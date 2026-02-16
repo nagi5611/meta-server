@@ -1,0 +1,33 @@
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+    root: 'public',
+    server: {
+        port: 3001,
+        host: true, // Listen on 0.0.0.0 for LAN access
+        open: true,
+        proxy: {
+            '/socket.io': {
+                target: 'http://localhost:3000',
+                ws: true,
+                changeOrigin: true
+            },
+            '/api': {
+                target: 'http://localhost:3000',
+                changeOrigin: true
+            },
+            '/admin': {
+                target: 'http://localhost:3000',
+                changeOrigin: true
+            },
+            '/vendor': {
+                target: 'http://localhost:3000',
+                changeOrigin: true
+            }
+        }
+    },
+    build: {
+        outDir: '../dist',
+        emptyOutDir: true
+    }
+});

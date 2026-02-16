@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Metaverse Simple</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
+    <script>
+        // アクセス制御
+        const username = localStorage.getItem('username');
+        const isAdminPath = window.location.pathname === '/admin';
+        if (isAdminPath) {
+            // /admin: Basic認証でページ取得済み。トークン取得は main.js で実施
+        } else {
+            if (username && username.trim().toLowerCase() === 'admin') {
+                window.location.href = '/admin';
+                throw new Error('redirect');
+            }
+            if (!username || username.trim().length < 2) {
+                window.location.href = '/login/';
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <!-- モバイル用コンパクト info (768px以下で表示) -->
+    <div id="mobile-info" class="mobile-info" aria-hidden="true">
+        <span id="mobile-world-name">-</span> | <span id="mobile-position">0,0,0</span> | <span id="mobile-player-count">0</span>
+    </div>
+
+    <div id="info">
+        <h1>松山南高校 みんなでメタ</h1>
+        <div id="info-stats">
+            <p>ワールド: <span id="world-name">-</span></p>
+            <p>座標: <span id="position-display">0, 0, 0</span></p>
+            <p>プレイヤー数: <span id="player-count">0</span></p>
+        </div>
+        <div id="player-list-container" title="Vキーで視聴開始／Shift+クリックまたはUでマウス解放">
+            <div id="ping-display" class="ping-display" title="サーバー応答時間">
+                <i class="bi bi-bar-chart-fill"></i> <span id="ping-value">-</span>
+            </div>
+            <div id="player-list" class="player-list"></div>
+        </div>
+    </div>
+
+    <!-- Admin: プレイヤー情報パネル（管理者のみ、アバタークリック時） -->
+    <div id="admin-player-info-panel" class="admin-player-info-panel" style="display: none;">
+        <div class="admin-player-info-header">
+            <span>プレイヤー情報</span>
+            <button type="button" id="admin-player-info-close" class="admin-player-info-close" title="閉じる">×</button>
+        </div>
+        <div class="admin-player-info-body">
+            <div class="admin-player-info-row"><span class="label">ユーザー名</span><span id="admin-info-username">-</span></div>
+            <div class="admin-player-info-row"><span class="label">接続時間</span><span id="admin-info-connected">-</span></div>
+            <div class="admin-player-info-row"><span class="label">Ping</span><span id="admin-info-ping">-</span></div>
+            <div class="admin-player-info-row"><span class="label">IP</span><span id="admin-info-ip">-</span></div>
+            <div class="admin-player-info-row"><span class="label">ブラウザ</span><span id="admin-info-browser">-</span></div>
+            <div class="admin-player-info-row"><span class="label">OS</span><span id="admin-info-os">-</span></div>
+        </div>
+    </div>
+
+    <div id="teleport-prompt" style="display: none;"></div>
+
+    <!-- PDF Viewer Overlay (E key near PDF object) -->
+    <div id="pdf-viewer-overlay" class="pdf-viewer-overlay" style="display: none;">
+        <button type="button" id="pdf-viewer-close" class="pdf-viewer-close" title="閉じる">×</button>
+        <div id="pdf-viewer-content" class="pdf-viewer-content">
+            <div id="pdf-viewer-canvas-wrap" class="pdf-viewer-canvas-wrap">
+                <canvas id="pdf-viewer-canvas"></canvas>
+                <canvas id="pdf-viewer-draw-canvas" class="pdf-viewer-draw-canvas"></canvas>
+            </div>
+            <div id="pdf-viewer-sidebar" class="pdf-viewer-sidebar">
+                <div id="pdf-viewer-pen-sample" class="pdf-viewer-pen-sample" title="線の太さサンプル">
+                    <div id="pdf-viewer-pen-sample-line" class="pdf-viewer-pen-sample-line"></div>
+                </div>
+                <div class="pdf-viewer-pen-thickness-wrap">
+                    <label for="pdf-viewer-pen-thickness" class="pdf-viewer-pen-thickness-label">太さ</label>
+                    <input type="range" id="pdf-viewer-pen-thickness" class="pdf-viewer-pen-thickness" min="1" max="20" value="3">
+                </div>
+                <button type="button" id="pdf-viewer-pen-btn" class="pdf-viewer-pen-btn" title="ペン">🖊</button>
+                <div class="pdf-viewer-vc-wrap">
+                    <button type="button" id="pdf-viewer-mic-btn" class="pdf-viewer-mic-btn muted" title="PDF通話マイク">
+                        <svg class="icon" id="pdf-viewer-mic-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/>
+                        </svg>
+                    </button>
+                    <button type="button" id="pdf-viewer-speaker-btn" class="pdf-viewer-speaker-btn" title="PDF通話スピーカー">
+                        <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Container -->
+    <div id="chat-container">
+        <div id="chat-header">
+            <span><i class="bi bi-chat-left-text"></i> チャット</span>
+            <button id="chat-minimize-btn">−</button>
+        </div>
+        <div id="chat-messages">
+            <!-- Messages will be added here dynamically -->
+        </div>
+        <div id="chat-input-container">
+            <input type="text" id="chat-input" placeholder="メッセージを入力... @でメンション" maxlength="200" autocomplete="off">
+            <button id="chat-send-btn"><i class="bi bi-send-fill"></i></button>
+        </div>
+    </div>
+
+    <!-- Emoji Menu -->
+    <div id="emoji-menu">
+        <!-- Emoji buttons will be added dynamically -->
+    </div>
+
+    <!-- モバイル用メニュートグル (768px以下で表示) -->
+    <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-label="メニュー" aria-hidden="true">
+        <i class="bi bi-list"></i>
+    </button>
+
+    <!-- Menu Bar -->
+    <div id="menu-bar">
+        <button id="mic-btn" class="menu-button" title="マイクミュート">
+            <svg class="icon" id="mic-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/>
+            </svg>
+        </button>
+        <button id="speaker-btn" class="menu-button" title="スピーカーミュート">
+            <svg class="icon" id="speaker-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+            </svg>
+        </button>
+        <button id="stamp-btn" class="menu-button" title="スタンプ">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+        </button>
+        <button id="video-btn" class="menu-button" title="ビデオ通話">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+            </svg>
+        </button>
+        <button id="settings-btn" class="menu-button" title="設定">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+            </svg>
+        </button>
+        <button id="logout-btn" class="menu-button danger" title="退出">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.59L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+            </svg>
+        </button>
+    </div>
+
+    <!-- Exit Modal (ロビーに戻る / ログアウト) -->
+    <div id="logout-modal">
+        <div id="logout-modal-content">
+            <h3>退出</h3>
+            <p>ロビーに戻るか、ログアウトするか選んでください。</p>
+            <div class="logout-buttons">
+                <button class="logout-btn lobby" id="return-to-lobby-btn">ロビーに戻る</button>
+                <button class="logout-btn confirm" id="logout-confirm-btn">ログアウト</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal">
+        <div id="settings-modal-content">
+            <div id="settings-header">
+                <h3>設定</h3>
+                <button id="settings-close-btn">×</button>
+            </div>
+            <div id="settings-body">
+                <div id="settings-sidebar">
+                    <div class="settings-category active" data-section="general">一般</div>
+                    <div class="settings-category" data-section="audio">音声</div>
+                </div>
+                <div id="settings-content">
+                    <div class="settings-section active" id="general-section">
+                        <h4>一般</h4>
+                        <div class="setting-item">
+                            <label for="language">言語:</label>
+                            <select id="language">
+                                <option value="ja">日本語</option>
+                                <option value="en">English</option>
+                            </select>
+                            <div class="setting-description">表示言語を選択してください</div>
+                        </div>
+                    </div>
+                    <div class="settings-section" id="audio-section">
+                        <h4>音声</h4>
+                        <div class="setting-item mic-test-item">
+                            <label>マイクテスト</label>
+                            <p class="mic-test-desc">マイクに問題がありますか? テストを開始し、何でもいいので話してください。声を再生してお返しします。</p>
+                            <div class="mic-test-row">
+                                <button type="button" id="mic-test-btn" class="mic-test-btn">テストを開始</button>
+                                <div id="settings-mic-analyzer" class="mic-analyzer-segments">
+                                    <!-- 40個のセグメントをJSで生成 -->
+                                </div>
+                            </div>
+                            <p id="mic-test-status" class="mic-test-status"></p>
+                        </div>
+                        <div class="setting-item">
+                            <label for="micDevice">使用するマイク:</label>
+                            <select id="micDevice">
+                                <option value="">デフォルト</option>
+                            </select>
+                            <div class="setting-description">使用するマイクデバイスを選択してください</div>
+                        </div>
+                        <div class="setting-item">
+                            <label for="speakerDevice">使用するスピーカー:</label>
+                            <select id="speakerDevice">
+                                <option value="">デフォルト</option>
+                            </select>
+                            <div class="setting-description">使用するスピーカーデバイスを選択してください</div>
+                        </div>
+                        <div class="setting-item">
+                            <label for="micVolume">マイク入力倍率: <span id="micVolumeValue">99</span>%</label>
+                            <input type="range" id="micVolume" min="0" max="100" value="33">
+                            <div class="setting-description">マイクの入力音量倍率（0%で無音、100%で等倍、最大300%）</div>
+                        </div>
+                        <div class="setting-item">
+                            <label for="speakerVolume">スピーカー音量:</label>
+                            <input type="range" id="speakerVolume" min="0" max="100" value="50">
+                            <span id="speakerVolumeValue">50</span>%
+                            <div class="setting-description">スピーカーの出力音量を調整します</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Call Settings Modal -->
+    <div id="video-modal">
+        <div id="video-modal-content">
+            <div id="video-modal-header">
+                <h3>配信設定</h3>
+                <button id="video-modal-close-btn">×</button>
+            </div>
+            <div id="video-modal-body">
+                <div id="video-preview-wrap">
+                    <div id="video-preview-label">プレビュー</div>
+                    <video id="video-preview" autoplay muted playsinline></video>
+                    <div id="video-preview-placeholder">プレビュー</div>
+                </div>
+                <div class="video-mode-toggle" role="tablist">
+                    <label class="video-mode-tab">
+                        <input type="radio" name="video-mode" value="camera" checked>
+                        <span class="video-mode-icon">📷</span>
+                        <span>カメラ</span>
+                    </label>
+                    <label class="video-mode-tab">
+                        <input type="radio" name="video-mode" value="screen">
+                        <span class="video-mode-icon">🖥</span>
+                        <span>画面共有</span>
+                    </label>
+                </div>
+                <div id="video-camera-options" class="video-options">
+                    <div class="setting-item">
+                        <label for="video-camera-device">カメラ</label>
+                        <select id="video-camera-device">
+                            <option value="">デフォルト</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label for="video-camera-resolution">解像度</label>
+                        <select id="video-camera-resolution">
+                            <option value="360p">360p (640×360)</option>
+                            <option value="480p">480p (854×480)</option>
+                            <option value="540p">540p (960×540)</option>
+                            <option value="720p">720p (1280×720)</option>
+                        </select>
+                    </div>
+                    <div class="setting-item setting-row">
+                        <label for="video-camera-audio">音声を含める</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="video-camera-audio" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div id="video-screen-options" class="video-options" style="display:none;">
+                    <div class="setting-item">
+                        <label for="video-screen-resolution">解像度</label>
+                        <select id="video-screen-resolution">
+                            <option value="360p">360p (640×360)</option>
+                            <option value="480p">480p (854×480)</option>
+                            <option value="540p">540p (960×540)</option>
+                            <option value="720p">720p (1280×720)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="video-action-buttons">
+                    <button id="video-start-btn" class="video-btn primary">開始</button>
+                    <button id="video-stop-btn" class="video-btn danger" style="display:none;">停止</button>
+                </div>
+                <div id="video-modal-error" class="video-error" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- モバイル用コントロール (768px以下で表示) -->
+    <div id="mobile-controls" class="mobile-controls" aria-hidden="true">
+        <div id="mobile-camera-drag-layer" class="mobile-camera-drag-layer" aria-hidden="true"></div>
+        <div id="joystick-left-zone" class="joystick-zone joystick-left"></div>
+        <button id="mobile-jump-btn" class="mobile-jump-btn" type="button" aria-label="ジャンプ">ジャンプ</button>
+    </div>
+
+    <!-- 縦画面時オーバーレイ (横に回転してください) -->
+    <div id="mobile-landscape-overlay" class="mobile-landscape-overlay" aria-hidden="true">
+        <div class="mobile-landscape-message">
+            <i class="bi bi-phone-landscape" aria-hidden="true"></i>
+            <p>横に回転してください</p>
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <!-- Vite handles all module imports -->
+    <script type="module" src="/js/main.js"></script>
+    
+</body>
+
+</html>

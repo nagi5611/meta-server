@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metaverse Simple - 教師ログイン</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #333;
+        }
+
+        .login-container {
+            background: #ffffff;
+            padding: 40px 50px;
+            border-radius: 20px;
+            border: 2px solid #ed6c02;
+            box-shadow: 0 4px 20px rgba(237, 108, 2, 0.15);
+            max-width: 400px;
+            width: 90%;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-header h1 {
+            font-size: 32px;
+            color: #ed6c02;
+            margin-bottom: 10px;
+        }
+
+        .login-header p {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        .form-group input:focus {
+            border-color: #ed6c02;
+            box-shadow: 0 0 0 3px rgba(237, 108, 2, 0.15);
+        }
+
+        .error-message {
+            color: #e74c3c;
+            font-size: 13px;
+            margin-top: 5px;
+            display: none;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: #fff;
+            color: #ed6c02;
+            border: 2px solid #ed6c02;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(237, 108, 2, 0.15);
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            background: rgba(237, 108, 2, 0.08);
+            box-shadow: 0 4px 12px rgba(237, 108, 2, 0.25);
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .login-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .login-links {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        .login-links a {
+            color: #ed6c02;
+            text-decoration: none;
+        }
+
+        .login-links a:hover {
+            text-decoration: underline;
+        }
+
+        .login-links span {
+            margin: 0 8px;
+            color: #ccc;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>Metaverse Simple</h1>
+            <p>教師ログイン</p>
+        </div>
+
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">ログインID（メールまたはID）</label>
+                <input 
+                    type="text" 
+                    id="username" 
+                    name="username" 
+                    placeholder="ログインIDを入力" 
+                    autocomplete="username"
+                    required
+                >
+            </div>
+            <div class="form-group">
+                <label for="password">パスワード</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    name="password" 
+                    placeholder="パスワードを入力" 
+                    autocomplete="current-password"
+                    required
+                >
+            </div>
+            <div class="error-message" id="error-message"></div>
+
+            <button type="submit" class="login-btn" id="login-btn">
+                ログイン
+            </button>
+        </form>
+
+        <div class="login-links">
+            <a href="/login/">一般ログイン</a>
+            <span>|</span>
+            <a href="/student/">生徒ログイン</a>
+        </div>
+    </div>
+
+    <script>
+        const savedUsername = localStorage.getItem('username');
+        if (savedUsername && savedUsername.trim().length >= 2 && localStorage.getItem('userRole') === 'teacher') {
+            if (savedUsername.trim().toLowerCase() !== 'admin') {
+                window.location.href = '/index.html';
+                throw new Error('redirect');
+            }
+        }
+
+        const loginForm = document.getElementById('login-form');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const loginBtn = document.getElementById('login-btn');
+        const errorMessage = document.getElementById('error-message');
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!username || !password) {
+                errorMessage.textContent = 'ログインIDとパスワードを入力してください';
+                errorMessage.style.display = 'block';
+                return;
+            }
+
+            loginBtn.textContent = 'ログイン中...';
+            loginBtn.disabled = true;
+            errorMessage.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/auth/teacher/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    localStorage.setItem('username', data.displayName || data.username);
+                    localStorage.setItem('userRole', 'teacher');
+                    window.location.href = '/index.html';
+                    return;
+                }
+
+                errorMessage.textContent = data.error === 'invalid_credentials'
+                    ? 'ログインIDまたはパスワードが正しくありません'
+                    : (data.error || 'ログインに失敗しました');
+                errorMessage.style.display = 'block';
+            } catch (err) {
+                errorMessage.textContent = '通信エラーが発生しました';
+                errorMessage.style.display = 'block';
+            } finally {
+                loginBtn.textContent = 'ログイン';
+                loginBtn.disabled = false;
+            }
+        });
+
+        usernameInput.addEventListener('input', () => { errorMessage.style.display = 'none'; });
+        passwordInput.addEventListener('input', () => { errorMessage.style.display = 'none'; });
+        usernameInput.focus();
+    </script>
+</body>
+
+</html>

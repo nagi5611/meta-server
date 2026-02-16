@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metaverse Simple - 一般ログイン</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #333;
+        }
+
+        .login-container {
+            background: #ffffff;
+            padding: 40px 50px;
+            border-radius: 20px;
+            border: 2px solid #0288d1;
+            box-shadow: 0 4px 20px rgba(2, 136, 209, 0.15);
+            max-width: 400px;
+            width: 90%;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-header h1 {
+            font-size: 32px;
+            color: #0288d1;
+            margin-bottom: 10px;
+        }
+
+        .login-header p {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        .form-group input:focus {
+            border-color: #0288d1;
+            box-shadow: 0 0 0 3px rgba(2, 136, 209, 0.15);
+        }
+
+        .error-message {
+            color: #e74c3c;
+            font-size: 13px;
+            margin-top: 5px;
+            display: none;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: #fff;
+            color: #0288d1;
+            border: 2px solid #0288d1;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(2, 136, 209, 0.15);
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            background: rgba(2, 136, 209, 0.08);
+            box-shadow: 0 4px 12px rgba(2, 136, 209, 0.25);
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .login-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .info-text {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 12px;
+            color: #999;
+        }
+
+        .login-links {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        .login-links a {
+            color: #0288d1;
+            text-decoration: none;
+        }
+
+        .login-links a:hover {
+            text-decoration: underline;
+        }
+
+        .login-links span {
+            margin: 0 8px;
+            color: #ccc;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>Metaverse Simple</h1>
+            <p>一般ログイン - ユーザー名を入力してください</p>
+        </div>
+
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">ユーザー名</label>
+                <input 
+                    type="text" 
+                    id="username" 
+                    name="username" 
+                    placeholder="例: Player1" 
+                    autocomplete="off"
+                    required
+                    minlength="2"
+                    maxlength="20"
+                >
+                <div class="error-message" id="error-message">
+                    ユーザー名は2～20文字で入力してください
+                </div>
+            </div>
+
+            <button type="submit" class="login-btn" id="login-btn">
+                ログイン
+            </button>
+        </form>
+
+        <div class="info-text">
+            同じユーザー名でも複数人ログイン可能です
+        </div>
+
+        <div class="login-links">
+            <a href="/student/">生徒ログイン</a>
+            <span>|</span>
+            <a href="/teacher/">教師ログイン</a>
+        </div>
+    </div>
+
+    <script>
+        // 既にログイン済みの場合は自動的にゲーム画面へ（admin は管理者専用のため除外）
+        const savedUsername = localStorage.getItem('username');
+        if (savedUsername && savedUsername.trim().length >= 2) {
+            if (savedUsername.trim().toLowerCase() !== 'admin') {
+                window.location.href = '/index.html';
+            } else {
+                localStorage.removeItem('username');
+                localStorage.removeItem('userRole');
+            }
+        }
+
+        const loginForm = document.getElementById('login-form');
+        const usernameInput = document.getElementById('username');
+        const loginBtn = document.getElementById('login-btn');
+        const errorMessage = document.getElementById('error-message');
+
+        // フォーム送信処理
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+
+            const username = usernameInput.value.trim();
+
+            // バリデーション
+            if (username.length < 2 || username.length > 20) {
+                errorMessage.textContent = 'ユーザー名は2～20文字で入力してください';
+                errorMessage.style.display = 'block';
+                usernameInput.focus();
+                return;
+            }
+            if (username.toLowerCase() === 'admin') {
+                errorMessage.textContent = '「admin」は管理者専用のため使用できません';
+                errorMessage.style.display = 'block';
+                usernameInput.focus();
+                return;
+            }
+
+            // LocalStorageに保存（一般ユーザーはuserRoleなし）
+            localStorage.setItem('username', username);
+            localStorage.removeItem('userRole');
+
+            // ログイン成功 - ゲーム画面へ遷移
+            loginBtn.textContent = 'ログイン中...';
+            loginBtn.disabled = true;
+
+            setTimeout(() => {
+                window.location.href = '/index.html';
+            }, 500);
+        });
+
+        // 入力時にエラーメッセージを非表示
+        usernameInput.addEventListener('input', () => {
+            errorMessage.style.display = 'none';
+        });
+
+        // ページ読み込み時にフォーカス
+        usernameInput.focus();
+    </script>
+</body>
+
+</html>

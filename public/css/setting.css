@@ -1,0 +1,388 @@
+/* Blender風: ダークテーマ・階層・折りたたみ・整列 */
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #fff;
+    color: #333;
+    height: 100vh;
+    overflow: hidden;
+    font-size: 14px;
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: 280px 1fr 300px;
+    grid-template-rows: 1fr;
+    height: 100vh;
+}
+
+.panel-left,
+.panel-right {
+    background: #323232;
+    overflow-y: auto;
+    padding: 14px 18px;
+}
+
+.panel-left {
+    border-right: 1px solid #3d3d3d;
+}
+
+.panel-right {
+    border-left: 1px solid #3d3d3d;
+}
+
+.viewer {
+    position: relative;
+    min-width: 0;
+}
+
+#canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* セクション見出し */
+.section {
+    margin-bottom: 20px;
+}
+
+.section-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0 0 10px 0;
+    color: #a0a0a0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.panel-section .section-title {
+    margin-bottom: 8px;
+}
+
+/* 折りたたみブロック (Blender風) */
+.block {
+    margin-bottom: 2px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+}
+
+.block:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.block-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 14px;
+    font-weight: 500;
+    color: #dcdcdc;
+    user-select: none;
+}
+
+.block-header::-webkit-details-marker {
+    display: none;
+}
+
+.block-header::before {
+    content: "";
+    display: inline-block;
+    width: 0;
+    height: 0;
+    margin-right: 8px;
+    border-left: 5px solid #888;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform 0.15s ease;
+    vertical-align: middle;
+}
+
+details[open] > .block-header::before {
+    transform: rotate(90deg);
+}
+
+.block-content {
+    padding: 8px 12px 14px 28px;
+    border-top: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+/* プロパティ行: ラベル左・入力右・単位 */
+.prop-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 6px;
+}
+
+.prop-label {
+    flex: 0 0 88px;
+    font-size: 14px;
+    color: #b0b0b0;
+}
+
+.prop-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 120px;
+    background: #484848;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #dcdcdc;
+    font-size: 14px;
+}
+
+.prop-input.num {
+    max-width: 88px;
+    text-align: center;
+}
+
+/* 数値入力の上下矢印（スピナー）を非表示 */
+.prop-input[type="number"]::-webkit-inner-spin-button,
+.prop-input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+    appearance: none;
+}
+
+.prop-input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.prop-input.full {
+    max-width: none;
+}
+
+.prop-input:focus {
+    outline: none;
+    border-color: #6b9bd1;
+    box-shadow: 0 0 0 1px #6b9bd1;
+}
+
+.prop-input[readonly] {
+    background: #404040;
+    color: #909090;
+}
+
+.prop-unit {
+    flex: 0 0 18px;
+    font-size: 13px;
+    color: #808080;
+}
+
+.prop-group-label {
+    font-size: 13px;
+    color: #808080;
+    margin: 10px 0 4px 0;
+    padding-left: 0;
+}
+
+.prop-row.checkbox-row {
+    gap: 8px;
+    min-height: 36px;
+}
+
+.prop-checkbox {
+    flex: 0 0 auto;
+    margin: 0;
+    width: 18px;
+    height: 18px;
+    accent-color: #6b9bd1;
+}
+
+.checkbox-row .prop-label {
+    flex: 1 1 auto;
+}
+
+/* ボタン */
+.btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+button {
+    padding: 10px 16px;
+    background: #494949;
+    color: #dcdcdc;
+    border: 1px solid #5a5a5a;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+button:hover:not(:disabled) {
+    background: #5a5a5a;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: #2d5a8a;
+    border-color: #3d6a9a;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #3d6a9a;
+}
+
+/* リスト */
+.world-list,
+.model-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 4px;
+    background: #282828;
+}
+
+.world-list .item,
+.model-list .item {
+    padding: 10px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.world-list .item:hover,
+.model-list .item:hover {
+    background: #404040;
+}
+
+.world-list .item.selected,
+.model-list .item.selected {
+    background: #2d5a8a;
+    color: #fff;
+}
+
+.object-list-slider {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 4px;
+    background: #282828;
+}
+
+.object-list-slider .item {
+    padding: 10px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.object-list-slider .item:hover {
+    background: #404040;
+}
+
+.object-list-slider .item.selected {
+    background: #2d5a8a;
+    color: #fff;
+}
+
+.object-list-slider .item-type {
+    font-size: 12px;
+    color: #808080;
+    margin-left: 6px;
+}
+
+/* オブジェクト一覧: 階層（ライト / モデル） */
+.object-list-category {
+    margin-bottom: 2px;
+}
+
+.object-list-category-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #dcdcdc;
+    user-select: none;
+}
+
+.object-list-category-header:hover {
+    background: #404040;
+}
+
+.object-list-arrow {
+    display: inline-block;
+    width: 14px;
+    margin-right: 6px;
+    font-size: 10px;
+    color: #888;
+}
+
+.object-list-children {
+    padding-left: 20px;
+}
+
+.object-list-children .item {
+    padding: 8px 12px 8px 8px;
+    font-size: 13px;
+}
+
+.object-list-children .item.selected {
+    background: #2d5a8a;
+    color: #fff;
+}
+
+/* 左パネル: フィールド行（ワールド名など） */
+.field-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.field-row .prop-label {
+    flex: 0 0 auto;
+}
+
+.field-row .prop-input {
+    flex: 1 1 auto;
+    max-width: none;
+}
+
+/* ヒント・ステータス */
+.hint {
+    font-size: 12px;
+    color: #808080;
+    margin: 0 0 8px 0;
+}
+
+.status-text {
+    font-size: 12px;
+    margin-left: 8px;
+    color: #7a9a7a;
+}
+
+.error {
+    color: #c66;
+}
+
+/* オブジェクトパネル: 移動/回転/スケールボタン行（JSで挿入） */
+#panel-object > button {
+    margin-right: 8px;
+    padding: 3px 3px;
+    font-size: 13px;
+}
+

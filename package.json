@@ -1,0 +1,47 @@
+{
+    "name": "meta-server",
+    "version": "1.0.0",
+    "description": "Simplified metaverse with static objects and client-side physics",
+    "main": "server.js",
+    "type": "module",
+    "scripts": {
+        "start": "node server.js",
+        "start:prod": "cross-env NODE_ENV=production node server.js",
+        "dev": "concurrently \"nodemon server.js\" \"wait-on http://localhost:3000 --timeout 30000 && vite\"",
+        "dev:vcdebug": "concurrently \"cross-env VC_DEBUG_STATS=1 nodemon server.js\" \"wait-on http://localhost:3000 --timeout 30000 && vite\"",
+        "build": "vite build",
+        "preview": "vite preview"
+    },
+    "keywords": [
+        "metaverse",
+        "three.js",
+        "socket.io",
+        "three-mesh-bvh",
+        "multiplayer"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "bcryptjs": "^3.0.3",
+        "better-sqlite3": "^12.6.2",
+        "bootstrap-icons": "^1.13.1",
+        "dotenv": "^17.2.3",
+        "express": "^4.18.2",
+        "mediasoup": "^3.19.14",
+        "mediasoup-client": "^3.18.3",
+        "multer": "^2.0.2",
+        "nipplejs": "^0.10.2",
+        "pdfjs-dist": "^4.8.69",
+        "socket.io": "^4.7.2",
+        "socket.io-client": "^4.8.1",
+        "three": "^0.160.0",
+        "three-mesh-bvh": "^0.9.3"
+    },
+    "devDependencies": {
+        "concurrently": "^9.1.2",
+        "cross-env": "^7.0.3",
+        "nodemon": "^3.1.11",
+        "vite": "^7.2.6",
+        "wait-on": "^8.0.1"
+    }
+}

@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>メタバース管理パネル</title>
+    <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    <link rel="stylesheet" href="/css/setting.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <aside class="admin-sidebar">
+        <nav class="admin-nav">
+            <button type="button" class="admin-nav-item active" data-panel="panel-status"><i class="bi bi-speedometer2"></i> ステータス</button>
+            <button type="button" class="admin-nav-item" data-panel="panel-players"><i class="bi bi-people"></i> プレイヤー一覧</button>
+            <button type="button" class="admin-nav-item" data-panel="panel-comm"><i class="bi bi-broadcast"></i> 通信</button>
+            <button type="button" class="admin-nav-item" data-panel="panel-logs"><i class="bi bi-journal-text"></i> ログ</button>
+            <button type="button" class="admin-nav-item" data-panel="panel-user-register"><i class="bi bi-person-plus"></i> ユーザー登録</button>
+            <button type="button" class="admin-nav-item" data-panel="panel-world-edit"><i class="bi bi-pencil-square"></i> ワールド編集</button>
+        </nav>
+    </aside>
+
+    <main class="admin-main">
+        <header>
+            <div class="header-left">
+                <span class="header-username" id="header-username">admin</span>
+                <h1>メタバース管理パネル</h1>
+            </div>
+            <div class="header-actions">
+                <button type="button" class="btn btn-icon" id="admin-theme-toggle" title="ダークモードに切替"><i class="bi bi-moon-fill" id="admin-theme-icon"></i></button>
+                <button type="button" class="btn btn-secondary" id="back-to-metaverse">メタバースへ入る（管理者）</button>
+                <span class="last-update">最終更新: <span id="last-update">-</span></span>
+            </div>
+        </header>
+
+        <div class="admin-panels">
+            <div id="panel-status" class="admin-panel active">
+                <section class="stats-section">
+                    <h2>サーバー統計</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">CPU使用率</div>
+                            <div class="stat-value" id="cpu-usage">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">RAM使用率</div>
+                            <div class="stat-value" id="ram-usage">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">性能劣化指数</div>
+                            <div class="stat-value" id="degradation-index">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">接続プレイヤー数</div>
+                            <div class="stat-value" id="total-players">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">アクティブルーム数</div>
+                            <div class="stat-value" id="total-rooms">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">VCルーム数</div>
+                            <div class="stat-value" id="vc-rooms">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">VC接続数</div>
+                            <div class="stat-value" id="vc-peers">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">送信通信量</div>
+                            <div class="stat-value" id="bytes-sent">0 B</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">受信通信量</div>
+                            <div class="stat-value" id="bytes-received">0 B</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">送信パケット数</div>
+                            <div class="stat-value" id="packets-sent">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">受信パケット数</div>
+                            <div class="stat-value" id="packets-received">0</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <div id="panel-players" class="admin-panel">
+                <section class="players-section">
+                    <h2>プレイヤー一覧</h2>
+                    <div class="players-table-container">
+                        <table class="players-table">
+                            <thead>
+                                <tr>
+                                    <th>Socket ID</th>
+                                    <th>ユーザー名</th>
+                                    <th>ルーム</th>
+                                    <th>接続時間</th>
+                                    <th>Ping</th>
+                                    <th>種別</th>
+                                    <th>VC状態</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="players-tbody">
+                                <tr>
+                                    <td colspan="8" class="loading">読み込み中...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <div id="panel-comm" class="admin-panel">
+                <section class="bandwidth-section">
+                    <h2>通信帯域</h2>
+                    <div class="bandwidth-header">
+                        <div class="bandwidth-stat">
+                            <span class="bandwidth-label">上限</span>
+                            <span id="bandwidth-limit" class="bandwidth-value">-</span>
+                        </div>
+                        <div class="bandwidth-stat">
+                            <span class="bandwidth-label">現在</span>
+                            <span id="bandwidth-current" class="bandwidth-value">-</span>
+                        </div>
+                        <div class="bandwidth-stat">
+                            <span class="bandwidth-label">使用率</span>
+                            <span id="bandwidth-usage" class="bandwidth-value">-</span>
+                        </div>
+                    </div>
+                    <div class="bandwidth-graph-wrap">
+                        <canvas id="bandwidth-graph" class="bandwidth-graph"></canvas>
+                    </div>
+                    <div class="bandwidth-legend">
+                        <span class="legend-item legend-sent"><i class="bi bi-arrow-up"></i> 送信</span>
+                        <span class="legend-item legend-recv"><i class="bi bi-arrow-down"></i> 受信</span>
+                    </div>
+                </section>
+                <div class="admin-grid-3col">
+                    <section class="vc-ports-section admin-grid-item">
+                        <h2>VC使用ポート</h2>
+                        <div class="ports-info">
+                            <div class="port-count">使用中: <span id="port-count">0</span></div>
+                            <div class="port-list" id="port-list"></div>
+                        </div>
+                    </section>
+                    <section class="pdf-ports-section admin-grid-item">
+                        <h2>PDF VC使用ポート</h2>
+                        <div class="ports-info">
+                            <div class="port-count">使用中: <span id="pdf-port-count">0</span></div>
+                            <div class="port-list" id="pdf-port-list"></div>
+                        </div>
+                    </section>
+                    <section class="video-ports-section admin-grid-item">
+                        <h2>Video VC使用ポート</h2>
+                        <div class="ports-info">
+                            <div class="port-count">使用中: <span id="video-port-count">0</span></div>
+                            <div class="port-list" id="video-port-list"></div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <div id="panel-logs" class="admin-panel">
+                <section class="chat-logs-section admin-grid-item">
+                    <h2>チャットログ</h2>
+                    <div class="chat-logs-controls">
+                        <label for="room-filter">ルームフィルター:</label>
+                        <select id="room-filter">
+                            <option value="">全ルーム</option>
+                        </select>
+                        <button id="refresh-chat-logs" class="btn btn-secondary">更新</button>
+                    </div>
+                    <div class="chat-logs-container" id="chat-logs-container">
+                        <div class="loading">読み込み中...</div>
+                    </div>
+                </section>
+                <section class="logs-section admin-grid-item">
+                    <h2>サーバーコンソール</h2>
+                    <div class="server-console-wrap">
+                        <div class="server-console-scroll">
+                            <div class="logs-container" id="logs-container">
+                                <div class="loading">読み込み中...</div>
+                            </div>
+                            <div class="command-output" id="command-output"></div>
+                        </div>
+                        <div class="command-input-row">
+                            <span class="command-prompt">&gt;</span>
+                            <div class="command-input-wrap">
+                                <input type="text" id="command-input" class="command-input" placeholder="Command.." autocomplete="off">
+                                <div id="command-completion-dropdown" class="command-completion-dropdown" role="listbox" aria-hidden="true"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                <section class="login-users-section admin-grid-item">
+                    <h2>ログインユーザー一覧（最大50件/ページ・30日保持）</h2>
+                    <div class="login-users-controls">
+                        <button type="button" id="refresh-login-users" class="btn btn-secondary">更新</button>
+                    </div>
+                    <div class="login-users-table-wrap">
+                        <table class="login-users-table">
+                            <thead>
+                                <tr>
+                                    <th>ユーザー名</th>
+                                    <th>ログイン時間</th>
+                                    <th>IP</th>
+                                    <th>ブラウザ</th>
+                                    <th>OS</th>
+                                </tr>
+                            </thead>
+                            <tbody id="login-users-tbody">
+                                <tr><td colspan="5" class="loading">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="login-users-pagination" id="login-users-pagination">
+                        <span class="pagination-info" id="login-users-pagination-info"></span>
+                        <div class="pagination-buttons">
+                            <button type="button" id="login-users-prev" class="btn btn-secondary">前へ</button>
+                            <button type="button" id="login-users-next" class="btn btn-secondary">次へ</button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <div id="panel-user-register" class="admin-panel admin-panel-user-register">
+                <div class="ur-layout">
+                    <div class="ur-left-area">
+                        <nav class="ur-category-nav" aria-label="ユーザー種別">
+                            <button type="button" class="ur-category-btn active" data-ur-category="student">生徒</button>
+                            <button type="button" class="ur-category-btn" data-ur-category="teacher">教師</button>
+                        </nav>
+                    </div>
+                    <div class="ur-content">
+                        <section class="users-section">
+                            <h2>ユーザー登録・編集・削除</h2>
+                            <p class="hint">生徒・教師のログインID、パスワード、表示名を管理します。</p>
+
+                            <div class="user-register-row">
+                                <div class="user-register-form">
+                                    <h3>新規登録</h3>
+                                    <div class="form-row">
+                                        <label for="new-username">ログインID</label>
+                                        <input type="text" id="new-username" placeholder="メールまたはID" autocomplete="off">
+                                    </div>
+                                    <div class="form-row">
+                                        <label for="new-password">パスワード</label>
+                                        <input type="password" id="new-password" placeholder="パスワード" autocomplete="new-password">
+                                    </div>
+                                    <div class="form-row">
+                                        <label for="new-display-name">表示名</label>
+                                        <input type="text" id="new-display-name" placeholder="メタバース内の表示名（省略時はログインID）" autocomplete="off">
+                                    </div>
+                                    <div class="form-row">
+                                        <button type="button" id="btn-add-user" class="btn btn-primary">登録</button>
+                                        <span id="user-add-status" class="status-text"></span>
+                                    </div>
+                                </div>
+                                <div class="user-csv-section">
+                                    <h3>CSV一斉追加</h3>
+                                    <p class="hint">CSV形式: 1行目ヘッダー <code>role,username,password,display_name</code>。role は <code>student</code> または <code>teacher</code>。display_name は省略可（その場合は username を使用）。</p>
+                                    <div class="form-row">
+                                        <input type="file" id="user-csv-file" accept=".csv" style="display:none">
+                                        <button type="button" id="btn-choose-csv" class="btn btn-secondary">CSVファイルを選択</button>
+                                        <span id="user-csv-filename" class="csv-filename"></span>
+                                    </div>
+                                    <div class="form-row">
+                                        <button type="button" id="btn-import-csv" class="btn btn-primary" disabled>一斉追加</button>
+                                        <span id="user-csv-import-status" class="status-text"></span>
+                                    </div>
+                                    <h3>既存ユーザー一覧のCSVエクスポート</h3>
+                                    <div class="form-row">
+                                        <button type="button" id="btn-export-csv" class="btn btn-secondary">CSVをダウンロード</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="user-search-row form-row">
+                                <label for="user-search">既存ユーザー検索</label>
+                                <input type="text" id="user-search" placeholder="ログインID・表示名で検索" autocomplete="off">
+                            </div>
+
+                            <div class="users-table-wrap">
+                                <h3>ユーザー一覧</h3>
+                                <div id="user-bulk-actions" class="user-bulk-actions" style="display:none">
+                                    <button type="button" id="btn-bulk-delete-users" class="btn btn-secondary">選択したユーザーを一斉削除</button>
+                                    <span id="user-selection-count" class="status-text"></span>
+                                </div>
+                                <div class="users-table-container">
+                                    <table class="users-table">
+                                        <thead>
+                                            <tr>
+                                                <th class="th-checkbox"><input type="checkbox" id="user-select-all" class="user-select-all" title="一斉選択"></th>
+                                                <th>ID</th>
+                                                <th>ログインID</th>
+                                                <th>表示名</th>
+                                                <th>登録日</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="users-tbody">
+                                            <tr><td colspan="6" class="loading">読み込み中...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit user modal -->
+            <div id="user-edit-modal" class="modal">
+                <div class="modal-content">
+                    <h3 id="user-edit-modal-title">ユーザー編集</h3>
+                    <input type="hidden" id="user-edit-id">
+                    <input type="hidden" id="user-edit-role">
+                    <div class="form-row">
+                        <label for="user-edit-username">ログインID</label>
+                        <input type="text" id="user-edit-username" autocomplete="off">
+                    </div>
+                    <div class="form-row">
+                        <label for="user-edit-display-name">表示名</label>
+                        <input type="text" id="user-edit-display-name" autocomplete="off">
+                    </div>
+                    <div class="form-row">
+                        <label for="user-edit-password">パスワード（変更する場合のみ入力）</label>
+                        <input type="password" id="user-edit-password" placeholder="空欄のままなら変更しません" autocomplete="new-password">
+                    </div>
+                    <div class="modal-buttons">
+                        <button type="button" id="user-edit-save-btn" class="btn btn-primary">保存</button>
+                        <button type="button" id="user-edit-cancel-btn" class="btn btn-secondary">キャンセル</button>
+                    </div>
+                    <span id="user-edit-status" class="status-text"></span>
+                </div>
+            </div>
+
+            <div id="panel-world-edit" class="admin-panel admin-panel-world-edit">
+                <div class="layout setting-layout">
+                    <main class="viewer">
+                        <canvas id="canvas"></canvas>
+                    </main>
+                    <div class="we-left-area">
+                        <nav class="we-category-nav" aria-label="左パネルカテゴリ">
+                            <button type="button" class="we-category-btn active" data-we-category="world">ワールド</button>
+                            <button type="button" class="we-category-btn" data-we-category="model">モデル</button>
+                            <button type="button" class="we-category-btn" data-we-category="pdf">PDF</button>
+                            <button type="button" class="we-category-btn" data-we-category="file">ファイル</button>
+                        </nav>
+                        <div class="we-left-content">
+                            <div id="we-cat-world" class="we-category-pane active">
+                                <section class="section">
+                                    <h2 class="section-title">ワールド</h2>
+                                    <div class="world-list" id="world-list"></div>
+                                    <div class="field-row" id="world-name-row" style="display:none">
+                                        <label class="prop-label">名前</label>
+                                        <input type="text" id="world-name" class="prop-input" placeholder="表示名">
+                                    </div>
+                                    <div class="btn-row">
+                                        <button type="button" id="btn-add-world">ワールドを追加</button>
+                                        <button type="button" id="btn-delete-world" disabled>削除</button>
+                                    </div>
+                                </section>
+                            </div>
+                            <div id="we-cat-model" class="we-category-pane">
+                                <section class="section">
+                                    <h2 class="section-title">モデル一覧</h2>
+                                    <div class="model-list" id="model-list"></div>
+                                    <button type="button" id="btn-add-model">モデルを追加</button>
+                                </section>
+                            </div>
+                            <div id="we-cat-pdf" class="we-category-pane">
+                                <section class="section">
+                                    <h2 class="section-title">PDF一覧</h2>
+                                    <div class="model-list" id="pdf-list"></div>
+                                    <button type="button" id="btn-add-pdf">PDFを追加</button>
+                                </section>
+                            </div>
+                            <div id="we-cat-file" class="we-category-pane">
+                                <section class="section">
+                                    <h2 class="section-title">モデルをアップロード</h2>
+                                    <input type="file" id="upload-input" accept=".glb" style="display:none">
+                                    <button type="button" id="btn-upload">ファイルを選択</button>
+                                    <span id="upload-status" class="status-text"></span>
+                                </section>
+                                <section class="section">
+                                    <h2 class="section-title">PDFをアップロード</h2>
+                                    <input type="file" id="upload-pdf-input" accept=".pdf" style="display:none">
+                                    <button type="button" id="btn-upload-pdf">ファイルを選択</button>
+                                    <span id="upload-pdf-status" class="status-text"></span>
+                                </section>
+                                <section class="section">
+                                    <button type="button" id="btn-save" class="btn-primary">保存</button>
+                                    <span id="save-status" class="status-text"></span>
+                                </section>
+                                <section class="section">
+                                    <button type="button" id="btn-export-worlds" class="btn-secondary">ワールド設定をJSONでエクスポート</button>
+                                    <span id="export-status" class="status-text"></span>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="we-right-area">
+                        <nav class="we-right-category-nav" aria-label="右パネルカテゴリ">
+                            <button type="button" class="we-right-category-btn active" data-we-right-category="model">モデル</button>
+                            <button type="button" class="we-right-category-btn" data-we-right-category="light">ライト</button>
+                            <button type="button" class="we-right-category-btn" data-we-right-category="settings">設定</button>
+                        </nav>
+                        <div class="we-right-content">
+                            <div id="we-cat-right-model" class="we-right-pane active">
+                                <section class="section panel-section" id="panel-world-objects">
+                                    <h2 class="section-title">オブジェクト一覧</h2>
+                                    <div class="object-list-slider" id="world-object-list"></div>
+                                </section>
+                                <section class="section panel-section" id="panel-object">
+                            <h2 class="section-title">オブジェクト</h2>
+                            <p class="hint" id="object-hint">オブジェクトを選択してください</p>
+                            <div id="object-props" style="display:none">
+                                <details class="block" open>
+                                    <summary class="block-header">トランスフォーム</summary>
+                                    <div class="block-content">
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-path">Path</label>
+                                            <input type="text" id="obj-path" class="prop-input full" readonly>
+                                        </div>
+                                        <div class="prop-group-label">位置</div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-pos-x">位置 X</label>
+                                            <input type="number" id="obj-pos-x" class="prop-input num" step="0.1"><span class="prop-unit">m</span>
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-pos-y">位置 Y</label>
+                                            <input type="number" id="obj-pos-y" class="prop-input num" step="0.1"><span class="prop-unit">m</span>
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-pos-z">位置 Z</label>
+                                            <input type="number" id="obj-pos-z" class="prop-input num" step="0.1"><span class="prop-unit">m</span>
+                                        </div>
+                                        <div class="prop-group-label">回転</div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-rot-x">回転 X</label>
+                                            <input type="number" id="obj-rot-x" class="prop-input num" step="0.1"><span class="prop-unit">°</span>
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-rot-y">回転 Y</label>
+                                            <input type="number" id="obj-rot-y" class="prop-input num" step="0.1"><span class="prop-unit">°</span>
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-rot-z">回転 Z</label>
+                                            <input type="number" id="obj-rot-z" class="prop-input num" step="0.1"><span class="prop-unit">°</span>
+                                        </div>
+                                        <div class="prop-group-label">スケール</div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-scale-x">スケール X</label>
+                                            <input type="number" id="obj-scale-x" class="prop-input num" step="0.01">
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-scale-y">スケール Y</label>
+                                            <input type="number" id="obj-scale-y" class="prop-input num" step="0.01">
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-scale-z">スケール Z</label>
+                                            <input type="number" id="obj-scale-z" class="prop-input num" step="0.01">
+                                        </div>
+                                    </div>
+                                </details>
+                                <details class="block" id="object-props-animation">
+                                    <summary class="block-header">アニメーション</summary>
+                                    <div class="block-content">
+                                        <div class="prop-row checkbox-row">
+                                            <input type="checkbox" id="obj-animate" class="prop-checkbox">
+                                            <label class="prop-label" for="obj-animate">回転アニメーション</label>
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-anim-x">Rot/Frame X</label>
+                                            <input type="number" id="obj-anim-x" class="prop-input num" step="0.01">
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-anim-y">Rot/Frame Y</label>
+                                            <input type="number" id="obj-anim-y" class="prop-input num" step="0.01">
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-anim-z">Rot/Frame Z</label>
+                                            <input type="number" id="obj-anim-z" class="prop-input num" step="0.01">
+                                        </div>
+                                    </div>
+                                </details>
+                                <details class="block" id="object-props-teleporter">
+                                    <summary class="block-header">テレポーター</summary>
+                                    <div class="block-content">
+                                        <div class="prop-row checkbox-row">
+                                            <input type="checkbox" id="obj-teleporter" class="prop-checkbox">
+                                            <label class="prop-label" for="obj-teleporter">テレポーターにする</label>
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-tp-id">ID</label>
+                                            <input type="text" id="obj-tp-id" class="prop-input" placeholder="s1">
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-tp-dest">行先ワールド</label>
+                                            <select id="obj-tp-dest" class="prop-input"></select>
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-tp-radius">Radius</label>
+                                            <input type="number" id="obj-tp-radius" class="prop-input num" step="0.1" min="0">
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-tp-label">Label</label>
+                                            <input type="text" id="obj-tp-label" class="prop-input">
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-tp-access">利用権限</label>
+                                            <select id="obj-tp-access" class="prop-input">
+                                                <option value="public">一般公開（デフォルト）</option>
+                                                <option value="student+">生徒以上（生徒・教師・admin）</option>
+                                                <option value="teacher+">教師以上（教師・admin）</option>
+                                                <option value="admin">管理者限定（admin）</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </details>
+                                <div class="btn-row">
+                                    <button type="button" id="btn-delete-object">オブジェクトを削除</button>
+                                </div>
+                            </div>
+                                </section>
+                            </div>
+                            <div id="we-cat-right-light" class="we-right-pane">
+                                <section class="section panel-section" id="panel-light">
+                            <h2 class="section-title">ライト</h2>
+                            <p class="hint" id="light-hint">ライトを選択するか追加してください</p>
+                            <div id="light-props" style="display:none">
+                                <details class="block" open>
+                                    <summary class="block-header">トランスフォーム</summary>
+                                    <div class="block-content">
+                                        <div class="prop-row">
+                                            <label class="prop-label">種類</label>
+                                            <input type="text" id="light-type" class="prop-input full" readonly>
+                                        </div>
+                                        <div class="prop-group-label">位置</div>
+                                        <div id="light-position-row">
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="light-pos-x">位置 X</label>
+                                                <input type="number" id="light-pos-x" class="prop-input num" step="0.1"><span class="prop-unit">m</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="light-pos-y">位置 Y</label>
+                                                <input type="number" id="light-pos-y" class="prop-input num" step="0.1"><span class="prop-unit">m</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="light-pos-z">位置 Z</label>
+                                                <input type="number" id="light-pos-z" class="prop-input num" step="0.1"><span class="prop-unit">m</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </details>
+                                <details class="block" open>
+                                    <summary class="block-header">ライト設定</summary>
+                                    <div class="block-content">
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="light-intensity">Intensity</label>
+                                            <input type="number" id="light-intensity" class="prop-input num" step="0.1" min="0">
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="light-color">Color</label>
+                                            <input type="text" id="light-color" class="prop-input" placeholder="ffffff">
+                                        </div>
+                                        <div class="prop-row" id="light-distance-row">
+                                            <label class="prop-label" for="light-distance">Distance</label>
+                                            <input type="number" id="light-distance" class="prop-input num" step="1" min="0">
+                                        </div>
+                                    </div>
+                                </details>
+                                <div class="btn-row">
+                                    <button type="button" id="btn-delete-light">ライトを削除</button>
+                                </div>
+                            </div>
+                            <div class="btn-row">
+                                <button type="button" id="btn-add-light">ライトを追加</button>
+                            </div>
+                                </section>
+                            </div>
+                            <div id="we-cat-right-settings" class="we-right-pane">
+                                <section class="section panel-section" id="panel-spawn">
+                                    <details class="block">
+                                        <summary class="block-header">スポーン位置</summary>
+                                        <div class="block-content">
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="spawn-x">位置 X</label>
+                                                <input type="number" id="spawn-x" class="prop-input num" step="0.1"><span class="prop-unit">m</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="spawn-y">位置 Y</label>
+                                                <input type="number" id="spawn-y" class="prop-input num" step="0.1"><span class="prop-unit">m</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="spawn-z">位置 Z</label>
+                                                <input type="number" id="spawn-z" class="prop-input num" step="0.1"><span class="prop-unit">m</span>
+                                            </div>
+                                        </div>
+                                    </details>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- User session detail modal (click username in chat log) -->
+    <div id="user-session-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="user-session-modal-title">ユーザー情報</h3>
+            <div id="user-session-modal-body">
+                <p class="user-session-empty" id="user-session-empty">ログイン情報がありません。</p>
+                <dl class="user-session-dl" id="user-session-dl" style="display:none">
+                    <dt>ユーザー名</dt><dd id="user-session-username"></dd>
+                    <dt>ログイン時間</dt><dd id="user-session-login-time"></dd>
+                    <dt>IP</dt><dd id="user-session-ip"></dd>
+                    <dt>ブラウザ</dt><dd id="user-session-browser"></dd>
+                    <dt>OS</dt><dd id="user-session-os"></dd>
+                </dl>
+            </div>
+            <div class="modal-buttons">
+                <button type="button" id="user-session-modal-close" class="btn btn-secondary">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Modal -->
+    <div id="alert-modal" class="modal">
+        <div class="modal-content">
+            <h3>メッセージ送信</h3>
+            <textarea id="alert-message" placeholder="メッセージを入力してください"></textarea>
+            <div class="modal-buttons">
+                <button id="alert-send-btn" class="btn btn-primary">送信</button>
+                <button id="alert-cancel-btn" class="btn btn-secondary">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/admin.js"></script>
+</body>
+</html>
