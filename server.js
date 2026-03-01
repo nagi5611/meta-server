@@ -260,7 +260,7 @@ const videoVcMediasoupConfig = {
     },
     webRtcTransport: {
         ...mediasoupConfig.webRtcTransport,
-        maxIncomingBitrate: 2500000, // 2.5Mbps for video
+        maxIncomingBitrate: 5000000, // 5Mbps for video (incl. 1080p)
     },
 };
 

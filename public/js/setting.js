@@ -442,6 +442,7 @@ function selectObject(obj) {
             document.getElementById('light-hint').style.display = 'block';
             document.getElementById('light-props').style.display = 'none';
             document.getElementById('object-props-animation').style.display = '';
+            document.getElementById('object-props-taiko').style.display = '';
             document.getElementById('object-props-teleporter').style.display = '';
         } else if (obj.userData.pdfConfig) {
             updateObjectPanel(obj);
@@ -450,6 +451,7 @@ function selectObject(obj) {
             document.getElementById('light-hint').style.display = 'block';
             document.getElementById('light-props').style.display = 'none';
             document.getElementById('object-props-animation').style.display = 'none';
+            document.getElementById('object-props-taiko').style.display = 'none';
             document.getElementById('object-props-teleporter').style.display = 'none';
         } else {
             document.getElementById('object-hint').style.display = 'block';
@@ -534,6 +536,9 @@ function updateObjectPanel(obj) {
         document.getElementById('obj-tp-radius').value = tp ? (tp.radius ?? 3) : 3;
         document.getElementById('obj-tp-label').value = tp ? (tp.label || '') : '';
         document.getElementById('obj-tp-access').value = tp && tp.access ? tp.access : 'public';
+        const taiko = c.taiko;
+        document.getElementById('obj-taiko').checked = !!taiko;
+        document.getElementById('obj-taiko-radius').value = taiko ? (taiko.radius ?? 3) : 3;
     }
 }
 
@@ -589,6 +594,13 @@ function syncObjectFromPanel() {
         } else {
             delete c.teleporter;
         }
+        if (document.getElementById('obj-taiko').checked) {
+            c.taiko = {
+                radius: parseFloat(document.getElementById('obj-taiko-radius').value) || 3
+            };
+        } else {
+            delete c.taiko;
+        }
     }
 }
 
@@ -623,6 +635,7 @@ function buildWorldsFromScene() {
                     c.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
                     if (c.animate) c.animate = { ...c.animate, rotation: c.animate.rotation ? { ...c.animate.rotation } : {} };
                     if (c.teleporter) c.teleporter = { ...c.teleporter };
+                    if (c.taiko) c.taiko = { ...c.taiko };
                     w.models.push(c);
                 }
                 if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
@@ -683,7 +696,7 @@ function loadWorldIntoScene(world) {
         model.scale.set(scale.x, scale.y, scale.z);
         model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
         model.userData.editId = 'm' + idx;
-        model.userData.config = { path, position: { ...pos }, rotation: { ...rot }, scale: { ...scale }, animate: config.animate ? { ...config.animate } : undefined, teleporter: config.teleporter ? { ...config.teleporter } : undefined };
+        model.userData.config = { path, position: { ...pos }, rotation: { ...rot }, scale: { ...scale }, animate: config.animate ? { ...config.animate } : undefined, teleporter: config.teleporter ? { ...config.teleporter } : undefined, taiko: config.taiko ? { ...config.taiko } : undefined };
         editGroup.add(model);
     }, undefined, (err) => console.error('Load model failed:', path, err));
     });
@@ -1088,6 +1101,8 @@ function bindEvents() {
     document.getElementById('obj-tp-radius').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-tp-label').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-tp-access').addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-taiko').addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-taiko-radius').addEventListener('change', syncObjectFromPanel);
 
     document.getElementById('btn-save').addEventListener('click', async () => {
         const status = document.getElementById('save-status');

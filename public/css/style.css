@@ -1738,13 +1738,14 @@ body {
     }
 
     .joystick-left {
-        left: 20px;
+        left: 50px;
+        bottom: 30px;
         z-index: 10;
     }
 
     .mobile-jump-btn {
         position: fixed;
-        right: 20px;
+        right: 35px;
         bottom: 40px;
         width: 96px;
         height: 96px;
@@ -1771,7 +1772,7 @@ body {
     #chat-container {
         top: auto !important;
         bottom: auto !important;
-        left: 12px !important;
+        left: 42px !important;
         top: 52px !important;
         width: 56px;
         height: 56px;
@@ -1855,8 +1856,387 @@ body {
         pointer-events: auto;
     }
 
+    /* PDFビューワー: ツールを20%小さく・40px上へ */
+    .pdf-viewer-sidebar {
+        top: 60px;
+        transform: scale(0.8);
+        transform-origin: top right;
+    }
+
     /* PDFビューワー閉じるボタン: メニューボタンと重ならないよう左にずらす */
     .pdf-viewer-close {
         right: 72px;
     }
 }
+
+/* ============================================================
+   太鼓ゲームオーバーレイ
+   ============================================================ */
+
+.taiko-game-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.taiko-game-container {
+    position: relative;
+    width: min(840px, 95vw);
+    background: #fff;
+    border-radius: 12px;
+    border: 3px solid #333;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+}
+
+.taiko-game-top-buttons {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    z-index: 10;
+}
+
+.taiko-game-close,
+.taiko-game-hint {
+    width: 36px;
+    height: 36px;
+    border: 2px solid #333;
+    border-radius: 50%;
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f5f5f5;
+    color: #333;
+}
+
+.taiko-game-close {
+    font-size: 20px;
+}
+
+.taiko-game-close:hover,
+.taiko-game-hint:hover {
+    background: #e0e0e0;
+}
+
+/* ヒントポップアップ */
+.taiko-hint-popup {
+    position: fixed;
+    inset: 0;
+    z-index: 2100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.taiko-hint-popup-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.taiko-hint-popup-content {
+    position: relative;
+    background: #fff;
+    color: #222;
+    border-radius: 12px;
+    border: 2px solid #333;
+    padding: 20px 24px;
+    max-width: 320px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.taiko-hint-title {
+    margin: 0 0 14px;
+    font-size: 18px;
+    color: #222;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 8px;
+}
+
+.taiko-hint-body {
+    margin-bottom: 16px;
+    color: #333;
+}
+
+.taiko-hint-body p {
+    margin: 0 0 8px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #333;
+}
+
+.taiko-hint-body p:last-child {
+    margin-bottom: 0;
+}
+
+.taiko-hint-popup-close {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #222;
+    border: 2px solid #333;
+    border-radius: 8px;
+    background: #f0f0f0;
+    cursor: pointer;
+}
+
+.taiko-hint-popup-close:hover {
+    background: #e0e0e0;
+}
+
+/* タイトルエリア */
+.taiko-game-header {
+    padding: 12px 18px 8px;
+    font-size: 22px;
+    font-weight: bold;
+    border-bottom: 2px solid #333;
+    background: #f9f9f9;
+}
+
+/* スコア + ノーツレーン の行 */
+.taiko-game-bar {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 2px solid #333;
+    height: 90px;
+}
+
+/* 譜面左スペース: 太鼓の達人ベースのスコア表示 */
+.taiko-game-score-box {
+    min-width: 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border-right: 2px solid #333;
+    padding: 8px 10px;
+    background: #f5f5f5;
+    flex-shrink: 0;
+}
+
+.taiko-score-label {
+    font-size: 11px;
+    color: #555;
+    font-weight: bold;
+}
+
+.taiko-score-value {
+    font-size: 22px;
+    font-weight: bold;
+    color: #333;
+    line-height: 1.2;
+}
+
+.taiko-score-max {
+    font-size: 10px;
+    color: #666;
+}
+
+.taiko-score-rate {
+    font-size: 11px;
+    font-weight: bold;
+    color: #333;
+    margin-top: 2px;
+}
+
+/* ノーツレーン */
+.taiko-game-lane {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    background: #fafafa;
+}
+
+/* 判定ライン（ノーツと同じ 52×52、中央が 60px の位置） */
+.taiko-game-judge-line {
+    position: absolute;
+    left: 34px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 52px;
+    height: 52px;
+    object-fit: contain;
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* ノーツが流れるエリア */
+.taiko-game-notes {
+    position: absolute;
+    inset: 0;
+}
+
+/* ノーツ（丸）の共通スタイル */
+.taiko-note {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 3px solid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: bold;
+    pointer-events: none;
+}
+
+.taiko-note.don {
+    background: #ffcccc;
+    border-color: #cc2200;
+    color: #cc2200;
+}
+
+.taiko-note.ka {
+    background: #cce8ff;
+    border-color: #0055cc;
+    color: #0055cc;
+}
+
+/* ノーツヒット時エフェクト（拡大＋光って消える） */
+@keyframes taiko-note-hit-effect {
+    0% {
+        transform: translateY(-50%) scale(1);
+        opacity: 1;
+        filter: brightness(1.2);
+    }
+    30% {
+        transform: translateY(-50%) scale(1.35);
+        opacity: 1;
+        filter: brightness(2);
+    }
+    100% {
+        transform: translateY(-50%) scale(1.8);
+        opacity: 0;
+        filter: brightness(2);
+    }
+}
+
+.taiko-note.taiko-note-hit {
+    animation: taiko-note-hit-effect 0.32s ease-out forwards;
+    pointer-events: none;
+}
+
+/* 不可時は短くフェードアウト */
+@keyframes taiko-note-miss-effect {
+    to {
+        opacity: 0;
+        transform: translateY(-50%) scale(0.9);
+    }
+}
+
+.taiko-note.taiko-note-miss {
+    animation: taiko-note-miss-effect 0.2s ease-out forwards;
+    pointer-events: none;
+}
+
+/* 判定フラッシュ */
+@keyframes taiko-flash {
+    0%   { filter: brightness(1.8); }
+    100% { filter: brightness(1); }
+}
+
+.taiko-flash {
+    animation: taiko-flash 0.15s ease-out;
+}
+
+/* 入力エリア: 薄い青の矩形全体がカッ、中央の画像部分のみドン */
+.taiko-game-input {
+    position: relative;
+    min-height: 190px;
+    padding: 20px 12px 0;
+    background: #b8d4e8;
+    border-radius: 0 0 12px 12px;
+}
+
+/* カッ領域（画像を除く青い部分全体） */
+.taiko-ka-zone {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    cursor: pointer;
+    user-select: none;
+    transition: filter 0.1s;
+    border-radius: 0 0 12px 12px;
+}
+
+.taiko-ka-zone:hover {
+    filter: brightness(1.05);
+}
+
+.taiko-ka-zone.active {
+    animation: taiko-flash 0.15s ease-out;
+}
+
+/* 太鼓の面（半円形・画像表示・クリック＝ドン、青の上に重なる） */
+.taiko-input-drum {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    z-index: 1;
+    width: 400px;
+    height: 200px;
+    border-radius: 200px 200px 0 0;
+    overflow: hidden;
+    cursor: pointer;
+    user-select: none;
+}
+
+.taiko-input-drum:hover {
+    filter: brightness(1.08);
+}
+
+.taiko-input-drum.active {
+    animation: taiko-flash 0.15s ease-out;
+}
+
+.taiko-drum-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center top;
+    pointer-events: none;
+}
+
+/* 判定テキスト（判定ラインの真上に表示） */
+.taiko-judge-text {
+    position: absolute;
+    left: 60px;
+    top: 0%;
+    transform: translateX(-50%);
+    font-size: 20px;
+    font-weight: bold;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.05s;
+    z-index: 20;
+}
+
+.taiko-judge-text.visible {
+    opacity: 1;
+    transition: opacity 0s;
+}
+
+.taiko-judge-text.good  { color: #cc6600; }
+.taiko-judge-text.ok    { color: #0055cc; }
+.taiko-judge-text.miss  { color: #888; }

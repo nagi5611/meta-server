@@ -47,6 +47,27 @@
         }
       },
       {
+        "path": "models/monument.glb",
+        "position": {
+          "x": -13.809733279693603,
+          "y": 2.6234356999023394,
+          "z": -4.590871204479761
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        },
+        "taiko": {
+          "radius": 5
+        }
+      },
+      {
         "path": "models/teleporter_l2.glb",
         "position": {
           "x": 6,

@@ -68,6 +68,16 @@ class UIManager {
     }
 
     /**
+     * Show "太鼓をたたく" when near a taiko object
+     */
+    showTaikoPrompt() {
+        if (!this.teleportPrompt) return;
+
+        this.teleportPrompt.textContent = '[E] 太鼓をたたく';
+        this.teleportPrompt.style.display = 'block';
+    }
+
+    /**
      * Show "PDFを表示" when near a PDF object（タップ/クリックで開く）
      */
     showPdfPrompt() {

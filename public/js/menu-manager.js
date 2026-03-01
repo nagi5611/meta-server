@@ -154,9 +154,9 @@ class MenuManager {
 
         const mode = document.querySelector('input[name="video-mode"]:checked')?.value || 'camera';
         if (mode === 'camera') {
-            const res = document.getElementById('video-camera-resolution')?.value || '360p';
-            const resMap = { '360p': [640, 360], '480p': [854, 480], '540p': [960, 540], '720p': [1280, 720] };
-            const [w, h] = resMap[res] || [640, 360];
+            const res = document.getElementById('video-camera-resolution')?.value || '720p';
+            const resMap = { '360p': [640, 360], '480p': [854, 480], '540p': [960, 540], '720p': [1280, 720], '1080p': [1920, 1080] };
+            const [w, h] = resMap[res] || [1280, 720];
             const deviceId = document.getElementById('video-camera-device')?.value || undefined;
             const constraints = { video: { width: { ideal: w }, height: { ideal: h } } };
             if (deviceId) constraints.video.deviceId = { exact: deviceId };
@@ -186,9 +186,9 @@ class MenuManager {
                 }
                 return;
             }
-            const res = document.getElementById('video-screen-resolution')?.value || '360p';
-            const resMap = { '360p': [640, 360], '480p': [854, 480], '540p': [960, 540], '720p': [1280, 720] };
-            const [w, h] = resMap[res] || [640, 360];
+            const res = document.getElementById('video-screen-resolution')?.value || '720p';
+            const resMap = { '360p': [640, 360], '480p': [854, 480], '540p': [960, 540], '720p': [1280, 720], '1080p': [1920, 1080] };
+            const [w, h] = resMap[res] || [1280, 720];
             const options = {
                 video: { width: { ideal: w }, height: { ideal: h } },
                 audio: false
@@ -240,7 +240,7 @@ class MenuManager {
         const resolution = mode === 'camera'
             ? document.getElementById('video-camera-resolution').value
             : document.getElementById('video-screen-resolution').value;
-        const { width, height } = { '360p': { width: 640, height: 360 }, '480p': { width: 854, height: 480 }, '540p': { width: 960, height: 540 }, '720p': { width: 1280, height: 720 } }[resolution] || { width: 640, height: 360 };
+        const { width, height } = { '360p': { width: 640, height: 360 }, '480p': { width: 854, height: 480 }, '540p': { width: 960, height: 540 }, '720p': { width: 1280, height: 720 }, '1080p': { width: 1920, height: 1080 } }[resolution] || { width: 1280, height: 720 };
 
         try {
             if (mode === 'camera') {

@@ -10,6 +10,7 @@ export const VIDEO_RESOLUTIONS = {
     '480p': { width: 854, height: 480 },
     '540p': { width: 960, height: 540 },
     '720p': { width: 1280, height: 720 },
+    '1080p': { width: 1920, height: 1080 },
 };
 
 class VideoChatManager {

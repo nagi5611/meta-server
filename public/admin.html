@@ -476,7 +476,7 @@
                                     </div>
                                 </details>
                                 <details class="block" id="object-props-animation">
-                                    <summary class="block-header">アニメーション</summary>
+                                    <summary class="block-header">モジュール設定</summary>
                                     <div class="block-content">
                                         <div class="prop-row checkbox-row">
                                             <input type="checkbox" id="obj-animate" class="prop-checkbox">
@@ -493,6 +493,20 @@
                                         <div class="prop-row">
                                             <label class="prop-label" for="obj-anim-z">Rot/Frame Z</label>
                                             <input type="number" id="obj-anim-z" class="prop-input num" step="0.01">
+                                        </div>
+                                    </div>
+                                </details>
+                                <details class="block" id="object-props-taiko">
+                                    <summary class="block-header">太鼓</summary>
+                                    <div class="block-content">
+                                        <div class="prop-row checkbox-row">
+                                            <input type="checkbox" id="obj-taiko" class="prop-checkbox">
+                                            <label class="prop-label" for="obj-taiko">太鼓にする</label>
+                                        </div>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-taiko-radius">接近検知範囲</label>
+                                            <input type="number" id="obj-taiko-radius" class="prop-input num" step="0.1" min="0" value="3">
+                                            <span class="prop-unit">m</span>
                                         </div>
                                     </div>
                                 </details>

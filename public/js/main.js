@@ -13,6 +13,7 @@ import VoiceChatManager from './voice-chat-manager.js';
 import VideoChatManager from './video-chat-manager.js';
 import PdfViewerVoiceChatManager from './pdf-viewer-voice-chat-manager.js';
 import PdfViewerManager from './pdf-viewer-manager.js';
+import TaikoGameManager from './taiko-game-manager.js';
 import { isMobile, setupFullscreen, tryLockLandscape, onResize } from './mobile-utils.js';
 import MobileJoystickManager from './mobile-joystick-manager.js';
 import MobileUIManager from './mobile-ui-manager.js';
@@ -35,6 +36,7 @@ class MetaverseApp {
         this.videoChatManager = null;
         this.pdfViewerVoiceChatManager = null;
         this.pdfViewerManager = null;
+        this.taikoGameManager = null;
         this.clock = 0;
         this.isPageVisible = true;
         this.nearbyPdfPath = null;
@@ -141,6 +143,15 @@ class MetaverseApp {
             }
         );
 
+        // Initialize Taiko Game (E key near taiko object)
+        this.taikoGameManager = new TaikoGameManager();
+        this.taikoGameManager.init();
+        this.teleportManager.setTaikoCallback(() => {
+            this.taikoGameManager.open();
+            document.exitPointerLock();
+            this.characterController.resetMovement();
+        });
+
         // Load initial world (lobby or first available)
         const initialWorldId = this.worldManager.getWorld('lobby') ? 'lobby' : (this.worldManager.getAllWorlds()[0]?.id || 'lobby');
         console.log('Loading world:', initialWorldId);
@@ -149,6 +160,7 @@ class MetaverseApp {
                 console.log('World loaded:', initialWorldId);
                 // Setup teleport zones after world is loaded
                 this.updateTeleportZones();
+                this.updateTaikoZones();
                 resolve();
             });
         });
@@ -416,6 +428,20 @@ class MetaverseApp {
         */
     }
 
+    updateTaikoZones() {
+        const taikos = this.sceneManager.getTaikos();
+        const currentWorldId = this.worldManager.getCurrentWorldId();
+        this.teleportManager.clearTaikoZones();
+        taikos.forEach(taiko => {
+            this.teleportManager.addTaikoZone({
+                position: taiko.position,
+                radius: taiko.radius,
+                worldId: currentWorldId
+            });
+        });
+        console.log(`Setting up ${taikos.length} taiko zones for world: ${currentWorldId}`);
+    }
+
     async onWorldChanged(world) {
         console.log(`World changed to: ${world.id}`);
 
@@ -435,8 +461,9 @@ class MetaverseApp {
         // Notify network manager about world change
         this.networkManager.changeWorld(world.id);
 
-        // Update teleport zones for new world
+        // Update teleport and taiko zones for new world
         this.updateTeleportZones();
+        this.updateTaikoZones();
 
         // VC: Change to new room (cleanup old, join new)
         if (this.voiceChatManager && this.voiceChatManager.isJoined) {
@@ -477,6 +504,7 @@ class MetaverseApp {
                 this.worldManager.loadWorld(worldId, () => resolve());
             });
             this.updateTeleportZones();
+            this.updateTaikoZones();
             this.networkManager.changeWorld(worldId);
             // VC room change is handled by vc-room-changed from server
         }
@@ -525,6 +553,10 @@ class MetaverseApp {
             this.nearbyPdfPath = pdfObj ? pdfObj.pdfPath : null;
             if (this.pdfViewerManager && this.pdfViewerManager.isOpen()) {
                 this.uiManager.hideTeleportPrompt();
+            } else if (this.taikoGameManager && this.taikoGameManager.isOpen()) {
+                this.uiManager.hideTeleportPrompt();
+            } else if (this.teleportManager && this.teleportManager.nearestTaikoZone) {
+                this.uiManager.showTaikoPrompt();
             } else if (this.nearbyPdfPath) {
                 this.uiManager.showPdfPrompt();
             } else if (this.teleportManager && this.teleportManager.nearestZone) {

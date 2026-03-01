@@ -97,6 +97,53 @@
         </div>
     </div>
 
+    <!-- 太鼓ゲームオーバーレイ -->
+    <div id="taiko-game-overlay" class="taiko-game-overlay" style="display:none;">
+        <div class="taiko-game-container">
+            <div class="taiko-game-top-buttons">
+                <button type="button" id="taiko-game-hint" class="taiko-game-hint" title="ヒント">?</button>
+                <button type="button" id="taiko-game-close" class="taiko-game-close" title="閉じる">×</button>
+            </div>
+            <div class="taiko-game-header">
+                <div class="taiko-game-title" id="taiko-game-title">轟太鼓</div>
+            </div>
+            <div class="taiko-game-bar">
+                <div class="taiko-game-score-box">
+                    <div class="taiko-score-label">スコア</div>
+                    <div class="taiko-score-value" id="taiko-score">0</div>
+                    <div class="taiko-score-max">MAX <span id="taiko-score-max">0</span></div>
+                    <div class="taiko-score-rate" id="taiko-score-rate">0%</div>
+                </div>
+                <div class="taiko-game-lane">
+                    <img src="images/judge.png" alt="" class="taiko-game-judge-line" width="52" height="52">
+                    <div class="taiko-game-notes" id="taiko-notes"></div>
+                </div>
+            </div>
+            <div class="taiko-game-input">
+                <div class="taiko-ka-zone" id="taiko-ka-zone" title="カッ"></div>
+                <div class="taiko-input-drum" id="taiko-drum" title="ドン">
+                    <img src="images/taiko.png" alt="" class="taiko-drum-img">
+                </div>
+            </div>
+        </div>
+        <div id="taiko-hint-popup" class="taiko-hint-popup" style="display:none;" aria-hidden="true">
+            <div class="taiko-hint-popup-backdrop"></div>
+            <div class="taiko-hint-popup-content">
+                <h3 class="taiko-hint-title">操作方法</h3>
+                <div id="taiko-hint-body-pc" class="taiko-hint-body" style="display:none;">
+                    <p><strong>ドン</strong> … F キー（左） / J キー（右）</p>
+                    <p><strong>カッ</strong> … D キー（左） / K キー（右）</p>
+                    <p>マウスで太鼓・青い部分をクリックしても入力できます。</p>
+                </div>
+                <div id="taiko-hint-body-mobile" class="taiko-hint-body" style="display:none;">
+                    <p><strong>ドン</strong> … 中央の太鼓の画像をタップ</p>
+                    <p><strong>カッ</strong> … 青い部分（太鼓の左右）をタップ</p>
+                </div>
+                <button type="button" class="taiko-hint-popup-close">閉じる</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Chat Container -->
     <div id="chat-container">
         <div id="chat-header">
@@ -274,7 +321,8 @@
                             <option value="360p">360p (640×360)</option>
                             <option value="480p">480p (854×480)</option>
                             <option value="540p">540p (960×540)</option>
-                            <option value="720p">720p (1280×720)</option>
+                            <option value="720p" selected>720p (1280×720)</option>
+                            <option value="1080p">1080p (1920×1080)</option>
                         </select>
                     </div>
                     <div class="setting-item setting-row">
@@ -292,7 +340,8 @@
                             <option value="360p">360p (640×360)</option>
                             <option value="480p">480p (854×480)</option>
                             <option value="540p">540p (960×540)</option>
-                            <option value="720p">720p (1280×720)</option>
+                            <option value="720p" selected>720p (1280×720)</option>
+                            <option value="1080p">1080p (1920×1080)</option>
                         </select>
                     </div>
                 </div>

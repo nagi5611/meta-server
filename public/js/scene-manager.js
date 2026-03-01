@@ -12,6 +12,7 @@ class SceneManager {
         this.environmentGroup = new THREE.Group(); // Container for all static objects
         this.animatedModels = []; // Track models with animations
         this.teleporters = []; // Track teleporter models
+        this.taikos = []; // Track taiko drum models
         /** Lights added for current world (removed on clearWorld) */
         this.worldLights = [];
     }
@@ -129,6 +130,15 @@ class SceneManager {
                                 access: config.teleporter.access || 'public'
                             });
                             console.log(`  Teleporter: ID=${config.teleporter.id}, Destination=${config.teleporter.destinationWorld}, access=${config.teleporter.access || 'public'}`);
+                        }
+
+                        // Track taiko drum models
+                        if (config.taiko) {
+                            this.taikos.push({
+                                position: position,
+                                radius: config.taiko.radius || 3
+                            });
+                            console.log(`  Taiko: radius=${config.taiko.radius || 3}`);
                         }
 
                         loadedCount++;
@@ -481,8 +491,9 @@ class SceneManager {
             this.collider = null;
         }
 
-        // Clear teleporters and animations for this world
+        // Clear teleporters, taikos, and animations for this world
         this.teleporters = [];
+        this.taikos = [];
         this.animatedModels = [];
 
         console.log('World cleared');
@@ -493,6 +504,13 @@ class SceneManager {
      */
     getTeleporters() {
         return this.teleporters;
+    }
+
+    /**
+     * Get all taiko drums in current world
+     */
+    getTaikos() {
+        return this.taikos;
     }
 
     onWindowResize() {

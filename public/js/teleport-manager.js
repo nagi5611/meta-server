@@ -20,6 +20,9 @@ class TeleportManager {
         this.uiManager = uiManager;
         this.teleportZones = [];
         this.nearestZone = null;
+        this.taikoZones = [];
+        this.nearestTaikoZone = null;
+        this.openTaikoGame = null;
         this.keyPressed = false;
         this.getPdfPath = null;
         this.openPdfViewer = null;
@@ -70,6 +73,23 @@ class TeleportManager {
     setPdfCallbacks(getPdfPath, openPdfViewer) {
         this.getPdfPath = getPdfPath;
         this.openPdfViewer = openPdfViewer;
+    }
+
+    setTaikoCallback(openTaikoGame) {
+        this.openTaikoGame = typeof openTaikoGame === 'function' ? openTaikoGame : null;
+    }
+
+    addTaikoZone(zone) {
+        this.taikoZones.push({
+            position: zone.position,
+            radius: zone.radius || 3,
+            worldId: zone.worldId
+        });
+    }
+
+    clearTaikoZones() {
+        this.taikoZones = [];
+        this.nearestTaikoZone = null;
     }
 
     /**
@@ -134,20 +154,36 @@ class TeleportManager {
             }
         });
 
-        // Update UI based on proximity
-        if (closestZone) {
-            this.nearestZone = closestZone;
-            this.uiManager.showTeleportPrompt(closestZone.label);
-        } else {
-            this.nearestZone = null;
-            this.uiManager.hideTeleportPrompt();
-        }
+        this.nearestZone = closestZone || null;
+
+        // Find closest taiko zone in current world
+        let closestTaiko = null;
+        let closestTaikoDistance = Infinity;
+        this.taikoZones.forEach(zone => {
+            if (zone.worldId !== currentWorldId) return;
+            const distance = Math.sqrt(
+                Math.pow(playerPosition.x - zone.position.x, 2) +
+                Math.pow(playerPosition.y - zone.position.y, 2) +
+                Math.pow(playerPosition.z - zone.position.z, 2)
+            );
+            if (distance < zone.radius && distance < closestTaikoDistance) {
+                closestTaikoDistance = distance;
+                closestTaiko = zone;
+            }
+        });
+        this.nearestTaikoZone = closestTaiko || null;
     }
 
     /**
      * Handle teleport action when E is pressed (PDF viewer takes priority over teleport)
      */
     handleTeleport() {
+        // 優先度: 太鼓 > PDF > テレポート
+        if (this.nearestTaikoZone && this.openTaikoGame) {
+            this.uiManager.hideTeleportPrompt();
+            this.openTaikoGame();
+            return;
+        }
         const pdfPath = this.getPdfPath && this.getPdfPath();
         if (pdfPath && this.openPdfViewer) {
             this.uiManager.hideTeleportPrompt();
@@ -176,6 +212,7 @@ class TeleportManager {
     clearZones() {
         this.teleportZones = [];
         this.nearestZone = null;
+        this.clearTaikoZones();
         this.uiManager.hideTeleportPrompt();
     }
 

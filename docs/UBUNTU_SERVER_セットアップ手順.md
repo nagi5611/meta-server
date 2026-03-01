@@ -44,33 +44,51 @@ sudo hostnamectl set-hostname meta-server
 DHCP のままだと IP が変わり、ルーターのポート転送先がずれる。必要なら `netplan` で固定 IP を設定する。
 
 ```bash
-# 現在の Netplan 設定を確認
+# 現在の Netplan 設定と「実際の NIC 名」を確認
 ls /etc/netplan/
-
-# 編集（ファイル名は環境により異なる。例: 00-installer-config.yaml）
-sudo nano /etc/netplan/00-installer-config.yaml
+ip link show
 ```
 
-例（実際のインターフェース名・ゲートウェイ・DNS は環境に合わせる）:
+**重要**: 固定 IP を設定するのは **実際に使っているインターフェース** だけ。  
+例: `50-cloud-init.yaml` で `enp8s0` とあれば、固定化するのも **enp8s0**。別の名前（例: enp0s3）を書くと別 NIC 用になり、有線 LAN が enp8s0 のままだと 50 の DHCP が優先されたままになる。
+
+編集（既存の cloud-init 用設定がある場合は、**数字の大きい方**のファイルで同じインターフェースを上書きする）:
+
+```bash
+sudo nano /etc/netplan/99-config.yaml
+```
+
+例（**enp8s0** は 50-cloud-init.yaml で使っている名前。実際のインターフェース名・ゲートウェイ・DNS は環境に合わせる）:
 
 ```yaml
 network:
   version: 2
   ethernets:
-    enp0s3:
-      addresses: [192.168.1.100/24]
+    enp8s0:
+      addresses:
+        - 192.168.0.20/24
       routes:
         - to: default
-          via: 192.168.1.1
+          via: 192.168.0.1
       nameservers:
-        addresses: [8.8.8.8, 1.1.1.1]
+        addresses:
+          - 8.8.8.8
+          - 1.1.1.1
 ```
+
+※ 50-cloud-init.yaml で `enp8s0: dhcp4: true` になっていても、99-config.yaml で同じ `enp8s0` を静的に書けば 99 が優先される。
 
 適用:
 
 ```bash
+# Netplan は設定ファイルのパーミッションが緩いと警告する。先に 600 にしておく。
+sudo chmod 600 /etc/netplan/99-config.yaml
+# または編集したファイル名に合わせる: sudo chmod 600 /etc/netplan/<ファイル名>.yaml
+
 sudo netplan apply
 ```
+
+**「Permissions are too open」と出た場合**: 上記の `chmod 600` を実行してから、再度 `sudo netplan apply` する。
 
 ### 2.4 ファイアウォール（ufw）の準備
 
@@ -92,17 +110,19 @@ sudo apt install -y ufw
 sudo apt install -y build-essential python3-minimal git
 ```
 
-### 3.2 Node.js（LTS）のインストール
+### 3.2 Node.js のインストール
 
-NodeSource で Node.js 20 LTS を入れる例（推奨）。
+**mediasoup 3.19** は Node.js 22 以上を要求するため、Node.js 22 を推奨。
+
+NodeSource で Node.js 22 を入れる:
 
 ```bash
-# NodeSource 用の鍵とリポジトリ追加（Node.js 20.x）
+# NodeSource 用の鍵とリポジトリ追加（Node.js 22.x）
 sudo apt install -y ca-certificates curl gnupg
 sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
 
-echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
+echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
 
 sudo apt update
 sudo apt install -y nodejs
@@ -111,9 +131,11 @@ sudo apt install -y nodejs
 確認:
 
 ```bash
-node -v   # v20.x.x
+node -v   # v22.x.x
 npm -v
 ```
+
+**既に Node.js 20 を入れている場合**: 上記で `node_22.x` を追加すると、`apt install nodejs` で 22 に上がる。`node -v` で 22.x であることを確認してから `npm ci` を実行する。
 
 ---
 
@@ -262,13 +284,17 @@ PORT_HTTP_REDIRECT=80
 sudo crontab -e
 ```
 
-例（毎日 3 時）:
+### 方法 A の場合（Let’s Encrypt 証明書を `/etc/letsencrypt/live/` から直接参照）
+
+毎日 3 時に証明書を自動更新し、サービスを再起動するだけでOKです（コピー・chown不要）。
+
+例（crontabの設定）:
 
 ```
-0 3 * * * certbot renew --quiet --deploy-hook "cp /etc/letsencrypt/live/meta.example.com/fullchain.pem /etc/letsencrypt/live/meta.example.com/privkey.pem /home/<ユーザー名>/meta-server/certs/ && chown <ユーザー名>:<ユーザー名> /home/<ユーザー名>/meta-server/certs/*.pem && systemctl restart meta-server"
+0 3 * * * certbot renew --quiet --deploy-hook "systemctl restart meta-server"
 ```
 
-（方法 A の場合は `systemctl restart meta-server` のみでよい。）
+※ `systemctl restart meta-server` のみで、証明書ファイルのパーミッション設定やコピー作業は不要です（ただし、Nodeを実行するユーザーに `/etc/letsencrypt/live/` への読取権限があることを必ず確認してください）。
 
 ### 5.2 自己署名証明書（テスト用）
 
@@ -294,6 +320,39 @@ npm run start:prod
 - HTTPS で 443 を使う場合: `https://localhost` または `https://<このサーバーのIP>`。
 
 問題なければ Ctrl+C で止め、次で systemd サービス化する。
+
+### 6.1 SSH でサーバー上の Node を終了させる方法
+
+**systemd で動かしている場合**
+
+```bash
+sudo systemctl stop meta-server
+```
+
+状態確認: `sudo systemctl status meta-server`
+
+**手動で起動したまま（別セッションやバックグラウンドで動いている場合）**
+
+1. Node プロセスの PID を確認する:
+   ```bash
+   pgrep -af "node server.js"
+   # または
+   ps aux | grep "node server.js"
+   ```
+2. 表示された PID を指定して終了する:
+   ```bash
+   kill <PID>
+   ```
+   応答しない場合は強制終了:
+   ```bash
+   kill -9 <PID>
+   ```
+
+一括で終了する場合（`server.js` を実行している node だけ対象）:
+
+```bash
+pkill -f "node server.js"
+```
 
 ---
 
@@ -400,7 +459,7 @@ sudo ufw enable
 ### 10.2 better-sqlite3 / mediasoup のビルドエラー
 
 - `build-essential` と `python3-minimal` が入っているか確認。
-- `node-gyp` のログを読む。Node のバージョンは 18/20/22 LTS を推奨。
+- `node-gyp` のログを読む。Node.js は 22 以上（mediasoup 3.19 の要件）を推奨。
 
 ### 10.3 外部から WebRTC がつながらない
 
@@ -419,7 +478,7 @@ sudo ufw enable
 - [ ] Ubuntu Server 24.04 インストール・更新
 - [ ] 固定 IP（任意）・ホスト名（任意）
 - [ ] build-essential, python3-minimal, git インストール
-- [ ] Node.js 20 LTS（NodeSource）インストール
+- [ ] Node.js 22（NodeSource）インストール
 - [ ] リポジトリのクローン、`npm ci`、`npm run build`
 - [ ] `.env` 作成（`ADMIN_PASSWORD` と必要に応じて `MEDIASOUP_ANNOUNCED_IP` を設定）
 - [ ] HTTPS 用: 証明書の用意と `.env` の SSL_* / PORT 設定
