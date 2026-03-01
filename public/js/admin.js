@@ -13,6 +13,28 @@ const BANDWIDTH_HISTORY_MAX = 60; // 60 points = 1 min at 1s poll
 let lastTrafficSample = null;
 let bandwidthHistory = [];
 let worldEditInitialized = false;
+let chartPanelInitialized = false;
+/** 譜面作成パネルで選択中の譜面ID */
+let selectedChartId = null;
+/** 譜面一覧のキャッシュ（renderChartList/selectChart で参照） */
+let cachedCharts = {};
+/** 編集中のノーツ配列（{ time, type }[]）。譜面編集エリアと同期 */
+let editingNotes = [];
+/** 譜面編集エリアで選択中のノーツ索引。-1 は未選択 */
+let selectedNoteIndex = -1;
+/** 譜面ストリップ: 1秒あたりのピクセル数（ホイールで拡大縮小） */
+let chartPixelsPerSecond = 60;
+/** 譜面の表示時間範囲（秒）。ノーツの最大時間を下回らないよう render 内で拡張 */
+const CHART_TIME_RANGE_DEFAULT = 60;
+/** ホイールズームの倍率範囲 */
+const CHART_ZOOM_MIN = 0.25;
+const CHART_ZOOM_MAX = 4;
+/** ノーツドラッグ中: 対象の索引。-1 はドラッグなし */
+let noteDragIndex = -1;
+/** ノーツドラッグ開始時の clientX */
+let noteDragStartX = 0;
+/** ノーツを実際にドラッグしたか（移動量で判定） */
+let noteDragStarted = false;
 
 /** ログインユーザー一覧の現在ページ（1始まり） */
 let currentLoginUsersPage = 1;
@@ -40,6 +62,13 @@ function switchPanel(panelId) {
     if (panelId === 'panel-logs') {
         loadLoginUsers(currentLoginUsersPage);
     }
+    if (panelId === 'panel-chart') {
+        loadCharts();
+        if (!chartPanelInitialized) {
+            chartPanelInitialized = true;
+            bindChartPanelEvents();
+        }
+    }
 }
 
 /** 保存キー: 管理画面テーマ 'light' | 'dark' */
@@ -66,6 +95,371 @@ function applyAdminTheme(isDark) {
     }
 }
 
+/**
+ * 譜面一覧を取得して表示する
+ */
+async function loadCharts() {
+    const statusEl = document.getElementById('chart-status');
+    const listEl = document.getElementById('chart-list');
+    if (!listEl) return;
+    try {
+        const res = await fetch('/admin/charts');
+        if (!res.ok) throw new Error(res.statusText);
+        const charts = await res.json();
+        cachedCharts = charts;
+        renderChartList(charts);
+        if (!selectedChartId) clearChartEditor();
+        statusEl.textContent = '';
+    } catch (err) {
+        statusEl.textContent = '取得失敗: ' + err.message;
+        listEl.innerHTML = '';
+    }
+}
+
+/**
+ * 譜面一覧のDOMを更新し、選択状態を反映する
+ * @param {Record<string, { id: string, name?: string, notes?: Array<{ time: number, type: string }> }>} charts
+ */
+function renderChartList(charts) {
+    const listEl = document.getElementById('chart-list');
+    charts = charts || cachedCharts;
+    const btnDelete = document.getElementById('btn-delete-chart');
+    const btnEdit = document.getElementById('btn-edit-chart');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    const ids = Object.keys(charts);
+    ids.forEach((id) => {
+        const c = charts[id];
+        const div = document.createElement('div');
+        div.className = 'item' + (id === selectedChartId ? ' selected' : '');
+        div.textContent = c.name || id;
+        div.dataset.id = id;
+        div.addEventListener('click', () => selectChart(id));
+        listEl.appendChild(div);
+    });
+    if (selectedChartId && charts[selectedChartId]) {
+        if (btnDelete) btnDelete.disabled = false;
+        if (btnEdit) btnEdit.disabled = false;
+    } else {
+        if (btnDelete) btnDelete.disabled = true;
+        if (btnEdit) btnEdit.disabled = true;
+    }
+}
+
+/**
+ * 譜面を選択し、名前行と削除ボタンの状態を更新する
+ * @param {string} id
+ */
+function selectChart(id) {
+    selectedChartId = id;
+    const c = cachedCharts[id];
+    const btnDelete = document.getElementById('btn-delete-chart');
+    if (btnDelete) btnDelete.disabled = !id;
+    renderChartList(cachedCharts);
+    if (c) {
+        loadChartIntoEditor(c);
+    } else {
+        clearChartEditor();
+    }
+}
+
+/**
+ * 譜面を右側の編集エリアに読み込む
+ * @param {{ id: string, name?: string, notes?: Array<{ time: number, type: string }>, difficulty?: number|string|null, tempo?: number|null }} chart
+ */
+function loadChartIntoEditor(chart) {
+    const nameEl = document.getElementById('chart-edit-name');
+    const difficultyEl = document.getElementById('chart-edit-difficulty');
+    const tempoEl = document.getElementById('chart-edit-tempo');
+    const endTimeEl = document.getElementById('chart-edit-end-time');
+    const btnSave = document.getElementById('btn-save-chart');
+    if (nameEl) nameEl.value = chart.name || chart.id || '';
+    if (difficultyEl) difficultyEl.value = chart.difficulty != null ? String(chart.difficulty) : '';
+    if (tempoEl) tempoEl.value = chart.tempo != null ? String(chart.tempo) : '';
+    if (endTimeEl) endTimeEl.value = chart.endTime != null ? String(chart.endTime) : '';
+    editingNotes = Array.isArray(chart.notes) ? chart.notes.slice() : [];
+    selectedNoteIndex = -1;
+    renderNotesStrip();
+    if (btnSave) btnSave.disabled = false;
+}
+
+/**
+ * 編集エリアをクリアする（譜面未選択時）
+ */
+function clearChartEditor() {
+    const nameEl = document.getElementById('chart-edit-name');
+    const difficultyEl = document.getElementById('chart-edit-difficulty');
+    const tempoEl = document.getElementById('chart-edit-tempo');
+    const endTimeEl = document.getElementById('chart-edit-end-time');
+    const btnSave = document.getElementById('btn-save-chart');
+    if (nameEl) nameEl.value = '';
+    if (difficultyEl) difficultyEl.value = '';
+    if (tempoEl) tempoEl.value = '';
+    if (endTimeEl) endTimeEl.value = '';
+    editingNotes = [];
+    selectedNoteIndex = -1;
+    renderNotesStrip();
+    if (btnSave) btnSave.disabled = true;
+}
+
+/**
+ * テンポ入力から BPM を取得する（未入力時は 120）
+ */
+function getChartTempo() {
+    const el = document.getElementById('chart-edit-tempo');
+    const v = el && el.value ? Number(el.value) : NaN;
+    return Number.isFinite(v) && v >= 60 && v <= 300 ? v : 120;
+}
+
+/**
+ * 譜面編集エリアの時間ルーラーとノーツを再描画する。BPM に合わせて上に時間を表示する。
+ */
+function renderNotesStrip() {
+    const inner = document.getElementById('chart-notes-inner');
+    const ruler = document.getElementById('chart-notes-ruler');
+    const strip = document.getElementById('chart-notes-strip');
+    const btnRemove = document.getElementById('btn-remove-selected-note');
+    if (!inner || !ruler || !strip) return;
+
+    const bpm = getChartTempo();
+    const beatSec = 60 / bpm;
+    const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map((n) => n.time)) : 0;
+    const timeRange = Math.max(CHART_TIME_RANGE_DEFAULT, maxNoteTime + 10);
+    const widthPx = timeRange * chartPixelsPerSecond;
+    inner.style.width = widthPx + 'px';
+
+    ruler.innerHTML = '';
+    const tickStep = Math.max(beatSec * 2, 0.5);
+    for (let t = 0; t <= timeRange; t += tickStep) {
+        const x = t * chartPixelsPerSecond;
+        const span = document.createElement('span');
+        span.className = 'ruler-tick';
+        span.style.left = x + 'px';
+        span.textContent = t.toFixed(1) + 's';
+        ruler.appendChild(span);
+    }
+
+    editingNotes.sort((a, b) => a.time - b.time);
+    strip.innerHTML = '';
+    editingNotes.forEach((note, i) => {
+        const span = document.createElement('span');
+        span.className = 'note-circle note-' + (note.type === 'ka' ? 'ka' : 'don') + (i === selectedNoteIndex ? ' selected' : '');
+        span.textContent = note.type === 'ka' ? 'カ' : 'ドン';
+        span.style.left = (note.time * chartPixelsPerSecond) + 'px';
+        span.dataset.index = String(i);
+        span.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            noteDragIndex = i;
+            noteDragStartX = e.clientX;
+            noteDragStarted = false;
+        });
+        strip.appendChild(span);
+    });
+    if (btnRemove) btnRemove.disabled = selectedNoteIndex < 0;
+}
+
+/**
+ * 譜面作成パネルのボタン・リストのイベントを一度だけバインドする
+ */
+function bindChartPanelEvents() {
+    const btnAdd = document.getElementById('btn-add-chart');
+    const btnEdit = document.getElementById('btn-edit-chart');
+    const btnDelete = document.getElementById('btn-delete-chart');
+    const statusEl = document.getElementById('chart-status');
+
+    if (btnAdd) {
+        btnAdd.addEventListener('click', async () => {
+            const id = prompt('譜面ID（英数字・アンダースコア・ハイフン）', 'chart_' + Date.now());
+            if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) return;
+            statusEl.textContent = '追加中...';
+            try {
+                const res = await fetch('/admin/charts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, name: id, notes: [] })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    statusEl.textContent = data.error || res.statusText;
+                    return;
+                }
+                statusEl.textContent = '追加しました';
+                selectedChartId = id;
+                loadCharts();
+            } catch (err) {
+                statusEl.textContent = '追加失敗: ' + err.message;
+            }
+        });
+    }
+
+    if (btnEdit) {
+        btnEdit.addEventListener('click', () => {
+            if (selectedChartId && cachedCharts[selectedChartId]) {
+                loadChartIntoEditor(cachedCharts[selectedChartId]);
+            }
+        });
+    }
+
+    const btnSave = document.getElementById('btn-save-chart');
+    if (btnSave) {
+        btnSave.addEventListener('click', async () => {
+            if (!selectedChartId) return;
+            const nameEl = document.getElementById('chart-edit-name');
+            const difficultyEl = document.getElementById('chart-edit-difficulty');
+            const tempoEl = document.getElementById('chart-edit-tempo');
+            const endTimeEl = document.getElementById('chart-edit-end-time');
+            const name = nameEl ? nameEl.value.trim() : '';
+            const difficulty = difficultyEl && difficultyEl.value ? difficultyEl.value : null;
+            const tempo = tempoEl && tempoEl.value ? Number(tempoEl.value) : null;
+            const endTime = endTimeEl && endTimeEl.value !== '' ? Number(endTimeEl.value) : null;
+            statusEl.textContent = '保存中...';
+            try {
+                const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name || selectedChartId, notes: editingNotes, difficulty, tempo, endTime })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    statusEl.textContent = data.error || res.statusText;
+                    return;
+                }
+                statusEl.textContent = '保存しました';
+                cachedCharts[selectedChartId] = { ...cachedCharts[selectedChartId], name: name || selectedChartId, notes: editingNotes, difficulty, tempo, endTime };
+            } catch (err) {
+                statusEl.textContent = '保存失敗: ' + err.message;
+            }
+        });
+    }
+
+    const btnRemoveNote = document.getElementById('btn-remove-selected-note');
+    if (btnRemoveNote) {
+        btnRemoveNote.addEventListener('click', () => {
+            if (selectedNoteIndex < 0 || selectedNoteIndex >= editingNotes.length) return;
+            editingNotes.splice(selectedNoteIndex, 1);
+            selectedNoteIndex = -1;
+            renderNotesStrip();
+        });
+    }
+
+    const scrollEl = document.getElementById('chart-notes-scroll');
+    const strip = document.getElementById('chart-notes-strip');
+    const paletteDon = document.querySelector('.note-palette-item.note-don');
+    const paletteKa = document.querySelector('.note-palette-item.note-ka');
+    if (scrollEl && strip && paletteDon && paletteKa) {
+        [paletteDon, paletteKa].forEach((el) => {
+            el.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', el.dataset.noteType || 'don');
+                e.dataTransfer.effectAllowed = 'copy';
+            });
+        });
+        scrollEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            scrollEl.classList.add('drag-over');
+        });
+        scrollEl.addEventListener('dragleave', (e) => {
+            if (!scrollEl.contains(e.relatedTarget)) scrollEl.classList.remove('drag-over');
+        });
+        scrollEl.addEventListener('drop', (e) => {
+            e.preventDefault();
+            scrollEl.classList.remove('drag-over');
+            const type = (e.dataTransfer.getData('text/plain') || 'don').trim();
+            const t = type === 'ka' ? 'ka' : 'don';
+            const innerEl = document.getElementById('chart-notes-inner');
+            const bpm = getChartTempo();
+            const beatSec = 60 / bpm;
+            const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map((n) => n.time)) : 0;
+            const timeRange = Math.max(CHART_TIME_RANGE_DEFAULT, maxNoteTime + 10);
+            const rect = innerEl ? innerEl.getBoundingClientRect() : null;
+            const dropX = rect ? (e.clientX - rect.left + scrollEl.scrollLeft) : 0;
+            const time = Math.max(0, Math.min(timeRange, dropX / chartPixelsPerSecond));
+            editingNotes.push({ time, type: t });
+            editingNotes.sort((a, b) => a.time - b.time);
+            selectedNoteIndex = -1;
+            renderNotesStrip();
+        });
+        let panStartX = null;
+        let panStartScroll = null;
+        scrollEl.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (e.target.closest('.note-circle')) return;
+            panStartX = e.clientX;
+            panStartScroll = scrollEl.scrollLeft;
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (noteDragIndex >= 0) {
+                if (!noteDragStarted && Math.abs(e.clientX - noteDragStartX) > 5) noteDragStarted = true;
+                if (noteDragStarted) {
+                    const rect = scrollEl.getBoundingClientRect();
+                    const contentX = scrollEl.scrollLeft + (e.clientX - rect.left);
+                    const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map((n) => n.time)) : 0;
+                    const timeRange = Math.max(CHART_TIME_RANGE_DEFAULT, maxNoteTime + 10);
+                    const time = Math.max(0, Math.min(timeRange, contentX / chartPixelsPerSecond));
+                    editingNotes[noteDragIndex].time = time;
+                    renderNotesStrip();
+                }
+                return;
+            }
+            if (panStartX === null) return;
+            scrollEl.scrollLeft = panStartScroll + (panStartX - e.clientX);
+        });
+        document.addEventListener('mouseup', () => {
+            if (noteDragIndex >= 0) {
+                if (noteDragStarted) {
+                    const draggedNote = editingNotes[noteDragIndex];
+                    editingNotes.sort((a, b) => a.time - b.time);
+                    selectedNoteIndex = editingNotes.indexOf(draggedNote);
+                } else {
+                    selectedNoteIndex = selectedNoteIndex === noteDragIndex ? -1 : noteDragIndex;
+                }
+                renderNotesStrip();
+                noteDragIndex = -1;
+                noteDragStarted = false;
+            }
+            panStartX = null;
+            panStartScroll = null;
+        });
+        scrollEl.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const rect = scrollEl.getBoundingClientRect();
+            const contentX = scrollEl.scrollLeft + (e.clientX - rect.left);
+            const timeUnderMouse = contentX / chartPixelsPerSecond;
+            const factor = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.max(CHART_ZOOM_MIN, Math.min(CHART_ZOOM_MAX, (chartPixelsPerSecond / 60) * factor));
+            chartPixelsPerSecond = 60 * newScale;
+            renderNotesStrip();
+            const rect2 = scrollEl.getBoundingClientRect();
+            scrollEl.scrollLeft = Math.max(0, timeUnderMouse * chartPixelsPerSecond - (e.clientX - rect2.left));
+        }, { passive: false });
+        const tempoEl = document.getElementById('chart-edit-tempo');
+        if (tempoEl) {
+            tempoEl.addEventListener('input', () => renderNotesStrip());
+        }
+    }
+
+    if (btnDelete) {
+        btnDelete.addEventListener('click', async () => {
+            if (!selectedChartId) return;
+            if (!confirm('譜面「' + selectedChartId + '」を削除しますか？')) return;
+            statusEl.textContent = '削除中...';
+            try {
+                const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId), { method: 'DELETE' });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    statusEl.textContent = data.error || res.statusText;
+                    return;
+                }
+                statusEl.textContent = '削除しました';
+                selectedChartId = null;
+                loadCharts();
+            } catch (err) {
+                statusEl.textContent = '削除失敗: ' + err.message;
+            }
+        });
+    }
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     const savedTheme = localStorage.getItem(ADMIN_THEME_KEY);
@@ -88,7 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // URL の ?panel= で初期表示パネルを指定（例: ?panel=world-edit）
     const params = new URLSearchParams(location.search);
     const initialPanel = params.get('panel');
-    const validPanels = ['panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit'];
+    const validPanels = ['panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-chart'];
     if (initialPanel && validPanels.includes(initialPanel)) {
         switchPanel(initialPanel);
     }

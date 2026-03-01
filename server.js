@@ -84,6 +84,35 @@ function writeWorlds(worlds) {
     fs.renameSync(tmpPath, WORLDS_PATH);
 }
 
+const CHARTS_PATH = path.join(DATA_DIR, 'charts.json');
+const DEFAULT_CHARTS = {};
+
+function ensureChartsFile() {
+    if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(CHARTS_PATH)) {
+        fs.writeFileSync(CHARTS_PATH, JSON.stringify(DEFAULT_CHARTS, null, 2), 'utf8');
+        console.log('Created charts.json');
+    }
+}
+
+function readCharts() {
+    try {
+        const data = fs.readFileSync(CHARTS_PATH, 'utf8');
+        return JSON.parse(data);
+    } catch (err) {
+        console.warn('Failed to read charts.json, using default:', err.message);
+        return { ...DEFAULT_CHARTS };
+    }
+}
+
+function writeCharts(charts) {
+    const tmpPath = CHARTS_PATH + '.tmp.' + Date.now();
+    fs.writeFileSync(tmpPath, JSON.stringify(charts, null, 2), 'utf8');
+    fs.renameSync(tmpPath, CHARTS_PATH);
+}
+
 const MODELS_DIR = path.join(__dirname, 'public', 'models');
 const PDFS_DIR = path.join(__dirname, 'public', 'pdfs');
 const uploadStorage = multer.memoryStorage();
@@ -2429,6 +2458,75 @@ app.post('/admin/worlds', (req, res) => {
     }
 });
 
+app.get('/admin/charts', (req, res) => {
+    try {
+        const charts = readCharts();
+        res.json(charts);
+    } catch (err) {
+        console.error('GET /admin/charts error:', err);
+        res.status(500).json({ error: 'Failed to read charts' });
+    }
+});
+
+app.post('/admin/charts', (req, res) => {
+    const { id, name, notes } = req.body || {};
+    if (!id || typeof id !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+        return res.status(400).json({ error: 'Invalid or missing id (alphanumeric, underscore, hyphen)' });
+    }
+    const charts = readCharts();
+    if (charts[id]) {
+        return res.status(400).json({ error: 'Chart id already exists' });
+    }
+    const notesArr = Array.isArray(notes) ? notes : [];
+    const difficulty = req.body.difficulty != null ? req.body.difficulty : null;
+    const tempo = req.body.tempo != null ? Number(req.body.tempo) : null;
+    charts[id] = { id, name: name || id, notes: notesArr, difficulty, tempo };
+    try {
+        writeCharts(charts);
+        res.json({ success: true, chart: charts[id] });
+    } catch (err) {
+        console.error('POST /admin/charts error:', err);
+        res.status(500).json({ error: 'Failed to save charts' });
+    }
+});
+
+app.put('/admin/charts/:id', (req, res) => {
+    const id = req.params.id;
+    const charts = readCharts();
+    if (!charts[id]) {
+        return res.status(404).json({ error: 'Chart not found' });
+    }
+    const { name, notes, difficulty, tempo, endTime } = req.body || {};
+    if (name !== undefined) charts[id].name = name;
+    if (Array.isArray(notes)) charts[id].notes = notes;
+    if (difficulty !== undefined) charts[id].difficulty = difficulty;
+    if (tempo !== undefined) charts[id].tempo = tempo == null ? null : Number(tempo);
+    if (endTime !== undefined) charts[id].endTime = endTime == null || endTime === '' ? null : Number(endTime);
+    try {
+        writeCharts(charts);
+        res.json({ success: true, chart: charts[id] });
+    } catch (err) {
+        console.error('PUT /admin/charts error:', err);
+        res.status(500).json({ error: 'Failed to save charts' });
+    }
+});
+
+app.delete('/admin/charts/:id', (req, res) => {
+    const id = req.params.id;
+    const charts = readCharts();
+    if (!charts[id]) {
+        return res.status(404).json({ error: 'Chart not found' });
+    }
+    delete charts[id];
+    try {
+        writeCharts(charts);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('DELETE /admin/charts error:', err);
+        res.status(500).json({ error: 'Failed to save charts' });
+    }
+});
+
 app.get('/admin/models', (req, res) => {
     try {
         if (!fs.existsSync(MODELS_DIR)) {
@@ -2530,6 +2628,42 @@ app.get('/api/worlds', (req, res) => {
         console.error('GET /api/worlds error:', err);
         res.status(500).json({ error: 'Failed to read worlds' });
     }
+});
+
+app.get('/api/charts', (req, res) => {
+    try {
+        const charts = readCharts();
+        res.json(charts);
+    } catch (err) {
+        console.error('GET /api/charts error:', err);
+        res.status(500).json({ error: 'Failed to read charts' });
+    }
+});
+
+/** 譜面別スコアランキング（メモリ保持）。{ chartId: [ { username, score } ] } 降順 */
+const chartScores = {};
+
+app.post('/api/charts/:id/score', (req, res) => {
+    const id = req.params.id;
+    const { username, score } = req.body || {};
+    const scoreNum = typeof score === 'number' ? score : parseInt(score, 10);
+    if (Number.isNaN(scoreNum) || scoreNum < 0) {
+        return res.status(400).json({ error: 'Invalid score' });
+    }
+    const name = (typeof username === 'string' && username.trim()) ? username.trim() : 'プレイヤー';
+    if (!chartScores[id]) chartScores[id] = [];
+    chartScores[id].push({ username: name, score: scoreNum });
+    chartScores[id].sort((a, b) => b.score - a.score);
+    const maxEntries = 100;
+    if (chartScores[id].length > maxEntries) chartScores[id] = chartScores[id].slice(0, maxEntries);
+    res.json({ success: true });
+});
+
+app.get('/api/charts/:id/ranking', (req, res) => {
+    const id = req.params.id;
+    const list = chartScores[id] || [];
+    const top = list.slice(0, 10);
+    res.json(top);
 });
 
 app.get('/admin/stats', (req, res) => {
@@ -3003,6 +3137,7 @@ function formatBytes(bytes) {
 // Start server
 (async () => {
     ensureWorldsFile();
+    ensureChartsFile();
     initDb();
     initUserSessionsDb();
     // Initialize mediasoup workers (room VC + PDF VC)

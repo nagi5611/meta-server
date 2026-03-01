@@ -99,7 +99,13 @@
 
     <!-- 太鼓ゲームオーバーレイ -->
     <div id="taiko-game-overlay" class="taiko-game-overlay" style="display:none;">
-        <div class="taiko-game-container">
+        <div id="taiko-song-select" class="taiko-song-select">
+            <h2 class="taiko-song-select-title">選曲</h2>
+            <ul id="taiko-chart-list" class="taiko-chart-list"></ul>
+            <p id="taiko-chart-empty" class="taiko-chart-empty" style="display:none;">譜面がありません</p>
+            <button type="button" id="taiko-song-select-close" class="taiko-song-select-close">閉じる</button>
+        </div>
+        <div class="taiko-game-container" id="taiko-game-container" style="display:none;">
             <div class="taiko-game-top-buttons">
                 <button type="button" id="taiko-game-hint" class="taiko-game-hint" title="ヒント">?</button>
                 <button type="button" id="taiko-game-close" class="taiko-game-close" title="閉じる">×</button>
@@ -115,7 +121,7 @@
                     <div class="taiko-score-rate" id="taiko-score-rate">0%</div>
                 </div>
                 <div class="taiko-game-lane">
-                    <img src="images/judge.png" alt="" class="taiko-game-judge-line" width="52" height="52">
+                    <img src="images/judge.png" alt="" class="taiko-game-judge-line" width="64" height="64">
                     <div class="taiko-game-notes" id="taiko-notes"></div>
                 </div>
             </div>
@@ -125,6 +131,32 @@
                     <img src="images/taiko.png" alt="" class="taiko-drum-img">
                 </div>
             </div>
+        </div>
+        <div id="taiko-results" class="taiko-results" style="display:none;">
+            <div class="taiko-results-top">
+                <h2 class="taiko-results-title">成績発表</h2>
+                <div class="taiko-results-song-name" id="taiko-results-song-name">曲名</div>
+                <div class="taiko-results-difficulty" id="taiko-results-difficulty">難易度 -</div>
+            </div>
+            <div class="taiko-results-bottom">
+                <div class="taiko-results-score-area">
+                    <div class="taiko-results-score-label">スコア</div>
+                    <div class="taiko-results-score-value-wrap">
+                        <span class="taiko-results-score-value" id="taiko-results-score-value">0</span><span class="taiko-results-score-unit">点</span>
+                    </div>
+                    <div class="taiko-results-full-combo" id="taiko-results-full-combo" style="display:none;">フルスコア!</div>
+                    <div class="taiko-results-judge-counts">
+                        <span>良 <strong id="taiko-results-good">0</strong></span>
+                        <span>可 <strong id="taiko-results-ok">0</strong></span>
+                        <span>不可 <strong id="taiko-results-miss">0</strong></span>
+                    </div>
+                </div>
+                <div class="taiko-results-ranking-area">
+                    <h3 class="taiko-results-ranking-title">ランキング</h3>
+                    <ol class="taiko-results-ranking-list" id="taiko-results-ranking-list"></ol>
+                </div>
+            </div>
+            <button type="button" id="taiko-results-close" class="taiko-results-close">閉じる</button>
         </div>
         <div id="taiko-hint-popup" class="taiko-hint-popup" style="display:none;" aria-hidden="true">
             <div class="taiko-hint-popup-backdrop"></div>

@@ -1883,9 +1883,249 @@ body {
     justify-content: center;
 }
 
+/* 選曲・プレイ・成績発表の幅を統一（プレイメニュー基準）。大画面で拡大 */
+.taiko-game-overlay .taiko-song-select,
+.taiko-game-overlay .taiko-game-container,
+.taiko-game-overlay .taiko-results {
+    width: min(840px, 95vw);
+}
+@media (min-width: 1024px) {
+    .taiko-game-overlay .taiko-song-select,
+    .taiko-game-overlay .taiko-game-container,
+    .taiko-game-overlay .taiko-results {
+        width: min(960px, 90vw);
+        min-height: 470px;
+        box-sizing: border-box;
+    }
+}
+@media (min-width: 1280px) {
+    .taiko-game-overlay .taiko-song-select,
+    .taiko-game-overlay .taiko-game-container,
+    .taiko-game-overlay .taiko-results {
+        width: min(1040px, 85vw);
+    }
+}
+@media (min-width: 1600px) {
+    .taiko-game-overlay .taiko-song-select,
+    .taiko-game-overlay .taiko-game-container,
+    .taiko-game-overlay .taiko-results {
+        width: min(1200px, 75vw);
+    }
+}
+
+.taiko-song-select {
+    position: relative;
+    background: #fff;
+    color: #333;
+    border-radius: 12px;
+    border: 3px solid #333;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.taiko-song-select-title {
+    margin: 0;
+    font-size: 1.25rem;
+    text-align: center;
+    border-bottom: 2px solid #333;
+    padding-bottom: 12px;
+    color: #333;
+}
+
+.taiko-chart-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 50vh;
+    overflow-y: auto;
+    color: #333;
+}
+
+.taiko-chart-list li {
+    padding: 12px 16px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    background: #fafafa;
+    color: #333;
+    transition: background 0.2s;
+}
+
+.taiko-chart-list li:hover {
+    background: #e3f2fd;
+    border-color: #1565c0;
+}
+
+.taiko-chart-empty {
+    margin: 0;
+    color: #666;
+    text-align: center;
+}
+
+.taiko-song-select-close {
+    padding: 10px 20px;
+    border: 2px solid #333;
+    border-radius: 8px;
+    background: #f5f5f5;
+    color: #333;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.taiko-song-select-close:hover {
+    background: #e0e0e0;
+}
+
+/* 成績発表・ランキング（添付画像レイアウト） */
+.taiko-results {
+    position: relative;
+    background: #fff;
+    color: #333;
+    border-radius: 16px;
+    border: 3px solid #333;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.taiko-results-top {
+    padding: 16px 20px;
+    border-bottom: 2px solid #e0e0e0;
+    position: relative;
+}
+
+.taiko-results-title {
+    margin: 0 0 8px 0;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.taiko-results-song-name {
+    text-align: center;
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 8px 0;
+}
+
+.taiko-results-difficulty {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    font-size: 0.875rem;
+    color: #666;
+}
+
+.taiko-results-bottom {
+    display: flex;
+    padding: 20px;
+    gap: 24px;
+}
+
+.taiko-results-score-area {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.taiko-results-score-label {
+    font-size: 0.875rem;
+    color: #666;
+}
+
+.taiko-results-score-value-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.taiko-results-score-value {
+    font-size: 2rem;
+    font-weight: 700;
+    padding: 4px 12px;
+    background: #f5f5f5;
+    border-radius: 8px;
+    display: inline-block;
+}
+
+.taiko-results-score-unit {
+    font-size: 0.875rem;
+    color: #666;
+}
+
+.taiko-results-full-combo {
+    font-size: 1rem;
+    font-weight: 700;
+    padding: 8px 16px;
+    text-align: center;
+    background: linear-gradient(135deg, #fff 50%, #ffeb3b 50%);
+    border: 2px solid #333;
+    transform: rotate(-3deg);
+    display: inline-block;
+    align-self: flex-start;
+}
+
+.taiko-results-judge-counts {
+    display: flex;
+    gap: 16px;
+    font-size: 0.875rem;
+}
+
+.taiko-results-judge-counts strong {
+    margin-left: 4px;
+}
+
+.taiko-results-ranking-area {
+    width: 180px;
+    flex-shrink: 0;
+}
+
+.taiko-results-ranking-title {
+    margin: 0 0 8px 0;
+    font-size: 0.875rem;
+    font-weight: 700;
+}
+
+.taiko-results-ranking-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.taiko-results-ranking-list li {
+    padding: 6px 10px;
+    background: #f5f5f5;
+    border-radius: 8px;
+    font-size: 0.8125rem;
+}
+
+.taiko-results-close {
+    margin: 12px 20px 20px;
+    padding: 10px 20px;
+    border: 2px solid #333;
+    border-radius: 8px;
+    background: #f5f5f5;
+    color: #333;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.taiko-results-close:hover {
+    background: #e0e0e0;
+}
+
 .taiko-game-container {
     position: relative;
-    width: min(840px, 95vw);
     background: #fff;
     border-radius: 12px;
     border: 3px solid #333;
@@ -2063,14 +2303,14 @@ body {
     background: #fafafa;
 }
 
-/* 判定ライン（ノーツと同じ 52×52、中央が 60px の位置） */
+/* 判定ライン（ノーツと同じ 64×64、中央が 60px の位置） */
 .taiko-game-judge-line {
     position: absolute;
     left: 34px;
     top: 50%;
     transform: translateY(-50%);
-    width: 52px;
-    height: 52px;
+    width: 64px;
+    height: 64px;
     object-fit: contain;
     pointer-events: none;
     z-index: 10;
@@ -2087,8 +2327,8 @@ body {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    width: 52px;
-    height: 52px;
+    width: 64px;
+    height: 64px;
     border-radius: 50%;
     border: 3px solid;
     display: flex;
@@ -2240,3 +2480,42 @@ body {
 .taiko-judge-text.good  { color: #cc6600; }
 .taiko-judge-text.ok    { color: #0055cc; }
 .taiko-judge-text.miss  { color: #888; }
+
+/* PC版: プレイメニューを大きく表示 */
+@media (min-width: 1024px) {
+    .taiko-game-input {
+        position: relative;
+        min-height: 400px;
+    }
+    .taiko-input-drum {
+        position: absolute;
+        left: 50%;
+        bottom: 0;
+        transform: translateX(-50%);
+        z-index: 1;
+        width: 500px;
+        height: 250px;
+    }
+    .taiko-game-bar {
+        display: flex;
+        align-items: stretch;
+        border-bottom: 2px solid #333;
+        height: 160px;
+    }
+    .taiko-game-header {
+        padding: 20px 18px 20px;
+        font-size: 22px;
+        font-weight: bold;
+        border-bottom: 2px solid #333;
+        background: #f9f9f9;
+    }
+    .taiko-game-top-buttons {
+        position: absolute;
+        top: 15px;
+    }
+    .taiko-game-close,
+    .taiko-game-hint {
+        width: 45px;
+        height: 45px;
+    }
+}

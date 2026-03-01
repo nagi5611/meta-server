@@ -25,6 +25,7 @@
             <button type="button" class="admin-nav-item" data-panel="panel-logs"><i class="bi bi-journal-text"></i> ログ</button>
             <button type="button" class="admin-nav-item" data-panel="panel-user-register"><i class="bi bi-person-plus"></i> ユーザー登録</button>
             <button type="button" class="admin-nav-item" data-panel="panel-world-edit"><i class="bi bi-pencil-square"></i> ワールド編集</button>
+            <button type="button" class="admin-nav-item" data-panel="panel-chart"><i class="bi bi-music-note-beamed"></i> 譜面作成</button>
         </nav>
     </aside>
 
@@ -627,6 +628,73 @@
                                 </section>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="panel-chart" class="admin-panel chart-panel">
+                <div class="chart-edit-layout">
+                    <aside class="chart-category">
+                        <h2 class="section-title">譜面一覧</h2>
+                        <div class="chart-list" id="chart-list"></div>
+                        <div class="btn-row">
+                            <button type="button" id="btn-add-chart">譜面を追加</button>
+                            <button type="button" id="btn-edit-chart" disabled>譜面を編集</button>
+                            <button type="button" id="btn-delete-chart" disabled>譜面を削除</button>
+                        </div>
+                        <span id="chart-status" class="status-text"></span>
+                    </aside>
+                    <div class="chart-right">
+                        <section class="chart-settings section">
+                            <h2 class="section-title">設定</h2>
+                            <div class="field-row">
+                                <label class="prop-label">譜面</label>
+                                <input type="text" id="chart-edit-name" class="prop-input" placeholder="譜面の表示名">
+                            </div>
+                            <div class="field-row">
+                                <label class="prop-label">難易度</label>
+                                <select id="chart-edit-difficulty" class="prop-input">
+                                    <option value="">未設定</option>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
+                                </select>
+                            </div>
+                            <div class="field-row">
+                                <label class="prop-label">テンポ (BPM)</label>
+                                <input type="number" id="chart-edit-tempo" class="prop-input num" min="60" max="300" placeholder="120">
+                            </div>
+                            <div class="field-row">
+                                <label class="prop-label">曲の終わり（秒）</label>
+                                <input type="number" id="chart-edit-end-time" class="prop-input num" min="0" step="0.1" placeholder="最後のノーツ以降">
+                            </div>
+                            <div class="btn-row">
+                                <button type="button" id="btn-save-chart" disabled>保存</button>
+                            </div>
+                        </section>
+                        <section class="chart-notes-section section">
+                            <h2 class="section-title">譜面</h2>
+                            <div class="chart-notes-scroll" id="chart-notes-scroll">
+                                <div class="chart-notes-inner" id="chart-notes-inner">
+                                    <div class="chart-notes-ruler" id="chart-notes-ruler"></div>
+                                    <div class="chart-notes-strip" id="chart-notes-strip" data-drop-zone="chart"></div>
+                                </div>
+                            </div>
+                            <div class="btn-row">
+                                <button type="button" id="btn-remove-selected-note" disabled>選択ノーツを削除</button>
+                            </div>
+                            <p class="chart-drag-hint">メニューからドラッグ＆ドロップでノーツを追加</p>
+                        </section>
+                        <section class="chart-menu-section section">
+                            <h2 class="section-title">メニュー</h2>
+                            <div class="chart-menu-palette">
+                                <span class="note-palette-item note-don" data-note-type="don" draggable="true" title="ドン">ドン</span>
+                                <span class="note-palette-item note-ka" data-note-type="ka" draggable="true" title="カ">カ</span>
+                            </div>
+                            <p class="chart-drag-hint">drag & drop</p>
+                        </section>
                     </div>
                 </div>
             </div>

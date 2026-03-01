@@ -411,6 +411,258 @@ body {
     color: #c62828;
 }
 
+/* 譜面作成パネル（画像レイアウト: 左カテゴリー / 右 設定・譜面・メニュー） */
+.chart-panel .chart-edit-layout {
+    display: flex;
+    gap: 24px;
+    min-height: 400px;
+}
+
+.chart-panel .chart-category {
+    width: 220px;
+    flex-shrink: 0;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.chart-panel .chart-category .section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #555;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+
+.chart-panel .chart-list {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    min-height: 120px;
+    margin-bottom: 12px;
+}
+
+.chart-panel .chart-list .item {
+    padding: 10px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    margin: 4px;
+}
+
+.chart-panel .chart-list .item:hover {
+    background: #e3f2fd;
+}
+
+.chart-panel .chart-list .item.selected {
+    background: #1565c0;
+    color: #fff;
+}
+
+.chart-panel .chart-right {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.chart-panel .chart-settings,
+.chart-panel .chart-notes-section,
+.chart-panel .chart-menu-section {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.chart-panel .chart-settings .section-title,
+.chart-panel .chart-notes-section .section-title,
+.chart-panel .chart-menu-section .section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #555;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+
+.chart-panel .field-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.chart-panel .prop-label {
+    width: 100px;
+    flex-shrink: 0;
+    font-size: 13px;
+    color: #555;
+}
+
+.chart-panel .prop-input {
+    flex: 1;
+    padding: 8px 10px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.chart-panel .chart-notes-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 2px dashed #e0e0e0;
+    border-radius: 8px;
+    background: #fafafa;
+    cursor: grab;
+    user-select: none;
+}
+
+.chart-panel .chart-notes-scroll:active {
+    cursor: grabbing;
+}
+
+.chart-panel .chart-notes-scroll.drag-over {
+    border-color: #1565c0;
+    background: #e3f2fd;
+}
+
+.chart-panel .chart-notes-inner {
+    min-width: min-content;
+    padding-bottom: 4px;
+}
+
+.chart-panel .chart-notes-ruler {
+    height: 24px;
+    position: relative;
+    flex-shrink: 0;
+    border-bottom: 1px solid #e0e0e0;
+    background: #f5f5f5;
+}
+
+.chart-panel .chart-notes-ruler .ruler-tick {
+    position: absolute;
+    top: 0;
+    font-size: 11px;
+    color: #666;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.chart-panel .chart-notes-strip {
+    position: relative;
+    min-height: 72px;
+    padding: 12px 0;
+    background: #fafafa;
+}
+
+.chart-panel .chart-notes-strip.drag-over {
+    background: #e3f2fd;
+}
+
+.chart-panel .note-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    position: absolute;
+    top: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+    cursor: grab;
+    user-select: none;
+    transform: translateX(-50%);
+    border: 3px solid transparent;
+}
+
+.chart-panel .note-circle:active {
+    cursor: grabbing;
+}
+
+.chart-panel .note-circle.note-don {
+    background: #e91e63;
+}
+
+.chart-panel .note-circle.note-ka {
+    background: #2196f3;
+}
+
+.chart-panel .note-circle.selected {
+    border-color: #333;
+    box-shadow: 0 0 0 2px #fff;
+}
+
+.chart-panel .chart-menu-palette {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.chart-panel .note-palette-item {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    color: #fff;
+    cursor: grab;
+    user-select: none;
+}
+
+.chart-panel .note-palette-item:active {
+    cursor: grabbing;
+}
+
+.chart-panel .note-palette-item.note-don {
+    background: #e91e63;
+}
+
+.chart-panel .note-palette-item.note-ka {
+    background: #2196f3;
+}
+
+.chart-panel .chart-drag-hint {
+    font-size: 12px;
+    color: #888;
+    margin-top: 8px;
+}
+
+.chart-panel .btn-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.chart-panel .btn-row button {
+    padding: 8px 14px;
+    font-size: 13px;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+}
+
+.chart-panel .btn-row button:hover:not(:disabled) {
+    background: #e3f2fd;
+    border-color: #1565c0;
+    color: #1565c0;
+}
+
+.chart-panel .btn-row button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 /* 移動/回転/スケールボタン（JSで挿入） */
 .admin-panel-world-edit #panel-object > button {
     margin-right: 8px;
@@ -1785,6 +2037,77 @@ body.admin-dark .ur-left-area {
 }
 body.admin-dark .bandwidth-section {
     background: #1f1e19;
+}
+
+body.admin-dark .chart-panel .chart-category,
+body.admin-dark .chart-panel .chart-settings,
+body.admin-dark .chart-panel .chart-notes-section,
+body.admin-dark .chart-panel .chart-menu-section {
+    background: #1f1e19;
+    border-color: #2d2a24;
+}
+body.admin-dark .chart-panel .chart-category .section-title,
+body.admin-dark .chart-panel .chart-settings .section-title,
+body.admin-dark .chart-panel .chart-notes-section .section-title,
+body.admin-dark .chart-panel .chart-menu-section .section-title {
+    color: #9c9992;
+    border-bottom-color: #2d2a24;
+}
+body.admin-dark .chart-panel .chart-list {
+    border-color: #2d2a24;
+    background: #14120b;
+}
+body.admin-dark .chart-panel .chart-list .item {
+    color: #e6e4df;
+}
+body.admin-dark .chart-panel .chart-list .item:hover {
+    background: #25231d;
+}
+body.admin-dark .chart-panel .chart-list .item.selected {
+    background: #2d3d47;
+    color: #7eb8da;
+}
+body.admin-dark .chart-panel .prop-label {
+    color: #9c9992;
+}
+body.admin-dark .chart-panel .prop-input {
+    background: #25231d;
+    border-color: #2d2a24;
+    color: #e6e4df;
+}
+body.admin-dark .chart-panel .chart-notes-scroll {
+    background: #14120b;
+    border-color: #2d2a24;
+}
+body.admin-dark .chart-panel .chart-notes-scroll.drag-over {
+    border-color: #7eb8da;
+    background: #25231d;
+}
+body.admin-dark .chart-panel .chart-notes-ruler {
+    background: #1f1e19;
+    border-bottom-color: #2d2a24;
+}
+body.admin-dark .chart-panel .chart-notes-ruler .ruler-tick {
+    color: #9c9992;
+}
+body.admin-dark .chart-panel .chart-notes-strip {
+    background: #14120b;
+}
+body.admin-dark .chart-panel .chart-drag-hint {
+    color: #9c9992;
+}
+body.admin-dark .chart-panel .btn-row button {
+    background: #25231d;
+    border-color: #2d2a24;
+    color: #e6e4df;
+}
+body.admin-dark .chart-panel .btn-row button:hover:not(:disabled) {
+    background: #2d3d47;
+    border-color: #7eb8da;
+    color: #7eb8da;
+}
+body.admin-dark .chart-panel .status-text {
+    color: #9c9992;
 }
 
 @media (max-width: 768px) {

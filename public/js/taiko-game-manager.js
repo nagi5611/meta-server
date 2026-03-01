@@ -49,6 +49,10 @@ const SOUND_KA = '/music/ka.mp3';
 class TaikoGameManager {
     constructor() {
         this._overlay = null;
+        this._songSelectEl = null;
+        this._gameContainerEl = null;
+        this._chartListEl = null;
+        this._chartEmptyEl = null;
         this._notesContainer = null;
         this._scoreEl = null;
         this._judgeEl = null;
@@ -57,6 +61,8 @@ class TaikoGameManager {
         this._score = 0;
         this._maxScore = 0; // 満点（全ノーツ良 = 100pt × ノーツ数）
         this._chart = [];
+        this._chartMeta = null; // { id, name, difficulty, endTime } 選曲時
+        this._judgeCounts = { good: 0, ok: 0, miss: 0 };
         this._activeNotes = []; // { el, targetTime, type, hit, chartIndex }
         this._processedChartIndices = new Set(); // 処理済み（ヒット or 不可）のチャート索引
         this._startTime = null;
@@ -71,12 +77,19 @@ class TaikoGameManager {
      */
     init() {
         this._overlay = document.getElementById('taiko-game-overlay');
+        this._songSelectEl = document.getElementById('taiko-song-select');
+        this._gameContainerEl = document.getElementById('taiko-game-container');
+        this._chartListEl = document.getElementById('taiko-chart-list');
+        this._chartEmptyEl = document.getElementById('taiko-chart-empty');
         this._notesContainer = document.getElementById('taiko-notes');
         this._scoreEl = document.getElementById('taiko-score');
         this._scoreMaxEl = document.getElementById('taiko-score-max');
         this._scoreRateEl = document.getElementById('taiko-score-rate');
 
         if (!this._overlay) return;
+
+        document.getElementById('taiko-song-select-close')?.addEventListener('click', () => this.close());
+        document.getElementById('taiko-results-close')?.addEventListener('click', () => this._closeResults());
 
         // 判定テキスト要素を動的に作成
         this._judgeEl = document.createElement('div');
@@ -122,24 +135,86 @@ class TaikoGameManager {
     }
 
     /**
-     * ゲームオーバーレイを開いてゲームを開始する。
-     * @param {Array<{time:number, type:string}>} [chart] - 譜面（省略時はデモ）
+     * 太鼓メニューを開く。選曲画面を表示し、譜面を選んだらゲームを開始する。
      */
-    open(chart) {
+    open() {
         if (!this._overlay) return;
-        this._chart = chart || DEMO_CHART;
+        this._open = true;
+        this._overlay.style.display = 'flex';
+        if (this._songSelectEl) this._songSelectEl.style.display = 'flex';
+        if (this._gameContainerEl) this._gameContainerEl.style.display = 'none';
+        const resultsEl = document.getElementById('taiko-results');
+        if (resultsEl) resultsEl.style.display = 'none';
+
+        this._loadChartList();
+    }
+
+    /**
+     * 選曲リストを取得して表示する
+     */
+    async _loadChartList() {
+        if (!this._chartListEl || !this._chartEmptyEl) return;
+        this._chartListEl.innerHTML = '';
+        this._chartEmptyEl.style.display = 'none';
+        try {
+            const res = await fetch('/api/charts');
+            const charts = res.ok ? await res.json() : {};
+            const ids = Object.keys(charts);
+            if (ids.length === 0) {
+                this._chartEmptyEl.style.display = 'block';
+                const li = document.createElement('li');
+                li.textContent = 'デモで遊ぶ';
+                li.className = 'taiko-chart-item-demo';
+                li.addEventListener('click', () => this._startGamePlay(DEMO_CHART, null));
+                this._chartListEl.appendChild(li);
+                return;
+            }
+            ids.forEach((id) => {
+                const c = charts[id];
+                const li = document.createElement('li');
+                li.textContent = c.name || id;
+                li.dataset.chartId = id;
+                li.addEventListener('click', () => {
+                    const notes = Array.isArray(c.notes) ? c.notes : [];
+                    const meta = { id, name: c.name || id, difficulty: c.difficulty, endTime: c.endTime };
+                    this._startGamePlay(notes.length ? notes : DEMO_CHART, meta);
+                });
+                this._chartListEl.appendChild(li);
+            });
+        } catch (err) {
+            this._chartEmptyEl.style.display = 'block';
+            this._chartEmptyEl.textContent = '譜面の取得に失敗しました';
+            const li = document.createElement('li');
+            li.textContent = 'デモで遊ぶ';
+            li.addEventListener('click', () => this._startGamePlay(DEMO_CHART, null));
+            this._chartListEl.appendChild(li);
+        }
+    }
+
+    /**
+     * 選んだ譜面でゲームを開始する
+     * @param {Array<{time:number, type:string}>} chart - 譜面
+     * @param {{ id: string, name: string, difficulty?: number, endTime?: number } | null} meta - 曲メタ（選曲時）
+     */
+    _startGamePlay(chart, meta) {
+        if (!this._songSelectEl || !this._gameContainerEl) return;
+        this._songSelectEl.style.display = 'none';
+        this._gameContainerEl.style.display = 'flex';
+        const resultsEl = document.getElementById('taiko-results');
+        if (resultsEl) resultsEl.style.display = 'none';
+
+        this._chart = chart;
+        this._chartMeta = meta || null;
         this._score = 0;
-        this._maxScore = this._chart.length * 100; // 太鼓の達人ベース: 良=100, 可=50, 不可=0 → 満点は全良
+        this._maxScore = this._chart.length * 100;
+        this._judgeCounts = { good: 0, ok: 0, miss: 0 };
         this._activeNotes = [];
         this._processedChartIndices = new Set();
         this._updateScoreDisplay();
         if (this._notesContainer) this._notesContainer.innerHTML = '';
-        this._open = true;
-        this._overlay.style.display = 'flex';
         this._startTime = performance.now() / 1000;
 
         document.addEventListener('keydown', this._boundKeyDown);
-
         this._loop();
     }
 
@@ -217,6 +292,8 @@ class TaikoGameManager {
 
     _judge(result, note) {
         note.hit = true;
+        if (result === 'good') this._judgeCounts.good++;
+        else if (result === 'ok') this._judgeCounts.ok++;
         if (note.el) {
             note.el.classList.add('taiko-note-hit');
             this._removeNoteAfterEffect(note);
@@ -315,7 +392,7 @@ class TaikoGameManager {
             }
         });
 
-        const rightEdge = laneWidth - 26;
+        const rightEdge = laneWidth - 32;
         const laneSpan = rightEdge - JUDGE_LINE_LEFT_PX;
 
         let missShownThisFrame = false;
@@ -326,13 +403,14 @@ class TaikoGameManager {
             const remaining = note.targetTime - now;
             const left = JUDGE_LINE_LEFT_PX + remaining / NOTE_TRAVEL_TIME * laneSpan;
             if (note.el) {
-                note.el.style.left = `${left - 26}px`;
+                note.el.style.left = `${left - 32}px`;
             }
 
             // 不可: 判定ラインから JUDGE_MISS_PX を超えて通過したら miss。エフェクト後に削除
             const distancePx = Math.abs(remaining) * laneSpan / NOTE_TRAVEL_TIME;
             if (remaining < 0 && distancePx > JUDGE_MISS_PX && !missShownThisFrame) {
                 note.hit = true;
+                this._judgeCounts.miss++;
                 if (note.el) {
                     note.el.classList.add('taiko-note-miss');
                     this._removeNoteAfterEffect(note);
@@ -341,6 +419,7 @@ class TaikoGameManager {
                 missShownThisFrame = true;
             } else if (remaining < 0 && distancePx > JUDGE_MISS_PX) {
                 note.hit = true;
+                this._judgeCounts.miss++;
                 if (note.el) {
                     note.el.classList.add('taiko-note-miss');
                     this._removeNoteAfterEffect(note);
@@ -358,15 +437,86 @@ class TaikoGameManager {
             return false;
         });
 
-        // 全ノーツ終了チェック
+        // 曲終了チェック: 終了時間を過ぎた、または全ノーツ処理済みで余韻後
+        const lastNoteTime = this._chart.length ? (this._chart[this._chart.length - 1]?.time ?? 0) : 0;
+        const endTime = this._chartMeta?.endTime != null ? this._chartMeta.endTime : lastNoteTime + 1;
         const allDone = this._chart.length > 0 && this._activeNotes.every(n => n.hit);
-        if (allDone && now > (this._chart[this._chart.length - 1]?.time ?? 0) + 1) {
-            // 全ノーツ終了（自動クローズはしない、プレイヤーが× で閉じる）
+        if (allDone && now >= endTime) {
             this._rafId = null;
+            setTimeout(() => this._onSongEnd(), 300);
             return;
         }
 
         this._rafId = requestAnimationFrame(() => this._loop());
+    }
+
+    /**
+     * 曲終了時: 成績発表・ランキングを表示する
+     */
+    async _onSongEnd() {
+        document.removeEventListener('keydown', this._boundKeyDown);
+        if (this._gameContainerEl) this._gameContainerEl.style.display = 'none';
+
+        const meta = this._chartMeta || {};
+        const chartId = meta.id;
+        const username = typeof localStorage !== 'undefined' ? (localStorage.getItem('username') || 'プレイヤー') : 'プレイヤー';
+
+        if (chartId) {
+            try {
+                await fetch('/api/charts/' + encodeURIComponent(chartId) + '/score', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, score: this._score })
+                });
+            } catch (e) {}
+        }
+
+        const resultsEl = document.getElementById('taiko-results');
+        if (!resultsEl) return;
+
+        document.getElementById('taiko-results-song-name').textContent = meta.name || '曲名';
+        document.getElementById('taiko-results-difficulty').textContent = meta.difficulty != null ? `難易度 ${meta.difficulty}` : '難易度 -';
+        document.getElementById('taiko-results-score-value').textContent = String(this._score);
+        document.getElementById('taiko-results-good').textContent = String(this._judgeCounts.good);
+        document.getElementById('taiko-results-ok').textContent = String(this._judgeCounts.ok);
+        document.getElementById('taiko-results-miss').textContent = String(this._judgeCounts.miss);
+
+        const fullComboEl = document.getElementById('taiko-results-full-combo');
+        if (this._maxScore > 0 && this._score >= this._maxScore) {
+            fullComboEl.style.display = 'block';
+        } else {
+            fullComboEl.style.display = 'none';
+        }
+
+        const listEl = document.getElementById('taiko-results-ranking-list');
+        listEl.innerHTML = '';
+        if (chartId) {
+            try {
+                const res = await fetch('/api/charts/' + encodeURIComponent(chartId) + '/ranking');
+                const ranking = res.ok ? await res.json() : [];
+                ranking.forEach((entry, i) => {
+                    const li = document.createElement('li');
+                    li.textContent = `${i + 1} ${entry.username} ${entry.score}点`;
+                    listEl.appendChild(li);
+                });
+            } catch (e) {}
+        }
+        if (listEl.children.length === 0) {
+            const li = document.createElement('li');
+            li.textContent = 'まだ記録がありません';
+            listEl.appendChild(li);
+        }
+
+        resultsEl.style.display = 'flex';
+    }
+
+    /**
+     * 成績発表を閉じて選曲に戻る
+     */
+    _closeResults() {
+        const resultsEl = document.getElementById('taiko-results');
+        if (resultsEl) resultsEl.style.display = 'none';
+        if (this._songSelectEl) this._songSelectEl.style.display = 'flex';
     }
 }
 
