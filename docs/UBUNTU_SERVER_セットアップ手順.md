@@ -258,8 +258,8 @@ Node を実行するユーザーに証明書の読取権限が必要です。
 
 ```bash
 # 例: アプリユーザーが meta の場合
-sudo chown -R meta:meta /etc/letsencrypt/archive
-sudo chown -R meta:meta /etc/letsencrypt/live
+sudo chown -R nagi:nagi /etc/letsencrypt/archive
+sudo chown -R nagi:nagi /etc/letsencrypt/live
 ```
 
 **方法 B: プロジェクトの certs にコピー**
