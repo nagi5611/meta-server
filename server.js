@@ -529,6 +529,13 @@ function consumeAdminToken(token) {
 const serverLogs = [];
 const MAX_LOGS = 1000;
 
+// Wrap console methods (originals must be captured before wrapping)
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+
+const originalByLevel = { info: originalLog, warn: originalWarn, error: originalError };
+
 function logWithStorage(level, ...args) {
     const timestamp = new Date().toISOString();
     const message = args.join(' ');
@@ -536,27 +543,19 @@ function logWithStorage(level, ...args) {
     if (serverLogs.length > MAX_LOGS) {
         serverLogs.shift();
     }
-    console[level](...args);
+    originalByLevel[level](...args);
 }
-
-// Wrap console methods
-const originalLog = console.log;
-const originalWarn = console.warn;
-const originalError = console.error;
 
 console.log = (...args) => {
     logWithStorage('info', ...args);
-    originalLog(...args);
 };
 
 console.warn = (...args) => {
     logWithStorage('warn', ...args);
-    originalWarn(...args);
 };
 
 console.error = (...args) => {
     logWithStorage('error', ...args);
-    originalError(...args);
 };
 
 // ============================
