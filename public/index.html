@@ -258,6 +258,7 @@
                 <div id="settings-sidebar">
                     <div class="settings-category active" data-section="general">一般</div>
                     <div class="settings-category" data-section="audio">音声</div>
+                    <div class="settings-category" data-section="draw">描画</div>
                 </div>
                 <div id="settings-content">
                     <div class="settings-section active" id="general-section">
@@ -308,6 +309,39 @@
                             <input type="range" id="speakerVolume" min="0" max="100" value="50">
                             <span id="speakerVolumeValue">50</span>%
                             <div class="setting-description">スピーカーの出力音量を調整します</div>
+                        </div>
+                    </div>
+                    <div class="settings-section" id="draw-section">
+                        <h4>描画</h4>
+                        <div class="setting-item">
+                            <label for="drawQualityLow">低品質モード</label>
+                            <input type="checkbox" id="drawQualityLow" checked>
+                            <div class="setting-description">軽いPCでも快適に。オフにすると高品質になります。</div>
+                        </div>
+                        <div class="setting-item">
+                            <label for="shadowQuality">シャドウ:</label>
+                            <select id="shadowQuality">
+                                <option value="low">軽量</option>
+                                <option value="normal">通常</option>
+                            </select>
+                            <div class="setting-description">シャドウの品質（軽量は負荷を抑えます）</div>
+                        </div>
+                        <div class="setting-item">
+                            <label for="fogFar">描画範囲:</label>
+                            <select id="fogFar">
+                                <option value="800">近い</option>
+                                <option value="2000">遠い</option>
+                            </select>
+                            <div class="setting-description">遠くまで描画するほど負荷が増えます</div>
+                        </div>
+                        <div class="setting-item">
+                            <label for="pixelRatioCap">ピクセル比:</label>
+                            <select id="pixelRatioCap">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="full">デバイスどおり</option>
+                            </select>
+                            <div class="setting-description">低いほど軽くなります（Retina等は高負荷になりやすい）</div>
                         </div>
                     </div>
                 </div>

@@ -15,16 +15,48 @@ class SceneManager {
         this.taikos = []; // Track taiko drum models
         /** Lights added for current world (removed on clearWorld) */
         this.worldLights = [];
+        /** Render quality options (default: low for performance) */
+        this.renderQualityOptions = {
+            drawQualityLow: true,
+            shadowQuality: 'low',
+            fogFar: 800,
+            pixelRatioCap: 1
+        };
+    }
+
+    /**
+     * Compute effective pixel ratio from options
+     * @returns {number}
+     */
+    _getPixelRatio() {
+        const cap = this.renderQualityOptions.pixelRatioCap;
+        const dpr = window.devicePixelRatio || 1;
+        if (cap === 'full') return dpr;
+        const n = typeof cap === 'number' ? cap : 1;
+        return Math.min(dpr, n);
     }
 
     init() {
         // Get canvas element
         this.canvas = document.getElementById('canvas');
 
+        // Apply saved settings for initial renderer creation (antialias is fixed at creation)
+        const saved = localStorage.getItem('metaverse-settings');
+        if (saved) {
+            try {
+                const s = JSON.parse(saved);
+                if (s.drawQualityLow === false) this.renderQualityOptions.drawQualityLow = false;
+                if (s.shadowQuality === 'normal') this.renderQualityOptions.shadowQuality = 'normal';
+                if (s.fogFar != null) this.renderQualityOptions.fogFar = Number(s.fogFar) || 800;
+                if (s.pixelRatioCap !== undefined) this.renderQualityOptions.pixelRatioCap = s.pixelRatioCap;
+            } catch (e) { /* ignore */ }
+        }
+
         // Create scene
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87ceeb); // Sky blue
-        this.scene.fog = new THREE.Fog(0x87ceeb, 100, 2000);  // 10x larger fog distance
+        const fogFar = this.renderQualityOptions.fogFar ?? 800;
+        this.scene.fog = new THREE.Fog(0x87ceeb, 100, fogFar);
 
         // Create camera
         this.camera = new THREE.PerspectiveCamera(
@@ -35,15 +67,17 @@ class SceneManager {
         );
         this.camera.position.set(0, 5, 10);
 
-        // Create renderer
-        this.renderer = new THREE.WebGLRenderer({
+        const antialias = !this.renderQualityOptions.drawQualityLow;
+        const renderer = new THREE.WebGLRenderer({
             canvas: this.canvas,
-            antialias: true
+            antialias
         });
+        this.renderer = renderer;
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setPixelRatio(this._getPixelRatio());
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        const shadowType = this.renderQualityOptions.shadowQuality === 'low' ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+        this.renderer.shadowMap.type = shadowType;
 
         // Base lights are added per-world via addWorldLights()
 
@@ -337,8 +371,9 @@ class SceneManager {
                         light.shadow.camera.bottom = -500;
                         light.shadow.camera.near = 0.1;
                         light.shadow.camera.far = 200;
-                        light.shadow.mapSize.width = 2048;
-                        light.shadow.mapSize.height = 2048;
+                        const mapSize = this.renderQualityOptions.shadowQuality === 'low' ? 1024 : 2048;
+                        light.shadow.mapSize.width = mapSize;
+                        light.shadow.mapSize.height = mapSize;
                     }
                     break;
                 }
@@ -516,7 +551,39 @@ class SceneManager {
     onWindowResize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
+        this.renderer.setPixelRatio(this._getPixelRatio());
         this.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    /**
+     * Apply render quality from settings (from MenuManager).
+     * When drawQualityLow is true, effective values are: shadow low, fogFar 800, pixelRatioCap 1.
+     * @param {{ drawQualityLow?: boolean, shadowQuality?: string, fogFar?: number, pixelRatioCap?: number|string }} settings
+     */
+    applyRenderQuality(settings) {
+        const low = !!settings?.drawQualityLow;
+        this.renderQualityOptions = {
+            drawQualityLow: low,
+            shadowQuality: low ? 'low' : (settings?.shadowQuality || 'low'),
+            fogFar: low ? 800 : (Number(settings?.fogFar) || 800),
+            pixelRatioCap: low ? 1 : (settings?.pixelRatioCap ?? 1)
+        };
+
+        if (this.scene?.fog) {
+            this.scene.fog.far = this.renderQualityOptions.fogFar;
+        }
+        if (this.renderer) {
+            this.renderer.setPixelRatio(this._getPixelRatio());
+            this.renderer.shadowMap.type = this.renderQualityOptions.shadowQuality === 'low' ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        this.worldLights.forEach((light) => {
+            if (light.castShadow && light.shadow) {
+                const mapSize = this.renderQualityOptions.shadowQuality === 'low' ? 1024 : 2048;
+                light.shadow.mapSize.width = mapSize;
+                light.shadow.mapSize.height = mapSize;
+            }
+        });
     }
 
     /**

@@ -27,3 +27,6 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Data (DB, JSON - 環境ごとのデータはリポジトリに含めない)
+data/

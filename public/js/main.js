@@ -272,6 +272,8 @@ class MetaverseApp {
             const world = this.worldManager.getWorld('lobby');
             if (world) this.worldManager.loadWorld('lobby', () => {});
         });
+        this.menuManager.setSceneManager(this.sceneManager);
+        this.sceneManager.applyRenderQuality(this.menuManager.settings);
 
         // プレイヤー一覧の「視聴」ボタン → 指定ユーザーの配信に接続して表示
         this.uiManager.setOnWatchVideo((peerId) => {

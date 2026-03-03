@@ -49,7 +49,11 @@ class MenuManager {
             micVolume: 33, // 0=0%, 33=100%等倍, 100=300%
             speakerVolume: 50,
             micDevice: '',
-            speakerDevice: ''
+            speakerDevice: '',
+            drawQualityLow: true,
+            shadowQuality: 'low',
+            fogFar: 800,
+            pixelRatioCap: 1
         };
         
         this.init();
@@ -77,6 +81,14 @@ class MenuManager {
     
     setVideoChatManager(videoChatManager) {
         this.videoChatManager = videoChatManager;
+    }
+
+    /**
+     * SceneManager を設定（描画品質の適用に使用）
+     * @param {import('./scene-manager.js').default} sceneManager
+     */
+    setSceneManager(sceneManager) {
+        this.sceneManager = sceneManager;
     }
 
     /**
@@ -424,6 +436,30 @@ class MenuManager {
             }
         });
 
+        // Draw settings
+        document.getElementById('drawQualityLow')?.addEventListener('change', (e) => {
+            this.settings.drawQualityLow = e.target.checked;
+            this.updateDrawQualityDisabled();
+            this.saveSettings();
+            this.sceneManager?.applyRenderQuality(this.settings);
+        });
+        document.getElementById('shadowQuality')?.addEventListener('change', (e) => {
+            this.settings.shadowQuality = e.target.value;
+            this.saveSettings();
+            this.sceneManager?.applyRenderQuality(this.settings);
+        });
+        document.getElementById('fogFar')?.addEventListener('change', (e) => {
+            this.settings.fogFar = parseInt(e.target.value, 10);
+            this.saveSettings();
+            this.sceneManager?.applyRenderQuality(this.settings);
+        });
+        document.getElementById('pixelRatioCap')?.addEventListener('change', (e) => {
+            const v = e.target.value;
+            this.settings.pixelRatioCap = v === 'full' ? 'full' : parseInt(v, 10);
+            this.saveSettings();
+            this.sceneManager?.applyRenderQuality(this.settings);
+        });
+
         // ESC key to close modals
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
@@ -689,6 +725,29 @@ class MenuManager {
         if (this.settings.speakerDevice) {
             document.getElementById('speakerDevice').value = this.settings.speakerDevice;
         }
+
+        const drawQualityLowEl = document.getElementById('drawQualityLow');
+        const shadowQualityEl = document.getElementById('shadowQuality');
+        const fogFarEl = document.getElementById('fogFar');
+        const pixelRatioCapEl = document.getElementById('pixelRatioCap');
+        if (drawQualityLowEl) drawQualityLowEl.checked = !!this.settings.drawQualityLow;
+        if (shadowQualityEl) shadowQualityEl.value = this.settings.shadowQuality || 'low';
+        if (fogFarEl) fogFarEl.value = String(this.settings.fogFar ?? 800);
+        if (pixelRatioCapEl) pixelRatioCapEl.value = this.settings.pixelRatioCap === 'full' ? 'full' : String(this.settings.pixelRatioCap ?? 1);
+        this.updateDrawQualityDisabled();
+    }
+
+    /**
+     * 低品質モード時に個別描画項目を無効化
+     */
+    updateDrawQualityDisabled() {
+        const low = !!this.settings.drawQualityLow;
+        const shadowEl = document.getElementById('shadowQuality');
+        const fogEl = document.getElementById('fogFar');
+        const pixelEl = document.getElementById('pixelRatioCap');
+        if (shadowEl) shadowEl.disabled = low;
+        if (fogEl) fogEl.disabled = low;
+        if (pixelEl) pixelEl.disabled = low;
     }
     
     showDeviceChangeNotification(message) {
