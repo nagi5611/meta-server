@@ -1920,18 +1920,19 @@ body {
     .taiko-chart-empty { font-size: 1rem; }
     .taiko-song-select-close { font-size: 1.125rem; padding: 12px 24px; }
 
-    .taiko-results-title { font-size: 1.25rem; }
-    .taiko-results-song-name { font-size: 2rem; }
-    .taiko-results-difficulty { font-size: 1rem; }
-    .taiko-results-score-label { font-size: 1rem; }
-    .taiko-results-score-value { font-size: 2.5rem; }
-    .taiko-results-score-unit { font-size: 1rem; }
-    .taiko-results-full-combo { font-size: 1.125rem; }
-    .taiko-results-judge-counts { font-size: 1rem; }
-    .taiko-results-ranking-title { font-size: 1rem; }
-    .taiko-results-ranking-area { width: 220px; }
-    .taiko-results-ranking-list li { font-size: 1rem; padding: 8px 12px; }
-    .taiko-results-close { font-size: 1.125rem; padding: 12px 24px; }
+    /* 成績発表は個別に調整済み */
+    /* .taiko-results-title { font-size: 1.25rem; } */
+    /* .taiko-results-song-name { font-size: 2rem; } */
+    /* .taiko-results-difficulty { font-size: 1rem; top: 16px; right: 20px; } */
+    /* .taiko-results-score-label { font-size: 1rem; } */
+    /* .taiko-results-score-value { font-size: 2.5rem; } */
+    /* .taiko-results-score-unit { font-size: 1rem; } */
+    /* .taiko-results-full-combo { font-size: 1.125rem; } */
+    /* .taiko-results-judge-counts { font-size: 1rem; } */
+    /* .taiko-results-ranking-title { font-size: 1rem; } */
+    /* .taiko-results-ranking-area { width: 220px; } */
+    /* .taiko-results-ranking-list li { font-size: 1rem; padding: 8px 12px; } */
+    /* .taiko-results-close { font-size: 1.125rem; padding: 12px 24px; } */
 
     .taiko-game-close, .taiko-game-hint { width: 40px; height: 40px; font-size: 20px; }
     .taiko-game-header { font-size: 1.5rem; padding: 14px 20px 10px; }
@@ -2037,7 +2038,7 @@ body {
 
 .taiko-results-title {
     margin: 0 0 8px 0;
-    font-size: 1rem;
+    font-size: 3rem;
     font-weight: 700;
 }
 
@@ -2050,8 +2051,8 @@ body {
 
 .taiko-results-difficulty {
     position: absolute;
-    top: 16px;
-    right: 20px;
+    top: 120px;
+    right: 93px;
     font-size: 0.875rem;
     color: #666;
 }
@@ -2169,18 +2170,23 @@ body {
 }
 
 .taiko-results-close {
-    margin: 12px 20px 20px;
-    padding: 10px 20px;
+    position: absolute;
+    bottom: -60px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 32px;
     border: 2px solid #333;
-    border-radius: 8px;
-    background: #f5f5f5;
+    border-radius: 24px;
+    background: #fff;
     color: #333;
     cursor: pointer;
-    font-size: 1rem;
+    font-size: 1.125rem;
+    font-weight: bold;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 
 .taiko-results-close:hover {
-    background: #e0e0e0;
+    background: #f0f0f0;
 }
 
 .taiko-game-container {
