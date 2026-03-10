@@ -1913,6 +1913,41 @@ body {
     }
 }
 
+/* PC版: 太鼓UIの文字を全体的に大きく（769px以上 & 高さ601px以上 = モバイルでない） */
+@media (min-width: 769px) and (min-height: 601px) {
+    .taiko-song-select-title { font-size: 1.5rem; }
+    .taiko-chart-list li { font-size: 1.0625rem; padding: 14px 18px; }
+    .taiko-chart-empty { font-size: 1rem; }
+    .taiko-song-select-close { font-size: 1.125rem; padding: 12px 24px; }
+
+    .taiko-results-title { font-size: 1.25rem; }
+    .taiko-results-song-name { font-size: 2rem; }
+    .taiko-results-difficulty { font-size: 1rem; }
+    .taiko-results-score-label { font-size: 1rem; }
+    .taiko-results-score-value { font-size: 2.5rem; }
+    .taiko-results-score-unit { font-size: 1rem; }
+    .taiko-results-full-combo { font-size: 1.125rem; }
+    .taiko-results-judge-counts { font-size: 1rem; }
+    .taiko-results-ranking-title { font-size: 1rem; }
+    .taiko-results-ranking-area { width: 220px; }
+    .taiko-results-ranking-list li { font-size: 1rem; padding: 8px 12px; }
+    .taiko-results-close { font-size: 1.125rem; padding: 12px 24px; }
+
+    .taiko-game-close, .taiko-game-hint { width: 40px; height: 40px; font-size: 20px; }
+    .taiko-game-header { font-size: 1.5rem; padding: 14px 20px 10px; }
+    .taiko-score-label { font-size: 13px; }
+    .taiko-score-value { font-size: 26px; }
+    .taiko-score-max { font-size: 12px; }
+    .taiko-score-rate { font-size: 13px; }
+
+    .taiko-hint-popup-content { max-width: 400px; padding: 24px 28px; }
+    .taiko-hint-title { font-size: 1.375rem; margin-bottom: 16px; }
+    .taiko-hint-body p { font-size: 1rem; }
+    .taiko-hint-popup-close { font-size: 1rem; padding: 12px; }
+
+    .taiko-note { font-size: 13px; }
+}
+
 .taiko-song-select {
     position: relative;
     background: #fff;
@@ -2008,7 +2043,7 @@ body {
 
 .taiko-results-song-name {
     text-align: center;
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 700;
     margin: 8px 0;
 }
@@ -2027,20 +2062,28 @@ body {
     gap: 24px;
 }
 
+/* 画像準拠: 左=スコア、右=フルスコア+良可不可 */
 .taiko-results-score-area {
     flex: 1;
     min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    align-items: start;
+    column-gap: 24px;
+    row-gap: 12px;
 }
 
 .taiko-results-score-label {
+    grid-column: 1;
+    grid-row: 1;
     font-size: 0.875rem;
     color: #666;
 }
 
 .taiko-results-score-value-wrap {
+    grid-column: 1;
+    grid-row: 2;
     display: flex;
     align-items: baseline;
     gap: 4px;
@@ -2061,6 +2104,8 @@ body {
 }
 
 .taiko-results-full-combo {
+    grid-column: 2;
+    grid-row: 1;
     font-size: 1rem;
     font-weight: 700;
     padding: 8px 16px;
@@ -2069,17 +2114,27 @@ body {
     border: 2px solid #333;
     transform: rotate(-3deg);
     display: inline-block;
-    align-self: flex-start;
+    justify-self: start;
 }
 
 .taiko-results-judge-counts {
+    grid-column: 2;
+    grid-row: 2;
     display: flex;
-    gap: 16px;
+    flex-direction: column;
+    gap: 4px;
     font-size: 0.875rem;
+    min-width: 100px;
+}
+
+.taiko-results-judge-counts span {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
 }
 
 .taiko-results-judge-counts strong {
-    margin-left: 4px;
+    margin-left: 0;
 }
 
 .taiko-results-ranking-area {
@@ -2107,6 +2162,10 @@ body {
     background: #f5f5f5;
     border-radius: 8px;
     font-size: 0.8125rem;
+}
+
+.taiko-results-ranking-list li.taiko-results-ranking-empty {
+    color: #999;
 }
 
 .taiko-results-close {

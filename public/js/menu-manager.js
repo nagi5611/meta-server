@@ -581,6 +581,9 @@ class MenuManager {
 
         if (wasAudio && !willBeAudio) this.stopMicTest();
         if (willBeAudio) this.ensureMicAnalyzerSegments();
+        if (sectionName === 'draw' && this.sceneManager) {
+            this.sceneManager.applyRenderQuality(this.settings);
+        }
     }
 
     /** マイクアナライザーの40セグメントを生成 */
@@ -731,8 +734,15 @@ class MenuManager {
         const fogFarEl = document.getElementById('fogFar');
         const pixelRatioCapEl = document.getElementById('pixelRatioCap');
         if (drawQualityLowEl) drawQualityLowEl.checked = !!this.settings.drawQualityLow;
-        if (shadowQualityEl) shadowQualityEl.value = this.settings.shadowQuality || 'low';
-        if (fogFarEl) fogFarEl.value = String(this.settings.fogFar ?? 800);
+        if (shadowQualityEl) {
+            const sq = this.settings.shadowQuality || 'low';
+            shadowQualityEl.value = (sq === 'normal') ? 'high' : sq;
+        }
+        if (fogFarEl) {
+            const far = Number(this.settings.fogFar) || 800;
+            const validFar = [500, 800, 1500, 2000].includes(far) ? far : 800;
+            fogFarEl.value = String(validFar);
+        }
         if (pixelRatioCapEl) pixelRatioCapEl.value = this.settings.pixelRatioCap === 'full' ? 'full' : String(this.settings.pixelRatioCap ?? 1);
         this.updateDrawQualityDisabled();
     }

@@ -490,20 +490,23 @@ class TaikoGameManager {
 
         const listEl = document.getElementById('taiko-results-ranking-list');
         listEl.innerHTML = '';
+        let ranking = [];
         if (chartId) {
             try {
                 const res = await fetch('/api/charts/' + encodeURIComponent(chartId) + '/ranking');
-                const ranking = res.ok ? await res.json() : [];
-                ranking.forEach((entry, i) => {
-                    const li = document.createElement('li');
-                    li.textContent = `${i + 1} ${entry.username} ${entry.score}点`;
-                    listEl.appendChild(li);
-                });
+                ranking = res.ok ? await res.json() : [];
             } catch (e) {}
         }
-        if (listEl.children.length === 0) {
+        for (let i = 0; i < 10; i++) {
             const li = document.createElement('li');
-            li.textContent = 'まだ記録がありません';
+            const entry = ranking[i];
+            if (entry) {
+                li.textContent = `${i + 1} ${entry.username} ${entry.score}点`;
+                li.classList.remove('taiko-results-ranking-empty');
+            } else {
+                li.textContent = `${i + 1} - -`;
+                li.classList.add('taiko-results-ranking-empty');
+            }
             listEl.appendChild(li);
         }
 

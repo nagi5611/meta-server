@@ -25,6 +25,22 @@ class SceneManager {
     }
 
     /**
+     * Get shadow map size and type from quality string (low | medium | high | highest; legacy 'normal' → high).
+     * @param {string} quality
+     * @returns {{ mapSize: number, type: number }}
+     */
+    _getShadowConfig(quality) {
+        switch (quality) {
+            case 'low': return { mapSize: 512, type: THREE.BasicShadowMap };
+            case 'medium': return { mapSize: 1024, type: THREE.PCFSoftShadowMap };
+            case 'high':
+            case 'normal': return { mapSize: 2048, type: THREE.PCFSoftShadowMap };
+            case 'highest': return { mapSize: 4096, type: THREE.PCFSoftShadowMap };
+            default: return { mapSize: 1024, type: THREE.PCFSoftShadowMap };
+        }
+    }
+
+    /**
      * Compute effective pixel ratio from options
      * @returns {number}
      */
@@ -46,7 +62,8 @@ class SceneManager {
             try {
                 const s = JSON.parse(saved);
                 if (s.drawQualityLow === false) this.renderQualityOptions.drawQualityLow = false;
-                if (s.shadowQuality === 'normal') this.renderQualityOptions.shadowQuality = 'normal';
+                if (s.shadowQuality && ['low', 'medium', 'high', 'highest'].includes(s.shadowQuality)) this.renderQualityOptions.shadowQuality = s.shadowQuality;
+                else if (s.shadowQuality === 'normal') this.renderQualityOptions.shadowQuality = 'high';
                 if (s.fogFar != null) this.renderQualityOptions.fogFar = Number(s.fogFar) || 800;
                 if (s.pixelRatioCap !== undefined) this.renderQualityOptions.pixelRatioCap = s.pixelRatioCap;
             } catch (e) { /* ignore */ }
@@ -76,8 +93,8 @@ class SceneManager {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(this._getPixelRatio());
         this.renderer.shadowMap.enabled = true;
-        const shadowType = this.renderQualityOptions.shadowQuality === 'low' ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
-        this.renderer.shadowMap.type = shadowType;
+        const shadowConfig = this._getShadowConfig(this.renderQualityOptions.shadowQuality);
+        this.renderer.shadowMap.type = shadowConfig.type;
 
         // Base lights are added per-world via addWorldLights()
 
@@ -371,7 +388,7 @@ class SceneManager {
                         light.shadow.camera.bottom = -500;
                         light.shadow.camera.near = 0.1;
                         light.shadow.camera.far = 200;
-                        const mapSize = this.renderQualityOptions.shadowQuality === 'low' ? 1024 : 2048;
+                        const mapSize = this._getShadowConfig(this.renderQualityOptions.shadowQuality).mapSize;
                         light.shadow.mapSize.width = mapSize;
                         light.shadow.mapSize.height = mapSize;
                     }
@@ -574,14 +591,18 @@ class SceneManager {
         }
         if (this.renderer) {
             this.renderer.setPixelRatio(this._getPixelRatio());
-            this.renderer.shadowMap.type = this.renderQualityOptions.shadowQuality === 'low' ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+            const shadowConfig = this._getShadowConfig(this.renderQualityOptions.shadowQuality);
+            this.renderer.shadowMap.type = shadowConfig.type;
             this.renderer.setSize(window.innerWidth, window.innerHeight);
         }
+        const shadowMapSize = this._getShadowConfig(this.renderQualityOptions.shadowQuality).mapSize;
         this.worldLights.forEach((light) => {
             if (light.castShadow && light.shadow) {
-                const mapSize = this.renderQualityOptions.shadowQuality === 'low' ? 1024 : 2048;
-                light.shadow.mapSize.width = mapSize;
-                light.shadow.mapSize.height = mapSize;
+                light.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+                if (light.shadow.map) {
+                    light.shadow.map.dispose();
+                    light.shadow.map = null;
+                }
             }
         });
     }
