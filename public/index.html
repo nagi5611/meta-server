@@ -133,30 +133,41 @@
             </div>
         </div>
         <div id="taiko-results" class="taiko-results" style="display:none;">
-            <div class="taiko-results-top">
-                <h2 class="taiko-results-title">成績発表</h2>
-                <div class="taiko-results-song-name" id="taiko-results-song-name">曲名</div>
-                <div class="taiko-results-difficulty" id="taiko-results-difficulty">難易度 -</div>
+            <div class="taiko-results-header">
+                <div class="taiko-results-banner taiko-results-banner-left">成績発表</div>
+                <div class="taiko-results-banner taiko-results-banner-right" id="taiko-results-song-name">曲名</div>
             </div>
-            <div class="taiko-results-bottom">
-                <div class="taiko-results-score-area">
-                    <div class="taiko-results-score-left">
-                        <div class="taiko-results-score-label">スコア</div>
-                        <div class="taiko-results-score-value-wrap">
+            <div class="taiko-results-main">
+                <div class="taiko-results-left">
+                    <div class="taiko-results-player">
+                        <span class="taiko-results-player-label">1P</span>
+                        <span class="taiko-results-player-name" id="taiko-results-username">プレイヤー</span>
+                    </div>
+                    <div class="taiko-results-difficulty-wrap">
+                        <span class="taiko-results-difficulty" id="taiko-results-difficulty">ふつう</span>
+                    </div>
+                </div>
+                <div class="taiko-results-center">
+                    <div class="taiko-results-clear-row">
+                        <span class="taiko-results-clear-label">クリア</span>
+                        <div class="taiko-results-clear-bar">
+                            <div class="taiko-results-clear-bar-fill" id="taiko-results-clear-fill"></div>
+                        </div>
+                        <span class="taiko-results-soul">魂</span>
+                    </div>
+                    <div class="taiko-results-stats-row">
+                        <div class="taiko-results-score-box">
                             <span class="taiko-results-score-value" id="taiko-results-score-value">0</span>
                             <span class="taiko-results-score-unit">点</span>
                         </div>
-                    </div>
-                    <div class="taiko-results-score-right">
-                        <div class="taiko-results-full-combo-wrap">
-                            <div class="taiko-results-full-combo" id="taiko-results-full-combo" style="display:none;">
-                                <span>フル<br>スコア!</span>
-                            </div>
-                        </div>
-                        <div class="taiko-results-judge-counts">
+                        <div class="taiko-results-judgments">
                             <span>良 <strong id="taiko-results-good">0</strong></span>
                             <span>可 <strong id="taiko-results-ok">0</strong></span>
                             <span>不可 <strong id="taiko-results-miss">0</strong></span>
+                        </div>
+                        <div class="taiko-results-combo-stats">
+                            <span>最大コンボ数 <strong id="taiko-results-max-combo">0</strong></span>
+                            <span>連打数 <strong id="taiko-results-roll">0</strong></span>
                         </div>
                     </div>
                 </div>
@@ -165,7 +176,10 @@
                     <ol class="taiko-results-ranking-list" id="taiko-results-ranking-list"></ol>
                 </div>
             </div>
-            <button type="button" id="taiko-results-close" class="taiko-results-close">閉じる</button>
+            <div class="taiko-results-band"></div>
+            <div class="taiko-results-footer">
+                <button type="button" id="taiko-results-close" class="taiko-results-close">閉じる</button>
+            </div>
         </div>
         <div id="taiko-hint-popup" class="taiko-hint-popup" style="display:none;" aria-hidden="true">
             <div class="taiko-hint-popup-backdrop"></div>

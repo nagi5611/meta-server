@@ -63,6 +63,8 @@ class TaikoGameManager {
         this._chart = [];
         this._chartMeta = null; // { id, name, difficulty, endTime } 選曲時
         this._judgeCounts = { good: 0, ok: 0, miss: 0 };
+        this._currentCombo = 0;
+        this._maxCombo = 0;
         this._activeNotes = []; // { el, targetTime, type, hit, chartIndex }
         this._processedChartIndices = new Set(); // 処理済み（ヒット or 不可）のチャート索引
         this._startTime = null;
@@ -208,6 +210,8 @@ class TaikoGameManager {
         this._score = 0;
         this._maxScore = this._chart.length * 100;
         this._judgeCounts = { good: 0, ok: 0, miss: 0 };
+        this._currentCombo = 0;
+        this._maxCombo = 0;
         this._activeNotes = [];
         this._processedChartIndices = new Set();
         this._updateScoreDisplay();
@@ -294,6 +298,10 @@ class TaikoGameManager {
         note.hit = true;
         if (result === 'good') this._judgeCounts.good++;
         else if (result === 'ok') this._judgeCounts.ok++;
+        if (result === 'good' || result === 'ok') {
+            this._currentCombo++;
+            if (this._currentCombo > this._maxCombo) this._maxCombo = this._currentCombo;
+        }
         if (note.el) {
             note.el.classList.add('taiko-note-hit');
             this._removeNoteAfterEffect(note);
@@ -410,6 +418,7 @@ class TaikoGameManager {
             const distancePx = Math.abs(remaining) * laneSpan / NOTE_TRAVEL_TIME;
             if (remaining < 0 && distancePx > JUDGE_MISS_PX && !missShownThisFrame) {
                 note.hit = true;
+                this._currentCombo = 0;
                 this._judgeCounts.miss++;
                 if (note.el) {
                     note.el.classList.add('taiko-note-miss');
@@ -419,6 +428,7 @@ class TaikoGameManager {
                 missShownThisFrame = true;
             } else if (remaining < 0 && distancePx > JUDGE_MISS_PX) {
                 note.hit = true;
+                this._currentCombo = 0;
                 this._judgeCounts.miss++;
                 if (note.el) {
                     note.el.classList.add('taiko-note-miss');
@@ -475,18 +485,19 @@ class TaikoGameManager {
         if (!resultsEl) return;
 
         document.getElementById('taiko-results-song-name').textContent = meta.name || '曲名';
-        document.getElementById('taiko-results-difficulty').textContent = meta.difficulty != null ? `難易度 ${meta.difficulty}` : '難易度 -';
+        document.getElementById('taiko-results-username').textContent = username;
+        const diffLabels = ['かんたん', 'ふつう', 'むずかしい', 'おに'];
+        const diff = meta.difficulty != null ? meta.difficulty : 1;
+        document.getElementById('taiko-results-difficulty').textContent = diffLabels[Math.min(diff, 3)] || 'ふつう';
         document.getElementById('taiko-results-score-value').textContent = String(this._score);
         document.getElementById('taiko-results-good').textContent = String(this._judgeCounts.good);
         document.getElementById('taiko-results-ok').textContent = String(this._judgeCounts.ok);
         document.getElementById('taiko-results-miss').textContent = String(this._judgeCounts.miss);
-
-        const fullComboEl = document.getElementById('taiko-results-full-combo');
-        if (this._maxScore > 0 && this._score >= this._maxScore) {
-            fullComboEl.style.display = 'block';
-        } else {
-            fullComboEl.style.display = 'none';
-        }
+        document.getElementById('taiko-results-max-combo').textContent = String(this._maxCombo);
+        document.getElementById('taiko-results-roll').textContent = '0';
+        const clearRate = this._maxScore > 0 ? Math.min(1, this._score / this._maxScore) : 0;
+        const fillEl = document.getElementById('taiko-results-clear-fill');
+        if (fillEl) fillEl.style.width = `${Math.round(clearRate * 100)}%`;
 
         const listEl = document.getElementById('taiko-results-ranking-list');
         listEl.innerHTML = '';
