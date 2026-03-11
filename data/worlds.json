@@ -1,0 +1,254 @@
+{
+  "lobby": {
+    "id": "lobby",
+    "name": "Lobby",
+    "models": [
+      {
+        "path": "models/monument.glb",
+        "position": {
+          "x": 0,
+          "y": 3.5,
+          "z": -7.987314769171752
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1.5,
+          "y": 1.5,
+          "z": 1.5
+        },
+        "animate": {
+          "rotation": {
+            "x": 0,
+            "y": 0.1,
+            "z": 0
+          }
+        }
+      },
+      {
+        "path": "models/monument.glb",
+        "position": {
+          "x": -10.79628884263443,
+          "y": 2.279562792279682,
+          "z": -1.5912924937575559
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        },
+        "taiko": {
+          "radius": 5
+        }
+      },
+      {
+        "path": "models/gate.glb",
+        "position": {
+          "x": -6.735995729788247,
+          "y": 1.3761341659400799,
+          "z": -21.406718200144077
+        },
+        "rotation": {
+          "x": 0,
+          "y": 30.939720937064,
+          "z": 0
+        },
+        "scale": {
+          "x": 1.5,
+          "y": 1.5,
+          "z": 1.5
+        }
+      },
+      {
+        "path": "models/lobby.glb",
+        "position": {
+          "x": 0,
+          "y": -7.949919856697404,
+          "z": -8.141853949946633
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 30,
+          "y": 30,
+          "z": 30
+        }
+      }
+    ],
+    "spawnPoint": {
+      "x": 0,
+      "y": 10,
+      "z": 0
+    },
+    "lights": [
+      {
+        "type": "ambient",
+        "intensity": 0.5,
+        "color": 16777215,
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "type": "directional",
+        "intensity": 0.8,
+        "color": 16777215,
+        "position": {
+          "x": 50,
+          "y": 100,
+          "z": 50
+        },
+        "castShadow": true
+      }
+    ],
+    "pdfs": [
+      {
+        "path": "pdfs/一般_ポスター原稿_松山南（物理１）.pdf",
+        "position": {
+          "x": -12.290984142876583,
+          "y": 2.573840482814288,
+          "z": -8.917139274495643
+        },
+        "rotation": {
+          "x": 0,
+          "y": 80.78704911344296,
+          "z": 0
+        },
+        "scale": {
+          "x": 2,
+          "y": 2.8,
+          "z": 1
+        }
+      },
+      {
+        "path": "pdfs/postor_ad.pdf",
+        "position": {
+          "x": -6.718772353435099,
+          "y": 2.936763160377562,
+          "z": -21.31353785070066
+        },
+        "rotation": {
+          "x": 0,
+          "y": 30.940000000000005,
+          "z": 0
+        },
+        "scale": {
+          "x": 1.8945855056086707,
+          "y": 2.6524197078521388,
+          "z": 0.9472927528043353
+        }
+      },
+      {
+        "path": "pdfs/new_school.pdf",
+        "position": {
+          "x": -0.052736172032873174,
+          "y": 7.124270425506331,
+          "z": -29.239402888395198
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 6.325692823117285,
+          "y": 8.855969952364218,
+          "z": 3.1628464115586423
+        },
+        "teleporter": {
+          "id": "new1",
+          "destinationWorld": "school",
+          "radius": 5,
+          "label": "新校舎",
+          "access": "public"
+        }
+      }
+    ],
+    "floorEnabled": false
+  },
+  "school": {
+    "id": "school",
+    "name": "新校舎",
+    "models": [
+      {
+        "path": "models/monument.glb",
+        "position": {
+          "x": 0,
+          "y": 2,
+          "z": 8.75093595125027
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        },
+        "animate": {
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          }
+        }
+      }
+    ],
+    "spawnPoint": {
+      "x": 0,
+      "y": 10,
+      "z": 0
+    },
+    "lights": [
+      {
+        "type": "ambient",
+        "intensity": 0.4,
+        "color": 16777215,
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "type": "directional",
+        "intensity": 0.9,
+        "color": 16777164,
+        "position": {
+          "x": 30,
+          "y": 80,
+          "z": 20
+        },
+        "castShadow": true
+      },
+      {
+        "type": "point",
+        "intensity": 0.6,
+        "color": 16777215,
+        "distance": 30,
+        "position": {
+          "x": 5,
+          "y": 5,
+          "z": 5
+        }
+      }
+    ],
+    "pdfs": [],
+    "floorEnabled": true
+  }
+}
