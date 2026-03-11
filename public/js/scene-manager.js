@@ -75,7 +75,7 @@ class SceneManager {
 
         // Create scene
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x87ceeb); // Sky blue
+        this.scene.background = new THREE.Color(0x87ceeb); // Sky blue (fallback when shader sky is not visible)
         const fogFar = this.renderQualityOptions.fogFar ?? 800;
         this.scene.fog = new THREE.Fog(0x87ceeb, 100, fogFar);
 
@@ -101,6 +101,9 @@ class SceneManager {
         this.renderer.shadowMap.type = shadowConfig.type;
 
         // Base lights are added per-world via addWorldLights()
+
+        // Add shader-based sky dome (gradient sky)
+        this.addSkyDome();
 
         // Add static environment
         this.addEnvironment();
@@ -468,6 +471,69 @@ class SceneManager {
             this.scene.remove(light);
         });
         this.worldLights = [];
+    }
+
+    /**
+     * Create a large sky dome with a vertical color gradient:
+     * near the horizon is whitish, higher is blue, and below the horizon is gray.
+     */
+    addSkyDome() {
+        const radius = 2000;
+        const geometry = new THREE.SphereGeometry(radius, 32, 16);
+
+        const vertexShader = `
+            varying vec3 vWorldPosition;
+            void main() {
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                gl_Position = projectionMatrix * viewMatrix * worldPosition;
+            }
+        `;
+
+        const fragmentShader = `
+            precision mediump float;
+            varying vec3 vWorldPosition;
+            uniform vec3 zenithColor;
+            uniform vec3 horizonColor;
+            uniform vec3 groundColor;
+            uniform vec3 midSkyColor;
+
+            void main() {
+                float h = vWorldPosition.y;
+
+                // 地平線(0)〜高さ80までは「白 → 薄い青」のグラデーション
+                float tLow = clamp(h / 920.0, 0.0, 1.0);
+                vec3 skyLow = mix(horizonColor, midSkyColor, tLow);
+
+                // さらにかなり上空(400〜)でだけ濃い青を少し足す
+                float tHigh = smoothstep(400.0, 800.0, h);
+                vec3 sky = mix(skyLow, zenithColor, tHigh);
+
+                // y=-50 付近から下をグレーに寄せる
+                float blend = smoothstep(-80.0, 0.0, h);
+                vec3 color = mix(groundColor, sky, blend);
+
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        const material = new THREE.ShaderMaterial({
+            uniforms: {
+                zenithColor: { value: new THREE.Color(0x1e90ff) },   // 一番上の濃い青
+                horizonColor: { value: new THREE.Color(0xf5f5f5) },  // 地平線付近の白っぽい色
+                groundColor: { value: new THREE.Color(0x666666) },   // 下側のグレー
+                midSkyColor: { value: new THREE.Color(0x9acbff) }    // 中間の薄い青
+            },
+            vertexShader,
+            fragmentShader,
+            side: THREE.BackSide,
+            depthWrite: false,
+            fog: false
+        });
+
+        const skyDome = new THREE.Mesh(geometry, material);
+        skyDome.name = 'SkyDome';
+        this.scene.add(skyDome);
     }
 
     addEnvironment() {
