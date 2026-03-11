@@ -565,7 +565,7 @@ function selectObject(obj) {
             document.getElementById('light-props').style.display = 'none';
             document.getElementById('object-props-animation').style.display = 'none';
             document.getElementById('object-props-taiko').style.display = 'none';
-            document.getElementById('object-props-teleporter').style.display = 'none';
+            document.getElementById('object-props-teleporter').style.display = '';
         } else {
             document.getElementById('object-hint').style.display = 'block';
             document.getElementById('object-props').style.display = 'none';
@@ -652,6 +652,14 @@ function updateObjectPanel(obj) {
         const taiko = c.taiko;
         document.getElementById('obj-taiko').checked = !!taiko;
         document.getElementById('obj-taiko-radius').value = taiko ? (taiko.radius ?? 3) : 3;
+    } else if (obj.userData.pdfConfig) {
+        const tp = c.teleporter;
+        document.getElementById('obj-teleporter').checked = !!tp;
+        document.getElementById('obj-tp-id').value = tp ? (tp.id || '') : '';
+        document.getElementById('obj-tp-dest').value = tp ? (tp.destinationWorld || '') : '';
+        document.getElementById('obj-tp-radius').value = tp ? (tp.radius ?? 3) : 3;
+        document.getElementById('obj-tp-label').value = tp ? (tp.label || '') : '';
+        document.getElementById('obj-tp-access').value = tp && tp.access ? tp.access : 'public';
     }
 }
 
@@ -713,6 +721,20 @@ function syncObjectFromPanel() {
             };
         } else {
             delete c.taiko;
+        }
+    } else if (selectedObject.userData.pdfConfig) {
+        if (document.getElementById('obj-teleporter').checked) {
+            const accessEl = document.getElementById('obj-tp-access');
+            const accessVal = accessEl && accessEl.value ? accessEl.value : 'public';
+            c.teleporter = {
+                id: document.getElementById('obj-tp-id').value.trim() || 'tp1',
+                destinationWorld: document.getElementById('obj-tp-dest').value || Object.keys(worlds)[0],
+                radius: parseFloat(document.getElementById('obj-tp-radius').value) || 3,
+                label: document.getElementById('obj-tp-label').value.trim() || '',
+                access: accessVal
+            };
+        } else {
+            delete c.teleporter;
         }
     }
 }
@@ -894,7 +916,7 @@ function loadWorldIntoScene(world) {
         mesh.position.set(pos.x, pos.y, pos.z);
         mesh.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
         mesh.scale.set(scale.x, scale.y, scale.z);
-        mesh.userData.pdfConfig = { path, position: { ...pos }, rotation: { ...rot }, scale: { ...scale } };
+        mesh.userData.pdfConfig = { path, position: { ...pos }, rotation: { ...rot }, scale: { ...scale }, teleporter: config.teleporter ? { ...config.teleporter } : undefined };
         editGroup.add(mesh);
         loadPdfTextureForMesh(mesh, path).catch(() => {});
     });

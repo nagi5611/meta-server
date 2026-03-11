@@ -281,20 +281,32 @@ class SceneManager {
                 mesh.rotation.set(rotation.x * Math.PI / 180, rotation.y * Math.PI / 180, rotation.z * Math.PI / 180);
                 mesh.scale.set(scale.x, scale.y, scale.z);
                 mesh.userData.pdfPath = path;
+                if (config.teleporter) {
+                    mesh.userData.teleporter = config.teleporter;
+                    this.teleporters.push({
+                        id: config.teleporter.id,
+                        position: position,
+                        destinationWorld: config.teleporter.destinationWorld,
+                        radius: config.teleporter.radius || 3,
+                        label: config.teleporter.label || config.teleporter.destinationWorld,
+                        access: config.teleporter.access || 'public'
+                    });
+                    console.log(`  PDF Teleporter: ID=${config.teleporter.id}, Destination=${config.teleporter.destinationWorld}`);
+                }
                 this.environmentGroup.add(mesh);
             } catch (err) {
                 console.error('Failed to load PDF:', path, err);
-                this._addPdfPlaceholderMesh(position, rotation, scale, path);
+                this._addPdfPlaceholderMesh(position, rotation, scale, path, config.teleporter);
             }
         }
         console.log(`Loaded ${pdfConfigs.length} PDF poster(s)`);
     }
 
     /**
-     * Get the closest PDF mesh within radius of the given position (for E-key viewer).
+     * Get the closest PDF mesh within radius of the given position (for E-key viewer / teleporter).
      * @param {THREE.Vector3} position - World position (e.g. player)
      * @param {number} radius - Max distance
-     * @returns {{ mesh: THREE.Mesh, pdfPath: string } | null}
+     * @returns {{ mesh: THREE.Mesh, pdfPath: string, teleporter?: object } | null}
      */
     getNearbyPdfObject(position, radius) {
         const tempPos = new THREE.Vector3();
@@ -306,7 +318,8 @@ class SceneManager {
             const dist = position.distanceTo(tempPos);
             if (dist < closestDist) {
                 closestDist = dist;
-                closest = { mesh: obj, pdfPath: obj.userData.pdfPath };
+                const teleporter = obj.userData.teleporter || null;
+                closest = { mesh: obj, pdfPath: obj.userData.pdfPath, teleporter };
             }
         });
         return closest;
@@ -314,8 +327,9 @@ class SceneManager {
 
     /**
      * Add a single placeholder plane when PDF load fails.
+     * @param {object} [teleporterConfig] - Optional. If set, this PDF acts as a teleporter (same shape as config.teleporter).
      */
-    _addPdfPlaceholderMesh(position, rotation, scale, pdfPath) {
+    _addPdfPlaceholderMesh(position, rotation, scale, pdfPath, teleporterConfig) {
         const geom = new THREE.PlaneGeometry(1, 1);
         const canvas = document.createElement('canvas');
         canvas.width = 128;
@@ -334,6 +348,17 @@ class SceneManager {
         mesh.rotation.set(rotation.x * Math.PI / 180, rotation.y * Math.PI / 180, rotation.z * Math.PI / 180);
         mesh.scale.set(scale.x, scale.y, scale.z);
         if (pdfPath) mesh.userData.pdfPath = pdfPath;
+        if (teleporterConfig) {
+            mesh.userData.teleporter = teleporterConfig;
+            this.teleporters.push({
+                id: teleporterConfig.id,
+                position: position,
+                destinationWorld: teleporterConfig.destinationWorld,
+                radius: teleporterConfig.radius || 3,
+                label: teleporterConfig.label || teleporterConfig.destinationWorld,
+                access: teleporterConfig.access || 'public'
+            });
+        }
         this.environmentGroup.add(mesh);
     }
 
@@ -346,7 +371,7 @@ class SceneManager {
             const rotation = config.rotation || { x: 0, y: 0, z: 0 };
             const scale = config.scale || { x: 2, y: 2.8, z: 1 };
             const pdfPath = config.path || 'pdfs/placeholder.pdf';
-            this._addPdfPlaceholderMesh(position, rotation, scale, pdfPath);
+            this._addPdfPlaceholderMesh(position, rotation, scale, pdfPath, config.teleporter);
         });
     }
 

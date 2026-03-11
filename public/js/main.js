@@ -574,7 +574,8 @@ class MetaverseApp {
                 this.teleportManager.update(position);
             }
             const pdfObj = this.sceneManager.getNearbyPdfObject(position, 5);
-            this.nearbyPdfPath = pdfObj ? pdfObj.pdfPath : null;
+            // PDFがテレポーターのときは「PDFを表示」にせずテレポート扱いにする
+            this.nearbyPdfPath = (pdfObj && !pdfObj.teleporter) ? pdfObj.pdfPath : null;
             if (this.pdfViewerManager && this.pdfViewerManager.isOpen()) {
                 this.uiManager.hideTeleportPrompt();
             } else if (this.taikoGameManager && this.taikoGameManager.isOpen()) {
