@@ -20,6 +20,8 @@ let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（p
 let lightHelpers = []; // { light, mesh? } for point/spot position drag
 let worldObjectList = []; // 右パネル「オブジェクト一覧」の並び（クリックで選択用）
 let objectListExpanded = { lights: false, models: false, pdfs: false }; // オブジェクト一覧の階層展開状態
+let editorGround = null; // 編集プレビュー用の床メッシュ（表示切替用）
+let editorGrid = null;   // 編集プレビュー用のグリッド（表示切替用）
 const pointer = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
 
@@ -107,14 +109,14 @@ function initScene() {
     // Ground
     const groundGeom = new THREE.PlaneGeometry(1000, 1000);
     const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a7c59, roughness: 0.8, metalness: 0.2 });
-    const ground = new THREE.Mesh(groundGeom, groundMat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    editorGround = new THREE.Mesh(groundGeom, groundMat);
+    editorGround.rotation.x = -Math.PI / 2;
+    editorGround.receiveShadow = true;
+    scene.add(editorGround);
 
-    const grid = new THREE.GridHelper(1000, 100, 0x000000, 0x2a4a2a);
-    grid.position.y = 0.01;
-    scene.add(grid);
+    editorGrid = new THREE.GridHelper(1000, 100, 0x000000, 0x2a4a2a);
+    editorGrid.position.y = 0.01;
+    scene.add(editorGrid);
 
     editGroup = new THREE.Group();
     scene.add(editGroup);
@@ -614,7 +616,8 @@ function buildWorldsFromScene() {
             models: w.models ? [...w.models] : [],
             spawnPoint: w.spawnPoint ? { ...w.spawnPoint } : { x: 0, y: 10, z: 0 },
             lights: w.lights ? w.lights.map((l) => ({ ...l })) : [],
-            pdfs: w.pdfs ? w.pdfs.map((p) => ({ ...p })) : []
+            pdfs: w.pdfs ? w.pdfs.map((p) => ({ ...p })) : [],
+            floorEnabled: wid === selectedWorldId ? document.getElementById('floor-enabled').checked : (w.floorEnabled !== false)
         };
     }
     if (selectedWorldId) {
@@ -661,6 +664,7 @@ function buildWorldsFromScene() {
                 y: parseFloat(document.getElementById('spawn-y').value) || 10,
                 z: parseFloat(document.getElementById('spawn-z').value) || 0
             };
+            w.floorEnabled = document.getElementById('floor-enabled').checked;
         }
     }
     return out;
@@ -786,6 +790,10 @@ function loadWorldIntoScene(world) {
     document.getElementById('spawn-x').value = (world.spawnPoint && world.spawnPoint.x) ?? 0;
     document.getElementById('spawn-y').value = (world.spawnPoint && world.spawnPoint.y) ?? 10;
     document.getElementById('spawn-z').value = (world.spawnPoint && world.spawnPoint.z) ?? 0;
+    const floorEl = document.getElementById('floor-enabled');
+    if (floorEl) floorEl.checked = world.floorEnabled !== false;
+    if (editorGround) editorGround.visible = world.floorEnabled !== false;
+    if (editorGrid) editorGrid.visible = world.floorEnabled !== false;
     renderWorldObjectList();
 }
 
@@ -1152,7 +1160,7 @@ function bindEvents() {
         if (!id || /[^a-zA-Z0-9_]/.test(id)) return;
         if (worlds[id]) { alert('そのIDは既に存在します'); return; }
         const name = prompt('表示名', id);
-        worlds[id] = { id, name: name || id, models: [], spawnPoint: { x: 0, y: 10, z: 0 }, lights: [] };
+        worlds[id] = { id, name: name || id, models: [], spawnPoint: { x: 0, y: 10, z: 0 }, lights: [], floorEnabled: true };
         renderWorldList();
         selectWorld(id);
     });
@@ -1299,6 +1307,13 @@ function bindEvents() {
     document.getElementById('spawn-x').addEventListener('change', () => { if (selectedWorldId && worlds[selectedWorldId]) { pushUndo(); worlds[selectedWorldId].spawnPoint = worlds[selectedWorldId].spawnPoint || {}; worlds[selectedWorldId].spawnPoint.x = parseFloat(document.getElementById('spawn-x').value) || 0; } });
     document.getElementById('spawn-y').addEventListener('change', () => { if (selectedWorldId && worlds[selectedWorldId]) { pushUndo(); worlds[selectedWorldId].spawnPoint = worlds[selectedWorldId].spawnPoint || {}; worlds[selectedWorldId].spawnPoint.y = parseFloat(document.getElementById('spawn-y').value) || 10; } });
     document.getElementById('spawn-z').addEventListener('change', () => { if (selectedWorldId && worlds[selectedWorldId]) { pushUndo(); worlds[selectedWorldId].spawnPoint = worlds[selectedWorldId].spawnPoint || {}; worlds[selectedWorldId].spawnPoint.z = parseFloat(document.getElementById('spawn-z').value) || 0; } });
+    document.getElementById('floor-enabled').addEventListener('change', () => {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        pushUndo();
+        worlds[selectedWorldId].floorEnabled = document.getElementById('floor-enabled').checked;
+        if (editorGround) editorGround.visible = worlds[selectedWorldId].floorEnabled;
+        if (editorGrid) editorGrid.visible = worlds[selectedWorldId].floorEnabled;
+    });
 
     document.getElementById('light-pos-x').addEventListener('change', syncLightFromPanel);
     document.getElementById('light-pos-y').addEventListener('change', syncLightFromPanel);

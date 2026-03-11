@@ -2002,16 +2002,14 @@ body {
     background: #e0e0e0;
 }
 
-/* 成績発表・本家太鼓の達人風レイアウト */
+/* 成績発表・メタバース統一（白ベース・青アウトライン） */
 .taiko-results {
     position: relative;
-    background: #e04040;
-    background-image: radial-gradient(circle at 20% 30%, rgba(255,255,255,0.08) 0%, transparent 50%),
-        radial-gradient(circle at 80% 70%, rgba(255,255,255,0.06) 0%, transparent 50%);
-    color: #fff;
+    background: rgba(255, 255, 255, 0.98);
+    color: #333;
     border-radius: 12px;
-    border: 3px solid #333;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    border: 2px solid #0288d1;
+    box-shadow: 0 4px 16px rgba(2, 136, 209, 0.2);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -2024,25 +2022,26 @@ body {
     align-items: flex-start;
     padding: 12px 16px;
     gap: 12px;
+    border-bottom: 1px solid rgba(2, 136, 209, 0.2);
 }
 
 .taiko-results-banner {
     padding: 8px 20px;
     font-size: 1.25rem;
     font-weight: 700;
-    text-shadow: 1px 1px 0 #000, -1px -1px 0 #000;
-    border: 2px solid #fff;
+    border: 2px solid #0288d1;
+    border-radius: 8px;
     white-space: nowrap;
 }
 
 .taiko-results-banner-left {
-    background: #c82828;
-    color: #fff;
+    background: rgba(2, 136, 209, 0.1);
+    color: #0288d1;
 }
 
 .taiko-results-banner-right {
-    background: #222;
-    color: #fff;
+    background: rgba(2, 136, 209, 0.08);
+    color: #333;
     max-width: 50%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2064,36 +2063,21 @@ body {
 }
 
 .taiko-results-player {
-    background: linear-gradient(135deg, #ff6b4a 0%, #e85a3a 100%);
-    border: 2px solid #fff;
-    border-radius: 20px;
+    background: rgba(2, 136, 209, 0.08);
+    border: 2px solid #0288d1;
+    border-radius: 12px;
     padding: 8px 16px;
-    position: relative;
     min-width: 140px;
 }
 
-.taiko-results-player::before {
-    content: '';
-    position: absolute;
-    left: 12px;
-    bottom: -10px;
-    border: 8px solid transparent;
-    border-top-color: #e85a3a;
-    border-left-width: 6px;
-    border-right-width: 6px;
-}
-
 .taiko-results-player-label {
-    color: #fff;
+    color: #0288d1;
     font-weight: 700;
     margin-right: 6px;
 }
 
 .taiko-results-player-name {
-    background: #fff;
     color: #333;
-    padding: 2px 8px;
-    border-radius: 6px;
     font-size: 0.9rem;
 }
 
@@ -2108,6 +2092,7 @@ body {
     color: #333;
     padding: 4px 14px;
     border-radius: 20px;
+    border: 1px solid #0288d1;
     font-size: 0.9rem;
     font-weight: 700;
 }
@@ -2128,8 +2113,7 @@ body {
 
 .taiko-results-clear-label {
     font-size: 0.9rem;
-    color: #fff;
-    text-shadow: 1px 1px 0 #000;
+    color: #333;
     font-weight: 700;
     flex-shrink: 0;
 }
@@ -2137,23 +2121,22 @@ body {
 .taiko-results-clear-bar {
     flex: 1;
     height: 20px;
-    background: rgba(0,0,0,0.3);
-    border: 2px solid #fff;
+    background: rgba(2, 136, 209, 0.1);
+    border: 2px solid #0288d1;
     border-radius: 4px;
     overflow: hidden;
 }
 
 .taiko-results-clear-bar-fill {
     height: 100%;
-    background: #c82828;
+    background: #0288d1;
     transition: width 0.3s ease;
 }
 
 .taiko-results-soul {
     font-size: 1.5rem;
     font-weight: 700;
-    color: #fff;
-    text-shadow: 2px 2px 0 #000;
+    color: #0288d1;
 }
 
 .taiko-results-stats-row {
@@ -2164,8 +2147,8 @@ body {
 }
 
 .taiko-results-score-box {
-    background: #ffeb3b;
-    border: 3px solid #333;
+    background: rgba(2, 136, 209, 0.08);
+    border: 2px solid #0288d1;
     border-radius: 8px;
     padding: 12px 24px;
     display: flex;
@@ -2190,12 +2173,12 @@ body {
     flex-direction: column;
     gap: 4px;
     font-size: 1rem;
-    color: #fff;
-    text-shadow: 1px 1px 0 #000;
+    color: #333;
 }
 
 .taiko-results-judgments strong {
     margin-left: 8px;
+    color: #0288d1;
 }
 
 .taiko-results-combo-stats {
@@ -2203,18 +2186,19 @@ body {
     flex-direction: column;
     gap: 4px;
     font-size: 0.95rem;
-    color: #fff;
-    text-shadow: 1px 1px 0 #000;
+    color: #333;
 }
 
 .taiko-results-combo-stats strong {
     margin-left: 8px;
+    color: #0288d1;
 }
 
 .taiko-results-ranking-area {
     width: 200px;
     flex-shrink: 0;
-    background: rgba(0,0,0,0.15);
+    background: rgba(2, 136, 209, 0.05);
+    border: 1px solid rgba(2, 136, 209, 0.3);
     border-radius: 8px;
     padding: 12px;
 }
@@ -2223,8 +2207,7 @@ body {
     margin: 0 0 8px 0;
     font-size: 1rem;
     font-weight: 700;
-    color: #fff;
-    text-shadow: 1px 1px 0 #000;
+    color: #0288d1;
     text-align: center;
 }
 
@@ -2239,20 +2222,20 @@ body {
 
 .taiko-results-ranking-list li {
     padding: 4px 8px;
-    background: rgba(255,255,255,0.2);
+    background: #fff;
+    border: 1px solid rgba(2, 136, 209, 0.3);
     border-radius: 4px;
     font-size: 0.75rem;
-    color: #fff;
-    text-shadow: 1px 1px 0 #000;
+    color: #333;
 }
 
 .taiko-results-ranking-list li.taiko-results-ranking-empty {
-    color: rgba(255,255,255,0.6);
+    color: #94a3b8;
 }
 
 .taiko-results-band {
-    height: 12px;
-    background: #a02020;
+    height: 8px;
+    background: rgba(2, 136, 209, 0.15);
 }
 
 .taiko-results-footer {
@@ -2263,18 +2246,17 @@ body {
 
 .taiko-results-close {
     padding: 12px 40px;
-    border: 3px solid #333;
-    border-radius: 24px;
+    border: 2px solid #0288d1;
+    border-radius: 8px;
     background: #fff;
-    color: #333;
+    color: #0288d1;
     cursor: pointer;
-    font-size: 1.125rem;
-    font-weight: 700;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    font-size: 1rem;
+    font-weight: 600;
 }
 
 .taiko-results-close:hover {
-    background: #f0f0f0;
+    background: rgba(2, 136, 209, 0.1);
 }
 
 .taiko-game-container {

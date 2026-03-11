@@ -15,6 +15,10 @@ class SceneManager {
         this.taikos = []; // Track taiko drum models
         /** Lights added for current world (removed on clearWorld) */
         this.worldLights = [];
+        /** Ground mesh (first child of environmentGroup). Visibility controlled by setFloorVisible. */
+        this.groundMesh = null;
+        /** Grid helper. Visibility controlled by setFloorVisible. */
+        this.gridHelper = null;
         /** Render quality options (default: low for performance) */
         this.renderQualityOptions = {
             drawQualityLow: true,
@@ -454,14 +458,24 @@ class SceneManager {
         ground.receiveShadow = true;
         ground.userData.isStatic = true;
         this.environmentGroup.add(ground);
+        this.groundMesh = ground;
 
         // Add environment group to scene
         this.scene.add(this.environmentGroup);
 
         // Add grid helper - 10x larger
-        const gridHelper = new THREE.GridHelper(1000, 100, 0x000000, 0x2a4a2a);
-        gridHelper.position.y = 0.01;
-        this.scene.add(gridHelper);
+        this.gridHelper = new THREE.GridHelper(1000, 100, 0x000000, 0x2a4a2a);
+        this.gridHelper.position.y = 0.01;
+        this.scene.add(this.gridHelper);
+    }
+
+    /**
+     * Set floor (ground plane and grid) visibility for the current world.
+     * @param {boolean} visible
+     */
+    setFloorVisible(visible) {
+        if (this.groundMesh) this.groundMesh.visible = !!visible;
+        if (this.gridHelper) this.gridHelper.visible = !!visible;
     }
 
     /**

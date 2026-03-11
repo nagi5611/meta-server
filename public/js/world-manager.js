@@ -75,6 +75,8 @@ class WorldManager {
         // Set current world
         this.currentWorld = world;
 
+        this.sceneManager.setFloorVisible(world.floorEnabled !== false);
+
         // Add world-specific lights (position, type, intensity)
         this.sceneManager.addWorldLights(world.lights);
 
