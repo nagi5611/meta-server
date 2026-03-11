@@ -95,15 +95,16 @@ class MetaverseApp {
         this.physicsManager = new PhysicsManager();
         await this.physicsManager.init();
 
-        // Set physics manager reference in scene manager for BVH collider
-        this.sceneManager.physicsManager = this.physicsManager;
-
         // Initialize UI Manager
         this.uiManager = new UIManager();
 
         // Initialize World Manager
         this.worldManager = new WorldManager(this.sceneManager);
         await this.worldManager.init();
+
+        // Set physics manager reference in scene manager for BVH collider
+        this.sceneManager.physicsManager = this.physicsManager;
+        this.physicsManager.setSpawnPointGetter(() => this.worldManager.getSpawnPoint());
 
         // Initialize Teleport Manager
         this.teleportManager = new TeleportManager(this.worldManager, this.uiManager);

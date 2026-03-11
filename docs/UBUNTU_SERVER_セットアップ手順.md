@@ -313,7 +313,7 @@ openssl req -x509 -newkey rsa:4096 -keyout privkey.pem -out fullchain.pem -days 
 
 ```bash
 cd ~/meta-server
-npm run start:prod
+c
 ```
 
 - HTTP の場合: 同じマシンで `http://localhost:3000` を開く。

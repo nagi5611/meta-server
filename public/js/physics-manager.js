@@ -4,6 +4,8 @@ class PhysicsManager {
     constructor() {
         this.collider = null; // BVH collider mesh
         this.gravity = -30;
+        /** 現在ワールドのスポーン地点を返す関数（{ x, y, z }） */
+        this.getSpawnPoint = null;
 
         // Character capsule info
         this.capsuleInfo = {
@@ -171,10 +173,27 @@ class PhysicsManager {
     }
 
     reset() {
-        this.playerPosition.set(0, 10, 0);
+        if (typeof this.getSpawnPoint === 'function') {
+            const spawn = this.getSpawnPoint();
+            if (spawn && typeof spawn.x === 'number' && typeof spawn.y === 'number' && typeof spawn.z === 'number') {
+                this.playerPosition.set(spawn.x, spawn.y + this.capsuleInfo.radius, spawn.z);
+            } else {
+                this.playerPosition.set(0, 10, 0);
+            }
+        } else {
+            this.playerPosition.set(0, 10, 0);
+        }
         this.playerVelocity.set(0, 0, 0);
         this.playerIsOnGround = false;
         console.log('Player reset');
+    }
+
+    /**
+     * スポーン地点取得関数を登録する（現在ワールドの spawnPoint を返すコールバック）
+     * @param {() => { x: number, y: number, z: number }} fn
+     */
+    setSpawnPointGetter(fn) {
+        this.getSpawnPoint = typeof fn === 'function' ? fn : null;
     }
 }
 
