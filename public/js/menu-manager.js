@@ -43,6 +43,18 @@ class MenuManager {
         this.settingsAudioContext = null;
         this.settingsMicTestGainNode = null;
 
+        // Admin quick menu elements
+        this.adminMenuBtn = document.getElementById('admin-menu-btn');
+        this.adminMenu = document.getElementById('admin-menu');
+        this.adminInvisibleToggle = document.getElementById('admin-invisible-toggle');
+        this.adminFlyToggle = document.getElementById('admin-fly-toggle');
+        this.adminSpeedToggle = document.getElementById('admin-speed-toggle');
+
+        // Admin callbacks
+        this.onAdminInvisibleChange = null;
+        this.onAdminFlyChange = null;
+        this.onAdminSpeedChange = null;
+
         // Settings
         this.settings = {
             language: 'ja',
@@ -67,6 +79,20 @@ class MenuManager {
         this.updateButtonStates();
         this.loadAudioDevices();
         this.loadVideoDevices();
+    }
+
+    /**
+     * 管理者メニュー用コールバックを登録し、ボタンを有効化する
+     * @param {{ onInvisibleChange?: (enabled: boolean) => void, onFlyChange?: (enabled: boolean) => void, onSpeedChange?: (enabled: boolean) => void }} handlers
+     */
+    setAdminMenuHandlers(handlers = {}) {
+        this.onAdminInvisibleChange = handlers.onInvisibleChange || null;
+        this.onAdminFlyChange = handlers.onFlyChange || null;
+        this.onAdminSpeedChange = handlers.onSpeedChange || null;
+
+        if (this.adminMenuBtn) {
+            this.adminMenuBtn.style.display = 'flex';
+        }
     }
     
     setVoiceChatManager(voiceChatManager) {
@@ -474,6 +500,40 @@ class MenuManager {
                 }
             }
         });
+
+        // Admin quick menu
+        if (this.adminMenuBtn && this.adminMenu) {
+            this.adminMenuBtn.addEventListener('click', () => {
+                const isOpen = this.adminMenu.style.display === 'block';
+                const next = !isOpen;
+                this.adminMenu.style.display = next ? 'block' : 'none';
+                this.adminMenuBtn.classList.toggle('admin-active', next);
+            });
+        }
+
+        if (this.adminInvisibleToggle) {
+            this.adminInvisibleToggle.addEventListener('change', (e) => {
+                if (typeof this.onAdminInvisibleChange === 'function') {
+                    this.onAdminInvisibleChange(e.target.checked);
+                }
+            });
+        }
+
+        if (this.adminFlyToggle) {
+            this.adminFlyToggle.addEventListener('change', (e) => {
+                if (typeof this.onAdminFlyChange === 'function') {
+                    this.onAdminFlyChange(e.target.checked);
+                }
+            });
+        }
+
+        if (this.adminSpeedToggle) {
+            this.adminSpeedToggle.addEventListener('change', (e) => {
+                if (typeof this.onAdminSpeedChange === 'function') {
+                    this.onAdminSpeedChange(e.target.checked);
+                }
+            });
+        }
     }
     
     async toggleMic() {

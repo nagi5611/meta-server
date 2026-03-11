@@ -37,6 +37,12 @@ class CharacterController {
         // Movement direction
         this.direction = new THREE.Vector3();
 
+        // Admin controls
+        this.isFlyMode = false;
+        this.adminSpeedMultiplier = 1;
+        this.flyUp = false;
+        this.flyDown = false;
+
         this.setupControls();
     }
 
@@ -130,11 +136,20 @@ class CharacterController {
                 this.moveRight = true;
                 break;
             case 'Space':
-                this.physicsManager.jump(10.0);
+                if (this.isFlyMode) {
+                    this.flyUp = true;
+                } else {
+                    this.physicsManager.jump(10.0);
+                }
                 break;
             case 'ShiftLeft':
             case 'ShiftRight':
                 this.keysShift = true;
+                break;
+            case 'KeyC':
+                if (this.isFlyMode) {
+                    this.flyDown = true;
+                }
                 break;
         }
     }
@@ -162,6 +177,12 @@ class CharacterController {
             case 'ShiftRight':
                 this.keysShift = false;
                 break;
+            case 'Space':
+                this.flyUp = false;
+                break;
+            case 'KeyC':
+                this.flyDown = false;
+                break;
         }
     }
 
@@ -185,7 +206,7 @@ class CharacterController {
         const mobileMoving = this.isMobileMode && (this.mobileMoveVector.x !== 0 || this.mobileMoveVector.y !== 0);
         const isMoving = kbMoving || mobileMoving;
         const mobileDashing = this.isMobileMode && mobileMoving && this.mobileMoveForce >= 0.85;
-        const isGrounded = this.physicsManager.isGrounded();
+        const isGrounded = this.isFlyMode ? true : this.physicsManager.isGrounded();
         return { isMoving, isDashing: (isMoving && this.keysShift) || mobileDashing, isGrounded };
     }
 
@@ -285,25 +306,37 @@ class CharacterController {
             this.playerQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.playerYaw);
         }
 
-        // Apply movement (dash speed when Shift held, or mobile force-based speed)
+        // Apply movement (dash・管理者高速移動を含む)
         const moveDirection = new THREE.Vector3();
         if (this.direction.length() > 0) {
             let speed;
             if (useMobileMove && this.isMobileMode) {
                 const f = this.mobileMoveForce;
                 if (f < 0.5) {
-                    speed = this.moveSpeed * (0.5 + 0.6 * (f / 0.5));
+                    speed = this.moveSpeed * this.adminSpeedMultiplier * (0.5 + 0.6 * (f / 0.5));
                 } else {
-                    speed = this.moveSpeed * (0.8 + 1.2 * ((f - 0.5) / 0.5));
+                    speed = this.moveSpeed * this.adminSpeedMultiplier * (0.8 + 1.2 * ((f - 0.5) / 0.5));
                 }
             } else {
-                speed = this.keysShift ? this.moveSpeed * this.dashSpeedMultiplier : this.moveSpeed;
+                const base = this.keysShift ? this.moveSpeed * this.dashSpeedMultiplier : this.moveSpeed;
+                speed = base * this.adminSpeedMultiplier;
             }
             moveDirection.copy(this.direction).multiplyScalar(speed * deltaTime);
         }
 
-        // Update physics with movement
-        this.physicsManager.updatePlayer(deltaTime, moveDirection);
+        if (this.isFlyMode) {
+            // 飛行モード: 重力・落下を使わず、そのまま座標を更新
+            const pos = this.physicsManager.getCharacterPosition().clone();
+            pos.add(moveDirection);
+            const flySpeed = this.moveSpeed * this.adminSpeedMultiplier * 2;
+            if (this.flyUp) pos.y += flySpeed * deltaTime;
+            if (this.flyDown) pos.y -= flySpeed * deltaTime;
+            this.physicsManager.setCharacterPosition(pos.x, pos.y, pos.z);
+            this.physicsManager.resetVelocity();
+        } else {
+            // 通常モード: 物理エンジンで移動
+            this.physicsManager.updatePlayer(deltaTime, moveDirection);
+        }
 
         // Update camera position (third-person view)
         const characterPos = this.physicsManager.getCharacterPosition();
@@ -341,6 +374,31 @@ class CharacterController {
     getRotation() {
         // Return player's facing direction (not camera quaternion)
         return this.playerQuaternion;
+    }
+
+    /**
+     * 管理者用: 飛行モードON/OFF
+     * @param {boolean} enabled
+     */
+    setFlyMode(enabled) {
+        this.isFlyMode = !!enabled;
+        if (!this.isFlyMode) {
+            this.flyUp = false;
+            this.flyDown = false;
+            this.physicsManager.resetVelocity();
+        }
+    }
+
+    /**
+     * 管理者用: 移動速度倍率を設定（1が通常）
+     * @param {number} multiplier
+     */
+    setAdminSpeedMultiplier(multiplier) {
+        if (!Number.isFinite(multiplier) || multiplier <= 0) {
+            this.adminSpeedMultiplier = 1;
+            return;
+        }
+        this.adminSpeedMultiplier = multiplier;
     }
 }
 

@@ -141,6 +141,15 @@ class PlayerManager {
         }
     }
 
+    /**
+     * ローカルプレイヤーの表示/非表示を切り替える（ネームタグ含む）
+     * @param {boolean} visible
+     */
+    setLocalPlayerVisible(visible) {
+        if (!this.localPlayer) return;
+        this.localPlayer.visible = !!visible;
+    }
+
     async createRemotePlayer(playerId, position = { x: 0, y: 2, z: 0 }, username = null) {
         console.log(`Creating remote player: ${playerId}`);
         

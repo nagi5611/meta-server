@@ -276,6 +276,27 @@ class MetaverseApp {
         this.menuManager.setSceneManager(this.sceneManager);
         this.sceneManager.applyRenderQuality(this.menuManager.settings);
 
+        // Admin quick controls (透明化 / 飛行 / 高速移動)
+        if (this.userRole === 'admin' && this.menuManager) {
+            this.menuManager.setAdminMenuHandlers({
+                onInvisibleChange: (enabled) => {
+                    if (this.playerManager) {
+                        this.playerManager.setLocalPlayerVisible(!enabled);
+                    }
+                },
+                onFlyChange: (enabled) => {
+                    if (this.characterController) {
+                        this.characterController.setFlyMode(enabled);
+                    }
+                },
+                onSpeedChange: (enabled) => {
+                    if (this.characterController) {
+                        this.characterController.setAdminSpeedMultiplier(enabled ? 3 : 1);
+                    }
+                }
+            });
+        }
+
         // プレイヤー一覧の「視聴」ボタン → 指定ユーザーの配信に接続して表示
         this.uiManager.setOnWatchVideo((peerId) => {
             if (this.videoChatManager) this.videoChatManager.showVideoContainer(peerId);
