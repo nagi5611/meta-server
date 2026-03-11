@@ -43,6 +43,117 @@ let customTransformPrevScaleDist = null; // スケール: 前フレームのマ�
 const ROTATE_SENSITIVITY = 0.005;
 const SCALE_SENSITIVITY = 0.5; // 画面上の距離変化に対する倍率（マウスを遠ざける=拡大）
 
+// PDFプレビュー用（左パネル PDF タブ）
+let pdfjsLib = null;
+let previewPdfDoc = null;
+let previewCurrentPage = 1;
+
+async function ensurePdfJsLoaded() {
+    if (pdfjsLib) return;
+    const mod = await import('https://cdn.jsdelivr.net/npm/@bundled-es-modules/pdfjs-dist/build/pdf.js');
+    pdfjsLib = mod.default || mod;
+    if (pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+            'https://cdn.jsdelivr.net/npm/@bundled-es-modules/pdfjs-dist/build/pdf.worker.min.js';
+    }
+}
+
+async function renderPdfPreviewPage(pageNum) {
+    if (!previewPdfDoc) return;
+    const canvas = document.getElementById('we-pdf-canvas');
+    const statusEl = document.getElementById('we-pdf-preview-status');
+    const pageNumEl = document.getElementById('we-pdf-page-num');
+    const pageCountEl = document.getElementById('we-pdf-page-count');
+    if (!canvas) return;
+    try {
+        const page = await previewPdfDoc.getPage(pageNum);
+        const scale = 1.0;
+        const viewport = page.getViewport({ scale });
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const renderContext = { canvasContext: ctx, viewport };
+        await page.render(renderContext).promise;
+        previewCurrentPage = pageNum;
+        if (pageNumEl) pageNumEl.textContent = String(pageNum);
+        if (pageCountEl) pageCountEl.textContent = String(previewPdfDoc.numPages);
+        if (statusEl) {
+            statusEl.textContent = '';
+            statusEl.className = 'status-text';
+        }
+    } catch (err) {
+        if (statusEl) {
+            statusEl.textContent = 'プレビュー描画に失敗しました: ' + err.message;
+            statusEl.className = 'status-text error';
+        }
+    }
+}
+
+async function loadPdfPreview(path) {
+    const statusEl = document.getElementById('we-pdf-preview-status');
+    const pageNumEl = document.getElementById('we-pdf-page-num');
+    const pageCountEl = document.getElementById('we-pdf-page-count');
+    if (statusEl) {
+        statusEl.textContent = '読み込み中...';
+        statusEl.className = 'status-text';
+    }
+    try {
+        await ensurePdfJsLoaded();
+        if (!pdfjsLib) throw new Error('PDFライブラリの初期化に失敗しました');
+        const pathStr = path.startsWith('/') ? path.slice(1) : path;
+        const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+        const url = '/' + encodedPath;
+        const loadingTask = pdfjsLib.getDocument(url);
+        previewPdfDoc = await loadingTask.promise;
+        previewCurrentPage = 1;
+        if (pageCountEl) pageCountEl.textContent = String(previewPdfDoc.numPages);
+        await renderPdfPreviewPage(previewCurrentPage);
+    } catch (err) {
+        previewPdfDoc = null;
+        if (statusEl) {
+            statusEl.textContent = 'PDFの読み込みに失敗しました: ' + err.message;
+            statusEl.className = 'status-text error';
+        }
+        if (pageNumEl) pageNumEl.textContent = '-';
+        if (pageCountEl) pageCountEl.textContent = '-';
+    }
+}
+
+/**
+ * メタバース内のPDFメッシュに、指定PDFの1ページをテクスチャとして描画する。
+ * @param {THREE.Mesh} mesh - PDF平面メッシュ（material.map を差し替える）
+ * @param {string} pdfPath - 例 'pdfs/xxx.pdf'
+ * @param {number} [pageNum=1] - 表示するページ番号
+ */
+async function loadPdfTextureForMesh(mesh, pdfPath, pageNum = 1) {
+    if (!mesh || !mesh.material || !mesh.material.map) return;
+    try {
+        await ensurePdfJsLoaded();
+        if (!pdfjsLib) return;
+        const pathStr = pdfPath.startsWith('/') ? pdfPath.slice(1) : pdfPath;
+        const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+        const url = '/' + encodedPath;
+        const loadingTask = pdfjsLib.getDocument(url);
+        const pdfDoc = await loadingTask.promise;
+        const page = await pdfDoc.getPage(Math.min(pageNum, pdfDoc.numPages));
+        const scale = 2;
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        const oldMap = mesh.material.map;
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.needsUpdate = true;
+        mesh.material.map = tex;
+        if (oldMap) oldMap.dispose();
+    } catch (err) {
+        console.warn('PDF texture load failed:', pdfPath, err);
+    }
+}
+
 // Undo/Redo: 編集記録 20 回まで
 const MAX_UNDO = 20;
 let undoStack = [];
@@ -785,6 +896,7 @@ function loadWorldIntoScene(world) {
         mesh.scale.set(scale.x, scale.y, scale.z);
         mesh.userData.pdfConfig = { path, position: { ...pos }, rotation: { ...rot }, scale: { ...scale } };
         editGroup.add(mesh);
+        loadPdfTextureForMesh(mesh, path).catch(() => {});
     });
 
     document.getElementById('spawn-x').value = (world.spawnPoint && world.spawnPoint.x) ?? 0;
@@ -850,6 +962,7 @@ function renderPdfList() {
         div.addEventListener('click', () => {
             selectedPdfPath = path;
             renderPdfList();
+            loadPdfPreview(path);
         });
         el.appendChild(div);
     });
@@ -881,6 +994,7 @@ function addPdf(path) {
     mesh.userData.pdfConfig = { path, position: { ...pos }, rotation: { ...rot }, scale: { ...scale } };
     editGroup.add(mesh);
     renderWorldObjectList();
+    loadPdfTextureForMesh(mesh, path).catch(() => {});
 }
 
 // --- UI ---
@@ -1243,6 +1357,9 @@ function bindEvents() {
             if (!res.ok) throw new Error(await res.text());
             await fetchPdfs();
             renderPdfList();
+            const newPath = 'pdfs/' + name;
+            selectedPdfPath = newPath;
+            loadPdfPreview(newPath);
             status.textContent = 'アップロードしました: ' + name;
         } catch (err) {
             status.textContent = 'アップロード失敗: ' + err.message;
@@ -1341,6 +1458,22 @@ function bindEvents() {
         document.getElementById('light-props').style.display = 'none';
         renderWorldObjectList();
     });
+
+    const pdfPrevBtn = document.getElementById('we-pdf-prev');
+    const pdfNextBtn = document.getElementById('we-pdf-next');
+    if (pdfPrevBtn) {
+        pdfPrevBtn.addEventListener('click', async () => {
+            if (!previewPdfDoc || previewCurrentPage <= 1) return;
+            await renderPdfPreviewPage(previewCurrentPage - 1);
+        });
+    }
+    if (pdfNextBtn) {
+        pdfNextBtn.addEventListener('click', async () => {
+            if (!previewPdfDoc) return;
+            if (previewCurrentPage >= previewPdfDoc.numPages) return;
+            await renderPdfPreviewPage(previewCurrentPage + 1);
+        });
+    }
 
     // Transform mode
     const modeTranslate = document.createElement('button');

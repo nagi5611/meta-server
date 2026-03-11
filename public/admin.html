@@ -386,6 +386,18 @@
                                     <h2 class="section-title">PDF一覧</h2>
                                     <div class="model-list" id="pdf-list"></div>
                                     <button type="button" id="btn-add-pdf">PDFを追加</button>
+                                    <div class="pdf-preview-wrap">
+                                        <h3 class="section-subtitle">PDFプレビュー</h3>
+                                        <canvas id="we-pdf-canvas"></canvas>
+                                        <div class="pdf-preview-controls">
+                                            <button type="button" id="we-pdf-prev">前のページ</button>
+                                            <span class="pdf-preview-page-info">
+                                                <span id="we-pdf-page-num">-</span> / <span id="we-pdf-page-count">-</span> ページ
+                                            </span>
+                                            <button type="button" id="we-pdf-next">次のページ</button>
+                                        </div>
+                                        <div id="we-pdf-preview-status" class="status-text"></div>
+                                    </div>
                                 </section>
                             </div>
                             <div id="we-cat-file" class="we-category-pane">
