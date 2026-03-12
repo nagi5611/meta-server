@@ -1193,7 +1193,8 @@ io.on('connection', (socket) => {
         rotation: { x: 0, y: 0, z: 0 }, // Euler angles
         quaternion: { x: 0, y: 0, z: 0, w: 1 },
         world: currentRoom,
-        timestamp: 0 // Will be updated on first player-update
+        timestamp: 0, // Will be updated on first player-update
+        adminInvisible: false
     };
     roomState.players.set(socket.id, initialPlayerState);
 
@@ -1302,6 +1303,9 @@ io.on('connection', (socket) => {
         if (data.quaternion) {
             player.quaternion = data.quaternion;
         }
+        if (data.adminInvisible !== undefined) {
+            player.adminInvisible = !!data.adminInvisible;
+        }
         player.timestamp = incomingTimestamp;
         player.world = currentRoom;
     });
@@ -1359,7 +1363,8 @@ io.on('connection', (socket) => {
             rotation: { x: 0, y: 0, z: 0 },
             quaternion: { x: 0, y: 0, z: 0, w: 1 },
             world: newRoom,
-            timestamp: 0
+            timestamp: 0,
+            adminInvisible: !!(oldPlayerState && oldPlayerState.adminInvisible)
         };
         newRoomState.players.set(socket.id, playerState);
 
@@ -2408,6 +2413,7 @@ setInterval(() => {
                 rotation: player.rotation,
                 quaternion: player.quaternion,
                 world: player.world,
+                adminInvisible: !!player.adminInvisible,
                 vcMicOn,
                 vcSpeakerOn,
                 vcVideoOn,
@@ -2899,7 +2905,8 @@ app.post('/admin/command', async (req, res) => {
                     rotation: { x: 0, y: 0, z: 0 },
                     quaternion: { x: 0, y: 0, z: 0, w: 1 },
                     world: newRoom,
-                    timestamp: 0
+                    timestamp: 0,
+                    adminInvisible: !!(oldPlayer && oldPlayer.adminInvisible)
                 };
                 newRoomState.players.set(targetSocketId, playerState);
                 io.to(newRoom).emit('player-joined', playerState);

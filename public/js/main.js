@@ -283,6 +283,9 @@ class MetaverseApp {
                     if (this.playerManager) {
                         this.playerManager.setLocalPlayerVisible(!enabled);
                     }
+                    if (this.networkManager) {
+                        this.networkManager.setAdminInvisible(enabled);
+                    }
                 },
                 onFlyChange: (enabled) => {
                     if (this.characterController) {

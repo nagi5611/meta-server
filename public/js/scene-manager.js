@@ -268,7 +268,10 @@ class SceneManager {
                 const loadingTask = pdfjsLib.getDocument(url);
                 const pdf = await loadingTask.promise;
                 const page = await pdf.getPage(1);
-                const scaleRatio = 2;
+                // 720p相当に制限してテクスチャを軽くする（最長辺 1280px）
+                const baseViewport = page.getViewport({ scale: 1 });
+                const maxDim = 1280;
+                const scaleRatio = Math.min(2, maxDim / Math.max(baseViewport.width, baseViewport.height));
                 const viewport = page.getViewport({ scale: scaleRatio });
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');

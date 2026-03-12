@@ -11,6 +11,8 @@ class NetworkManager {
         this.disconnectCheckInterval = null;
         this.currentWorld = 'lobby'; // Track current world
         this.username = localStorage.getItem('username') || 'Guest';
+        /** 管理者の透明化状態。他プレイヤーに送り、相手側で非表示にする */
+        this.adminInvisible = false;
         /** @type {{ id: string, username: string, position: {x,y,z}, vcMicOn: boolean, vcSpeakerOn?: boolean, pingMs?: number|null }[]} */
         this.lastPlayersSnapshot = [];
 
@@ -66,6 +68,7 @@ class NetworkManager {
                     try {
                         const name = player.displayName || player.username;
                         await this.playerManager.createRemotePlayer(player.id, player.position, name);
+                        this.playerManager.setRemotePlayerVisible(player.id, !player.adminInvisible);
                     } catch (error) {
                         console.error(`Failed to create remote player ${player.id}:`, error);
                     }
@@ -85,6 +88,7 @@ class NetworkManager {
                 try {
                     const name = player.displayName || player.username;
                     await this.playerManager.createRemotePlayer(player.id, player.position, name);
+                    this.playerManager.setRemotePlayerVisible(player.id, !player.adminInvisible);
                     this.updatePlayerCount();
                 } catch (error) {
                     console.error(`Failed to create joining player ${player.id}:`, error);
@@ -152,6 +156,7 @@ class NetworkManager {
                                 name
                             );
                         }
+                        this.playerManager.setRemotePlayerVisible(player.id, !player.adminInvisible);
                     } else {
                         // Hide players in different worlds
                         this.playerManager.removeRemotePlayer(player.id);
@@ -240,11 +245,20 @@ class NetworkManager {
                     w: rotation.w
                 },
                 timestamp: Date.now(), // Add timestamp for server validation
-                world: this.currentWorld
+                world: this.currentWorld,
+                adminInvisible: this.adminInvisible
             };
 
             this.socket.emit('player-update', updateData);
         }, 33); // 33ms = ~30fps
+    }
+
+    /**
+     * 管理者の透明化状態を設定。他プレイヤーには players-update で送られ、相手側で非表示になる。
+     * @param {boolean} invisible
+     */
+    setAdminInvisible(invisible) {
+        this.adminInvisible = !!invisible;
     }
 
     stopSendingUpdates() {

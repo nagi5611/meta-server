@@ -511,7 +511,10 @@ export default class PdfViewerManager {
     async renderPage(pageNum) {
         if (!this.pdfDoc || !this.canvas) return;
         const page = await this.pdfDoc.getPage(pageNum);
-        const scale = 2;
+        // 720p相当に制限して軽くする（最長辺 1280px）
+        const baseViewport = page.getViewport({ scale: 1 });
+        const maxDim = 1280;
+        const scale = Math.min(2, maxDim / Math.max(baseViewport.width, baseViewport.height));
         const viewport = page.getViewport({ scale });
         this.canvas.width = Math.floor(viewport.width);
         this.canvas.height = Math.floor(viewport.height);

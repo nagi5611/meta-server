@@ -150,6 +150,17 @@ class PlayerManager {
         this.localPlayer.visible = !!visible;
     }
 
+    /**
+     * 他プレイヤー（リモート）の表示/非表示を切り替える（ネームタグ含む）。管理者の透明化で使用。
+     * @param {string} playerId
+     * @param {boolean} visible
+     */
+    setRemotePlayerVisible(playerId, visible) {
+        const player = this.remotePlayers.get(playerId);
+        if (!player) return;
+        player.visible = !!visible;
+    }
+
     async createRemotePlayer(playerId, position = { x: 0, y: 2, z: 0 }, username = null) {
         console.log(`Creating remote player: ${playerId}`);
         

@@ -30,6 +30,14 @@ class PhysicsManager {
         this.upVector = new THREE.Vector3(0, 1, 0);
         /** Cached feet position (bottom of capsule) for getCharacterPosition */
         this._feetPosition = new THREE.Vector3();
+
+        /** 壁貫通ロールバック検出: 直近3秒間のロールバック時刻（ms） */
+        this._rollbackTimestamps = [];
+        /** 3秒間にこの回数以上ロールバックしたら初期位置へTP */
+        this.ROLLBACK_TP_THRESHOLD = 20;
+        this.ROLLBACK_WINDOW_MS = 3000;
+        /** この長さ以上の位置補正だけをロールバックとみなす（m）。小さい補正は通常の壁/床接触 */
+        this.ROLLBACK_MIN_OFFSET = 0.08;
     }
 
     async init() {
@@ -125,6 +133,21 @@ class PhysicsManager {
         // Apply position adjustment
         this.playerPosition.add(deltaVector);
 
+        // 壁貫通ロールバック: 補正が十分大きいときだけカウントし、3秒間に20回以上なら初期位置へTP
+        if (offset >= this.ROLLBACK_MIN_OFFSET) {
+            const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            this._rollbackTimestamps.push(now);
+            const cutoff = now - this.ROLLBACK_WINDOW_MS;
+            while (this._rollbackTimestamps.length > 0 && this._rollbackTimestamps[0] < cutoff) {
+                this._rollbackTimestamps.shift();
+            }
+            if (this._rollbackTimestamps.length >= this.ROLLBACK_TP_THRESHOLD) {
+                this._rollbackTimestamps.length = 0;
+                this.reset();
+                return;
+            }
+        }
+
         if (!this.playerIsOnGround) {
             deltaVector.normalize();
             this.playerVelocity.addScaledVector(deltaVector, -deltaVector.dot(this.playerVelocity));
@@ -173,6 +196,7 @@ class PhysicsManager {
     }
 
     reset() {
+        this._rollbackTimestamps.length = 0;
         if (typeof this.getSpawnPoint === 'function') {
             const spawn = this.getSpawnPoint();
             if (spawn && typeof spawn.x === 'number' && typeof spawn.y === 'number' && typeof spawn.z === 'number') {
