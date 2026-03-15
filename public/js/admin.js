@@ -18,7 +18,7 @@ let chartPanelInitialized = false;
 let selectedChartId = null;
 /** 譜面一覧のキャッシュ（renderChartList/selectChart で参照） */
 let cachedCharts = {};
-/** 編集中のノーツ配列（{ time, type }[]）。譜面編集エリアと同期 */
+/** 編集中のノーツ配列（{ time, type }[] または { type:'roll', startTime, endTime }[]）。譜面編集エリアと同期 */
 let editingNotes = [];
 /** 譜面編集エリアで選択中のノーツ索引。-1 は未選択 */
 let selectedNoteIndex = -1;
@@ -177,7 +177,17 @@ function loadChartIntoEditor(chart) {
     if (difficultyEl) difficultyEl.value = chart.difficulty != null ? String(chart.difficulty) : '';
     if (tempoEl) tempoEl.value = chart.tempo != null ? String(chart.tempo) : '';
     if (endTimeEl) endTimeEl.value = chart.endTime != null ? String(chart.endTime) : '';
-    editingNotes = Array.isArray(chart.notes) ? chart.notes.slice() : [];
+    let notes = Array.isArray(chart.notes) ? chart.notes.slice() : [];
+    notes = notes.flatMap((n) => {
+        if (n.type === 'roll' && n.startTime != null && n.endTime != null) {
+            return [
+                { type: 'roll-start', time: n.startTime },
+                { type: 'roll-end', time: n.endTime }
+            ];
+        }
+        return [n];
+    });
+    editingNotes = notes;
     selectedNoteIndex = -1;
     renderNotesStrip();
     if (btnSave) btnSave.disabled = false;
@@ -203,6 +213,59 @@ function clearChartEditor() {
 }
 
 /**
+ * 編集ノーツから連打区間 [{start, end}, ...] を算出
+ */
+function getRollSections() {
+    const sorted = [...editingNotes].sort((a, b) => {
+        const ta = a.type === 'roll' ? a.startTime : a.time;
+        const tb = b.type === 'roll' ? b.startTime : b.time;
+        return (ta ?? 0) - (tb ?? 0);
+    });
+    const sections = [];
+    const starts = [];
+    for (const n of sorted) {
+        if (n.type === 'roll') {
+            const s = n.startTime ?? 0;
+            const e = n.endTime ?? n.startTime ?? 0;
+            if (e > s) sections.push({ start: s, end: e });
+        } else if (n.type === 'roll-start') {
+            starts.push(n.time);
+        } else if (n.type === 'roll-end' && starts.length > 0) {
+            const start = starts.shift();
+            if (n.time > start) sections.push({ start, end: n.time });
+        }
+    }
+    return sections;
+}
+
+/**
+ * 指定時間が連打区間内か
+ */
+function isTimeInRollSection(time) {
+    return getRollSections().some((s) => time >= s.start && time <= s.end);
+}
+
+/**
+ * 連打終了ノーツのみ表示すべきか（roll-start が未ペアで残っている）
+ */
+function needsRollEndOnly() {
+    const starts = editingNotes.filter((n) => n.type === 'roll-start').length;
+    const ends = editingNotes.filter((n) => n.type === 'roll-end').length;
+    return starts > ends;
+}
+
+/**
+ * メニューパレットの表示を更新（roll-end-only / over-roll-zone）
+ */
+function updateChartPalette(overRollZone = false) {
+    const panel = document.getElementById('panel-chart');
+    if (!panel) return;
+    const rollEndOnly = needsRollEndOnly();
+    panel.dataset.rollEndOnly = rollEndOnly ? 'true' : 'false';
+    panel.dataset.overRollZone = overRollZone ? 'true' : 'false';
+}
+
+/**
  * テンポ入力から BPM を取得する（未入力時は 120）
  */
 function getChartTempo() {
@@ -223,7 +286,8 @@ function renderNotesStrip() {
 
     const bpm = getChartTempo();
     const beatSec = 60 / bpm;
-    const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map((n) => n.time)) : 0;
+    const getNoteMaxTime = (n) => n.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n.time ?? 0);
+    const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
     const timeRange = Math.max(CHART_TIME_RANGE_DEFAULT, maxNoteTime + 10);
     const widthPx = timeRange * chartPixelsPerSecond;
     inner.style.width = widthPx + 'px';
@@ -239,23 +303,81 @@ function renderNotesStrip() {
         ruler.appendChild(span);
     }
 
-    editingNotes.sort((a, b) => a.time - b.time);
+    editingNotes.sort((a, b) => {
+        const ta = a.type === 'roll' ? a.startTime : a.time;
+        const tb = b.type === 'roll' ? b.startTime : b.time;
+        return ta - tb;
+    });
     strip.innerHTML = '';
+    const rollPairs = [];
+    const starts = [];
+    const sorted = [...editingNotes].sort((a, b) => {
+        const ta = a.type === 'roll' ? a.startTime : a.time;
+        const tb = b.type === 'roll' ? b.startTime : b.time;
+        return ta - tb;
+    });
+    for (const n of sorted) {
+        if (n.type === 'roll-start') starts.push(n.time);
+        else if (n.type === 'roll-end' && starts.length > 0) rollPairs.push({ start: starts.shift(), end: n.time });
+    }
+    rollPairs.forEach((pair) => {
+        const bar = document.createElement('span');
+        bar.className = 'note-roll-bar';
+        bar.textContent = '連打';
+        const startPx = pair.start * chartPixelsPerSecond;
+        const widthPx = Math.max(20, (pair.end - pair.start) * chartPixelsPerSecond);
+        bar.style.left = startPx + 'px';
+        bar.style.width = widthPx + 'px';
+        bar.style.pointerEvents = 'none';
+        strip.appendChild(bar);
+    });
     editingNotes.forEach((note, i) => {
-        const span = document.createElement('span');
-        span.className = 'note-circle note-' + (note.type === 'ka' ? 'ka' : 'don') + (i === selectedNoteIndex ? ' selected' : '');
-        span.textContent = note.type === 'ka' ? 'カ' : 'ドン';
-        span.style.left = (note.time * chartPixelsPerSecond) + 'px';
-        span.dataset.index = String(i);
-        span.addEventListener('mousedown', (e) => {
-            e.stopPropagation();
-            noteDragIndex = i;
-            noteDragStartX = e.clientX;
-            noteDragStarted = false;
-        });
-        strip.appendChild(span);
+        if (note.type === 'roll') {
+            const bar = document.createElement('span');
+            bar.className = 'note-roll-bar' + (i === selectedNoteIndex ? ' selected' : '');
+            bar.textContent = '連打';
+            const startPx = (note.startTime ?? 0) * chartPixelsPerSecond;
+            const widthPx = Math.max(20, ((note.endTime ?? note.startTime ?? 0) - (note.startTime ?? 0)) * chartPixelsPerSecond);
+            bar.style.left = startPx + 'px';
+            bar.style.width = widthPx + 'px';
+            bar.dataset.index = String(i);
+            bar.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                noteDragIndex = i;
+                noteDragStartX = e.clientX;
+                noteDragStarted = false;
+            });
+            strip.appendChild(bar);
+        } else if (note.type === 'roll-start' || note.type === 'roll-end') {
+            const span = document.createElement('span');
+            span.className = 'note-circle note-' + (note.type === 'roll-start' ? 'roll-start' : 'roll-end') + (i === selectedNoteIndex ? ' selected' : '');
+            span.textContent = note.type === 'roll-start' ? '始' : '終';
+            span.style.left = (note.time * chartPixelsPerSecond) + 'px';
+            span.dataset.index = String(i);
+            span.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                noteDragIndex = i;
+                noteDragStartX = e.clientX;
+                noteDragStarted = false;
+            });
+            strip.appendChild(span);
+        } else {
+            const span = document.createElement('span');
+            span.className = 'note-circle note-' + (note.type === 'ka' ? 'ka' : 'don') + (i === selectedNoteIndex ? ' selected' : '');
+            span.textContent = note.type === 'ka' ? 'カ' : 'ドン';
+            span.style.left = (note.time * chartPixelsPerSecond) + 'px';
+            span.dataset.index = String(i);
+            span.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                noteDragIndex = i;
+                noteDragStartX = e.clientX;
+                noteDragStarted = false;
+            });
+            strip.appendChild(span);
+        }
     });
     if (btnRemove) btnRemove.disabled = selectedNoteIndex < 0;
+    updateChartPalette(false);
 }
 
 /**
@@ -342,12 +464,27 @@ function bindChartPanelEvents() {
         });
     }
 
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+        const chartPanel = document.getElementById('panel-chart');
+        if (!chartPanel || !chartPanel.classList.contains('active')) return;
+        if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+        if (selectedNoteIndex < 0 || selectedNoteIndex >= editingNotes.length) return;
+        e.preventDefault();
+        editingNotes.splice(selectedNoteIndex, 1);
+        selectedNoteIndex = -1;
+        renderNotesStrip();
+    });
+
     const scrollEl = document.getElementById('chart-notes-scroll');
     const strip = document.getElementById('chart-notes-strip');
     const paletteDon = document.querySelector('.note-palette-item.note-don');
     const paletteKa = document.querySelector('.note-palette-item.note-ka');
-    if (scrollEl && strip && paletteDon && paletteKa) {
-        [paletteDon, paletteKa].forEach((el) => {
+    const paletteRollStart = document.querySelector('.note-palette-item.note-roll-start');
+    const paletteRollEnd = document.querySelector('.note-palette-item.note-roll-end');
+    const paletteItems = [paletteDon, paletteKa, paletteRollStart, paletteRollEnd].filter(Boolean);
+    if (scrollEl && strip && paletteItems.length > 0) {
+        paletteItems.forEach((el) => {
             el.addEventListener('dragstart', (e) => {
                 e.dataTransfer.setData('text/plain', el.dataset.noteType || 'don');
                 e.dataTransfer.effectAllowed = 'copy';
@@ -357,33 +494,58 @@ function bindChartPanelEvents() {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
             scrollEl.classList.add('drag-over');
+            const innerEl = document.getElementById('chart-notes-inner');
+            const rect = innerEl ? innerEl.getBoundingClientRect() : null;
+            const dropX = rect ? (e.clientX - rect.left + scrollEl.scrollLeft) : 0;
+            const time = Math.max(0, dropX / chartPixelsPerSecond);
+            updateChartPalette(isTimeInRollSection(time));
         });
         scrollEl.addEventListener('dragleave', (e) => {
-            if (!scrollEl.contains(e.relatedTarget)) scrollEl.classList.remove('drag-over');
+            if (!scrollEl.contains(e.relatedTarget)) {
+                scrollEl.classList.remove('drag-over');
+                updateChartPalette(false);
+            }
         });
         scrollEl.addEventListener('drop', (e) => {
             e.preventDefault();
             scrollEl.classList.remove('drag-over');
+            updateChartPalette(false);
             const type = (e.dataTransfer.getData('text/plain') || 'don').trim();
-            const t = type === 'ka' ? 'ka' : 'don';
             const innerEl = document.getElementById('chart-notes-inner');
-            const bpm = getChartTempo();
-            const beatSec = 60 / bpm;
-            const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map((n) => n.time)) : 0;
+            const getNoteMaxTime = (n) => {
+                if (n.type === 'roll') return n.endTime ?? n.startTime ?? 0;
+                return n.time ?? 0;
+            };
+            const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
             const timeRange = Math.max(CHART_TIME_RANGE_DEFAULT, maxNoteTime + 10);
             const rect = innerEl ? innerEl.getBoundingClientRect() : null;
             const dropX = rect ? (e.clientX - rect.left + scrollEl.scrollLeft) : 0;
             const time = Math.max(0, Math.min(timeRange, dropX / chartPixelsPerSecond));
-            editingNotes.push({ time, type: t });
-            editingNotes.sort((a, b) => a.time - b.time);
+            if (type === 'roll-start' || type === 'roll-end') {
+                editingNotes.push({ type, time });
+            } else if (type === 'ka' || type === 'don') {
+                if (isTimeInRollSection(time)) {
+                    if (statusEl) statusEl.textContent = '連打区間内にはドン・カを設置できません';
+                    return;
+                }
+                editingNotes.push({ time, type });
+            } else {
+                return;
+            }
+            editingNotes.sort((a, b) => {
+                const ta = a.type === 'roll' ? a.startTime : a.time;
+                const tb = b.type === 'roll' ? b.startTime : b.time;
+                return ta - tb;
+            });
             selectedNoteIndex = -1;
             renderNotesStrip();
+            if (statusEl && (type === 'roll-start' || type === 'roll-end')) statusEl.textContent = '';
         });
         let panStartX = null;
         let panStartScroll = null;
         scrollEl.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
-            if (e.target.closest('.note-circle')) return;
+            if (e.target.closest('.note-circle') || e.target.closest('.note-roll-bar')) return;
             panStartX = e.clientX;
             panStartScroll = scrollEl.scrollLeft;
         });
@@ -393,10 +555,20 @@ function bindChartPanelEvents() {
                 if (noteDragStarted) {
                     const rect = scrollEl.getBoundingClientRect();
                     const contentX = scrollEl.scrollLeft + (e.clientX - rect.left);
-                    const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map((n) => n.time)) : 0;
+                    const getNoteMaxTime = (n) => n.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n.time ?? 0);
+                    const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
                     const timeRange = Math.max(CHART_TIME_RANGE_DEFAULT, maxNoteTime + 10);
                     const time = Math.max(0, Math.min(timeRange, contentX / chartPixelsPerSecond));
-                    editingNotes[noteDragIndex].time = time;
+                    const note = editingNotes[noteDragIndex];
+                    if (note.type === 'roll') {
+                        const duration = (note.endTime ?? note.startTime ?? 0) - (note.startTime ?? 0);
+                        note.startTime = time;
+                        note.endTime = time + duration;
+                    } else if (note.type === 'roll-start' || note.type === 'roll-end') {
+                        note.time = time;
+                    } else {
+                        note.time = time;
+                    }
                     renderNotesStrip();
                 }
                 return;
@@ -408,7 +580,11 @@ function bindChartPanelEvents() {
             if (noteDragIndex >= 0) {
                 if (noteDragStarted) {
                     const draggedNote = editingNotes[noteDragIndex];
-                    editingNotes.sort((a, b) => a.time - b.time);
+                    editingNotes.sort((a, b) => {
+                        const ta = a.type === 'roll' ? a.startTime : a.time;
+                        const tb = b.type === 'roll' ? b.startTime : b.time;
+                        return ta - tb;
+                    });
                     selectedNoteIndex = editingNotes.indexOf(draggedNote);
                 } else {
                     selectedNoteIndex = selectedNoteIndex === noteDragIndex ? -1 : noteDragIndex;

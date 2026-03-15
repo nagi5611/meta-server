@@ -595,6 +595,7 @@ class MetaverseApp {
         }
 
         // Always update animations and render (even when hidden for smooth transition)
+        this.sceneManager.update(deltaTime);
         this.sceneManager.updateAnimations();
         if (this.playerManager) this.playerManager.updateAnimations(deltaTime);
 

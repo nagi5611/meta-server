@@ -177,6 +177,7 @@
         }
       }
     ],
+    "vdbs": [],
     "floorEnabled": false
   },
   "school": {
@@ -249,6 +250,7 @@
       }
     ],
     "pdfs": [],
+    "vdbs": [],
     "floorEnabled": true
   }
 }

@@ -83,6 +83,7 @@ class WorldManager {
         // Load world models
         await this.sceneManager.loadWorldModels(world.models, async () => {
             await this.sceneManager.loadWorldPdfs(world.pdfs || []);
+            await this.sceneManager.loadWorldVdbs(world.vdbs || []);
             console.log(`World loaded: ${worldId}`);
 
             // Call completion callback

@@ -1,6 +1,18 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshBVH, StaticGeometryGenerator } from 'three-mesh-bvh';
+import * as OpenVDB from 'openvdb/three';
+
+// Filter a noisy warning from openvdb internals on three r160
+if (!console.__vdbWarnFiltered) {
+    const origWarn = console.warn.bind(console);
+    console.warn = (...args) => {
+        const msg = args && args[0] ? String(args[0]) : '';
+        if (msg.includes("THREE.Material: '_uniforms' is not a property of THREE.MeshBasicMaterial")) return;
+        origWarn(...args);
+    };
+    console.__vdbWarnFiltered = true;
+}
 
 class SceneManager {
     constructor() {
@@ -15,6 +27,10 @@ class SceneManager {
         this.taikos = []; // Track taiko drum models
         /** Lights added for current world (removed on clearWorld) */
         this.worldLights = [];
+        /** VDB volume instances for smoke playback (cleared on clearWorld) */
+        this.vdbInstances = [];
+        /** FPS for VDB frame advance (time-based) */
+        this.vdbFps = 24;
         /** Ground mesh (first child of environmentGroup). Visibility controlled by setFloorVisible. */
         this.groundMesh = null;
         /** Grid helper. Visibility controlled by setFloorVisible. */
@@ -25,6 +41,92 @@ class SceneManager {
             shadowQuality: 'low',
             fogFar: 800,
             pixelRatioCap: 1
+        };
+    }
+
+    /**
+     * Pick a single grid from OpenVDBReader to use as density.
+     * density / Density / smoke / Smoke / fog / Fog の順で優先し、無ければ最初のグリッドを返す。
+     */
+    _pickDensityGrid(vdb) {
+        if (!vdb || !vdb.grids) return vdb;
+        const keys = Object.keys(vdb.grids);
+        if (!keys.length) return vdb;
+        console.log('VDB grids:', keys);
+        const preferred = ['density', 'Density', 'smoke', 'Smoke', 'fog', 'Fog'];
+        for (const name of preferred) {
+            if (vdb.grids[name]) {
+                console.log('Using VDB grid:', name);
+                return vdb.grids[name];
+            }
+        }
+        console.log('Using first VDB grid:', keys[0]);
+        return vdb.grids[keys[0]];
+    }
+
+    /**
+     * Sample grid valuesおおよその min/max を見る（開発用）。
+     * グリッドのローカル空間を -0.5〜0.5 でざっくりサンプリングする。
+     */
+    _sampleGridStats(grid, sampleCount = 64) {
+        if (!grid || typeof grid.getValue !== 'function') {
+            return null;
+        }
+        const samples = [];
+        for (let i = 0; i < sampleCount; i++) {
+            const x = Math.random() - 0.5;
+            const y = Math.random() - 0.5;
+            const z = Math.random() - 0.5;
+            try {
+                const v = grid.getValue({ x, y, z });
+                if (Number.isFinite(v)) samples.push(v);
+            } catch (_) {
+                // サンプリングできない座標は無視
+            }
+        }
+        if (!samples.length) return null;
+        const min = Math.min(...samples);
+        const max = Math.max(...samples);
+        console.log('VDB grid sample stats:', { min, max });
+        return { min, max };
+    }
+
+    /**
+     * サンプル統計から FogVolume 用の densityScale / densityCutoff をざっくり決める。
+     * （ヒューリスティックなので、必要なら具体的なVDBに合わせて微調整する）
+     */
+    _createFogOptionsFromStats(stats) {
+        const base = {
+            resolution: 50,
+            progressive: false,
+            steps: 30,
+            absorbance: 0.6,
+            opacity: 0.25,
+            baseColor: 0xdddddd,
+            lights: OpenVDB.lights?.useDirectionalLights ?? 0,
+            densityScale: 0.6,
+            densityCutoff: 0.06
+        };
+        if (!stats) return base;
+
+        const { min, max } = stats;
+        const hasNegative = min < 0;
+        const absMax = Math.max(Math.abs(min), Math.abs(max), 1e-3);
+
+        if (!hasNegative) {
+            // 純粋な密度グリッド（0〜max想定）
+            return {
+                ...base,
+                densityScale: 1 / absMax,
+                densityCutoff: absMax * 0.05
+            };
+        }
+
+        // SDF っぽい場合：0 付近だけを煙として可視化
+        return {
+            ...base,
+            densityScale: 1 / absMax,
+            densityCutoff: 0.1
         };
     }
 
@@ -332,6 +434,145 @@ class SceneManager {
     }
 
     /**
+     * Dispose a FogVolume or Group (traverse and dispose geometry/material). Safe if obj has no dispose.
+     * @param {THREE.Object3D} obj
+     */
+    _disposeVdbVolume(obj) {
+        if (!obj) return;
+        if (typeof obj.dispose === 'function') {
+            obj.dispose();
+            return;
+        }
+        obj.traverse((o) => {
+            if (o.geometry) {
+                o.geometry.dispose();
+                o.geometry = null;
+            }
+            if (o.material) {
+                if (Array.isArray(o.material)) {
+                    o.material.forEach((m) => m.dispose());
+                } else {
+                    o.material.dispose();
+                }
+                o.material = null;
+            }
+        });
+    }
+
+    /**
+     * Load VDB volumetric sequences (e.g. smoke). Each config: { framePaths: string[], position?, rotation?, scale? }.
+     * Frame count = framePaths.length; playback loops from last frame to 0. Updates via update(deltaTime).
+     * @param {Array<Object>} [vdbConfigs]
+     */
+    async loadWorldVdbs(vdbConfigs) {
+        if (!vdbConfigs || vdbConfigs.length === 0) return;
+        const loader = new OpenVDB.VDBLoader();
+        const defaultPosition = { x: 0, y: 2, z: -5 };
+        const defaultRotation = { x: 0, y: 0, z: 0 };
+        const defaultScale = { x: 2, y: 2, z: 2 };
+
+        for (const config of vdbConfigs) {
+            const framePaths = config.framePaths && config.framePaths.length > 0 ? config.framePaths : [];
+            if (framePaths.length === 0) continue;
+
+            const position = config.position || defaultPosition;
+            const rotation = config.rotation || defaultRotation;
+            const scale = config.scale || defaultScale;
+
+            const container = new THREE.Group();
+            container.position.set(position.x, position.y, position.z);
+            container.rotation.set(
+                rotation.x * Math.PI / 180,
+                rotation.y * Math.PI / 180,
+                rotation.z * Math.PI / 180
+            );
+            container.scale.set(scale.x, scale.y, scale.z);
+
+            const instance = {
+                config,
+                framePaths,
+                elapsed: 0,
+                lastFrameIndex: -1,
+                container,
+                currentFogVolume: null,
+                loading: false
+            };
+            this.vdbInstances.push(instance);
+            this.environmentGroup.add(container);
+
+            const url = framePaths[0].startsWith('/') ? framePaths[0] : '/' + framePaths[0];
+            instance.loading = true;
+            loader.load(
+                url,
+                (vdb) => {
+                    const grid = this._pickDensityGrid(vdb);
+                    const stats = this._sampleGridStats(grid);
+                    const fogOptions = this._createFogOptionsFromStats(stats);
+                    const fogVolume = new OpenVDB.FogVolume(grid, fogOptions);
+                    if (instance.currentFogVolume) {
+                        this.environmentGroup.remove(instance.currentFogVolume);
+                        this._disposeVdbVolume(instance.currentFogVolume);
+                    }
+                    instance.currentFogVolume = fogVolume;
+                    container.add(fogVolume);
+                    instance.lastFrameIndex = 0;
+                    instance.loading = false;
+                },
+                undefined,
+                (err) => {
+                    console.error('VDB load failed:', framePaths[0], err);
+                    instance.loading = false;
+                }
+            );
+        }
+        console.log(`Loading ${vdbConfigs.length} VDB sequence(s)`);
+    }
+
+    /**
+     * Update VDB playback (call from game loop with deltaTime). Advances frame by time and loops at end.
+     * @param {number} deltaTime - Seconds since last frame
+     */
+    update(deltaTime) {
+        if (!deltaTime || this.vdbInstances.length === 0) return;
+        const loader = new OpenVDB.VDBLoader();
+
+        this.vdbInstances.forEach((instance) => {
+            if (instance.loading || instance.framePaths.length <= 1) return;
+            instance.elapsed += deltaTime;
+            const frameCount = instance.framePaths.length;
+            const frameIndex = Math.floor(instance.elapsed * this.vdbFps) % frameCount;
+
+            if (frameIndex === instance.lastFrameIndex) return;
+
+            const path = instance.framePaths[frameIndex];
+            const url = path.startsWith('/') ? path : '/' + path;
+            instance.loading = true;
+            loader.load(
+                url,
+                (vdb) => {
+                    const grid = this._pickDensityGrid(vdb);
+                    const stats = this._sampleGridStats(grid);
+                    const fogOptions = this._createFogOptionsFromStats(stats);
+                    const fogVolume = new OpenVDB.FogVolume(grid, fogOptions);
+                    if (instance.currentFogVolume) {
+                        instance.container.remove(instance.currentFogVolume);
+                        this._disposeVdbVolume(instance.currentFogVolume);
+                    }
+                    instance.currentFogVolume = fogVolume;
+                    instance.container.add(fogVolume);
+                    instance.lastFrameIndex = frameIndex;
+                    instance.loading = false;
+                },
+                undefined,
+                (err) => {
+                    console.warn('VDB frame load failed:', path, err);
+                    instance.loading = false;
+                }
+            );
+        });
+    }
+
+    /**
      * Add a single placeholder plane when PDF load fails.
      * @param {object} [teleporterConfig] - Optional. If set, this PDF acts as a teleporter (same shape as config.teleporter).
      */
@@ -622,6 +863,13 @@ class SceneManager {
         console.log('Clearing current world...');
 
         this.clearWorldLights();
+
+        // Remove and dispose VDB volume instances
+        this.vdbInstances.forEach((instance) => {
+            this.environmentGroup.remove(instance.container);
+            this._disposeVdbVolume(instance.currentFogVolume);
+        });
+        this.vdbInstances = [];
 
         // Remove all children from environment group except ground plane
         const ground = this.environmentGroup.children[0]; // Ground is first child

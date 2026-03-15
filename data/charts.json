@@ -34,18 +34,27 @@
     ],
     "difficulty": "2",
     "tempo": 120,
-    "endTime": 600
+    "endTime": 8
   },
   "asdasdasdada": {
     "id": "asdasdasdada",
     "name": "a16",
     "notes": [
       {
-        "time": 2.598307073921994,
+        "time": 1.1033330281575522,
         "type": "don"
+      },
+      {
+        "type": "roll-start",
+        "time": 1.9100001017252604
+      },
+      {
+        "type": "roll-end",
+        "time": 2.5866663614908854
       }
     ],
     "difficulty": "1",
-    "tempo": 120
+    "tempo": 120,
+    "endTime": null
   }
 }

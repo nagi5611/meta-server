@@ -593,6 +593,18 @@ body {
     background: #2196f3;
 }
 
+.chart-panel .note-circle.note-roll-start {
+    background: #fff9c4;
+    border-color: #f9a825;
+    color: #f57f17;
+}
+
+.chart-panel .note-circle.note-roll-end {
+    background: #ffe082;
+    border-color: #ffb74d;
+    color: #f57f17;
+}
+
 .chart-panel .note-circle.selected {
     border-color: #333;
     box-shadow: 0 0 0 2px #fff;
@@ -602,6 +614,19 @@ body {
     display: flex;
     gap: 16px;
     flex-wrap: wrap;
+}
+
+/* 連打終了ノーツのみ表示（roll-start 配置後） */
+#panel-chart[data-roll-end-only="true"] .note-palette-item.note-don,
+#panel-chart[data-roll-end-only="true"] .note-palette-item.note-ka,
+#panel-chart[data-roll-end-only="true"] .note-palette-item.note-roll-start {
+    display: none !important;
+}
+
+/* 連打区間上でドン・カを非表示 */
+#panel-chart[data-over-roll-zone="true"] .note-palette-item.note-don,
+#panel-chart[data-over-roll-zone="true"] .note-palette-item.note-ka {
+    display: none !important;
 }
 
 .chart-panel .note-palette-item {
@@ -628,6 +653,45 @@ body {
 
 .chart-panel .note-palette-item.note-ka {
     background: #2196f3;
+}
+
+.chart-panel .note-palette-item.note-roll-start {
+    background: #f9a825;
+    color: #333;
+}
+
+.chart-panel .note-palette-item.note-roll-end {
+    background: #ffb74d;
+    color: #333;
+}
+
+.chart-panel .note-roll-bar {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 36px;
+    min-width: 20px;
+    background: #f9a825;
+    border: 2px solid #f57f17;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    color: #333;
+    cursor: grab;
+    user-select: none;
+    box-sizing: border-box;
+}
+
+.chart-panel .note-roll-bar:active {
+    cursor: grabbing;
+}
+
+.chart-panel .note-roll-bar.selected {
+    border-color: #333;
+    box-shadow: 0 0 0 2px #fff;
 }
 
 .chart-panel .chart-drag-hint {

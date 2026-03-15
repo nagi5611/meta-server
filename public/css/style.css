@@ -2073,6 +2073,8 @@ body {
 /* 成績発表・メタバース統一（白ベース・青アウトライン） */
 .taiko-results {
     position: relative;
+    font-family: "Zen Kaku Gothic New", "Hiragino Sans", "Meiryo", sans-serif;
+    font-weight: 700;
     background: rgba(255, 255, 255, 0.98);
     color: #333;
     border-radius: 12px;
@@ -2096,7 +2098,7 @@ body {
 .taiko-results-banner {
     padding: 8px 20px;
     font-size: 1.25rem;
-    font-weight: 700;
+    font-weight: 900;
     border: 2px solid #0288d1;
     border-radius: 8px;
     white-space: nowrap;
@@ -2140,7 +2142,7 @@ body {
 
 .taiko-results-player-label {
     color: #0288d1;
-    font-weight: 700;
+    font-weight: 900;
     margin-right: 6px;
 }
 
@@ -2162,7 +2164,7 @@ body {
     border-radius: 20px;
     border: 1px solid #0288d1;
     font-size: 0.9rem;
-    font-weight: 700;
+    font-weight: 900;
 }
 
 .taiko-results-center {
@@ -2182,7 +2184,7 @@ body {
 .taiko-results-clear-label {
     font-size: 0.9rem;
     color: #333;
-    font-weight: 700;
+    font-weight: 900;
     flex-shrink: 0;
 }
 
@@ -2203,7 +2205,7 @@ body {
 
 .taiko-results-soul {
     font-size: 1.5rem;
-    font-weight: 700;
+    font-weight: 900;
     color: #0288d1;
 }
 
@@ -2212,36 +2214,46 @@ body {
     align-items: center;
     gap: 20px;
     flex-wrap: wrap;
+    margin-top: 150px;
 }
 
 .taiko-results-score-box {
     background: rgba(2, 136, 209, 0.08);
-    border: 2px solid #0288d1;
+    border: 3px solid #0288d1;
     border-radius: 8px;
-    padding: 12px 24px;
+    padding: 18px 36px;
     display: flex;
     align-items: baseline;
-    gap: 4px;
+    gap: 6px;
 }
 
 .taiko-results-score-value {
-    font-size: 2rem;
-    font-weight: 700;
+    font-size: 3.5rem;
+    font-weight: 900;
     color: #333;
 }
 
 .taiko-results-score-unit {
-    font-size: 1rem;
+    font-size: 1.8rem;
     color: #333;
-    font-weight: 700;
+    font-weight: 900;
+}
+
+.taiko-results-judgments-group {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+    margin-left: 50px;
+    margin-top: -80px;
 }
 
 .taiko-results-judgments {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    font-size: 1rem;
+    gap: 8px;
+    font-size: 1.5rem;
     color: #333;
+    padding: 12px 16px;
 }
 
 .taiko-results-judgments strong {
@@ -2252,9 +2264,10 @@ body {
 .taiko-results-combo-stats {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    font-size: 0.95rem;
+    gap: 8px;
+    font-size: 1.5rem;
     color: #333;
+    padding: 12px 16px;
 }
 
 .taiko-results-combo-stats strong {
@@ -2274,7 +2287,7 @@ body {
 .taiko-results-ranking-title {
     margin: 0 0 8px 0;
     font-size: 1rem;
-    font-weight: 700;
+    font-weight: 900;
     color: #0288d1;
     text-align: center;
 }
@@ -2320,7 +2333,7 @@ body {
     color: #0288d1;
     cursor: pointer;
     font-size: 1rem;
-    font-weight: 600;
+    font-weight: 900;
 }
 
 .taiko-results-close:hover {
@@ -2506,17 +2519,87 @@ body {
     background: #fafafa;
 }
 
-/* 判定ライン（ノーツと同じ 64×64、中央が 60px の位置） */
-.taiko-game-judge-line {
+/* 判定ライン用ラッパー */
+.taiko-judge-wrap {
     position: absolute;
     left: 34px;
     top: 50%;
     transform: translateY(-50%);
     width: 64px;
     height: 64px;
-    object-fit: contain;
     pointer-events: none;
     z-index: 10;
+}
+
+/* 判定ライン（ノーツと同じ 64×64） */
+.taiko-game-judge-line {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    display: block;
+}
+
+/* judge.png 周りの黄色はじけるエフェクト（連打ヒット時） */
+.taiko-judge-burst {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 64px;
+    height: 64px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.taiko-judge-burst .taiko-burst-particle {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    margin-left: -5px;
+    margin-top: -5px;
+    background: #f9a825;
+    border-radius: 50%;
+    box-shadow: 0 0 8px #ffc107, 0 0 16px rgba(249, 168, 37, 0.5);
+    animation: taiko-burst-particle 0.35s ease-out forwards;
+    opacity: 1;
+}
+
+@keyframes taiko-burst-particle {
+    0% {
+        transform: translate(0, 0) scale(1.2);
+        opacity: 1;
+    }
+    100% {
+        transform: var(--burst-offset) scale(0.2);
+        opacity: 0;
+    }
+}
+
+.taiko-judge-burst .taiko-burst-ring {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 64px;
+    height: 64px;
+    margin-left: -32px;
+    margin-top: -32px;
+    border-radius: 50%;
+    border: 3px solid rgba(249, 168, 37, 0.9);
+    box-shadow: 0 0 12px #f9a825, inset 0 0 12px rgba(249, 168, 37, 0.3);
+    animation: taiko-burst-ring 0.35s ease-out forwards;
+}
+
+@keyframes taiko-burst-ring {
+    0% {
+        transform: scale(0.5);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(2.2);
+        opacity: 0;
+    }
 }
 
 /* ノーツが流れるエリア */
@@ -2552,6 +2635,25 @@ body {
     background: #cce8ff;
     border-color: #0055cc;
     color: #0055cc;
+}
+
+.taiko-note.taiko-note-roll {
+    width: auto;
+    min-width: 40px;
+    height: 48px;
+    border-radius: 6px;
+    background: #fff9c4;
+    border-color: #f9a825;
+    color: #f57f17;
+}
+
+@keyframes taiko-roll-hit-effect {
+    0%   { filter: brightness(1.5); box-shadow: 0 0 12px #f9a825; }
+    100% { filter: brightness(1); box-shadow: none; }
+}
+
+.taiko-note.taiko-note-roll.taiko-roll-hit {
+    animation: taiko-roll-hit-effect 0.15s ease-out;
 }
 
 /* ノーツヒット時エフェクト（拡大＋光って消える） */
@@ -2683,6 +2785,7 @@ body {
 .taiko-judge-text.good  { color: #cc6600; }
 .taiko-judge-text.ok    { color: #0055cc; }
 .taiko-judge-text.miss  { color: #888; }
+.taiko-judge-text.roll  { color: #f9a825; font-weight: 900; }
 
 /* PC版: プレイメニューを大きく表示 */
 @media (min-width: 1024px) {

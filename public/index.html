@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Metaverse Simple</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
     <script>
@@ -121,7 +124,10 @@
                     <div class="taiko-score-rate" id="taiko-score-rate">0%</div>
                 </div>
                 <div class="taiko-game-lane">
-                    <img src="images/judge.png" alt="" class="taiko-game-judge-line" width="64" height="64">
+                    <div class="taiko-judge-wrap">
+                        <img src="images/judge.png" alt="" class="taiko-game-judge-line" width="64" height="64">
+                        <div class="taiko-judge-burst" id="taiko-judge-burst" aria-hidden="true"></div>
+                    </div>
                     <div class="taiko-game-notes" id="taiko-notes"></div>
                 </div>
             </div>
@@ -160,14 +166,16 @@
                             <span class="taiko-results-score-value" id="taiko-results-score-value">0</span>
                             <span class="taiko-results-score-unit">点</span>
                         </div>
-                        <div class="taiko-results-judgments">
-                            <span>良 <strong id="taiko-results-good">0</strong></span>
-                            <span>可 <strong id="taiko-results-ok">0</strong></span>
-                            <span>不可 <strong id="taiko-results-miss">0</strong></span>
-                        </div>
-                        <div class="taiko-results-combo-stats">
-                            <span>最大コンボ数 <strong id="taiko-results-max-combo">0</strong></span>
-                            <span>連打数 <strong id="taiko-results-roll">0</strong></span>
+                        <div class="taiko-results-judgments-group">
+                            <div class="taiko-results-judgments">
+                                <span>良 <strong id="taiko-results-good">0</strong></span>
+                                <span>可 <strong id="taiko-results-ok">0</strong></span>
+                                <span>不可 <strong id="taiko-results-miss">0</strong></span>
+                            </div>
+                            <div class="taiko-results-combo-stats">
+                                <span>最大コンボ数 <strong id="taiko-results-max-combo">0</strong></span>
+                                <span>連打数 <strong id="taiko-results-roll">0</strong></span>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -17,9 +17,11 @@ let modelList = [];
 let selectedModelPath = null; // 左パネル「モデル一覧」で選択中のモデル（models/xxx.glb）
 let pdfList = [];
 let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（pdfs/xxx.pdf）
+let vdbList = [];
+let selectedVdbPath = null; // 左パネル「VDB一覧」で選択中のVDB（vdbs/xxx.vdb）
 let lightHelpers = []; // { light, mesh? } for point/spot position drag
 let worldObjectList = []; // 右パネル「オブジェクト一覧」の並び（クリックで選択用）
-let objectListExpanded = { lights: false, models: false, pdfs: false }; // オブジェクト一覧の階層展開状態
+let objectListExpanded = { lights: false, models: false, pdfs: false, vdbs: false }; // オブジェクト一覧の階層展開状態
 let editorGround = null; // 編集プレビュー用の床メッシュ（表示切替用）
 let editorGrid = null;   // 編集プレビュー用のグリッド（表示切替用）
 const pointer = new THREE.Vector2();
@@ -56,6 +58,113 @@ async function ensurePdfJsLoaded() {
         pdfjsLib.GlobalWorkerOptions.workerSrc =
             'https://cdn.jsdelivr.net/npm/@bundled-es-modules/pdfjs-dist/build/pdf.worker.min.js';
     }
+}
+
+// VDB表示用（エディタ側はCDN importでopenvdb/threeを使用）
+let openVdbLib = null;
+let vdbLoader = null;
+const VDB_FOG_OPTIONS = {
+    resolution: 50,
+    progressive: false,
+    steps: 30,
+    absorbance: 0.6,
+    opacity: 0.25,
+    densityScale: 0.6,
+    densityCutoff: 0.06,
+    baseColor: 0xdddddd
+};
+
+/**
+ * Ensure openvdb/three is loaded for editor preview.
+ * @returns {Promise<any|null>}
+ */
+async function ensureOpenVdbLoaded() {
+    if (openVdbLib) return openVdbLib;
+    try {
+        // Filter a noisy warning from openvdb's internal material params on three r160
+        if (!console.__vdbWarnFiltered) {
+            const origWarn = console.warn.bind(console);
+            console.warn = (...args) => {
+                const msg = args && args[0] ? String(args[0]) : '';
+                if (msg.includes("THREE.Material: '_uniforms' is not a property of THREE.MeshBasicMaterial")) return;
+                origWarn(...args);
+            };
+            console.__vdbWarnFiltered = true;
+        }
+
+        // jsDelivr: npm openvdb@0.3.0
+        const mod = await import('https://cdn.jsdelivr.net/npm/openvdb@0.3.0/three/index.js');
+        openVdbLib = mod;
+        vdbLoader = new openVdbLib.VDBLoader();
+        return openVdbLib;
+    } catch (e) {
+        console.warn('Failed to load openvdb/three for editor preview:', e);
+        openVdbLib = null;
+        vdbLoader = null;
+        return null;
+    }
+}
+
+/**
+ * Create an Object3D representing a VDB sequence and start loading its first frame.
+ * Falls back to a placeholder box if VDB cannot be loaded.
+ * @param {{ framePaths: string[], position?: any, rotation?: any, scale?: any }} vdbConfig
+ * @returns {THREE.Object3D}
+ */
+function createVdbPreviewObject(vdbConfig) {
+    const framePaths = vdbConfig?.framePaths?.length ? vdbConfig.framePaths : [];
+    const pos = vdbConfig.position || { x: 0, y: 2, z: -5 };
+    const rot = vdbConfig.rotation || { x: 0, y: 0, z: 0 };
+    const scale = vdbConfig.scale || { x: 2, y: 2, z: 2 };
+
+    const group = new THREE.Group();
+    group.position.set(pos.x, pos.y, pos.z);
+    group.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
+    group.scale.set(scale.x, scale.y, scale.z);
+    group.userData.vdbConfig = { framePaths: [...framePaths], position: { ...pos }, rotation: { ...rot }, scale: { ...scale } };
+
+    // Placeholder while loading / when loading fails
+    const placeholderGeom = new THREE.BoxGeometry(1, 1, 1);
+    const placeholderMat = new THREE.MeshBasicMaterial({ color: 0x88aacc, transparent: true, opacity: 0.5 });
+    const placeholder = new THREE.Mesh(placeholderGeom, placeholderMat);
+    placeholder.userData.vdbPlaceholder = true;
+    group.add(placeholder);
+
+    if (framePaths.length === 0) return group;
+
+    ensureOpenVdbLoaded().then((lib) => {
+        if (!lib || !vdbLoader) return;
+        const firstPath = framePaths[0];
+        const pathStr = firstPath.startsWith('/') ? firstPath.slice(1) : firstPath;
+        const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+        const url = '/' + encodedPath;
+        vdbLoader.load(
+            url,
+            (vdb) => {
+                // Remove placeholder
+                const ph = group.children.find((c) => c.userData && c.userData.vdbPlaceholder);
+                if (ph) {
+                    group.remove(ph);
+                    if (ph.geometry) ph.geometry.dispose();
+                    if (ph.material) ph.material.dispose();
+                }
+                // Prefer density grid when available (smoke/fog usually exported as density)
+                const grid = (vdb && vdb.grids && (vdb.grids.density || vdb.grids.Density))
+                    ? (vdb.grids.density || vdb.grids.Density)
+                    : vdb;
+                const lightsMask = lib.lights?.useDirectionalLights ?? 0;
+                const fog = new lib.FogVolume(grid, { ...VDB_FOG_OPTIONS, lights: lightsMask });
+                fog.userData.vdbFogVolume = true;
+                group.add(fog);
+            },
+            undefined,
+            (err) => {
+                console.warn('VDB preview load failed:', firstPath, err);
+            }
+        );
+    });
+
+    return group;
 }
 
 async function renderPdfPreviewPage(pageNum) {
@@ -231,6 +340,15 @@ function initScene() {
 
     editGroup = new THREE.Group();
     scene.add(editGroup);
+
+    // Editor-only preview lights (not saved to worlds.json)
+    const previewAmbient = new THREE.AmbientLight(0xffffff, 0.9);
+    previewAmbient.userData.editorPreview = true;
+    scene.add(previewAmbient);
+    const previewDir = new THREE.DirectionalLight(0xffffff, 0.8);
+    previewDir.position.set(30, 80, 20);
+    previewDir.userData.editorPreview = true;
+    scene.add(previewDir);
 
     controls = new OrbitControls(camera, canvas);
     controls.enablePan = true;
@@ -566,6 +684,15 @@ function selectObject(obj) {
             document.getElementById('object-props-animation').style.display = 'none';
             document.getElementById('object-props-taiko').style.display = 'none';
             document.getElementById('object-props-teleporter').style.display = '';
+        } else if (obj.userData.vdbConfig) {
+            updateObjectPanel(obj);
+            document.getElementById('object-hint').style.display = 'none';
+            document.getElementById('object-props').style.display = 'block';
+            document.getElementById('light-hint').style.display = 'block';
+            document.getElementById('light-props').style.display = 'none';
+            document.getElementById('object-props-animation').style.display = 'none';
+            document.getElementById('object-props-taiko').style.display = 'none';
+            document.getElementById('object-props-teleporter').style.display = 'none';
         } else {
             document.getElementById('object-hint').style.display = 'block';
             document.getElementById('object-props').style.display = 'none';
@@ -624,9 +751,9 @@ function syncLightFromPanel() {
 
 function updateObjectPanel(obj) {
     if (!obj) return;
-    const c = obj.userData.config || obj.userData.pdfConfig;
+    const c = obj.userData.config || obj.userData.pdfConfig || obj.userData.vdbConfig;
     if (!c) return;
-    document.getElementById('obj-path').value = c.path || '';
+    document.getElementById('obj-path').value = (c.path || (c.framePaths && c.framePaths[0])) || '';
     document.getElementById('obj-pos-x').value = obj.position.x;
     document.getElementById('obj-pos-y').value = obj.position.y;
     document.getElementById('obj-pos-z').value = obj.position.z;
@@ -660,12 +787,14 @@ function updateObjectPanel(obj) {
         document.getElementById('obj-tp-radius').value = tp ? (tp.radius ?? 3) : 3;
         document.getElementById('obj-tp-label').value = tp ? (tp.label || '') : '';
         document.getElementById('obj-tp-access').value = tp && tp.access ? tp.access : 'public';
+    } else if (obj.userData.vdbConfig) {
+        document.getElementById('obj-teleporter').checked = false;
     }
 }
 
 function syncObjectFromPanel() {
     if (!selectedObject) return;
-    const c = selectedObject.userData.config || selectedObject.userData.pdfConfig;
+    const c = selectedObject.userData.config || selectedObject.userData.pdfConfig || selectedObject.userData.vdbConfig;
     if (!c) return;
     pushUndo();
     selectedObject.position.set(
@@ -722,6 +851,8 @@ function syncObjectFromPanel() {
         } else {
             delete c.taiko;
         }
+    } else if (selectedObject.userData.vdbConfig) {
+        // VDB: only position/rotation/scale (already set above)
     } else if (selectedObject.userData.pdfConfig) {
         if (document.getElementById('obj-teleporter').checked) {
             const accessEl = document.getElementById('obj-tp-access');
@@ -750,6 +881,7 @@ function buildWorldsFromScene() {
             spawnPoint: w.spawnPoint ? { ...w.spawnPoint } : { x: 0, y: 10, z: 0 },
             lights: w.lights ? w.lights.map((l) => ({ ...l })) : [],
             pdfs: w.pdfs ? w.pdfs.map((p) => ({ ...p })) : [],
+            vdbs: w.vdbs ? w.vdbs.map((v) => ({ ...v, framePaths: v.framePaths ? [...v.framePaths] : [] })) : [],
             floorEnabled: wid === selectedWorldId ? document.getElementById('floor-enabled').checked : (w.floorEnabled !== false)
         };
     }
@@ -759,6 +891,7 @@ function buildWorldsFromScene() {
             w.models = [];
             w.lights = [];
             w.pdfs = [];
+            w.vdbs = [];
             editGroup.children.forEach((child) => {
                 if (child.userData.config && !child.isLight) {
                     const c = { ...child.userData.config };
@@ -790,6 +923,13 @@ function buildWorldsFromScene() {
                     p.rotation = { x: child.rotation.x * 180 / Math.PI, y: child.rotation.y * 180 / Math.PI, z: child.rotation.z * 180 / Math.PI };
                     p.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
                     w.pdfs.push(p);
+                }
+                if (child.userData.vdbConfig) {
+                    const v = { ...child.userData.vdbConfig };
+                    v.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+                    v.rotation = { x: child.rotation.x * 180 / Math.PI, y: child.rotation.y * 180 / Math.PI, z: child.rotation.z * 180 / Math.PI };
+                    v.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
+                    w.vdbs.push(v);
                 }
             });
             w.spawnPoint = {
@@ -921,6 +1061,17 @@ function loadWorldIntoScene(world) {
         loadPdfTextureForMesh(mesh, path).catch(() => {});
     });
 
+    const vdbs = world.vdbs || [];
+    vdbs.forEach((config) => {
+        const framePaths = config.framePaths && config.framePaths.length > 0 ? config.framePaths : [];
+        if (framePaths.length === 0) return;
+        const pos = config.position || { x: 0, y: 2, z: -5 };
+        const rot = config.rotation || { x: 0, y: 0, z: 0 };
+        const scale = config.scale || { x: 2, y: 2, z: 2 };
+        const obj = createVdbPreviewObject({ framePaths: [...framePaths], position: { ...pos }, rotation: { ...rot }, scale: { ...scale } });
+        editGroup.add(obj);
+    });
+
     document.getElementById('spawn-x').value = (world.spawnPoint && world.spawnPoint.x) ?? 0;
     document.getElementById('spawn-y').value = (world.spawnPoint && world.spawnPoint.y) ?? 10;
     document.getElementById('spawn-z').value = (world.spawnPoint && world.spawnPoint.z) ?? 0;
@@ -947,6 +1098,11 @@ function animate() {
             selectedObject.userData.pdfConfig.rotation = { x: selectedObject.rotation.x * 180 / Math.PI, y: selectedObject.rotation.y * 180 / Math.PI, z: selectedObject.rotation.z * 180 / Math.PI };
             selectedObject.userData.pdfConfig.scale = { x: selectedObject.scale.x, y: selectedObject.scale.y, z: selectedObject.scale.z };
         }
+        if (selectedObject && selectedObject.userData.vdbConfig) {
+            selectedObject.userData.vdbConfig.position = { x: selectedObject.position.x, y: selectedObject.position.y, z: selectedObject.position.z };
+            selectedObject.userData.vdbConfig.rotation = { x: selectedObject.rotation.x * 180 / Math.PI, y: selectedObject.rotation.y * 180 / Math.PI, z: selectedObject.rotation.z * 180 / Math.PI };
+            selectedObject.userData.vdbConfig.scale = { x: selectedObject.scale.x, y: selectedObject.scale.y, z: selectedObject.scale.z };
+        }
     }
     controls.update();
     renderer.render(scene, camera);
@@ -969,6 +1125,53 @@ async function fetchPdfs() {
     const res = await fetch('/admin/pdfs', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load PDFs');
     pdfList = await res.json();
+}
+
+async function fetchVdbs() {
+    const res = await fetch('/admin/vdbs', { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to load VDBs');
+    vdbList = await res.json();
+}
+
+/**
+ * Build framePaths for a VDB sequence from a selected file. Finds same-prefix .vdb files and sorts them.
+ * @param {string} selectedPath - e.g. 'vdbs/smoke_001.vdb'
+ * @returns {string[]}
+ */
+function buildFramePathsFromSelected(selectedPath) {
+    if (!selectedPath || !vdbList.length) return selectedPath ? [selectedPath] : [];
+    const base = selectedPath.replace(/^vdbs\//i, '');
+    const baseLower = base.toLowerCase();
+    const prefix = baseLower.replace(/\d+\.vdb$/i, ''); // e.g. smoke_
+    const samePrefix = vdbList.filter((name) => {
+        const n = name.toLowerCase();
+        return n.endsWith('.vdb') && n.startsWith(prefix);
+    });
+    if (samePrefix.length <= 1) return [selectedPath];
+    samePrefix.sort((a, b) => {
+        const numA = parseInt(a.match(/(\d+)/)?.[1] ?? '0', 10);
+        const numB = parseInt(b.match(/(\d+)/)?.[1] ?? '0', 10);
+        return numA - numB;
+    });
+    return samePrefix.map((name) => 'vdbs/' + name);
+}
+
+function renderVdbList() {
+    const el = document.getElementById('vdb-list');
+    if (!el) return;
+    el.innerHTML = '';
+    vdbList.forEach((name) => {
+        const path = 'vdbs/' + name;
+        const div = document.createElement('div');
+        div.className = 'item' + (selectedVdbPath === path ? ' selected' : '');
+        div.textContent = name;
+        div.dataset.path = path;
+        div.addEventListener('click', () => {
+            selectedVdbPath = path;
+            renderVdbList();
+        });
+        el.appendChild(div);
+    });
 }
 
 function renderPdfList() {
@@ -1019,6 +1222,17 @@ function addPdf(path) {
     loadPdfTextureForMesh(mesh, path).catch(() => {});
 }
 
+function addVdb(framePaths) {
+    if (!selectedWorldId || !framePaths || framePaths.length === 0) return;
+    pushUndo();
+    const pos = { x: 0, y: 2, z: -5 };
+    const rot = { x: 0, y: 0, z: 0 };
+    const scale = { x: 2, y: 2, z: 2 };
+    const obj = createVdbPreviewObject({ framePaths: [...framePaths], position: { ...pos }, rotation: { ...rot }, scale: { ...scale } });
+    editGroup.add(obj);
+    renderWorldObjectList();
+}
+
 // --- UI ---
 function renderWorldObjectList() {
     const el = document.getElementById('world-object-list');
@@ -1030,8 +1244,11 @@ function renderWorldObjectList() {
     const lightsArr = [];
     const modelsArr = [];
     const pdfsArr = [];
+    const vdbsArr = [];
     editGroup.children.forEach((child) => {
-        if (child.userData.pdfConfig) {
+        if (child.userData.vdbConfig) {
+            vdbsArr.push(child);
+        } else if (child.userData.pdfConfig) {
             pdfsArr.push(child);
         } else if (child.userData.config) {
             modelsArr.push(child);
@@ -1041,14 +1258,20 @@ function renderWorldObjectList() {
             lightsArr.push(child);
         }
     });
-    worldObjectList = [...lightsArr, ...modelsArr, ...pdfsArr];
+    worldObjectList = [...lightsArr, ...modelsArr, ...pdfsArr, ...vdbsArr];
     if (selectedObject) {
         if (lightsArr.includes(selectedObject)) objectListExpanded.lights = true;
         if (modelsArr.includes(selectedObject)) objectListExpanded.models = true;
         if (pdfsArr.includes(selectedObject)) objectListExpanded.pdfs = true;
+        if (vdbsArr.includes(selectedObject)) objectListExpanded.vdbs = true;
     }
 
     function makeItemLabel(child) {
+        if (child.userData.vdbConfig) {
+            const paths = child.userData.vdbConfig.framePaths || [];
+            const first = paths[0] || '';
+            return first.split('/').pop() || 'VDB';
+        }
         if (child.userData.pdfConfig) {
             const path = child.userData.pdfConfig.path || '';
             return path.split('/').pop() || 'PDF';
@@ -1099,6 +1322,7 @@ function renderWorldObjectList() {
     el.appendChild(createCategory('ライト', 'lights', lightsArr, 0));
     el.appendChild(createCategory('モデル', 'models', modelsArr, lightsArr.length));
     el.appendChild(createCategory('PDF', 'pdfs', pdfsArr, lightsArr.length + modelsArr.length));
+    el.appendChild(createCategory('VDB', 'vdbs', vdbsArr, lightsArr.length + modelsArr.length + pdfsArr.length));
 }
 
 function renderWorldList() {
@@ -1296,7 +1520,7 @@ function bindEvents() {
         if (!id || /[^a-zA-Z0-9_]/.test(id)) return;
         if (worlds[id]) { alert('そのIDは既に存在します'); return; }
         const name = prompt('表示名', id);
-        worlds[id] = { id, name: name || id, models: [], spawnPoint: { x: 0, y: 10, z: 0 }, lights: [], floorEnabled: true };
+        worlds[id] = { id, name: name || id, models: [], spawnPoint: { x: 0, y: 10, z: 0 }, lights: [], pdfs: [], vdbs: [], floorEnabled: true };
         renderWorldList();
         selectWorld(id);
     });
@@ -1325,11 +1549,13 @@ function bindEvents() {
         pushUndo();
         const obj = selectedObject;
         editGroup.remove(obj);
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) {
-            if (Array.isArray(obj.material)) obj.material.forEach((m) => { if (m.map) m.map.dispose(); m.dispose(); });
-            else { if (obj.material.map) obj.material.map.dispose(); obj.material.dispose(); }
-        }
+        obj.traverse((o) => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) {
+                if (Array.isArray(o.material)) o.material.forEach((m) => { if (m.map) m.map.dispose(); m.dispose(); });
+                else { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
+            }
+        });
         selectedObject = null;
         transformControls.detach();
         document.getElementById('object-hint').style.display = 'block';
@@ -1347,6 +1573,16 @@ function bindEvents() {
         const path = selectedPdfPath || (pdfList.length ? 'pdfs/' + pdfList[0] : null);
         if (path) addPdf(path);
         else alert('PDFをアップロードするか、一覧から選択してください');
+    });
+
+    document.getElementById('btn-add-vdb').addEventListener('click', () => {
+        const path = selectedVdbPath || (vdbList.length ? 'vdbs/' + vdbList[0] : null);
+        if (path) {
+            const framePaths = buildFramePathsFromSelected(path);
+            addVdb(framePaths);
+        } else {
+            alert('VDBをアップロードするか、一覧から選択してください');
+        }
     });
 
     document.getElementById('btn-upload').addEventListener('click', () => document.getElementById('upload-input').click());
@@ -1382,6 +1618,41 @@ function bindEvents() {
             const newPath = 'pdfs/' + name;
             selectedPdfPath = newPath;
             loadPdfPreview(newPath);
+            status.textContent = 'アップロードしました: ' + name;
+        } catch (err) {
+            status.textContent = 'アップロード失敗: ' + err.message;
+            status.className = 'error';
+        }
+        e.target.value = '';
+    });
+    document.getElementById('btn-upload-vdb').addEventListener('click', () => document.getElementById('upload-vdb-input').click());
+    document.getElementById('upload-vdb-input').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const status = document.getElementById('upload-vdb-status');
+        status.textContent = '';
+        status.className = '';
+        const name = file.name.toLowerCase().endsWith('.vdb') ? file.name : file.name + '.vdb';
+        const exists = vdbList.some((n) => n.toLowerCase() === name.toLowerCase());
+        let url = '/admin/upload-vdb';
+        if (exists && !confirm('同名ファイルがあります。上書きしますか？')) {
+            e.target.value = '';
+            return;
+        }
+        if (exists) url += '?confirm=1';
+        const form = new FormData();
+        form.append('vdb', file);
+        try {
+            const res = await fetch(url, { method: 'POST', credentials: 'include', body: form });
+            if (res.status === 409) {
+                status.textContent = '同名ファイルがあります。上書きするには確認して再送信してください。';
+                status.className = 'error';
+                return;
+            }
+            if (!res.ok) throw new Error(await res.text());
+            await fetchVdbs();
+            renderVdbList();
+            selectedVdbPath = 'vdbs/' + name;
             status.textContent = 'アップロードしました: ' + name;
         } catch (err) {
             status.textContent = 'アップロード失敗: ' + err.message;
@@ -1530,6 +1801,7 @@ async function init() {
         await fetchWorlds();
         await fetchModels();
         await fetchPdfs();
+        await fetchVdbs();
     } catch (e) {
         console.error('Init fetch error:', e);
         document.getElementById('save-status').textContent = 'ワールド読み込み失敗: ' + e.message;
@@ -1538,6 +1810,7 @@ async function init() {
     renderWorldList();
     renderModelList();
     renderPdfList();
+    renderVdbList();
     populateDestWorldSelect();
     if (Object.keys(worlds).length) selectWorld(Object.keys(worlds)[0]);
     animate();

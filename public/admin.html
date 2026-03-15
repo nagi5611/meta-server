@@ -11,7 +11,9 @@
     {
         "imports": {
             "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+            "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+            "three/examples/jsm/utils/BufferGeometryUtils": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/utils/BufferGeometryUtils.js"
         }
     }
     </script>
@@ -357,6 +359,7 @@
                             <button type="button" class="we-category-btn active" data-we-category="world">ワールド</button>
                             <button type="button" class="we-category-btn" data-we-category="model">モデル</button>
                             <button type="button" class="we-category-btn" data-we-category="pdf">PDF</button>
+                            <button type="button" class="we-category-btn" data-we-category="vdb">モデル/pdf/vdb</button>
                             <button type="button" class="we-category-btn" data-we-category="file">ファイル</button>
                         </nav>
                         <div class="we-left-content">
@@ -398,6 +401,19 @@
                                         </div>
                                         <div id="we-pdf-preview-status" class="status-text"></div>
                                     </div>
+                                </section>
+                            </div>
+                            <div id="we-cat-vdb" class="we-category-pane">
+                                <section class="section">
+                                    <h2 class="section-title">VDB一覧</h2>
+                                    <div class="model-list" id="vdb-list"></div>
+                                    <button type="button" id="btn-add-vdb">VDBを追加</button>
+                                </section>
+                                <section class="section">
+                                    <h2 class="section-title">VDBをアップロード</h2>
+                                    <input type="file" id="upload-vdb-input" accept=".vdb" style="display:none">
+                                    <button type="button" id="btn-upload-vdb">ファイルを選択</button>
+                                    <span id="upload-vdb-status" class="status-text"></span>
                                 </section>
                             </div>
                             <div id="we-cat-file" class="we-category-pane">
@@ -713,6 +729,8 @@
                             <div class="chart-menu-palette">
                                 <span class="note-palette-item note-don" data-note-type="don" draggable="true" title="ドン">ドン</span>
                                 <span class="note-palette-item note-ka" data-note-type="ka" draggable="true" title="カ">カ</span>
+                                <span class="note-palette-item note-roll-start" data-note-type="roll-start" draggable="true" title="連打開始">連打始</span>
+                                <span class="note-palette-item note-roll-end" data-note-type="roll-end" draggable="true" title="連打終了">連打終</span>
                             </div>
                             <p class="chart-drag-hint">drag & drop</p>
                         </section>

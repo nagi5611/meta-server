@@ -4,7 +4,7 @@
 import { isMobile } from './mobile-utils.js';
 
 /**
- * ノーツ定義: { time: 秒, type: 'don'|'ka' }
+ * ノーツ定義: { time: 秒, type: 'don'|'ka' } または { type: 'roll', startTime: 秒, endTime: 秒 }
  * デモ譜面（固定）。後から外部ファイルに分離可能。
  */
 const DEMO_CHART = [
@@ -65,7 +65,8 @@ class TaikoGameManager {
         this._judgeCounts = { good: 0, ok: 0, miss: 0 };
         this._currentCombo = 0;
         this._maxCombo = 0;
-        this._activeNotes = []; // { el, targetTime, type, hit, chartIndex }
+        this._rollCount = 0;
+        this._activeNotes = []; // { el, targetTime, type, hit, chartIndex, endTime? }
         this._processedChartIndices = new Set(); // 処理済み（ヒット or 不可）のチャート索引
         this._startTime = null;
         this._rafId = null;
@@ -205,10 +206,12 @@ class TaikoGameManager {
         const resultsEl = document.getElementById('taiko-results');
         if (resultsEl) resultsEl.style.display = 'none';
 
-        this._chart = chart;
+        this._chart = this._normalizeChart(chart);
         this._chartMeta = meta || null;
         this._score = 0;
-        this._maxScore = this._chart.length * 100;
+        const donKaCount = this._chart.filter((n) => n.type !== 'roll').length;
+        this._maxScore = donKaCount * 100;
+        this._rollCount = 0;
         this._judgeCounts = { good: 0, ok: 0, miss: 0 };
         this._currentCombo = 0;
         this._maxCombo = 0;
@@ -220,6 +223,36 @@ class TaikoGameManager {
 
         document.addEventListener('keydown', this._boundKeyDown);
         this._loop();
+    }
+
+    /**
+     * roll-start/roll-end のペアを roll に変換。既存の roll はそのまま。
+     * @param {Array} chart
+     * @returns {Array}
+     */
+    _normalizeChart(chart) {
+        const result = [];
+        const starts = [];
+        const sorted = [...chart].sort((a, b) => {
+            const ta = a.type === 'roll' ? a.startTime : a.time;
+            const tb = b.type === 'roll' ? b.startTime : b.time;
+            return (ta ?? 0) - (tb ?? 0);
+        });
+        for (const n of sorted) {
+            if (n.type === 'roll-start') {
+                starts.push(n.time);
+            } else if (n.type === 'roll-end' && starts.length > 0) {
+                const start = starts.shift();
+                if (n.time > start) result.push({ type: 'roll', startTime: start, endTime: n.time });
+            } else if (n.type !== 'roll-start' && n.type !== 'roll-end') {
+                result.push(n);
+            }
+        }
+        return result.sort((a, b) => {
+            const ta = a.type === 'roll' ? a.startTime : a.time;
+            const tb = b.type === 'roll' ? b.startTime : b.time;
+            return (ta ?? 0) - (tb ?? 0);
+        });
     }
 
     close() {
@@ -285,12 +318,24 @@ class TaikoGameManager {
             }
         }
 
-        if (!best) return;
+        if (best) {
+            if (bestDistancePx <= JUDGE_GOOD_PX) {
+                this._judge('good', best);
+            } else if (bestDistancePx <= JUDGE_OK_PX) {
+                this._judge('ok', best);
+            }
+            return;
+        }
 
-        if (bestDistancePx <= JUDGE_GOOD_PX) {
-            this._judge('good', best);
-        } else if (bestDistancePx <= JUDGE_OK_PX) {
-            this._judge('ok', best);
+        const now = this._now();
+        const inRoll = this._chart.some(
+            (n) => n.type === 'roll' && now >= (n.startTime ?? 0) && now <= (n.endTime ?? n.startTime ?? 0)
+        );
+        if (inRoll) {
+            this._rollCount++;
+            this._playHitSound(type);
+            this._flashButton(type);
+            this._showRollHitEffect();
         }
     }
 
@@ -353,6 +398,55 @@ class TaikoGameManager {
         }, 200);
     }
 
+    /** 連打ヒット時の黄色エフェクト（判定表示＋ロールバーのフラッシュ＋judge周りのはじけるエフェクト） */
+    _showRollHitEffect() {
+        if (this._judgeEl) {
+            clearTimeout(this._judgeTimer);
+            this._judgeEl.textContent = '連打';
+            this._judgeEl.className = 'taiko-judge-text visible roll';
+            this._judgeTimer = setTimeout(() => {
+                if (this._judgeEl) this._judgeEl.classList.remove('visible');
+            }, 150);
+        }
+        this._showJudgeBurstEffect();
+        const now = this._now();
+        for (const note of this._activeNotes) {
+            if (note.type === 'roll' && note.el && !note.hit) {
+                const endT = note.endTime ?? note.targetTime;
+                if (now >= (note.targetTime ?? 0) && now <= endT) {
+                    note.el.classList.remove('taiko-roll-hit');
+                    void note.el.offsetWidth;
+                    note.el.classList.add('taiko-roll-hit');
+                    setTimeout(() => note.el?.classList.remove('taiko-roll-hit'), 150);
+                    break;
+                }
+            }
+        }
+    }
+
+    /** judge.png の周りから黄色がはじけるエフェクト */
+    _showJudgeBurstEffect() {
+        const burstEl = document.getElementById('taiko-judge-burst');
+        if (!burstEl) return;
+        const particleCount = 16;
+        const distance = 72;
+        burstEl.innerHTML = '';
+        const ring = document.createElement('span');
+        ring.className = 'taiko-burst-ring';
+        burstEl.appendChild(ring);
+        for (let i = 0; i < particleCount; i++) {
+            const angle = (i / particleCount) * Math.PI * 2;
+            const x = Math.cos(angle) * distance;
+            const y = Math.sin(angle) * distance;
+            const p = document.createElement('span');
+            p.className = 'taiko-burst-particle';
+            p.style.setProperty('--burst-offset', `translate(${x}px, ${y}px)`);
+            p.style.animationDelay = `${(i / particleCount) * 0.03}s`;
+            burstEl.appendChild(p);
+        }
+        setTimeout(() => { burstEl.innerHTML = ''; }, 400);
+    }
+
     _flashButton(type) {
         const targets = type === 'don' ? ['taiko-drum'] : ['taiko-ka-zone'];
         targets.forEach(targetId => {
@@ -378,30 +472,48 @@ class TaikoGameManager {
 
         const now = this._now();
         const laneWidth = this._notesContainer?.offsetWidth || 600;
+        const rightEdge = laneWidth - 32;
+        const laneSpan = rightEdge - JUDGE_LINE_LEFT_PX;
 
         // 新規ノーツ生成（到達時刻 - NOTE_TRAVEL_TIME 秒前に出現）
         this._chart.forEach((note, chartIndex) => {
             if (this._processedChartIndices.has(chartIndex)) return;
-            const spawnTime = note.targetTime ?? note.time;
+            const spawnTime = note.type === 'roll' ? (note.startTime ?? 0) : (note.targetTime ?? note.time);
             const exists = this._activeNotes.some(n => n.chartIndex === chartIndex);
             if (!exists && now >= spawnTime - NOTE_TRAVEL_TIME) {
                 const el = document.createElement('div');
-                el.className = `taiko-note ${note.type}`;
-                el.textContent = note.type === 'don' ? 'ドン' : 'カッ';
-                this._notesContainer?.appendChild(el);
-                this._activeNotes.push({
-                    el,
-                    targetTime: spawnTime,
-                    type: note.type,
-                    hit: false,
-                    chartIndex,
-                    srcNote: note
-                });
+                if (note.type === 'roll') {
+                    el.className = 'taiko-note taiko-note-roll';
+                    el.textContent = '連打';
+                    const duration = (note.endTime ?? note.startTime ?? 0) - (note.startTime ?? 0);
+                    const widthPx = Math.max(40, (duration / NOTE_TRAVEL_TIME) * laneSpan);
+                    el.style.width = widthPx + 'px';
+                    el.style.boxSizing = 'border-box';
+                    this._notesContainer?.appendChild(el);
+                    this._activeNotes.push({
+                        el,
+                        targetTime: note.startTime ?? 0,
+                        endTime: note.endTime ?? note.startTime ?? 0,
+                        type: 'roll',
+                        hit: false,
+                        chartIndex,
+                        srcNote: note
+                    });
+                } else {
+                    el.className = `taiko-note ${note.type}`;
+                    el.textContent = note.type === 'don' ? 'ドン' : 'カッ';
+                    this._notesContainer?.appendChild(el);
+                    this._activeNotes.push({
+                        el,
+                        targetTime: spawnTime,
+                        type: note.type,
+                        hit: false,
+                        chartIndex,
+                        srcNote: note
+                    });
+                }
             }
         });
-
-        const rightEdge = laneWidth - 32;
-        const laneSpan = rightEdge - JUDGE_LINE_LEFT_PX;
 
         let missShownThisFrame = false;
 
@@ -411,7 +523,17 @@ class TaikoGameManager {
             const remaining = note.targetTime - now;
             const left = JUDGE_LINE_LEFT_PX + remaining / NOTE_TRAVEL_TIME * laneSpan;
             if (note.el) {
-                note.el.style.left = `${left - 32}px`;
+                note.el.style.left = note.type === 'roll' ? `${left}px` : `${left - 32}px`;
+            }
+
+            if (note.type === 'roll') {
+                if (now > (note.endTime ?? note.targetTime)) {
+                    note.el?.remove();
+                    note.el = null;
+                    note.hit = true;
+                    this._processedChartIndices.add(note.chartIndex);
+                }
+                continue;
             }
 
             // 不可: 判定ラインから JUDGE_MISS_PX を超えて通過したら miss。エフェクト後に削除
@@ -437,18 +559,24 @@ class TaikoGameManager {
             }
         }
 
-        // ヒット済みのうち、エフェクト未使用（即削除）のものだけここで削除。エフェクト中は animationend で削除
+        // ヒット済みのうち、エフェクト未使用（即削除）のものだけここで削除。エフェクト中は animationend で削除。連打は即削除。
         this._activeNotes = this._activeNotes.filter(note => {
             if (!note.hit) return true;
             const el = note.el;
-            if (el && (el.classList.contains('taiko-note-hit') || el.classList.contains('taiko-note-miss'))) return true;
-            if (el) { el.remove(); note.el = null; }
+            if (note.type === 'roll' || !el) {
+                if (note.chartIndex !== undefined) this._processedChartIndices.add(note.chartIndex);
+                return false;
+            }
+            if (el.classList.contains('taiko-note-hit') || el.classList.contains('taiko-note-miss')) return true;
+            el.remove();
+            note.el = null;
             if (note.chartIndex !== undefined) this._processedChartIndices.add(note.chartIndex);
             return false;
         });
 
         // 曲終了チェック: 終了時間を過ぎた、または全ノーツ処理済みで余韻後
-        const lastNoteTime = this._chart.length ? (this._chart[this._chart.length - 1]?.time ?? 0) : 0;
+        const getNoteEndTime = (n) => n.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n.time ?? 0);
+        const lastNoteTime = this._chart.length ? Math.max(...this._chart.map(getNoteEndTime)) : 0;
         const endTime = this._chartMeta?.endTime != null ? this._chartMeta.endTime : lastNoteTime + 1;
         const allDone = this._chart.length > 0 && this._activeNotes.every(n => n.hit);
         if (allDone && now >= endTime) {
@@ -494,7 +622,7 @@ class TaikoGameManager {
         document.getElementById('taiko-results-ok').textContent = String(this._judgeCounts.ok);
         document.getElementById('taiko-results-miss').textContent = String(this._judgeCounts.miss);
         document.getElementById('taiko-results-max-combo').textContent = String(this._maxCombo);
-        document.getElementById('taiko-results-roll').textContent = '0';
+        document.getElementById('taiko-results-roll').textContent = String(this._rollCount);
         const clearRate = this._maxScore > 0 ? Math.min(1, this._score / this._maxScore) : 0;
         const fillEl = document.getElementById('taiko-results-clear-fill');
         if (fillEl) fillEl.style.width = `${Math.round(clearRate * 100)}%`;

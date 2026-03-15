@@ -115,6 +115,7 @@ function writeCharts(charts) {
 
 const MODELS_DIR = path.join(__dirname, 'public', 'models');
 const PDFS_DIR = path.join(__dirname, 'public', 'pdfs');
+const VDBS_DIR = path.join(__dirname, 'public', 'vdbs');
 const uploadStorage = multer.memoryStorage();
 const upload = multer({
     storage: uploadStorage,
@@ -133,6 +134,14 @@ const uploadPdf = multer({
     fileFilter: (req, file, cb) => {
         const ext = path.extname(file.originalname).toLowerCase();
         const ok = ext === '.pdf' || file.mimetype === 'application/pdf';
+        cb(null, !!ok);
+    }
+});
+const uploadVdb = multer({
+    storage: uploadStorage,
+    fileFilter: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const ok = ext === '.vdb' || file.mimetype === 'application/octet-stream';
         cb(null, !!ok);
     }
 });
@@ -514,9 +523,10 @@ app.use('/admin', basicAuth);
 // Serve bootstrap-icons from node_modules (for admin.html etc.)
 app.use('/vendor/bootstrap-icons', express.static(path.join(__dirname, 'node_modules/bootstrap-icons/font')));
 
-// /models, /pdfs は常に public から（アップロード先）
+// /models, /pdfs, /vdbs は常に public から（アップロード先）
 app.use('/models', express.static(path.join(__dirname, 'public', 'models')));
 app.use('/pdfs', express.static(path.join(__dirname, 'public', 'pdfs')));
+app.use('/vdbs', express.static(VDBS_DIR));
 
 // admin.html 用の /js, /css は常に public から（dist に含まれないため）
 app.use('/js', express.static(path.join(__dirname, 'public', 'js')));
@@ -2621,6 +2631,45 @@ app.post('/admin/upload-pdf', uploadPdf.single('pdf'), (req, res) => {
         res.json({ success: true, filename });
     } catch (err) {
         console.error('POST /admin/upload-pdf error:', err);
+        res.status(500).json({ error: 'Failed to save file' });
+    }
+});
+
+app.get('/admin/vdbs', (req, res) => {
+    try {
+        if (!fs.existsSync(VDBS_DIR)) {
+            fs.mkdirSync(VDBS_DIR, { recursive: true });
+            return res.json([]);
+        }
+        const names = fs.readdirSync(VDBS_DIR)
+            .filter((n) => n.toLowerCase().endsWith('.vdb'));
+        res.json(names);
+    } catch (err) {
+        console.error('GET /admin/vdbs error:', err);
+        res.status(500).json({ error: 'Failed to list VDBs' });
+    }
+});
+
+app.post('/admin/upload-vdb', uploadVdb.single('vdb'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file or invalid file' });
+    }
+    const filename = path.basename(req.file.originalname).replace(/[/\\]/g, '');
+    if (!filename.toLowerCase().endsWith('.vdb')) {
+        return res.status(400).json({ error: 'Only .vdb files are allowed' });
+    }
+    const destPath = path.join(VDBS_DIR, filename);
+    if (fs.existsSync(destPath) && req.query.confirm !== '1') {
+        return res.status(409).json({ error: 'file_exists', filename });
+    }
+    try {
+        if (!fs.existsSync(VDBS_DIR)) {
+            fs.mkdirSync(VDBS_DIR, { recursive: true });
+        }
+        fs.writeFileSync(destPath, req.file.buffer);
+        res.json({ success: true, filename });
+    } catch (err) {
+        console.error('POST /admin/upload-vdb error:', err);
         res.status(500).json({ error: 'Failed to save file' });
     }
 });
