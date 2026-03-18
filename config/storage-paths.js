@@ -41,7 +41,6 @@ function getStoragePathsFromSrcDirectory(srcDirectory) {
         DATA_DIR: dataDir,
         MODELS_DIR: path.join(base, 'models'),
         PDFS_DIR: path.join(base, 'pdfs'),
-        VDBS_DIR: path.join(base, 'vdbs'),
         IMAGES_DIR: path.join(base, 'images'),
         WORLDS_PATH: path.join(dataDir, 'worlds.json'),
         CHARTS_PATH: path.join(dataDir, 'charts.json'),
@@ -56,7 +55,6 @@ function getStoragePathsFromExplicitEnv() {
         DATA_DIR: null,
         MODELS_DIR: requireEnv('META_MODELS_DIR'),
         PDFS_DIR: requireEnv('META_PDFS_DIR'),
-        VDBS_DIR: requireEnv('META_VDBS_DIR'),
         IMAGES_DIR: requireEnv('META_IMAGES_DIR'),
         WORLDS_PATH: requireEnv('META_WORLDS_PATH'),
         CHARTS_PATH: requireEnv('META_CHARTS_PATH'),
@@ -87,7 +85,6 @@ export function validateAndPrepareStoragePaths() {
     }
     ensureDirExists(STORAGE_PATHS.MODELS_DIR, 'META_MODELS_DIR');
     ensureDirExists(STORAGE_PATHS.PDFS_DIR, 'META_PDFS_DIR');
-    ensureDirExists(STORAGE_PATHS.VDBS_DIR, 'META_VDBS_DIR');
     ensureDirExists(STORAGE_PATHS.IMAGES_DIR, 'META_IMAGES_DIR');
 
     ensureParentDirExists(STORAGE_PATHS.WORLDS_PATH, 'META_WORLDS_PATH');

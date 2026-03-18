@@ -28,9 +28,6 @@ function copyPublicAssets() {
 export default defineConfig({
     root: 'public',
     plugins: [copyPublicAssets()],
-    optimizeDeps: {
-        include: ['openvdb', 'openvdb/three']
-    },
     server: {
         port: 3001,
         host: true, // Listen on 0.0.0.0 for LAN access
@@ -58,10 +55,6 @@ export default defineConfig({
                 changeOrigin: true
             },
             '/images': {
-                target: 'http://localhost:3000',
-                changeOrigin: true
-            },
-            '/vdbs': {
                 target: 'http://localhost:3000',
                 changeOrigin: true
             },
