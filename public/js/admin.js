@@ -51,6 +51,10 @@ let chartPreviewState = {
     rafId: 0,
     startedAtPerfMs: 0,
     durationSec: 0,
+    /** プレビュー開始位置（曲頭からの秒） */
+    startOffsetSec: 0,
+    /** 今回の再生長（秒）= durationSec - startOffsetSec */
+    playDurationSec: 0,
     sources: [],
     playheadEl: null,
     activeCellEl: null
@@ -62,6 +66,8 @@ let chartPreviewAudioBuffers = {
     don: null,
     ka: null
 };
+/** プレビュー用BGMデコード済みバッファ（chartId:bgmVersion で無効化） */
+let chartPreviewBgmCache = { key: '', buffer: /** @type {AudioBuffer | null} */ (null) };
 
 /** ログインユーザー一覧の現在ページ（1始まり） */
 let currentLoginUsersPage = 1;
@@ -140,6 +146,7 @@ async function loadCharts() {
         cachedCharts = charts;
         renderChartList(charts);
         if (!selectedChartId) clearChartEditor();
+        else updateChartBgmRowUi();
         statusEl.textContent = '';
     } catch (err) {
         statusEl.textContent = '取得失敗: ' + err.message;
@@ -374,6 +381,64 @@ async function ensureChartPreviewAudioLoaded() {
 }
 
 /**
+ * 選択中譜面のBGMを AudioBuffer にデコードする（未設定なら null）
+ * @returns {Promise<AudioBuffer | null>}
+ */
+async function ensureChartPreviewBgmDecoded() {
+    const chartId = selectedChartId;
+    const c = chartId && cachedCharts[chartId];
+    if (!c || c.bgmVersion == null) {
+        return null;
+    }
+    const key = `${chartId}:${c.bgmVersion}`;
+    if (chartPreviewBgmCache.key === key && chartPreviewBgmCache.buffer) {
+        return chartPreviewBgmCache.buffer;
+    }
+    if (!chartPreviewAudioCtx) {
+        chartPreviewAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const url = `/chart-bgm/${encodeURIComponent(chartId)}.mp3?v=${encodeURIComponent(String(c.bgmVersion))}`;
+    const res = await fetch(url, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('BGMの取得に失敗しました');
+    const ab = await res.arrayBuffer();
+    const buf = await chartPreviewAudioCtx.decodeAudioData(ab.slice(0));
+    chartPreviewBgmCache = { key, buffer: buf };
+    return buf;
+}
+
+/**
+ * BGMキャッシュを破棄（譜面切替・アップロード後）
+ */
+function invalidateChartBgmPreviewCache() {
+    chartPreviewBgmCache = { key: '', buffer: null };
+}
+
+/**
+ * BGM行の表示を更新する
+ */
+function updateChartBgmRowUi() {
+    const statusEl = document.getElementById('chart-bgm-status');
+    const btnImport = document.getElementById('btn-chart-bgm-import');
+    const btnRemove = document.getElementById('btn-chart-bgm-remove');
+    const c = selectedChartId && cachedCharts[selectedChartId];
+    if (!statusEl) return;
+    if (!selectedChartId || !c) {
+        statusEl.textContent = '譜面を選択してください';
+        if (btnImport) btnImport.disabled = true;
+        if (btnRemove) btnRemove.disabled = true;
+        return;
+    }
+    if (btnImport) btnImport.disabled = false;
+    if (c.bgmVersion != null) {
+        statusEl.textContent = c.bgmOriginalName ? String(c.bgmOriginalName) : 'MP3設定済み';
+        if (btnRemove) btnRemove.disabled = false;
+    } else {
+        statusEl.textContent = '未設定（MP3をインポート）';
+        if (btnRemove) btnRemove.disabled = true;
+    }
+}
+
+/**
  * playhead要素を確保して返す
  */
 function ensureChartPreviewPlayheadEl() {
@@ -438,8 +503,9 @@ function updateChartPreviewControlsUI() {
 
 /**
  * プレビュー再生（音 + 緑バー）
+ * @param {number} [startFromSec=0] 曲頭からの秒。指定時はその位置から終端まで再生
  */
-async function playChartPreview() {
+async function playChartPreview(startFromSec = 0) {
     if (!selectedChartId) return;
     stopChartPreview();
     const statusEl = document.getElementById('chart-status');
@@ -450,24 +516,59 @@ async function playChartPreview() {
         return;
     }
 
+    /** @type {AudioBuffer | null} */
+    let bgmBuffer = null;
+    try {
+        bgmBuffer = await ensureChartPreviewBgmDecoded();
+    } catch (e) {
+        bgmBuffer = null;
+        if (statusEl && cachedCharts[selectedChartId]?.bgmVersion != null) {
+            statusEl.textContent = 'BGMを再生できません（ドン・カのみ再生）';
+        }
+    }
+
     const events = buildChartPreviewEvents();
-    const dur = getChartPreviewDurationSec();
-    chartPreviewState.durationSec = dur;
+    const totalDur = getChartPreviewDurationSec();
+    const startSec = Math.min(Math.max(0, Number(startFromSec) || 0), totalDur);
+    const playDuration = Math.max(0, totalDur - startSec);
+    chartPreviewState.durationSec = totalDur;
+    chartPreviewState.startOffsetSec = startSec;
+    chartPreviewState.playDurationSec = playDuration;
+
+    if (playDuration <= 0) {
+        updateChartPreviewControlsUI();
+        return;
+    }
 
     if (!chartPreviewAudioCtx) return;
     if (chartPreviewAudioCtx.state === 'suspended') await chartPreviewAudioCtx.resume();
     const baseTime = chartPreviewAudioCtx.currentTime + 0.05;
 
     const sources = [];
+    if (bgmBuffer && bgmBuffer.duration > 0) {
+        const sliceStart = Math.min(Math.max(0, startSec), Math.max(0, bgmBuffer.duration - 1e-6));
+        const maxFromSlice = Math.max(0, bgmBuffer.duration - sliceStart);
+        const bgmPlayLen = Math.min(playDuration, maxFromSlice);
+        if (bgmPlayLen > 0.02) {
+            const gain = chartPreviewAudioCtx.createGain();
+            gain.gain.value = 0.42;
+            const bgmSrc = chartPreviewAudioCtx.createBufferSource();
+            bgmSrc.buffer = bgmBuffer;
+            bgmSrc.connect(gain);
+            gain.connect(chartPreviewAudioCtx.destination);
+            bgmSrc.start(baseTime, sliceStart, bgmPlayLen);
+            sources.push(bgmSrc);
+        }
+    }
     for (const ev of events) {
         const buf = ev.type === 'don' ? chartPreviewAudioBuffers.don : chartPreviewAudioBuffers.ka;
         if (!buf) continue;
         const t = Number(ev.time ?? 0);
-        if (!Number.isFinite(t) || t < 0 || t > dur + 1) continue;
+        if (!Number.isFinite(t) || t < startSec || t > totalDur + 0.001) continue;
         const src = chartPreviewAudioCtx.createBufferSource();
         src.buffer = buf;
         src.connect(chartPreviewAudioCtx.destination);
-        src.start(baseTime + t);
+        src.start(baseTime + (t - startSec));
         sources.push(src);
     }
 
@@ -481,10 +582,12 @@ async function playChartPreview() {
     const tick = () => {
         if (!chartPreviewState.playing) return;
         const elapsed = (performance.now() - chartPreviewState.startedAtPerfMs) / 1000;
-        const clamped = Math.min(Math.max(0, elapsed), chartPreviewState.durationSec);
-        if (timeEl) timeEl.textContent = `${formatChartPreviewTime(clamped)} / ${formatChartPreviewTime(chartPreviewState.durationSec)}`;
-        setChartPreviewPlayheadAtTime(clamped);
-        if (elapsed >= chartPreviewState.durationSec) {
+        const songTime = chartPreviewState.startOffsetSec + Math.min(elapsed, chartPreviewState.playDurationSec);
+        if (timeEl) {
+            timeEl.textContent = `${formatChartPreviewTime(songTime)} / ${formatChartPreviewTime(chartPreviewState.durationSec)}`;
+        }
+        setChartPreviewPlayheadAtTime(songTime);
+        if (elapsed >= chartPreviewState.playDurationSec) {
             stopChartPreview();
             return;
         }
@@ -508,6 +611,8 @@ function stopChartPreview() {
     chartPreviewState.sources = [];
     chartPreviewState.playing = false;
     chartPreviewState.startedAtPerfMs = 0;
+    chartPreviewState.startOffsetSec = 0;
+    chartPreviewState.playDurationSec = 0;
 
     const playhead = chartPreviewState.playheadEl;
     if (playhead) playhead.classList.remove('active');
@@ -526,7 +631,6 @@ function renderChartList(charts) {
     const listEl = document.getElementById('chart-list');
     charts = charts || cachedCharts;
     const btnDelete = document.getElementById('btn-delete-chart');
-    const btnEdit = document.getElementById('btn-edit-chart');
     if (!listEl) return;
     listEl.innerHTML = '';
     const ids = Object.keys(charts);
@@ -541,10 +645,8 @@ function renderChartList(charts) {
     });
     if (selectedChartId && charts[selectedChartId]) {
         if (btnDelete) btnDelete.disabled = false;
-        if (btnEdit) btnEdit.disabled = false;
     } else {
         if (btnDelete) btnDelete.disabled = true;
-        if (btnEdit) btnEdit.disabled = true;
     }
 }
 
@@ -612,6 +714,8 @@ function loadChartIntoEditor(chart) {
     selectedNoteIndex = -1;
     renderNotesStrip();
     if (btnSave) btnSave.disabled = false;
+    invalidateChartBgmPreviewCache();
+    updateChartBgmRowUi();
     updateChartPreviewControlsUI();
 }
 
@@ -635,6 +739,8 @@ function clearChartEditor() {
     selectedNoteIndex = -1;
     renderNotesStrip();
     if (btnSave) btnSave.disabled = true;
+    invalidateChartBgmPreviewCache();
+    updateChartBgmRowUi();
     updateChartPreviewControlsUI();
 }
 
@@ -777,6 +883,22 @@ function renderNotesStrip() {
 
         const header = document.createElement('div');
         header.className = 'measure-header staff-header';
+
+        const previewPlayBtn = document.createElement('button');
+        previewPlayBtn.type = 'button';
+        previewPlayBtn.className = 'measure-preview-play-btn';
+        previewPlayBtn.setAttribute('aria-label', `第${barIndex + 1}小節からプレビュー`);
+        previewPlayBtn.title = 'この小節からプレビュー';
+        previewPlayBtn.innerHTML = '<i class="bi bi-play-fill" aria-hidden="true"></i>';
+        previewPlayBtn.disabled = !selectedChartId;
+        previewPlayBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!selectedChartId) return;
+            const t0 = barStepToTimeVarBpm(barIndex, 0);
+            playChartPreview(t0);
+        });
+        header.appendChild(previewPlayBtn);
 
         const rowIndex = Math.floor(barIndex / 4);
         const isFirstInRow = barIndex % 4 === 0;
@@ -1173,7 +1295,6 @@ function pasteClipboardNotesAt(barIndex, stepIndex) {
  */
 function bindChartPanelEvents() {
     const btnAdd = document.getElementById('btn-add-chart');
-    const btnEdit = document.getElementById('btn-edit-chart');
     const btnDelete = document.getElementById('btn-delete-chart');
     const btnExport = document.getElementById('btn-export-charts-json');
     const statusEl = document.getElementById('chart-status');
@@ -1221,10 +1342,114 @@ function bindChartPanelEvents() {
         });
     }
 
-    if (btnEdit) {
-        btnEdit.addEventListener('click', () => {
-            if (selectedChartId && cachedCharts[selectedChartId]) {
-                loadChartIntoEditor(cachedCharts[selectedChartId]);
+    const btnImportChart = document.getElementById('btn-import-chart-json');
+    const chartImportInput = document.getElementById('chart-import-json-input');
+    if (btnImportChart && chartImportInput) {
+        btnImportChart.addEventListener('click', () => {
+            chartImportInput.value = '';
+            chartImportInput.click();
+        });
+        chartImportInput.addEventListener('change', async () => {
+            const file = chartImportInput.files && chartImportInput.files[0];
+            if (!file) return;
+            if (statusEl) statusEl.textContent = 'インポート中...';
+            btnImportChart.disabled = true;
+            try {
+                const text = await file.text();
+                const { imported, lastId, message } = await importChartsFromJsonText(text, statusEl);
+                if (imported > 0 && lastId) {
+                    selectedChartId = lastId;
+                }
+                if (imported > 0) {
+                    await loadCharts();
+                    if (statusEl) statusEl.textContent = message;
+                    if (lastId && cachedCharts[lastId]) {
+                        loadChartIntoEditor(cachedCharts[lastId]);
+                    }
+                }
+            } catch (err) {
+                if (statusEl) statusEl.textContent = '読み込み失敗: ' + (err instanceof Error ? err.message : String(err));
+            } finally {
+                btnImportChart.disabled = false;
+                chartImportInput.value = '';
+            }
+        });
+    }
+
+    const btnChartBgmImport = document.getElementById('btn-chart-bgm-import');
+    const btnChartBgmRemove = document.getElementById('btn-chart-bgm-remove');
+    const chartBgmFileInput = document.getElementById('chart-bgm-file-input');
+    if (btnChartBgmImport && chartBgmFileInput) {
+        btnChartBgmImport.addEventListener('click', () => {
+            chartBgmFileInput.value = '';
+            chartBgmFileInput.click();
+        });
+        chartBgmFileInput.addEventListener('change', async () => {
+            const file = chartBgmFileInput.files && chartBgmFileInput.files[0];
+            if (!file || !selectedChartId) return;
+            const lower = (file.name || '').toLowerCase();
+            if (!lower.endsWith('.mp3')) {
+                if (statusEl) statusEl.textContent = 'MP3ファイルを選択してください';
+                chartBgmFileInput.value = '';
+                return;
+            }
+            if (statusEl) statusEl.textContent = 'BGMをアップロード中...';
+            btnChartBgmImport.disabled = true;
+            const fd = new FormData();
+            fd.append('bgm', file);
+            try {
+                const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId) + '/bgm', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'include'
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    if (statusEl) statusEl.textContent = data.error || 'BGMのアップロードに失敗しました';
+                    return;
+                }
+                if (data.chart) {
+                    cachedCharts[selectedChartId] = data.chart;
+                    invalidateChartBgmPreviewCache();
+                    updateChartBgmRowUi();
+                }
+                if (statusEl) statusEl.textContent = 'BGMを設定しました';
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'BGMアップロード失敗: ' + (err instanceof Error ? err.message : String(err));
+            } finally {
+                chartBgmFileInput.value = '';
+                updateChartBgmRowUi();
+            }
+        });
+    }
+    if (btnChartBgmRemove) {
+        btnChartBgmRemove.addEventListener('click', async () => {
+            if (!selectedChartId) return;
+            if (!confirm('この譜面のBGMを削除しますか？')) return;
+            try {
+                const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId) + '/bgm', {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    if (statusEl) statusEl.textContent = data.error || '削除に失敗しました';
+                    return;
+                }
+                if (data.chart) {
+                    cachedCharts[selectedChartId] = data.chart;
+                } else {
+                    const c = cachedCharts[selectedChartId];
+                    if (c) {
+                        delete c.bgmVersion;
+                        delete c.bgmOriginalName;
+                    }
+                }
+                invalidateChartBgmPreviewCache();
+                updateChartBgmRowUi();
+                if (statusEl) statusEl.textContent = 'BGMを削除しました';
+            } catch (e) {
+                if (statusEl) statusEl.textContent = '削除失敗: ' + (e instanceof Error ? e.message : String(e));
             }
         });
     }
@@ -2959,6 +3184,154 @@ async function exportChartsJson() {
     } finally {
         if (btn) btn.disabled = false;
     }
+}
+
+/**
+ * インポートJSONのルートから譜面オブジェクトの配列を取り出す（エクスポート形式・charts.json形式・配列を許容）
+ * @param {unknown} root
+ * @returns {Array<Record<string, unknown>>}
+ */
+function extractChartsFromImportJson(root) {
+    if (Array.isArray(root)) {
+        return root.filter((v) => isChartLikeForImport(v));
+    }
+    if (!root || typeof root !== 'object') return [];
+    const o = /** @type {Record<string, unknown>} */ (root);
+    if (o.charts != null && typeof o.charts === 'object') {
+        if (Array.isArray(o.charts)) {
+            return o.charts.filter((v) => isChartLikeForImport(v));
+        }
+        return Object.values(o.charts).filter((v) => isChartLikeForImport(v));
+    }
+    const skip = new Set(['exportedAt', 'selectedChartId']);
+    const out = [];
+    for (const [k, v] of Object.entries(o)) {
+        if (skip.has(k)) continue;
+        if (isChartLikeForImport(v)) out.push(/** @type {Record<string, unknown>} */ (v));
+    }
+    return out;
+}
+
+/**
+ * @param {unknown} v
+ * @returns {boolean}
+ */
+function isChartLikeForImport(v) {
+    return v != null && typeof v === 'object' && !Array.isArray(v)
+        && typeof /** @type {{ id?: unknown }} */ (v).id === 'string';
+}
+
+/**
+ * 譜面IDをPOST用に正規化（不正ならタイムスタンプベース）
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function sanitizeImportChartId(raw) {
+    const s = String(raw ?? '').trim();
+    if (/^[a-zA-Z0-9_-]+$/.test(s) && s.length > 0) return s;
+    return 'chart_' + Date.now();
+}
+
+/**
+ * 既存IDと重複しない譜面IDを割り当てる
+ * @param {string} baseId
+ * @param {Set<string>} used
+ * @returns {string}
+ */
+function allocateUniqueChartIdForImport(baseId, used) {
+    let id = sanitizeImportChartId(baseId);
+    if (!used.has(id)) {
+        used.add(id);
+        return id;
+    }
+    let n = 1;
+    while (used.has(`${id}_${n}`)) n += 1;
+    const out = `${id}_${n}`;
+    used.add(out);
+    return out;
+}
+
+/**
+ * JSONテキストを解析し譜面をサーバーに新規作成する
+ * @param {string} jsonText
+ * @param {HTMLElement | null} statusEl
+ * @returns {Promise<{ imported: number, failed: number, lastId: string | null, message: string }>}
+ */
+async function importChartsFromJsonText(jsonText, statusEl) {
+    let parsed;
+    try {
+        parsed = JSON.parse(jsonText);
+    } catch {
+        const msg = 'JSONの解析に失敗しました';
+        if (statusEl) statusEl.textContent = msg;
+        return { imported: 0, failed: 0, lastId: null, message: msg };
+    }
+    const list = extractChartsFromImportJson(parsed);
+    if (list.length === 0) {
+        const msg = '譜面データが見つかりません（形式を確認してください）';
+        if (statusEl) statusEl.textContent = msg;
+        return { imported: 0, failed: 0, lastId: null, message: msg };
+    }
+    const resList = await fetch('/admin/charts', { credentials: 'include' });
+    const existing = resList.ok ? await resList.json().catch(() => ({})) : {};
+    const used = new Set(Object.keys(existing && typeof existing === 'object' ? existing : {}));
+    let imported = 0;
+    let failed = 0;
+    /** @type {string | null} */
+    let lastId = null;
+    const errors = [];
+    for (const chart of list) {
+        const srcId = String(chart.id ?? '').trim() || 'chart';
+        const newId = allocateUniqueChartIdForImport(srcId, used);
+        const name = typeof chart.name === 'string' && chart.name.trim() ? chart.name.trim() : newId;
+        const notes = Array.isArray(chart.notes) ? chart.notes : [];
+        const difficulty = chart.difficulty != null ? chart.difficulty : null;
+        const tempo = chart.tempo != null && Number.isFinite(Number(chart.tempo)) ? Number(chart.tempo) : null;
+        const endTime = chart.endTime != null && chart.endTime !== '' && Number.isFinite(Number(chart.endTime))
+            ? Number(chart.endTime)
+            : null;
+        const measureBpms = chart.measureBpms != null ? chart.measureBpms : null;
+        try {
+            const res = await fetch('/admin/charts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    id: newId,
+                    name,
+                    notes,
+                    difficulty,
+                    tempo,
+                    endTime,
+                    measureBpms,
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                failed += 1;
+                errors.push(`${newId}: ${data.error || res.statusText}`);
+                used.delete(newId);
+                continue;
+            }
+            imported += 1;
+            lastId = newId;
+        } catch (err) {
+            failed += 1;
+            errors.push(`${newId}: ${err instanceof Error ? err.message : String(err)}`);
+            used.delete(newId);
+        }
+    }
+    /** @type {string} */
+    let message = '';
+    if (imported > 0 && failed === 0) {
+        message = `インポート完了（${imported}件）`;
+    } else if (imported > 0) {
+        message = `インポート: 成功${imported}件、失敗${failed}件` + (errors[0] ? ` — ${errors[0]}` : '');
+    } else {
+        message = failed > 0 ? `インポート失敗（${errors[0] || '不明なエラー'}）` : 'インポートできませんでした';
+    }
+    if (statusEl) statusEl.textContent = message;
+    return { imported, failed, lastId, message };
 }
 
 /** 利用可能なコマンド名（Tab補完用）。 */

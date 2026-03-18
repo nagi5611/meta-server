@@ -112,6 +112,7 @@ function writeCharts(charts) {
 const MODELS_DIR = STORAGE_PATHS.MODELS_DIR;
 const PDFS_DIR = STORAGE_PATHS.PDFS_DIR;
 const IMAGES_DIR = STORAGE_PATHS.IMAGES_DIR;
+const CHART_BGM_DIR = STORAGE_PATHS.CHART_BGM_DIR;
 const uploadStorage = multer.memoryStorage();
 const upload = multer({
     storage: uploadStorage,
@@ -130,6 +131,20 @@ const uploadPdf = multer({
     fileFilter: (req, file, cb) => {
         const ext = path.extname(file.originalname).toLowerCase();
         const ok = ext === '.pdf' || file.mimetype === 'application/pdf';
+        cb(null, !!ok);
+    }
+});
+/** 譜面BGM（MP3）アップロード。最大約80MB */
+const uploadChartBgm = multer({
+    storage: uploadStorage,
+    limits: { fileSize: 80 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        const ok = ext === '.mp3' && (
+            file.mimetype === 'audio/mpeg' ||
+            file.mimetype === 'audio/mp3' ||
+            file.mimetype === 'application/octet-stream'
+        );
         cb(null, !!ok);
     }
 });
@@ -514,6 +529,13 @@ app.use('/vendor/bootstrap-icons', express.static(path.join(__dirname, 'node_mod
 app.use('/models', express.static(MODELS_DIR));
 app.use('/pdfs', express.static(PDFS_DIR));
 app.use('/images', express.static(IMAGES_DIR));
+app.use('/chart-bgm', express.static(CHART_BGM_DIR, {
+    setHeaders: (res, filePath) => {
+        if (String(filePath).toLowerCase().endsWith('.mp3')) {
+            res.setHeader('Content-Type', 'audio/mpeg');
+        }
+    }
+}));
 
 // admin.html 用の /js, /css は常に public から（dist に含まれないため）
 app.use('/js', express.static(path.join(__dirname, 'public', 'js')));
@@ -2531,12 +2553,65 @@ app.delete('/admin/charts/:id', (req, res) => {
         return res.status(404).json({ error: 'Chart not found' });
     }
     delete charts[id];
+    const bgmPath = path.join(CHART_BGM_DIR, `${id}.mp3`);
+    try {
+        if (fs.existsSync(bgmPath)) fs.unlinkSync(bgmPath);
+    } catch (e) {
+        console.warn('DELETE chart BGM file:', e?.message || e);
+    }
     try {
         writeCharts(charts);
         res.json({ success: true });
     } catch (err) {
         console.error('DELETE /admin/charts error:', err);
         res.status(500).json({ error: 'Failed to save charts' });
+    }
+});
+
+app.post('/admin/charts/:id/bgm', uploadChartBgm.single('bgm'), (req, res) => {
+    const id = req.params.id;
+    if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+        return res.status(400).json({ error: 'Invalid chart id' });
+    }
+    if (!req.file || !req.file.buffer) {
+        return res.status(400).json({ error: 'MP3ファイルを選択してください（フィールド名: bgm）' });
+    }
+    const charts = readCharts();
+    if (!charts[id]) {
+        return res.status(404).json({ error: 'Chart not found' });
+    }
+    try {
+        fs.writeFileSync(path.join(CHART_BGM_DIR, `${id}.mp3`), req.file.buffer);
+        const orig = path.basename(req.file.originalname || 'bgm.mp3');
+        charts[id].bgmVersion = Date.now();
+        charts[id].bgmOriginalName = orig.length > 200 ? orig.slice(0, 200) : orig;
+        writeCharts(charts);
+        res.json({ success: true, chart: charts[id] });
+    } catch (err) {
+        console.error('POST /admin/charts/:id/bgm error:', err);
+        res.status(500).json({ error: 'BGMの保存に失敗しました' });
+    }
+});
+
+app.delete('/admin/charts/:id/bgm', (req, res) => {
+    const id = req.params.id;
+    if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+        return res.status(400).json({ error: 'Invalid chart id' });
+    }
+    const charts = readCharts();
+    if (!charts[id]) {
+        return res.status(404).json({ error: 'Chart not found' });
+    }
+    try {
+        const bgmPath = path.join(CHART_BGM_DIR, `${id}.mp3`);
+        if (fs.existsSync(bgmPath)) fs.unlinkSync(bgmPath);
+        delete charts[id].bgmVersion;
+        delete charts[id].bgmOriginalName;
+        writeCharts(charts);
+        res.json({ success: true, chart: charts[id] });
+    } catch (err) {
+        console.error('DELETE /admin/charts/:id/bgm error:', err);
+        res.status(500).json({ error: 'BGMの削除に失敗しました' });
     }
 });
 

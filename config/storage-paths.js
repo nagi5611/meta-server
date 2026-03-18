@@ -44,6 +44,7 @@ function getStoragePathsFromSrcDirectory(srcDirectory) {
         IMAGES_DIR: path.join(base, 'images'),
         WORLDS_PATH: path.join(dataDir, 'worlds.json'),
         CHARTS_PATH: path.join(dataDir, 'charts.json'),
+        CHART_BGM_DIR: path.join(dataDir, 'chart-bgm'),
         DB_DIR: path.join(base, 'db'),
         SERVER_LOG_DIR: path.join(base, 'logs'),
     };
@@ -58,6 +59,7 @@ function getStoragePathsFromExplicitEnv() {
         IMAGES_DIR: requireEnv('META_IMAGES_DIR'),
         WORLDS_PATH: requireEnv('META_WORLDS_PATH'),
         CHARTS_PATH: requireEnv('META_CHARTS_PATH'),
+        CHART_BGM_DIR: path.join(path.dirname(requireEnv('META_CHARTS_PATH')), 'chart-bgm'),
         DB_DIR: requireEnv('META_DB_DIR'),
         SERVER_LOG_DIR: requireEnv('META_SERVER_LOG_DIR'),
     };
@@ -89,6 +91,7 @@ export function validateAndPrepareStoragePaths() {
 
     ensureParentDirExists(STORAGE_PATHS.WORLDS_PATH, 'META_WORLDS_PATH');
     ensureParentDirExists(STORAGE_PATHS.CHARTS_PATH, 'META_CHARTS_PATH');
+    ensureDirExists(STORAGE_PATHS.CHART_BGM_DIR, 'CHART_BGM_DIR');
 
     ensureDirExists(STORAGE_PATHS.DB_DIR, 'META_DB_DIR');
     ensureDirExists(STORAGE_PATHS.SERVER_LOG_DIR, 'META_SERVER_LOG_DIR');

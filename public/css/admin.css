@@ -482,7 +482,34 @@ body {
 .chart-panel .chart-header-actions {
     display: flex;
     flex-shrink: 0;
+    flex-wrap: wrap;
     gap: 8px;
+    align-items: center;
+}
+
+/* 譜面パネル: 追加・インポート・編集・削除・保存・エクスポートの共通ボタン */
+.chart-panel .chart-action-btn {
+    padding: 10px 16px;
+    font-size: 14px;
+    line-height: 1.25;
+    border: 1px solid #5a5a5a;
+    border-radius: 6px;
+    background: #fff;
+    color: #333;
+    cursor: pointer;
+    box-sizing: border-box;
+    min-height: 40px;
+}
+
+.chart-panel .chart-action-btn:hover:not(:disabled) {
+    background: #e3f2fd;
+    border-color: #1565c0;
+    color: #1565c0;
+}
+
+.chart-panel .chart-action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .chart-panel .chart-right {
@@ -542,6 +569,31 @@ body {
     align-items: center;
     gap: 10px;
     margin-bottom: 10px;
+}
+
+.chart-panel .chart-bgm-row {
+    align-items: flex-start;
+}
+
+.chart-panel .chart-bgm-controls {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.chart-panel .chart-bgm-status {
+    font-size: 13px;
+    color: #555;
+    flex: 1 1 140px;
+    min-width: 0;
+    word-break: break-all;
+}
+
+body.admin-dark .chart-panel .chart-bgm-status {
+    color: #9c9992;
 }
 
 .chart-panel .prop-label {
@@ -625,6 +677,34 @@ body {
     color: #555;
     font-size: 12px;
     letter-spacing: 0.3px;
+}
+
+.chart-panel .measure-preview-play-btn {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+    background: #fff;
+    color: #1565c0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.chart-panel .measure-preview-play-btn:hover:not(:disabled) {
+    background: #e3f2fd;
+    border-color: #1565c0;
+}
+
+.chart-panel .measure-preview-play-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: #999;
 }
 
 .chart-panel .measure-add-btn {
@@ -963,26 +1043,7 @@ body {
     gap: 8px;
     flex-wrap: wrap;
     margin-top: 8px;
-}
-
-.chart-panel .btn-row button {
-    padding: 10px 16px;
-    font-size: 14px;
-    border: 1px solid #e0e0e0;
-    border-radius: 6px;
-    background: #fff;
-    cursor: pointer;
-}
-
-.chart-panel .btn-row button:hover:not(:disabled) {
-    background: #e3f2fd;
-    border-color: #1565c0;
-    color: #1565c0;
-}
-
-.chart-panel .btn-row button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+    align-items: center;
 }
 
 /* 譜面プレビュー（再生/停止 + 再生ヘッド） */
@@ -2498,6 +2559,15 @@ body.admin-dark .chart-panel .measure-header {
     border-bottom-color: #2d2a24;
     color: #9c9992;
 }
+body.admin-dark .chart-panel .measure-preview-play-btn {
+    background: #25231d;
+    border-color: #2d2a24;
+    color: #7eb8da;
+}
+body.admin-dark .chart-panel .measure-preview-play-btn:hover:not(:disabled) {
+    background: #2d3d47;
+    border-color: #7eb8da;
+}
 body.admin-dark .chart-panel .measure-cell {
     border-right-color: rgba(255,255,255,0.10);
     border-bottom-color: rgba(255,255,255,0.10);
@@ -2525,12 +2595,12 @@ body.admin-dark .chart-panel .staff-measure-title {
 body.admin-dark .chart-panel .chart-drag-hint {
     color: #9c9992;
 }
-body.admin-dark .chart-panel .btn-row button {
+body.admin-dark .chart-panel .chart-action-btn {
     background: #25231d;
     border-color: #2d2a24;
     color: #e6e4df;
 }
-body.admin-dark .chart-panel .btn-row button:hover:not(:disabled) {
+body.admin-dark .chart-panel .chart-action-btn:hover:not(:disabled) {
     background: #2d3d47;
     border-color: #7eb8da;
     color: #7eb8da;

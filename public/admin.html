@@ -663,9 +663,10 @@
                             <div class="chart-header-row">
                                 <div class="chart-list" id="chart-list"></div>
                                 <div class="chart-header-actions">
-                                    <button type="button" id="btn-add-chart">譜面を追加</button>
-                                    <button type="button" id="btn-edit-chart" disabled>譜面を編集</button>
-                                    <button type="button" id="btn-delete-chart" disabled>譜面を削除</button>
+                                    <button type="button" id="btn-add-chart" class="chart-action-btn">譜面を追加</button>
+                                    <input type="file" id="chart-import-json-input" accept=".json,application/json" style="display:none" aria-hidden="true">
+                                    <button type="button" id="btn-import-chart-json" class="chart-action-btn">譜面のインポート</button>
+                                    <button type="button" id="btn-delete-chart" class="chart-action-btn" disabled>譜面を削除</button>
                                 </div>
                             </div>
                             <span id="chart-status" class="status-text"></span>
@@ -692,9 +693,18 @@
                                 <label class="prop-label">曲の終わり（小節）</label>
                                 <input type="number" id="chart-edit-end-time" class="prop-input num" min="1" step="1" placeholder="例: 16">
                             </div>
+                            <div class="field-row chart-bgm-row">
+                                <label class="prop-label">BGM</label>
+                                <div class="chart-bgm-controls">
+                                    <input type="file" id="chart-bgm-file-input" accept=".mp3,audio/mpeg,audio/mp3" style="display:none" aria-hidden="true">
+                                    <span id="chart-bgm-status" class="chart-bgm-status">譜面を選択してください</span>
+                                    <button type="button" id="btn-chart-bgm-import" class="chart-action-btn" disabled>MP3をインポート</button>
+                                    <button type="button" id="btn-chart-bgm-remove" class="chart-action-btn" disabled>BGMを削除</button>
+                                </div>
+                            </div>
                             <div class="btn-row">
-                                <button type="button" id="btn-save-chart" disabled>保存</button>
-                                <button type="button" id="btn-export-charts-json">JSONエクスポート</button>
+                                <button type="button" id="btn-save-chart" class="chart-action-btn" disabled>保存</button>
+                                <button type="button" id="btn-export-charts-json" class="chart-action-btn">JSONエクスポート</button>
                             </div>
                         </section>
                         <div class="chart-preview-controls" aria-label="譜面プレビュー">
@@ -720,7 +730,7 @@
                                 </aside>
                             </div>
                             <div class="btn-row">
-                                <button type="button" id="btn-remove-selected-note" disabled>選択ノーツを削除</button>
+                                <button type="button" id="btn-remove-selected-note" class="chart-action-btn" disabled>選択ノーツを削除</button>
                             </div>
                             <p class="chart-drag-hint">右メニューからドラッグ＆ドロップでノーツを追加</p>
                         </section>
