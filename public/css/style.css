@@ -2165,6 +2165,31 @@ a.admin-menu-link:hover {
     gap: 10px;
 }
 
+.taiko-mp-part-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(18, 48, 71, 0.22);
+    background: rgba(255, 255, 255, 0.75);
+    color: #123047;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.taiko-mp-part-pill.ready {
+    border-color: rgba(30, 136, 229, 0.55);
+    background: rgba(227, 242, 253, 0.85);
+}
+
+.taiko-mp-part-pill.loading {
+    border-color: rgba(255, 152, 0, 0.55);
+    background: rgba(255, 248, 225, 0.85);
+}
+
 .taiko-mp-part-buttons button {
     min-width: 72px;
     padding: 12px 16px;

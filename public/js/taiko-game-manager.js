@@ -86,6 +86,81 @@ class TaikoGameManager {
         this._mpOnSyncStart = null;
         this._mpOnResults = null;
         this._mpPartNames = {};
+
+        // --- BGM sync (WebAudio + time sync)
+        /** @type {AudioContext | null} */
+        this._bgmAudioCtx = null;
+        /** @type {{ key: string, buffer: AudioBuffer | null }} */
+        this._bgmCache = { key: '', buffer: null };
+        /** @type {AudioBufferSourceNode | null} */
+        this._bgmSource = null;
+        /** @type {GainNode | null} */
+        this._bgmGain = null;
+        /** @type {number[]} */
+        this._serverOffsetSamplesMs = [];
+        /** @type {number} */
+        this._serverOffsetMs = 0;
+        /** @type {boolean} */
+        this._mpReadySent = false;
+        /** @type {boolean} */
+        this._mpNeedsBgm = false;
+    }
+
+    /** WebAudioコンテキストを確保して返す（ユーザー操作後に resume すること） */
+    _ensureBgmAudioCtx() {
+        if (this._bgmAudioCtx) return this._bgmAudioCtx;
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        this._bgmAudioCtx = Ctx ? new Ctx() : null;
+        return this._bgmAudioCtx;
+    }
+
+    /** サーバ時刻オフセットを推定（複数回サンプルして中央値を採用） */
+    async _sampleServerOffset() {
+        if (!this._socket) return;
+        const t0 = Date.now();
+        await new Promise((resolve) => {
+            this._socket.emit('taiko-time-sync', { t0 }, (res) => {
+                const t1 = Date.now();
+                const serverNow = res && typeof res.serverNow === 'number' ? res.serverNow : null;
+                if (serverNow != null) {
+                    const rtt = Math.max(0, t1 - t0);
+                    const offset = serverNow - (t0 + rtt / 2);
+                    this._serverOffsetSamplesMs.push(offset);
+                    if (this._serverOffsetSamplesMs.length > 11) this._serverOffsetSamplesMs.shift();
+                    const sorted = [...this._serverOffsetSamplesMs].sort((a, b) => a - b);
+                    this._serverOffsetMs = sorted[Math.floor(sorted.length / 2)] || 0;
+                }
+                resolve();
+            });
+        });
+    }
+
+    _estimatedServerNowMs() {
+        return Date.now() + (Number(this._serverOffsetMs) || 0);
+    }
+
+    /** BGM(mp3)をデコードしてAudioBufferを返す。bgmVersionが無い場合はnull。 */
+    async _loadChartBgmBuffer(chartId, bgmVersion) {
+        if (!chartId || bgmVersion == null) return null;
+        const ctx = this._ensureBgmAudioCtx();
+        if (!ctx) return null;
+        const key = `${chartId}:${bgmVersion}`;
+        if (this._bgmCache.key === key && this._bgmCache.buffer) return this._bgmCache.buffer;
+        const url = `/chart-bgm/${encodeURIComponent(chartId)}.mp3?v=${encodeURIComponent(String(bgmVersion))}`;
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('BGMの取得に失敗しました');
+        const ab = await res.arrayBuffer();
+        const buf = await ctx.decodeAudioData(ab.slice(0));
+        this._bgmCache = { key, buffer: buf };
+        return buf;
+    }
+
+    _stopBgm() {
+        if (this._bgmSource) {
+            try { this._bgmSource.stop(); } catch {}
+            try { this._bgmSource.disconnect(); } catch {}
+        }
+        this._bgmSource = null;
     }
 
     /**
@@ -253,8 +328,9 @@ class TaikoGameManager {
      * 選んだ譜面でゲームを開始する
      * @param {Array<{time:number, type:string}>} chart - 譜面
      * @param {{ id: string, name: string, difficulty?: number, endTime?: number } | null} meta - 曲メタ（選曲時）
+     * @param {{ startAtPerfSec?: number } | undefined} [opts]
      */
-    _startGamePlay(chart, meta) {
+    _startGamePlay(chart, meta, opts) {
         if (!this._songSelectEl || !this._gameContainerEl) return;
         this._songSelectEl.style.display = 'none';
         this._gameContainerEl.style.display = 'flex';
@@ -274,7 +350,9 @@ class TaikoGameManager {
         this._processedChartIndices = new Set();
         this._updateScoreDisplay();
         if (this._notesContainer) this._notesContainer.innerHTML = '';
-        this._startTime = performance.now() / 1000;
+        this._startTime = (opts && typeof opts.startAtPerfSec === 'number')
+            ? opts.startAtPerfSec
+            : (performance.now() / 1000);
 
         document.addEventListener('keydown', this._boundKeyDown);
         this._loop();
@@ -312,6 +390,7 @@ class TaikoGameManager {
 
     close() {
         if (!this._open) return;
+        this._stopBgm();
         this._teardownMultiplayer();
         this._open = false;
         this._closeHintPopup();
@@ -319,6 +398,16 @@ class TaikoGameManager {
         if (this._rafId) cancelAnimationFrame(this._rafId);
         if (this._notesContainer) this._notesContainer.innerHTML = '';
         this._activeNotes = [];
+        this._chart = [];
+        this._chartMeta = null;
+        this._processedChartIndices = new Set();
+        this._startTime = null;
+        clearTimeout(this._judgeTimer);
+        this._judgeTimer = null;
+        if (this._judgeEl) {
+            this._judgeEl.textContent = '';
+            this._judgeEl.className = 'taiko-judge-text';
+        }
         document.removeEventListener('keydown', this._boundKeyDown);
         const lobbyEl = document.getElementById('taiko-mp-lobby');
         if (lobbyEl) lobbyEl.style.display = 'none';
@@ -347,6 +436,8 @@ class TaikoGameManager {
         this._mpZone = null;
         this._mpClaimedPart = null;
         this._mpPartNames = {};
+        this._mpReadySent = false;
+        this._mpNeedsBgm = false;
     }
 
     /**
@@ -379,7 +470,13 @@ class TaikoGameManager {
             btn.dataset.part = String(i);
             btn.addEventListener('click', () => this._multiplayerClaimPart(i));
 
+            const pill = document.createElement('span');
+            pill.className = 'taiko-mp-part-pill';
+            pill.dataset.part = String(i);
+            pill.textContent = '未参加';
+
             row.appendChild(btn);
+            row.appendChild(pill);
             wrap.appendChild(row);
         }
 
@@ -389,6 +486,8 @@ class TaikoGameManager {
             .then((charts) => {
                 const c = charts && z.multiplayerChartId ? charts[z.multiplayerChartId] : null;
                 const pn = c && c.partNames && typeof c.partNames === 'object' ? c.partNames : null;
+                const bgmVersion = c && c.bgmVersion != null ? c.bgmVersion : null;
+                this._mpNeedsBgm = bgmVersion != null;
                 if (!pn) return;
                 for (let i = 1; i <= z.slotCount; i++) {
                     const v = pn[i] || pn[`p${i}`];
@@ -400,6 +499,14 @@ class TaikoGameManager {
                 }
             })
             .catch(() => {});
+
+        // 時刻同期をロビー入室時に数回サンプリング
+        (async () => {
+            for (let i = 0; i < 7; i++) {
+                await this._sampleServerOffset();
+                await new Promise((r) => setTimeout(r, 200));
+            }
+        })();
 
         this._mpOnState = (payload) => this._onMultiplayerState(payload);
         this._mpOnSyncStart = (payload) => this._onMultiplayerSyncStart(payload);
@@ -426,6 +533,10 @@ class TaikoGameManager {
     _multiplayerClaimPart(partIndex) {
         const z = this._mpZone;
         if (!this._socket || !z) return;
+        // ユーザー操作でWebAudioをアンロック
+        const ctx = this._ensureBgmAudioCtx();
+        if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+
         this._socket.emit('taiko-mp-claim-part', {
             worldId: z.worldId,
             groupId: z.groupId,
@@ -434,7 +545,22 @@ class TaikoGameManager {
             const statusEl = document.getElementById('taiko-mp-status');
             if (ack && ack.ok) {
                 this._mpClaimedPart = partIndex;
-                if (statusEl) statusEl.textContent = `${partIndex}P を選択しました`;
+                const btn = document.querySelector(`#taiko-mp-part-buttons button[data-part="${partIndex}"]`);
+                const label = (btn && btn instanceof HTMLButtonElement && btn.textContent) ? btn.textContent : `${partIndex}P`;
+                if (statusEl) statusEl.textContent = `${label} を選択しました`;
+
+                // BGMの事前デコード完了まで ready を送らない（BGMなしなら即ready）
+                this._mpReadySent = false;
+                const pill = document.querySelector(`.taiko-mp-part-pill[data-part="${partIndex}"]`);
+                if (pill && pill instanceof HTMLElement) {
+                    pill.classList.remove('ready');
+                    pill.classList.add('loading');
+                    pill.textContent = this._mpNeedsBgm ? 'BGM読込中' : '準備中';
+                }
+
+                this._prepareMultiplayerBgmAndReady().catch((e) => {
+                    if (statusEl) statusEl.textContent = 'BGMの準備に失敗: ' + (e?.message || e);
+                });
             } else if (statusEl) {
                 statusEl.textContent = ack?.error === 'taken'
                     ? 'このパートは埋まっています'
@@ -443,6 +569,45 @@ class TaikoGameManager {
                         : '選択できませんでした';
             }
         });
+    }
+
+    async _prepareMultiplayerBgmAndReady() {
+        const z = this._mpZone;
+        if (!this._socket || !z || this._mpClaimedPart == null) return;
+        const chartId = z.multiplayerChartId;
+        let bgmVersion = null;
+        try {
+            const res = await fetch('/api/charts');
+            const charts = res.ok ? await res.json() : {};
+            const c = charts[chartId];
+            bgmVersion = c && c.bgmVersion != null ? c.bgmVersion : null;
+        } catch {}
+
+        if (bgmVersion == null) {
+            // BGM無し: 即ready
+            this._mpNeedsBgm = false;
+            this._socket.emit('taiko-mp-ready', { worldId: z.worldId, groupId: z.groupId, partIndex: this._mpClaimedPart, ready: true });
+            this._mpReadySent = true;
+            const pill = document.querySelector(`.taiko-mp-part-pill[data-part="${this._mpClaimedPart}"]`);
+            if (pill && pill instanceof HTMLElement) {
+                pill.classList.remove('loading');
+                pill.classList.add('ready');
+                pill.textContent = 'OK';
+            }
+            return;
+        }
+
+        this._mpNeedsBgm = true;
+        await this._loadChartBgmBuffer(chartId, bgmVersion);
+        if (!this._socket || !this._mpZone || this._mpClaimedPart == null) return;
+        this._socket.emit('taiko-mp-ready', { worldId: z.worldId, groupId: z.groupId, partIndex: this._mpClaimedPart, ready: true });
+        this._mpReadySent = true;
+        const pill = document.querySelector(`.taiko-mp-part-pill[data-part="${this._mpClaimedPart}"]`);
+        if (pill && pill instanceof HTMLElement) {
+            pill.classList.remove('loading');
+            pill.classList.add('ready');
+            pill.textContent = 'OK';
+        }
     }
 
     /**
@@ -466,7 +631,7 @@ class TaikoGameManager {
                 btn.textContent = String(name).trim();
                 this._mpPartNames[p] = String(name).trim();
             } else {
-                btn.textContent = `${p}P`;
+                btn.textContent = (this._mpPartNames[p] && this._mpPartNames[p].trim()) ? this._mpPartNames[p].trim() : `${p}P`;
             }
             btn.classList.remove('taiko-mp-part-mine', 'taiko-mp-part-taken');
             if (this._mpClaimedPart === p) {
@@ -498,7 +663,7 @@ class TaikoGameManager {
     _onMultiplayerSyncStart(payload) {
         const z = this._mpZone;
         if (!z || !payload || !payload.chartId) return;
-        const part = this._mpClaimedPart;
+        const part = payload.partIndex != null ? Number(payload.partIndex) : this._mpClaimedPart;
         if (part == null) return;
 
         const lobbyEl = document.getElementById('taiko-mp-lobby');
@@ -513,7 +678,34 @@ class TaikoGameManager {
         this._mpOnSyncStart = null;
 
         const startAt = Number(payload.startAt) || Date.now();
-        const delay = Math.max(0, startAt - Date.now());
+        const delayMs = Math.max(0, startAt - this._estimatedServerNowMs());
+        const startAtPerfSec = (performance.now() / 1000) + (delayMs / 1000);
+
+        // BGMスケジューリング（存在する場合）
+        const ctx = this._ensureBgmAudioCtx();
+        if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+        (async () => {
+            try {
+                const res = await fetch('/api/charts');
+                const charts = res.ok ? await res.json() : {};
+                const c = charts[payload.chartId];
+                const bgmVersion = c && c.bgmVersion != null ? c.bgmVersion : null;
+                if (bgmVersion == null) return;
+                const buf = await this._loadChartBgmBuffer(payload.chartId, bgmVersion);
+                if (!buf || !ctx) return;
+                this._stopBgm();
+                const gain = ctx.createGain();
+                gain.gain.value = 0.42;
+                gain.connect(ctx.destination);
+                this._bgmGain = gain;
+                const src = ctx.createBufferSource();
+                src.buffer = buf;
+                src.connect(gain);
+                this._bgmSource = src;
+                const when = ctx.currentTime + Math.max(0, delayMs / 1000);
+                src.start(when);
+            } catch {}
+        })();
 
         setTimeout(async () => {
             try {
@@ -533,12 +725,12 @@ class TaikoGameManager {
                     difficulty: c?.difficulty,
                     endTime: c?.endTime
                 };
-                this._startGamePlay(notes, meta);
+                this._startGamePlay(notes, meta, { startAtPerfSec });
             } catch (e) {
                 window.alert('譜面の取得に失敗しました');
                 this.close();
             }
-        }, delay);
+        }, Math.max(0, startAtPerfSec * 1000 - performance.now()));
     }
 
     /**
@@ -582,7 +774,12 @@ class TaikoGameManager {
             listEl.innerHTML = '';
             players.sort((a, b) => a.partIndex - b.partIndex).forEach((p) => {
                 const li = document.createElement('li');
-                li.textContent = `${p.partIndex}P ${p.name || `P${p.partIndex}`} ${p.score}点`;
+                const name = (p.name && String(p.name).trim())
+                    ? String(p.name).trim()
+                    : (this._mpPartNames[p.partIndex] && this._mpPartNames[p.partIndex].trim())
+                        ? this._mpPartNames[p.partIndex].trim()
+                        : `P${p.partIndex}`;
+                li.textContent = `${name} ${p.score}点`;
                 listEl.appendChild(li);
             });
         }
@@ -954,10 +1151,8 @@ class TaikoGameManager {
             const hintEl = document.getElementById('taiko-mp-lobby-hint');
             const statusEl = document.getElementById('taiko-mp-status');
             const wrap = document.getElementById('taiko-mp-part-buttons');
-            const startBtn = document.getElementById('taiko-mp-start');
             if (this._songSelectEl) this._songSelectEl.style.display = 'none';
             if (wrap) wrap.innerHTML = '';
-            if (startBtn) startBtn.disabled = true;
             if (hintEl) hintEl.textContent = '演奏終了。ほかのプレイヤーの終了を待っています…';
             if (statusEl) statusEl.textContent = '';
 
@@ -1029,6 +1224,11 @@ class TaikoGameManager {
     _closeResults() {
         const resultsEl = document.getElementById('taiko-results');
         if (resultsEl) resultsEl.style.display = 'none';
+        // マルチ: リザルトを閉じたら太鼓メニュー自体も閉じて元に戻す（選曲に戻らない）
+        if (this._mpZone) {
+            this.close();
+            return;
+        }
         const lobbyEl = document.getElementById('taiko-mp-lobby');
         if (lobbyEl && lobbyEl.style.display !== 'none') return;
         if (this._songSelectEl) this._songSelectEl.style.display = 'flex';

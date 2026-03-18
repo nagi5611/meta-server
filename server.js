@@ -1200,7 +1200,7 @@ function getPlayerDisplayName(player) {
     return (player.isAdmin === true) ? 'admin' : (player.username || 'Guest');
 }
 
-/** 太鼓マルチ: worldId+groupId → { slotCount, parts, names, inGame, chartId, finished } */
+/** 太鼓マルチ: worldId+groupId → { slotCount, parts, names, ready, inGame, chartId, startAt, finished } */
 const taikoMpRooms = new Map();
 
 function taikoMpRoomKey(worldId, groupId) {
@@ -1217,9 +1217,14 @@ function cleanupTaikoMpOnDisconnect(ioSrv, socketId) {
         let changed = false;
         for (const [pi, sid] of [...st.parts.entries()]) {
             if (sid === socketId) {
+                // 演奏中に切断した場合は、そのパートを0点で終了扱いにして進行不能を避ける
+                if (st.inGame && st.finished && !st.finished.has(pi)) {
+                    const name = st.names?.get(pi) || `P${pi}`;
+                    st.finished.set(pi, { score: 0, name });
+                }
                 st.parts.delete(pi);
                 if (st.names) st.names.delete(pi);
-                if (st.finished) st.finished.delete(pi);
+                if (st.ready) st.ready.delete(pi);
                 changed = true;
             }
         }
@@ -1229,9 +1234,9 @@ function cleanupTaikoMpOnDisconnect(ioSrv, socketId) {
             const groupId = idx >= 0 ? k.slice(idx + 1) : '';
             const parts = {};
             for (let i = 1; i <= st.slotCount; i++) {
-                parts[i] = { taken: st.parts.has(i), name: st.names?.get(i) || '' };
+                parts[i] = { taken: st.parts.has(i), name: st.names?.get(i) || '', ready: !!st.ready?.get(i) };
             }
-            ioSrv.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts });
+            ioSrv.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame });
         }
     }
 }
@@ -1323,6 +1328,12 @@ io.on('connection', (socket) => {
         }
     });
 
+    // 太鼓BGM同期用: サーバ時刻の取得（RTT推定はクライアント側）
+    socket.on('taiko-time-sync', (data, callback) => {
+        if (typeof callback !== 'function') return;
+        callback({ serverNow: Date.now() });
+    });
+
     // 太鼓ヒット音: ソロ時は現在ワールド(room)全体、マルチ時は該当 taiko-mp ルームへ共有
     socket.on('taiko-hit', ({ multiplayer, worldId, groupId, type }) => {
         const hitType = type === 'ka' ? 'ka' : 'don';
@@ -1362,7 +1373,7 @@ io.on('connection', (socket) => {
         }
         let st = taikoMpRooms.get(k);
         if (!st || st.slotCount !== sc) {
-            st = { slotCount: sc, parts: new Map(), names: new Map(), inGame: false, chartId: null, finished: new Map() };
+            st = { slotCount: sc, parts: new Map(), names: new Map(), ready: new Map(), inGame: false, chartId: null, startAt: null, finished: new Map() };
             taikoMpRooms.set(k, st);
         }
         if (typeof chartId === 'string' && chartId.trim()) {
@@ -1370,9 +1381,9 @@ io.on('connection', (socket) => {
         }
         const parts = {};
         for (let i = 1; i <= st.slotCount; i++) {
-            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '' };
+            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '', ready: !!st.ready.get(i) };
         }
-        io.to(roomName).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame });
+        io.to(roomName).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame, startAt: st.startAt });
         if (typeof cb === 'function') cb({ ok: true });
     });
 
@@ -1384,18 +1395,23 @@ io.on('connection', (socket) => {
         if (st) {
             for (const [pi, sid] of [...st.parts.entries()]) {
                 if (sid === socket.id) {
+                    // 演奏中に離脱した場合は、そのパートを0点で終了扱いにして進行不能を避ける
+                    if (st.inGame && !st.finished.has(pi)) {
+                        const name = st.names.get(pi) || `P${pi}`;
+                        st.finished.set(pi, { score: 0, name });
+                    }
                     st.parts.delete(pi);
                     st.names.delete(pi);
-                    st.finished.delete(pi);
+                    st.ready.delete(pi);
                 }
             }
         }
         const parts = {};
         if (st) {
             for (let i = 1; i <= st.slotCount; i++) {
-                parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '' };
+                parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '', ready: !!st.ready.get(i) };
             }
-            io.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame });
+            io.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame, startAt: st.startAt });
         }
     });
 
@@ -1419,6 +1435,7 @@ io.on('connection', (socket) => {
             if (sid === socket.id) {
                 st.parts.delete(pi);
                 st.names.delete(pi);
+                st.ready.delete(pi);
                 st.finished.delete(pi);
             }
         }
@@ -1428,20 +1445,55 @@ io.on('connection', (socket) => {
             return;
         }
         st.parts.set(p, socket.id);
+        st.ready.set(p, false);
         const parts = {};
         for (let i = 1; i <= st.slotCount; i++) {
-            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '' };
+            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '', ready: !!st.ready.get(i) };
         }
         const roomName = `taiko-mp:${worldId}:${groupId}`;
-        // 自動開始: 全パートが埋まったらカウントダウンして同期開始
-        let startAt = null;
-        if (!st.inGame && st.parts.size >= st.slotCount && st.chartId) {
+        st.startAt = null;
+        io.to(roomName).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame, startAt: st.startAt });
+        if (typeof cb === 'function') cb({ ok: true });
+    });
+
+    socket.on('taiko-mp-ready', ({ worldId, groupId, partIndex, ready }, cb) => {
+        const k = taikoMpRoomKey(worldId, groupId);
+        const st = taikoMpRooms.get(k);
+        if (!st) {
+            if (typeof cb === 'function') cb({ ok: false, error: 'room' });
+            return;
+        }
+        const p = Number(partIndex);
+        if (!Number.isInteger(p) || p < 1 || p > st.slotCount) {
+            if (typeof cb === 'function') cb({ ok: false, error: 'part' });
+            return;
+        }
+        const owner = st.parts.get(p);
+        if (!owner || owner !== socket.id) {
+            if (typeof cb === 'function') cb({ ok: false, error: 'not_owner' });
+            return;
+        }
+        st.ready.set(p, !!ready);
+
+        const parts = {};
+        for (let i = 1; i <= st.slotCount; i++) {
+            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '', ready: !!st.ready.get(i) };
+        }
+
+        const roomName = `taiko-mp:${worldId}:${groupId}`;
+        const allTaken = st.parts.size >= st.slotCount;
+        const allReady = allTaken && [...Array(st.slotCount)].every((_, idx) => !!st.ready.get(idx + 1));
+
+        if (!st.inGame && allReady && st.chartId) {
             st.inGame = true;
             st.finished.clear();
-            startAt = Date.now() + 4000;
-            io.to(roomName).emit('taiko-mp-sync-start', { startAt, chartId: st.chartId });
+            st.startAt = Date.now() + 4000;
+            for (const [pi, sid] of st.parts.entries()) {
+                io.to(sid).emit('taiko-mp-sync-start', { startAt: st.startAt, chartId: st.chartId, partIndex: pi });
+            }
         }
-        io.to(roomName).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame, startAt });
+
+        io.to(roomName).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame, startAt: st.startAt });
         if (typeof cb === 'function') cb({ ok: true });
     });
 
@@ -1466,9 +1518,9 @@ io.on('connection', (socket) => {
         st.names.set(p, s || `P${p}`);
         const parts = {};
         for (let i = 1; i <= st.slotCount; i++) {
-            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '' };
+            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '', ready: !!st.ready.get(i) };
         }
-        io.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame });
+        io.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame, startAt: st.startAt });
         if (typeof cb === 'function') cb({ ok: true });
     });
 
