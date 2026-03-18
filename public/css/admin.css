@@ -512,6 +512,40 @@ body {
     cursor: not-allowed;
 }
 
+.chart-part-tabs-row .chart-part-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.chart-part-tab {
+    padding: 8px 14px;
+    border: 1px solid #5a5a5a;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.chart-part-tab.active {
+    background: #1565c0;
+    color: #fff;
+    border-color: #1565c0;
+}
+
+.chart-part-names-row .chart-part-names {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    width: 100%;
+}
+
+@media (min-width: 900px) {
+    .chart-part-names-row .chart-part-names {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
 .chart-panel .chart-right {
     flex: 1;
     min-width: 0;
@@ -2604,6 +2638,16 @@ body.admin-dark .chart-panel .chart-action-btn:hover:not(:disabled) {
     background: #2d3d47;
     border-color: #7eb8da;
     color: #7eb8da;
+}
+body.admin-dark .chart-part-tab {
+    background: #25231d;
+    border-color: #2d2a24;
+    color: #e6e4df;
+}
+body.admin-dark .chart-part-tab.active {
+    background: #1565c0;
+    color: #fff;
+    border-color: #1565c0;
 }
 body.admin-dark .chart-panel .status-text {
     color: #9c9992;

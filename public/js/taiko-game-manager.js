@@ -73,6 +73,40 @@ class TaikoGameManager {
         this._judgeTimer = null;
 
         this._boundKeyDown = this._onKeyDown.bind(this);
+
+        /** @type {import('socket.io-client').Socket | null} */
+        this._socket = null;
+        /** @type {((payload: { type: string, from?: string }) => void) | null} */
+        this._onRemoteHit = null;
+        /** マルチプレイゾーン情報 */
+        this._mpZone = null;
+        /** @type {number | null} */
+        this._mpClaimedPart = null;
+        this._mpOnState = null;
+        this._mpOnSyncStart = null;
+        this._mpOnResults = null;
+        this._mpPartNames = {};
+    }
+
+    /**
+     * Socket.io クライアントを接続する（マルチプレイ同期用）
+     * @param {import('socket.io-client').Socket | null} socket
+     */
+    setSocket(socket) {
+        if (this._socket && this._onRemoteHit) {
+            this._socket.off('taiko-hit', this._onRemoteHit);
+        }
+        this._socket = socket || null;
+        if (!this._socket) {
+            this._onRemoteHit = null;
+            return;
+        }
+        this._onRemoteHit = (payload) => {
+            if (!payload || (payload.type !== 'don' && payload.type !== 'ka')) return;
+            if (this._socket && payload.from && payload.from === this._socket.id) return;
+            this._playHitSound(payload.type === 'ka' ? 'ka' : 'don');
+        };
+        this._socket.on('taiko-hit', this._onRemoteHit);
     }
 
     /**
@@ -123,6 +157,8 @@ class TaikoGameManager {
         const kaZone = document.getElementById('taiko-ka-zone');
         kaZone?.addEventListener('click', () => this._hit('ka'));
         kaZone?.addEventListener('touchstart', (e) => { e.preventDefault(); this._hit('ka'); }, { passive: false });
+
+        document.getElementById('taiko-mp-lobby-close')?.addEventListener('click', () => this.close());
     }
 
     _closeHintPopup() {
@@ -138,17 +174,36 @@ class TaikoGameManager {
     }
 
     /**
-     * 太鼓メニューを開く。選曲画面を表示し、譜面を選んだらゲームを開始する。
+     * 太鼓メニューを開く。ソロは選曲、マルチはロビー。
+     * @param {{ multiplayer?: boolean, groupId?: string, multiplayerChartId?: string, slotCount?: number, worldId?: string } | null} [zone]
      */
-    open() {
+    open(zone) {
         if (!this._overlay) return;
         this._open = true;
         this._overlay.style.display = 'flex';
-        if (this._songSelectEl) this._songSelectEl.style.display = 'flex';
         if (this._gameContainerEl) this._gameContainerEl.style.display = 'none';
         const resultsEl = document.getElementById('taiko-results');
         if (resultsEl) resultsEl.style.display = 'none';
+        const lobbyEl = document.getElementById('taiko-mp-lobby');
 
+        const isMp = zone && zone.multiplayer && zone.groupId && zone.multiplayerChartId
+            && zone.worldId && (zone.slotCount || 1) >= 1;
+        if (isMp) {
+            if (this._songSelectEl) this._songSelectEl.style.display = 'none';
+            if (lobbyEl) lobbyEl.style.display = 'flex';
+            this._mpZone = {
+                worldId: zone.worldId,
+                groupId: String(zone.groupId).trim(),
+                multiplayerChartId: String(zone.multiplayerChartId).trim(),
+                slotCount: Math.min(3, Math.max(1, Number(zone.slotCount) || 1))
+            };
+            this._mpClaimedPart = null;
+            this._setupMultiplayerLobby();
+            return;
+        }
+        this._teardownMultiplayer();
+        if (lobbyEl) lobbyEl.style.display = 'none';
+        if (this._songSelectEl) this._songSelectEl.style.display = 'flex';
         this._loadChartList();
     }
 
@@ -257,6 +312,7 @@ class TaikoGameManager {
 
     close() {
         if (!this._open) return;
+        this._teardownMultiplayer();
         this._open = false;
         this._closeHintPopup();
         if (this._overlay) this._overlay.style.display = 'none';
@@ -264,6 +320,286 @@ class TaikoGameManager {
         if (this._notesContainer) this._notesContainer.innerHTML = '';
         this._activeNotes = [];
         document.removeEventListener('keydown', this._boundKeyDown);
+        const lobbyEl = document.getElementById('taiko-mp-lobby');
+        if (lobbyEl) lobbyEl.style.display = 'none';
+    }
+
+    /**
+     * マルチプレイ用 Socket ルームから離脱しリスナーを外す
+     */
+    _teardownMultiplayer() {
+        const z = this._mpZone;
+        if (this._socket && z) {
+            this._socket.emit('taiko-mp-leave', { worldId: z.worldId, groupId: z.groupId });
+        }
+        if (this._socket && this._mpOnState) {
+            this._socket.off('taiko-mp-state', this._mpOnState);
+        }
+        if (this._socket && this._mpOnSyncStart) {
+            this._socket.off('taiko-mp-sync-start', this._mpOnSyncStart);
+        }
+        if (this._socket && this._mpOnResults) {
+            this._socket.off('taiko-mp-results', this._mpOnResults);
+        }
+        this._mpOnState = null;
+        this._mpOnSyncStart = null;
+        this._mpOnResults = null;
+        this._mpZone = null;
+        this._mpClaimedPart = null;
+        this._mpPartNames = {};
+    }
+
+    /**
+     * マルチロビー UI と Socket 参加
+     */
+    _setupMultiplayerLobby() {
+        const z = this._mpZone;
+        const hintEl = document.getElementById('taiko-mp-lobby-hint');
+        const statusEl = document.getElementById('taiko-mp-status');
+        const wrap = document.getElementById('taiko-mp-part-buttons');
+        if (!z || !wrap) return;
+        if (hintEl) {
+            hintEl.textContent = `グループ「${z.groupId}」・${z.slotCount}人でプレイ。パートを選んでください。`;
+        }
+        if (statusEl) statusEl.textContent = '';
+        wrap.innerHTML = '';
+
+        if (!this._socket || !this._socket.connected) {
+            if (statusEl) statusEl.textContent = '接続されていません。ページを再読み込みしてください。';
+            return;
+        }
+
+        for (let i = 1; i <= z.slotCount; i++) {
+            const row = document.createElement('div');
+            row.className = 'taiko-mp-part-row';
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = this._mpPartNames[i] && this._mpPartNames[i].trim() ? this._mpPartNames[i].trim() : `${i}P`;
+            btn.dataset.part = String(i);
+            btn.addEventListener('click', () => this._multiplayerClaimPart(i));
+
+            row.appendChild(btn);
+            wrap.appendChild(row);
+        }
+
+        // 譜面に設定された初期パート名（charts.partNames）を反映
+        fetch('/api/charts')
+            .then((r) => (r.ok ? r.json() : {}))
+            .then((charts) => {
+                const c = charts && z.multiplayerChartId ? charts[z.multiplayerChartId] : null;
+                const pn = c && c.partNames && typeof c.partNames === 'object' ? c.partNames : null;
+                if (!pn) return;
+                for (let i = 1; i <= z.slotCount; i++) {
+                    const v = pn[i] || pn[`p${i}`];
+                    if (typeof v !== 'string' || !v.trim()) continue;
+                    const s = v.trim().slice(0, 20);
+                    this._mpPartNames[i] = s;
+                    const btn = wrap.querySelector(`button[data-part="${i}"]`);
+                    if (btn instanceof HTMLButtonElement) btn.textContent = s;
+                }
+            })
+            .catch(() => {});
+
+        this._mpOnState = (payload) => this._onMultiplayerState(payload);
+        this._mpOnSyncStart = (payload) => this._onMultiplayerSyncStart(payload);
+        this._mpOnResults = (payload) => this._onMultiplayerResults(payload);
+        this._socket.on('taiko-mp-state', this._mpOnState);
+        this._socket.on('taiko-mp-sync-start', this._mpOnSyncStart);
+        this._socket.on('taiko-mp-results', this._mpOnResults);
+
+        this._socket.emit('taiko-mp-join', {
+            worldId: z.worldId,
+            groupId: z.groupId,
+            slotCount: z.slotCount,
+            chartId: z.multiplayerChartId
+        }, (ack) => {
+            if (!ack || !ack.ok) {
+                if (statusEl) statusEl.textContent = 'ルームに入れませんでした。';
+            }
+        });
+    }
+
+    /**
+     * @param {number} partIndex 1..3
+     */
+    _multiplayerClaimPart(partIndex) {
+        const z = this._mpZone;
+        if (!this._socket || !z) return;
+        this._socket.emit('taiko-mp-claim-part', {
+            worldId: z.worldId,
+            groupId: z.groupId,
+            partIndex
+        }, (ack) => {
+            const statusEl = document.getElementById('taiko-mp-status');
+            if (ack && ack.ok) {
+                this._mpClaimedPart = partIndex;
+                if (statusEl) statusEl.textContent = `${partIndex}P を選択しました`;
+            } else if (statusEl) {
+                statusEl.textContent = ack?.error === 'taken'
+                    ? 'このパートは埋まっています'
+                    : ack?.error === 'in_game'
+                        ? '演奏中はパートを変更できません'
+                        : '選択できませんでした';
+            }
+        });
+    }
+
+    /**
+     * @param {{ slotCount: number, parts: Record<string, { taken: boolean, name?: string }>, inGame?: boolean, startAt?: number }} payload
+     */
+    _onMultiplayerState(payload) {
+        const z = this._mpZone;
+        const wrap = document.getElementById('taiko-mp-part-buttons');
+        if (!z || !payload || !wrap) return;
+        const sc = payload.slotCount || z.slotCount;
+        const parts = payload.parts || {};
+        let allTaken = true;
+        for (let i = 1; i <= sc; i++) {
+            if (!parts[i] || !parts[i].taken) allTaken = false;
+        }
+        wrap.querySelectorAll('button').forEach((btn) => {
+            const p = Number(btn.dataset.part);
+            const taken = parts[p]?.taken;
+            const name = parts[p]?.name;
+            if (name && String(name).trim()) {
+                btn.textContent = String(name).trim();
+                this._mpPartNames[p] = String(name).trim();
+            } else {
+                btn.textContent = `${p}P`;
+            }
+            btn.classList.remove('taiko-mp-part-mine', 'taiko-mp-part-taken');
+            if (this._mpClaimedPart === p) {
+                btn.classList.add('taiko-mp-part-mine');
+            } else if (taken) {
+                btn.classList.add('taiko-mp-part-taken');
+            }
+            btn.disabled = taken && this._mpClaimedPart !== p;
+        });
+
+        const hintEl = document.getElementById('taiko-mp-lobby-hint');
+        const statusEl = document.getElementById('taiko-mp-status');
+        if (payload.inGame && payload.startAt) {
+            const leftMs = Math.max(0, Number(payload.startAt) - Date.now());
+            const sec = Math.ceil(leftMs / 1000);
+            if (hintEl) hintEl.textContent = '満員になりました。まもなく開始します…';
+            if (statusEl) statusEl.textContent = `開始まで ${sec} 秒`;
+            const ring = document.querySelector('.taiko-mp-wait-ring');
+            if (ring) ring.classList.add('countdown');
+        } else {
+            const ring = document.querySelector('.taiko-mp-wait-ring');
+            if (ring) ring.classList.remove('countdown');
+        }
+    }
+
+    /**
+     * @param {{ startAt: number, chartId: string }} payload
+     */
+    _onMultiplayerSyncStart(payload) {
+        const z = this._mpZone;
+        if (!z || !payload || !payload.chartId) return;
+        const part = this._mpClaimedPart;
+        if (part == null) return;
+
+        const lobbyEl = document.getElementById('taiko-mp-lobby');
+        if (lobbyEl) lobbyEl.style.display = 'none';
+        if (this._socket && this._mpOnState) {
+            this._socket.off('taiko-mp-state', this._mpOnState);
+        }
+        if (this._socket && this._mpOnSyncStart) {
+            this._socket.off('taiko-mp-sync-start', this._mpOnSyncStart);
+        }
+        this._mpOnState = null;
+        this._mpOnSyncStart = null;
+
+        const startAt = Number(payload.startAt) || Date.now();
+        const delay = Math.max(0, startAt - Date.now());
+
+        setTimeout(async () => {
+            try {
+                const res = await fetch('/api/charts');
+                const charts = res.ok ? await res.json() : {};
+                const c = charts[payload.chartId];
+                const notes = this._notesForMultiplayerPart(c, part);
+                if (!notes || !Array.isArray(notes) || notes.length === 0) {
+                    window.alert(`パート${part}の譜面がありません。管理画面の譜面で${part === 1 ? '1P' : part === 2 ? '2P' : '3P'}を設定してください。`);
+                    this._mpZone = null;
+                    this.close();
+                    return;
+                }
+                const meta = {
+                    id: payload.chartId,
+                    name: c?.name || payload.chartId,
+                    difficulty: c?.difficulty,
+                    endTime: c?.endTime
+                };
+                this._startGamePlay(notes, meta);
+            } catch (e) {
+                window.alert('譜面の取得に失敗しました');
+                this.close();
+            }
+        }, delay);
+    }
+
+    /**
+     * マルチの最終リザルト（全員終了後）
+     * @param {{ chartId?: string, totalScore?: number, players?: Array<{ partIndex: number, name: string, score: number }> }} payload
+     */
+    _onMultiplayerResults(payload) {
+        const resultsEl = document.getElementById('taiko-results');
+        if (!resultsEl) return;
+        const total = Math.max(0, Math.floor(Number(payload?.totalScore) || 0));
+        const players = Array.isArray(payload?.players) ? payload.players : [];
+
+        if (this._gameContainerEl) this._gameContainerEl.style.display = 'none';
+        if (this._songSelectEl) this._songSelectEl.style.display = 'none';
+        const lobbyEl = document.getElementById('taiko-mp-lobby');
+        if (lobbyEl) lobbyEl.style.display = 'none';
+
+        const songNameEl = document.getElementById('taiko-results-song-name');
+        if (songNameEl) songNameEl.textContent = '総合得点';
+        const userEl = document.getElementById('taiko-results-username');
+        if (userEl) userEl.textContent = `合計 ${total}点`;
+        const diffEl = document.getElementById('taiko-results-difficulty');
+        if (diffEl) diffEl.textContent = 'マルチプレイ';
+        const scoreValEl = document.getElementById('taiko-results-score-value');
+        if (scoreValEl) scoreValEl.textContent = String(total);
+        const goodEl = document.getElementById('taiko-results-good');
+        const okEl = document.getElementById('taiko-results-ok');
+        const missEl = document.getElementById('taiko-results-miss');
+        const comboEl = document.getElementById('taiko-results-max-combo');
+        const rollEl = document.getElementById('taiko-results-roll');
+        if (goodEl) goodEl.textContent = '-';
+        if (okEl) okEl.textContent = '-';
+        if (missEl) missEl.textContent = '-';
+        if (comboEl) comboEl.textContent = '-';
+        if (rollEl) rollEl.textContent = '-';
+        const fillEl = document.getElementById('taiko-results-clear-fill');
+        if (fillEl) fillEl.style.width = '100%';
+
+        const listEl = document.getElementById('taiko-results-ranking-list');
+        if (listEl) {
+            listEl.innerHTML = '';
+            players.sort((a, b) => a.partIndex - b.partIndex).forEach((p) => {
+                const li = document.createElement('li');
+                li.textContent = `${p.partIndex}P ${p.name || `P${p.partIndex}`} ${p.score}点`;
+                listEl.appendChild(li);
+            });
+        }
+        resultsEl.style.display = 'flex';
+    }
+
+    /**
+     * @param {Record<string, unknown> | undefined} chart
+     * @param {number} part 1|2|3
+     * @returns {Array<unknown> | null}
+     */
+    _notesForMultiplayerPart(chart, part) {
+        if (!chart) return null;
+        if (part === 1) return Array.isArray(chart.notes) ? chart.notes : null;
+        if (part === 2) return Array.isArray(chart.notes2) ? chart.notes2 : null;
+        if (part === 3) return Array.isArray(chart.notes3) ? chart.notes3 : null;
+        return null;
     }
 
     // ------------------------------------------------------------------ private
@@ -299,6 +635,17 @@ class TaikoGameManager {
 
         this._playHitSound(type);
         this._flashButton(type);
+
+        if (this._socket) {
+            const z = this._mpZone;
+            const multiplayer = !!z;
+            this._socket.emit('taiko-hit', {
+                type,
+                multiplayer,
+                worldId: multiplayer ? z.worldId : undefined,
+                groupId: multiplayer ? z.groupId : undefined
+            });
+        }
 
         const laneEl = this._notesContainer?.parentElement;
         if (!laneEl) return;
@@ -599,6 +946,30 @@ class TaikoGameManager {
         const chartId = meta.id;
         const username = typeof localStorage !== 'undefined' ? (localStorage.getItem('username') || 'プレイヤー') : 'プレイヤー';
 
+        // マルチ: 全員終了後に総合リザルトを出す（ここでは終了通知だけ送って待機表示へ）
+        if (this._socket && this._mpZone && this._mpClaimedPart != null) {
+            const z = this._mpZone;
+            const lobbyEl = document.getElementById('taiko-mp-lobby');
+            if (lobbyEl) lobbyEl.style.display = 'flex';
+            const hintEl = document.getElementById('taiko-mp-lobby-hint');
+            const statusEl = document.getElementById('taiko-mp-status');
+            const wrap = document.getElementById('taiko-mp-part-buttons');
+            const startBtn = document.getElementById('taiko-mp-start');
+            if (this._songSelectEl) this._songSelectEl.style.display = 'none';
+            if (wrap) wrap.innerHTML = '';
+            if (startBtn) startBtn.disabled = true;
+            if (hintEl) hintEl.textContent = '演奏終了。ほかのプレイヤーの終了を待っています…';
+            if (statusEl) statusEl.textContent = '';
+
+            this._socket.emit('taiko-mp-finish', {
+                worldId: z.worldId,
+                groupId: z.groupId,
+                partIndex: this._mpClaimedPart,
+                score: this._score
+            });
+            return;
+        }
+
         if (chartId) {
             try {
                 await fetch('/api/charts/' + encodeURIComponent(chartId) + '/score', {
@@ -658,6 +1029,8 @@ class TaikoGameManager {
     _closeResults() {
         const resultsEl = document.getElementById('taiko-results');
         if (resultsEl) resultsEl.style.display = 'none';
+        const lobbyEl = document.getElementById('taiko-mp-lobby');
+        if (lobbyEl && lobbyEl.style.display !== 'none') return;
         if (this._songSelectEl) this._songSelectEl.style.display = 'flex';
     }
 }

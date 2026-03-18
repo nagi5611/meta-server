@@ -192,11 +192,15 @@ class SceneManager {
 
                         // Track taiko drum models
                         if (config.taiko) {
+                            const t = config.taiko;
                             this.taikos.push({
-                                position: position,
-                                radius: config.taiko.radius || 3
+                                position,
+                                radius: t.radius || 3,
+                                multiplayer: !!t.multiplayer,
+                                groupId: t.multiplayer ? String(t.groupId || '').trim() : '',
+                                multiplayerChartId: t.multiplayer ? String(t.multiplayerChartId || '').trim() : ''
                             });
-                            console.log(`  Taiko: radius=${config.taiko.radius || 3}`);
+                            console.log(`  Taiko: radius=${t.radius || 3}${t.multiplayer ? ` mp group=${t.groupId}` : ''}`);
                         }
 
                         loadedCount++;

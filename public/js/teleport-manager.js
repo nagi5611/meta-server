@@ -83,7 +83,11 @@ class TeleportManager {
         this.taikoZones.push({
             position: zone.position,
             radius: zone.radius || 3,
-            worldId: zone.worldId
+            worldId: zone.worldId,
+            multiplayer: !!zone.multiplayer,
+            groupId: zone.groupId || '',
+            multiplayerChartId: zone.multiplayerChartId || '',
+            slotCount: zone.slotCount != null ? zone.slotCount : 1
         });
     }
 
@@ -181,7 +185,7 @@ class TeleportManager {
         // 優先度: 太鼓 > PDF > テレポート
         if (this.nearestTaikoZone && this.openTaikoGame) {
             this.uiManager.hideTeleportPrompt();
-            this.openTaikoGame();
+            this.openTaikoGame(this.nearestTaikoZone);
             return;
         }
         const pdfPath = this.getPdfPath && this.getPdfPath();

@@ -147,8 +147,8 @@ class MetaverseApp {
         // Initialize Taiko Game (E key near taiko object)
         this.taikoGameManager = new TaikoGameManager();
         this.taikoGameManager.init();
-        this.teleportManager.setTaikoCallback(() => {
-            this.taikoGameManager.open();
+        this.teleportManager.setTaikoCallback((zone) => {
+            this.taikoGameManager.open(zone || null);
             document.exitPointerLock();
             this.characterController.resetMovement();
         });
@@ -198,6 +198,7 @@ class MetaverseApp {
         this.networkManager.connect();
         this.networkManager.startSendingUpdates(this.characterController);
         if (this.pdfViewerManager) this.pdfViewerManager.setSocket(this.networkManager.socket);
+        if (this.taikoGameManager) this.taikoGameManager.setSocket(this.networkManager.socket);
 
         // Initialize voice chat manager (room VC)
         this.voiceChatManager = new VoiceChatManager(this.networkManager.socket);
@@ -458,12 +459,23 @@ class MetaverseApp {
     updateTaikoZones() {
         const taikos = this.sceneManager.getTaikos();
         const currentWorldId = this.worldManager.getCurrentWorldId();
+        const world = this.worldManager.getWorld(currentWorldId);
+        const models = world && Array.isArray(world.models) ? world.models : [];
+        /** @param {string} gid */
+        const countGroup = (gid) => models.filter((m) => m.taiko && m.taiko.multiplayer && String(m.taiko.groupId || '').trim() === gid).length;
         this.teleportManager.clearTaikoZones();
-        taikos.forEach(taiko => {
+        taikos.forEach((taiko) => {
+            const gid = taiko.groupId || '';
+            const n = taiko.multiplayer && gid ? countGroup(gid) : 1;
+            const slotCount = Math.min(3, Math.max(1, n));
             this.teleportManager.addTaikoZone({
                 position: taiko.position,
                 radius: taiko.radius,
-                worldId: currentWorldId
+                worldId: currentWorldId,
+                multiplayer: taiko.multiplayer,
+                groupId: gid,
+                multiplayerChartId: taiko.multiplayerChartId || '',
+                slotCount
             });
         });
         console.log(`Setting up ${taikos.length} taiko zones for world: ${currentWorldId}`);

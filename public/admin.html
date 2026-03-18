@@ -523,6 +523,21 @@
                                             <input type="number" id="obj-taiko-radius" class="prop-input num" step="0.1" min="0" value="3">
                                             <span class="prop-unit">m</span>
                                         </div>
+                                        <div class="prop-row checkbox-row">
+                                            <input type="checkbox" id="obj-taiko-multiplayer" class="prop-checkbox">
+                                            <label class="prop-label" for="obj-taiko-multiplayer">マルチプレイ対応</label>
+                                        </div>
+                                        <div id="obj-taiko-multiplayer-rows" style="display:none">
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-taiko-group-id">マルチプレイグループID</label>
+                                                <input type="text" id="obj-taiko-group-id" class="prop-input" placeholder="例: room-a">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-taiko-chart-id">譜面（曲）</label>
+                                                <select id="obj-taiko-chart-id" class="prop-input"></select>
+                                            </div>
+                                            <p class="hint" style="margin-top:6px">同一ワールド・同一グループIDの太鼓は1〜3台。同グループで同じ譜面が使われます。</p>
+                                        </div>
                                     </div>
                                 </details>
                                 <details class="block" id="object-props-teleporter">
@@ -692,6 +707,24 @@
                             <div class="field-row">
                                 <label class="prop-label">曲の終わり（小節）</label>
                                 <input type="number" id="chart-edit-end-time" class="prop-input num" min="1" step="1" placeholder="例: 16">
+                            </div>
+                            <div class="field-row chart-part-tabs-row" aria-label="マルチプレイ用パート">
+                                <label class="prop-label">編集パート</label>
+                                <div class="chart-part-tabs">
+                                    <button type="button" class="chart-part-tab active" data-part="1" id="chart-part-tab-1">1P</button>
+                                    <button type="button" class="chart-part-tab" data-part="2" id="chart-part-tab-2">2P</button>
+                                    <button type="button" class="chart-part-tab" data-part="3" id="chart-part-tab-3">3P</button>
+                                </div>
+                                <span class="hint">マルチ太鼓で2〜3台のときに使用</span>
+                            </div>
+                            <div class="field-row chart-part-names-row" aria-label="パート名">
+                                <label class="prop-label">パート名</label>
+                                <div class="chart-part-names">
+                                    <input type="text" id="chart-part-name-1" class="prop-input" maxlength="20" placeholder="1Pの名前（例: 太郎）">
+                                    <input type="text" id="chart-part-name-2" class="prop-input" maxlength="20" placeholder="2Pの名前（例: 次郎）">
+                                    <input type="text" id="chart-part-name-3" class="prop-input" maxlength="20" placeholder="3Pの名前（例: 三郎）">
+                                </div>
+                                <span class="hint">待機画面のP名の初期値になります（後から待機画面でも変更可）</span>
                             </div>
                             <div class="field-row chart-bgm-row">
                                 <label class="prop-label">BGM</label>

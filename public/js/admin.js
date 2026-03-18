@@ -20,6 +20,24 @@ let selectedChartId = null;
 let cachedCharts = {};
 /** 編集中のノーツ配列（{ time, type }[] または { type:'roll', startTime, endTime }[]）。譜面編集エリアと同期 */
 let editingNotes = [];
+/** マルチプレイ用 1P/2P/3P の切替（1..3） */
+let chartEditingPart = 1;
+/** 選択中譜面のパート別ノーツ（インデックス 0=1P,1=2P,2=3P） */
+let chartPartNoteSlots = [[], [], []];
+/** 選択中譜面のパート名（1..3） */
+let chartPartNames = { 1: '', 2: '', 3: '' };
+
+/**
+ * 「編集パート」タブ（1P/2P/3P）の表示名を更新する
+ */
+function updateChartPartTabLabels() {
+    const b1 = document.getElementById('chart-part-tab-1');
+    const b2 = document.getElementById('chart-part-tab-2');
+    const b3 = document.getElementById('chart-part-tab-3');
+    if (b1) b1.textContent = (chartPartNames[1] && chartPartNames[1].trim()) ? chartPartNames[1].trim() : '1P';
+    if (b2) b2.textContent = (chartPartNames[2] && chartPartNames[2].trim()) ? chartPartNames[2].trim() : '2P';
+    if (b3) b3.textContent = (chartPartNames[3] && chartPartNames[3].trim()) ? chartPartNames[3].trim() : '3P';
+}
 /** 譜面編集エリアで選択中のノーツ索引。-1 は未選択 */
 let selectedNoteIndex = -1;
 /** 譜面編集エリアで範囲選択中のノーツ索引（複数選択） */
@@ -669,8 +687,53 @@ function selectChart(id) {
 }
 
 /**
+ * チャートの notes / notes2 / notes3 をエディタ用（roll 展開）に変換
+ * @param {Record<string, unknown>} chart
+ * @param {string} field
+ * @returns {Array<{ time?: number, type: string, startTime?: number, endTime?: number }>}
+ */
+function chartFieldToEditorNotes(chart, field) {
+    let notes = Array.isArray(chart[field]) ? chart[field].slice() : [];
+    return notes.flatMap((n) => {
+        if (n.type === 'roll' && n.startTime != null && n.endTime != null) {
+            return [
+                { type: 'roll-start', time: n.startTime },
+                { type: 'roll-end', time: n.endTime }
+            ];
+        }
+        return [n];
+    });
+}
+
+/**
+ * 現在タブの editingNotes をスロットへ書き戻す
+ */
+function flushChartPartSlot() {
+    chartPartNoteSlots[chartEditingPart - 1] = editingNotes.slice();
+}
+
+/**
+ * 譜面パートタブを切り替える（1P/2P/3P）
+ * @param {number} part 1|2|3
+ */
+function setChartEditingPart(part) {
+    if (part < 1 || part > 3 || part === chartEditingPart) return;
+    stopChartPreview();
+    flushChartPartSlot();
+    chartEditingPart = part;
+    editingNotes = chartPartNoteSlots[part - 1].slice();
+    selectedNoteIndex = -1;
+    selectedNoteIndices.clear();
+    document.querySelectorAll('.chart-part-tab').forEach((b) => {
+        b.classList.toggle('active', Number(b.dataset.part) === part);
+    });
+    renderNotesStrip();
+    updateChartPreviewControlsUI();
+}
+
+/**
  * 譜面を右側の編集エリアに読み込む
- * @param {{ id: string, name?: string, notes?: Array<{ time: number, type: string }>, difficulty?: number|string|null, tempo?: number|null }} chart
+ * @param {{ id: string, name?: string, notes?: unknown[], notes2?: unknown[], notes3?: unknown[], difficulty?: number|string|null, tempo?: number|null }} chart
  */
 function loadChartIntoEditor(chart) {
     const nameEl = document.getElementById('chart-edit-name');
@@ -700,17 +763,27 @@ function loadChartIntoEditor(chart) {
     const panel = document.getElementById('panel-chart');
     if (panel) panel.dataset.hasChart = 'true';
 
-    let notes = Array.isArray(chart.notes) ? chart.notes.slice() : [];
-    notes = notes.flatMap((n) => {
-        if (n.type === 'roll' && n.startTime != null && n.endTime != null) {
-            return [
-                { type: 'roll-start', time: n.startTime },
-                { type: 'roll-end', time: n.endTime }
-            ];
-        }
-        return [n];
+    chartPartNoteSlots[0] = chartFieldToEditorNotes(chart, 'notes');
+    chartPartNoteSlots[1] = chartFieldToEditorNotes(chart, 'notes2');
+    chartPartNoteSlots[2] = chartFieldToEditorNotes(chart, 'notes3');
+    const pn = (chart && chart.partNames && typeof chart.partNames === 'object') ? chart.partNames : null;
+    chartPartNames = {
+        1: pn && typeof pn[1] === 'string' ? pn[1] : (pn && typeof pn.p1 === 'string' ? pn.p1 : ''),
+        2: pn && typeof pn[2] === 'string' ? pn[2] : (pn && typeof pn.p2 === 'string' ? pn.p2 : ''),
+        3: pn && typeof pn[3] === 'string' ? pn[3] : (pn && typeof pn.p3 === 'string' ? pn.p3 : ''),
+    };
+    const p1 = document.getElementById('chart-part-name-1');
+    const p2 = document.getElementById('chart-part-name-2');
+    const p3 = document.getElementById('chart-part-name-3');
+    if (p1) p1.value = chartPartNames[1] || '';
+    if (p2) p2.value = chartPartNames[2] || '';
+    if (p3) p3.value = chartPartNames[3] || '';
+    updateChartPartTabLabels();
+    chartEditingPart = 1;
+    editingNotes = chartPartNoteSlots[0].slice();
+    document.querySelectorAll('.chart-part-tab').forEach((b) => {
+        b.classList.toggle('active', Number(b.dataset.part) === 1);
     });
-    editingNotes = notes;
     selectedNoteIndex = -1;
     renderNotesStrip();
     if (btnSave) btnSave.disabled = false;
@@ -735,6 +808,19 @@ function clearChartEditor() {
     if (endTimeEl) endTimeEl.value = '';
     if (panel) delete panel.dataset.hasChart;
     editingNotes = [];
+    chartPartNoteSlots = [[], [], []];
+    chartEditingPart = 1;
+    document.querySelectorAll('.chart-part-tab').forEach((b) => {
+        b.classList.toggle('active', Number(b.dataset.part) === 1);
+    });
+    chartPartNames = { 1: '', 2: '', 3: '' };
+    const p1 = document.getElementById('chart-part-name-1');
+    const p2 = document.getElementById('chart-part-name-2');
+    const p3 = document.getElementById('chart-part-name-3');
+    if (p1) p1.value = '';
+    if (p2) p2.value = '';
+    if (p3) p3.value = '';
+    updateChartPartTabLabels();
     chartMeasureBpms = {};
     selectedNoteIndex = -1;
     renderNotesStrip();
@@ -1471,11 +1557,30 @@ function bindChartPanelEvents() {
                 ? buildBarTimeline(Math.max(1, Math.floor(endMeasures))).totalSec
                 : null;
             statusEl.textContent = '保存中...';
+            flushChartPartSlot();
+            const n1 = chartPartNoteSlots[0];
+            const n2 = chartPartNoteSlots[1];
+            const n3 = chartPartNoteSlots[2];
+            const pn1 = document.getElementById('chart-part-name-1')?.value?.trim?.() || '';
+            const pn2 = document.getElementById('chart-part-name-2')?.value?.trim?.() || '';
+            const pn3 = document.getElementById('chart-part-name-3')?.value?.trim?.() || '';
+            chartPartNames = { 1: pn1.slice(0, 20), 2: pn2.slice(0, 20), 3: pn3.slice(0, 20) };
+            updateChartPartTabLabels();
             try {
                 const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId), {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name || selectedChartId, notes: editingNotes, difficulty, tempo, endTime, measureBpms: chartMeasureBpms })
+                    body: JSON.stringify({
+                        name: name || selectedChartId,
+                        notes: n1,
+                        notes2: n2,
+                        notes3: n3,
+                        partNames: chartPartNames,
+                        difficulty,
+                        tempo,
+                        endTime,
+                        measureBpms: chartMeasureBpms
+                    })
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
@@ -1483,13 +1588,41 @@ function bindChartPanelEvents() {
                     return;
                 }
                 statusEl.textContent = '保存しました';
-                cachedCharts[selectedChartId] = { ...cachedCharts[selectedChartId], name: name || selectedChartId, notes: editingNotes, difficulty, tempo, endTime, measureBpms: chartMeasureBpms };
+                cachedCharts[selectedChartId] = {
+                    ...cachedCharts[selectedChartId],
+                    name: name || selectedChartId,
+                    notes: n1,
+                    notes2: n2,
+                    notes3: n3,
+                    partNames: chartPartNames,
+                    difficulty,
+                    tempo,
+                    endTime,
+                    measureBpms: chartMeasureBpms
+                };
                 renderChartList(cachedCharts);
             } catch (err) {
                 statusEl.textContent = '保存失敗: ' + err.message;
             }
         });
     }
+
+    // パート名の入力変更 → タブ表示を即時更新（保存は「保存」ボタン）
+    ['1', '2', '3'].forEach((n) => {
+        const el = document.getElementById('chart-part-name-' + n);
+        if (!el) return;
+        el.addEventListener('input', () => {
+            chartPartNames[Number(n)] = (el.value || '').slice(0, 20);
+            updateChartPartTabLabels();
+        });
+    });
+
+    document.querySelectorAll('.chart-part-tab').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const p = Number(btn.dataset.part);
+            if (p >= 1 && p <= 3) setChartEditingPart(p);
+        });
+    });
 
     const btnRemoveNote = document.getElementById('btn-remove-selected-note');
     if (btnRemoveNote) {
@@ -3300,6 +3433,8 @@ async function importChartsFromJsonText(jsonText, statusEl) {
                     id: newId,
                     name,
                     notes,
+                    notes2: Array.isArray(chart.notes2) ? chart.notes2 : [],
+                    notes3: Array.isArray(chart.notes3) ? chart.notes3 : [],
                     difficulty,
                     tempo,
                     endTime,

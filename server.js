@@ -83,6 +83,43 @@ function writeWorlds(worlds) {
     fs.renameSync(tmpPath, WORLDS_PATH);
 }
 
+/**
+ * マルチプレイ太鼓の worlds 整合性検証（同一 groupId は1〜3台・譜面ID統一・必須項目）
+ * @param {Record<string, unknown>} worlds
+ * @returns {string[]} エラーメッセージ（空ならOK）
+ */
+function validateWorldsTaikoMultiplayer(worlds) {
+    const errors = [];
+    if (!worlds || typeof worlds !== 'object') return ['worlds が不正です'];
+    for (const [wid, w] of Object.entries(worlds)) {
+        if (!w || typeof w !== 'object' || !Array.isArray(w.models)) continue;
+        /** @type {Map<string, { count: number, chartIds: Set<string> }>} */
+        const groups = new Map();
+        w.models.forEach((m, i) => {
+            const t = m && m.taiko;
+            if (!t || !t.multiplayer) return;
+            const gid = String(t.groupId || '').trim();
+            const cid = String(t.multiplayerChartId || '').trim();
+            if (!gid) errors.push(`ワールド「${wid}」オブジェクト#${i + 1}: マルチ太鼓にはグループIDが必要です`);
+            if (!cid) errors.push(`ワールド「${wid}」オブジェクト#${i + 1}: マルチ太鼓には譜面（曲）が必要です`);
+            if (!groups.has(gid)) groups.set(gid, { count: 0, chartIds: new Set() });
+            const g = groups.get(gid);
+            g.count += 1;
+            if (cid) g.chartIds.add(cid);
+        });
+        for (const [gid, g] of groups) {
+            if (!gid) continue;
+            if (g.count < 1 || g.count > 3) {
+                errors.push(`ワールド「${wid}」グループ「${gid}」: マルチ太鼓は1〜3台にしてください（現在${g.count}台）`);
+            }
+            if (g.chartIds.size > 1) {
+                errors.push(`ワールド「${wid}」グループ「${gid}」: 同じグループ内で譜面IDを統一してください`);
+            }
+        }
+    }
+    return errors;
+}
+
 const CHARTS_PATH = STORAGE_PATHS.CHARTS_PATH;
 const DEFAULT_CHARTS = {};
 
@@ -1163,6 +1200,42 @@ function getPlayerDisplayName(player) {
     return (player.isAdmin === true) ? 'admin' : (player.username || 'Guest');
 }
 
+/** 太鼓マルチ: worldId+groupId → { slotCount, parts, names, inGame, chartId, finished } */
+const taikoMpRooms = new Map();
+
+function taikoMpRoomKey(worldId, groupId) {
+    return `${worldId}\0${groupId}`;
+}
+
+/**
+ * 切断時に太鼓マルチのパート割当を解除し状態を通知する
+ * @param {import('socket.io').Server} ioSrv
+ * @param {string} socketId
+ */
+function cleanupTaikoMpOnDisconnect(ioSrv, socketId) {
+    for (const [k, st] of taikoMpRooms) {
+        let changed = false;
+        for (const [pi, sid] of [...st.parts.entries()]) {
+            if (sid === socketId) {
+                st.parts.delete(pi);
+                if (st.names) st.names.delete(pi);
+                if (st.finished) st.finished.delete(pi);
+                changed = true;
+            }
+        }
+        if (changed) {
+            const idx = k.indexOf('\0');
+            const worldId = idx >= 0 ? k.slice(0, idx) : k;
+            const groupId = idx >= 0 ? k.slice(idx + 1) : '';
+            const parts = {};
+            for (let i = 1; i <= st.slotCount; i++) {
+                parts[i] = { taken: st.parts.has(i), name: st.names?.get(i) || '' };
+            }
+            ioSrv.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts });
+        }
+    }
+}
+
 // Socket.io connection handling
 io.on('connection', (socket) => {
     // Verify admin token and user role if provided
@@ -1248,6 +1321,202 @@ io.on('connection', (socket) => {
         if (typeof pingMs === 'number' && pingMs >= 0 && pingMs < 10000) {
             playerPings.set(socket.id, { pingMs, reportedAt: Date.now() });
         }
+    });
+
+    // 太鼓ヒット音: ソロ時は現在ワールド(room)全体、マルチ時は該当 taiko-mp ルームへ共有
+    socket.on('taiko-hit', ({ multiplayer, worldId, groupId, type }) => {
+        const hitType = type === 'ka' ? 'ka' : 'don';
+        if (multiplayer && worldId && groupId) {
+            io.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-hit', {
+                type: hitType,
+                multiplayer: true,
+                worldId,
+                groupId,
+                from: socket.id
+            });
+            return;
+        }
+        const currentRoom = socket.data.currentRoom;
+        if (!currentRoom) return;
+        io.to(currentRoom).emit('taiko-hit', {
+            type: hitType,
+            multiplayer: false,
+            worldId: currentRoom,
+            from: socket.id
+        });
+    });
+
+    socket.on('taiko-mp-join', ({ worldId, groupId, slotCount, chartId }, cb) => {
+        if (!worldId || !groupId || typeof slotCount !== 'number') {
+            if (typeof cb === 'function') cb({ ok: false });
+            return;
+        }
+        const sc = Math.min(3, Math.max(1, Math.floor(slotCount)));
+        const k = taikoMpRoomKey(worldId, groupId);
+        const roomName = `taiko-mp:${worldId}:${groupId}`;
+        socket.join(roomName);
+        for (const st of taikoMpRooms.values()) {
+            for (const [pi, sid] of [...st.parts.entries()]) {
+                if (sid === socket.id) st.parts.delete(pi);
+            }
+        }
+        let st = taikoMpRooms.get(k);
+        if (!st || st.slotCount !== sc) {
+            st = { slotCount: sc, parts: new Map(), names: new Map(), inGame: false, chartId: null, finished: new Map() };
+            taikoMpRooms.set(k, st);
+        }
+        if (typeof chartId === 'string' && chartId.trim()) {
+            st.chartId = chartId.trim();
+        }
+        const parts = {};
+        for (let i = 1; i <= st.slotCount; i++) {
+            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '' };
+        }
+        io.to(roomName).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame });
+        if (typeof cb === 'function') cb({ ok: true });
+    });
+
+    socket.on('taiko-mp-leave', ({ worldId, groupId }) => {
+        if (!worldId || !groupId) return;
+        socket.leave(`taiko-mp:${worldId}:${groupId}`);
+        const k = taikoMpRoomKey(worldId, groupId);
+        const st = taikoMpRooms.get(k);
+        if (st) {
+            for (const [pi, sid] of [...st.parts.entries()]) {
+                if (sid === socket.id) {
+                    st.parts.delete(pi);
+                    st.names.delete(pi);
+                    st.finished.delete(pi);
+                }
+            }
+        }
+        const parts = {};
+        if (st) {
+            for (let i = 1; i <= st.slotCount; i++) {
+                parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '' };
+            }
+            io.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame });
+        }
+    });
+
+    socket.on('taiko-mp-claim-part', ({ worldId, groupId, partIndex }, cb) => {
+        const k = taikoMpRoomKey(worldId, groupId);
+        const st = taikoMpRooms.get(k);
+        if (!st) {
+            if (typeof cb === 'function') cb({ ok: false, error: 'room' });
+            return;
+        }
+        if (st.inGame) {
+            if (typeof cb === 'function') cb({ ok: false, error: 'in_game' });
+            return;
+        }
+        const p = Number(partIndex);
+        if (!Number.isInteger(p) || p < 1 || p > st.slotCount) {
+            if (typeof cb === 'function') cb({ ok: false, error: 'part' });
+            return;
+        }
+        for (const [pi, sid] of [...st.parts.entries()]) {
+            if (sid === socket.id) {
+                st.parts.delete(pi);
+                st.names.delete(pi);
+                st.finished.delete(pi);
+            }
+        }
+        const cur = st.parts.get(p);
+        if (cur && cur !== socket.id) {
+            if (typeof cb === 'function') cb({ ok: false, error: 'taken' });
+            return;
+        }
+        st.parts.set(p, socket.id);
+        const parts = {};
+        for (let i = 1; i <= st.slotCount; i++) {
+            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '' };
+        }
+        const roomName = `taiko-mp:${worldId}:${groupId}`;
+        // 自動開始: 全パートが埋まったらカウントダウンして同期開始
+        let startAt = null;
+        if (!st.inGame && st.parts.size >= st.slotCount && st.chartId) {
+            st.inGame = true;
+            st.finished.clear();
+            startAt = Date.now() + 4000;
+            io.to(roomName).emit('taiko-mp-sync-start', { startAt, chartId: st.chartId });
+        }
+        io.to(roomName).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame, startAt });
+        if (typeof cb === 'function') cb({ ok: true });
+    });
+
+    socket.on('taiko-mp-set-name', ({ worldId, groupId, partIndex, name }, cb) => {
+        const k = taikoMpRoomKey(worldId, groupId);
+        const st = taikoMpRooms.get(k);
+        if (!st) {
+            if (typeof cb === 'function') cb({ ok: false });
+            return;
+        }
+        const p = Number(partIndex);
+        if (!Number.isInteger(p) || p < 1 || p > st.slotCount) {
+            if (typeof cb === 'function') cb({ ok: false });
+            return;
+        }
+        const owner = st.parts.get(p);
+        if (!owner || owner !== socket.id) {
+            if (typeof cb === 'function') cb({ ok: false, error: 'not_owner' });
+            return;
+        }
+        const s = String(name || '').trim().slice(0, 20);
+        st.names.set(p, s || `P${p}`);
+        const parts = {};
+        for (let i = 1; i <= st.slotCount; i++) {
+            parts[i] = { taken: st.parts.has(i), name: st.names.get(i) || '' };
+        }
+        io.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame });
+        if (typeof cb === 'function') cb({ ok: true });
+    });
+
+    socket.on('taiko-mp-finish', ({ worldId, groupId, partIndex, score }, cb) => {
+        const k = taikoMpRoomKey(worldId, groupId);
+        const st = taikoMpRooms.get(k);
+        if (!st || !st.inGame) {
+            if (typeof cb === 'function') cb({ ok: false });
+            return;
+        }
+        const p = Number(partIndex);
+        if (!Number.isInteger(p) || p < 1 || p > st.slotCount) {
+            if (typeof cb === 'function') cb({ ok: false });
+            return;
+        }
+        const owner = st.parts.get(p);
+        if (!owner || owner !== socket.id) {
+            if (typeof cb === 'function') cb({ ok: false, error: 'not_owner' });
+            return;
+        }
+        const sc = Math.max(0, Math.floor(Number(score) || 0));
+        st.finished.set(p, { score: sc, name: st.names.get(p) || `P${p}` });
+        const done = st.finished.size >= st.slotCount;
+        if (done) {
+            const players = [];
+            let totalScore = 0;
+            for (let i = 1; i <= st.slotCount; i++) {
+                const v = st.finished.get(i) || { score: 0, name: st.names.get(i) || `P${i}` };
+                totalScore += v.score;
+                players.push({ partIndex: i, name: v.name, score: v.score });
+            }
+            io.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-results', {
+                chartId: st.chartId,
+                totalScore,
+                players
+            });
+            st.inGame = false;
+            st.chartId = null;
+            st.parts.clear();
+            st.names.clear();
+            st.finished.clear();
+            const parts = {};
+            for (let i = 1; i <= st.slotCount; i++) {
+                parts[i] = { taken: false, name: '' };
+            }
+            io.to(`taiko-mp:${worldId}:${groupId}`).emit('taiko-mp-state', { slotCount: st.slotCount, parts, inGame: !!st.inGame });
+        }
+        if (typeof cb === 'function') cb({ ok: true });
     });
 
     // Handle username setting
@@ -2335,6 +2604,7 @@ io.on('connection', (socket) => {
         trafficStats.delete(socket.id);
         playerPings.delete(socket.id);
         clientInfo.delete(socket.id);
+        cleanupTaikoMpOnDisconnect(io, socket.id);
     });
     
     // ============================
@@ -2481,6 +2751,10 @@ app.post('/admin/worlds', (req, res) => {
     if (!worlds || typeof worlds !== 'object') {
         return res.status(400).json({ error: 'Invalid body: expected worlds object' });
     }
+    const taikoErrs = validateWorldsTaikoMultiplayer(worlds);
+    if (taikoErrs.length > 0) {
+        return res.status(400).json({ error: taikoErrs.join(' ') });
+    }
     try {
         writeWorlds(worlds);
         res.json({ success: true });
@@ -2514,7 +2788,10 @@ app.post('/admin/charts', (req, res) => {
     const tempo = req.body.tempo != null ? Number(req.body.tempo) : null;
     const endTime = req.body.endTime != null && req.body.endTime !== '' ? Number(req.body.endTime) : null;
     const measureBpms = req.body.measureBpms != null ? req.body.measureBpms : null;
-    charts[id] = { id, name: name || id, notes: notesArr, difficulty, tempo, endTime, measureBpms };
+    const partNames = req.body.partNames != null && typeof req.body.partNames === 'object' ? req.body.partNames : null;
+    const notes2Arr = Array.isArray(req.body.notes2) ? req.body.notes2 : [];
+    const notes3Arr = Array.isArray(req.body.notes3) ? req.body.notes3 : [];
+    charts[id] = { id, name: name || id, notes: notesArr, notes2: notes2Arr, notes3: notes3Arr, partNames, difficulty, tempo, endTime, measureBpms };
     try {
         writeCharts(charts);
         res.json({ success: true, chart: charts[id] });
@@ -2530,9 +2807,12 @@ app.put('/admin/charts/:id', (req, res) => {
     if (!charts[id]) {
         return res.status(404).json({ error: 'Chart not found' });
     }
-    const { name, notes, difficulty, tempo, endTime, measureBpms } = req.body || {};
+    const { name, notes, notes2, notes3, partNames, difficulty, tempo, endTime, measureBpms } = req.body || {};
     if (name !== undefined) charts[id].name = name;
     if (Array.isArray(notes)) charts[id].notes = notes;
+    if (Array.isArray(notes2)) charts[id].notes2 = notes2;
+    if (Array.isArray(notes3)) charts[id].notes3 = notes3;
+    if (partNames !== undefined) charts[id].partNames = partNames;
     if (difficulty !== undefined) charts[id].difficulty = difficulty;
     if (tempo !== undefined) charts[id].tempo = tempo == null ? null : Number(tempo);
     if (endTime !== undefined) charts[id].endTime = endTime == null || endTime === '' ? null : Number(endTime);

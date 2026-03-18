@@ -558,6 +558,10 @@ function selectObject(obj) {
             document.getElementById('light-hint').style.display = 'none';
             document.getElementById('light-props').style.display = 'block';
         } else if (obj.userData.config) {
+            const cid = obj.userData.config.taiko?.multiplayerChartId;
+            refreshTaikoChartSelect(cid).then(() => {
+                if (selectedObject === obj) updateObjectPanel(obj);
+            });
             updateObjectPanel(obj);
             document.getElementById('object-hint').style.display = 'none';
             document.getElementById('object-props').style.display = 'block';
@@ -661,6 +665,14 @@ function updateObjectPanel(obj) {
         const taiko = c.taiko;
         document.getElementById('obj-taiko').checked = !!taiko;
         document.getElementById('obj-taiko-radius').value = taiko ? (taiko.radius ?? 3) : 3;
+        const mp = !!(taiko && taiko.multiplayer);
+        document.getElementById('obj-taiko-multiplayer').checked = mp;
+        document.getElementById('obj-taiko-group-id').value = mp ? (taiko.groupId || '') : '';
+        const chartSel = document.getElementById('obj-taiko-chart-id');
+        if (chartSel && taiko && taiko.multiplayerChartId) chartSel.value = taiko.multiplayerChartId;
+        else if (chartSel && chartSel.options.length) chartSel.selectedIndex = 0;
+        const mpRows = document.getElementById('obj-taiko-multiplayer-rows');
+        if (mpRows) mpRows.style.display = taiko && mp ? '' : 'none';
     } else if (obj.userData.pdfConfig) {
         const tp = c.teleporter;
         document.getElementById('obj-teleporter').checked = !!tp;
@@ -725,9 +737,30 @@ function syncObjectFromPanel() {
             delete c.teleporter;
         }
         if (document.getElementById('obj-taiko').checked) {
-            c.taiko = {
-                radius: parseFloat(document.getElementById('obj-taiko-radius').value) || 3
-            };
+            const radius = parseFloat(document.getElementById('obj-taiko-radius').value) || 3;
+            const mp = document.getElementById('obj-taiko-multiplayer').checked;
+            const groupId = (document.getElementById('obj-taiko-group-id').value || '').trim();
+            const chartEl = document.getElementById('obj-taiko-chart-id');
+            const multiplayerChartId = chartEl && chartEl.value ? chartEl.value.trim() : '';
+            if (mp) {
+                c.taiko = {
+                    radius,
+                    multiplayer: true,
+                    groupId,
+                    multiplayerChartId
+                };
+                if (groupId) {
+                    editGroup.children.forEach((child) => {
+                        const cfg = child.userData.config;
+                        if (!cfg || !cfg.taiko || !cfg.taiko.multiplayer) return;
+                        if (String(cfg.taiko.groupId || '').trim() !== groupId) return;
+                        cfg.taiko.multiplayerChartId = multiplayerChartId;
+                        cfg.taiko.groupId = groupId;
+                    });
+                }
+            } else {
+                c.taiko = { radius };
+            }
         } else {
             delete c.taiko;
         }
@@ -986,6 +1019,34 @@ async function fetchPdfs() {
     pdfList = await res.json();
 }
 
+/** マルチ太鼓用・譜面セレクトを /admin/charts から埋める */
+async function refreshTaikoChartSelect(preserveChartId) {
+    const sel = document.getElementById('obj-taiko-chart-id');
+    if (!sel) return;
+    const prev = preserveChartId != null ? preserveChartId : sel.value;
+    sel.innerHTML = '';
+    try {
+        const res = await fetch('/admin/charts', { credentials: 'include' });
+        if (!res.ok) throw new Error('fetch failed');
+        const charts = await res.json();
+        const ids = Object.keys(charts || {}).sort();
+        ids.forEach((id) => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            const c = charts[id];
+            opt.textContent = `${c && c.name ? c.name : id} (${id})`;
+            sel.appendChild(opt);
+        });
+        if (prev && charts[prev]) sel.value = prev;
+        else if (ids.length) sel.selectedIndex = 0;
+    } catch (e) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '（譜面を取得できません）';
+        sel.appendChild(opt);
+    }
+}
+
 function renderPdfList() {
     const el = document.getElementById('pdf-list');
     if (!el) return;
@@ -1153,6 +1214,11 @@ function selectWorld(id) {
     const w = worlds[id];
     if (w) {
         loadWorldIntoScene(w);
+        const taiko = selectedObject && selectedObject.userData.config && selectedObject.userData.config.taiko;
+        const cid = taiko && taiko.multiplayerChartId;
+        refreshTaikoChartSelect(cid).then(() => {
+            if (selectedObject && selectedObject.userData.config) updateObjectPanel(selectedObject);
+        });
         document.getElementById('world-name-row').style.display = '';
         document.getElementById('world-name').value = w.name || id;
     } else {
@@ -1263,8 +1329,27 @@ function bindEvents() {
     document.getElementById('obj-tp-radius').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-tp-label').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-tp-access').addEventListener('change', syncObjectFromPanel);
-    document.getElementById('obj-taiko').addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-taiko').addEventListener('change', () => {
+        if (!document.getElementById('obj-taiko').checked) {
+            document.getElementById('obj-taiko-multiplayer').checked = false;
+            const mpRows = document.getElementById('obj-taiko-multiplayer-rows');
+            if (mpRows) mpRows.style.display = 'none';
+        } else {
+            const mp = document.getElementById('obj-taiko-multiplayer').checked;
+            const mpRows = document.getElementById('obj-taiko-multiplayer-rows');
+            if (mpRows) mpRows.style.display = mp ? '' : 'none';
+        }
+        syncObjectFromPanel();
+    });
     document.getElementById('obj-taiko-radius').addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-taiko-multiplayer').addEventListener('change', () => {
+        const show = document.getElementById('obj-taiko').checked && document.getElementById('obj-taiko-multiplayer').checked;
+        const mpRows = document.getElementById('obj-taiko-multiplayer-rows');
+        if (mpRows) mpRows.style.display = show ? '' : 'none';
+        syncObjectFromPanel();
+    });
+    document.getElementById('obj-taiko-group-id').addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-taiko-chart-id').addEventListener('change', syncObjectFromPanel);
 
     document.getElementById('btn-save').addEventListener('click', async () => {
         const status = document.getElementById('save-status');
