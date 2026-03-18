@@ -985,6 +985,67 @@ body {
     cursor: not-allowed;
 }
 
+/* 譜面プレビュー（再生/停止 + 再生ヘッド） */
+.chart-panel .chart-preview-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0 10px;
+    flex-wrap: wrap;
+}
+
+.chart-panel .chart-preview-time {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    color: #666;
+}
+
+.chart-panel .measure-bpm-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.chart-panel .measure-bpm-input {
+    width: 88px;
+    padding: 4px 6px;
+    font-size: 12px;
+    border: 1px solid rgba(0,0,0,0.18);
+    border-radius: 6px;
+    background: #fff;
+    color: #333;
+}
+
+.chart-panel .measure-bpm-input[data-overridden="true"] {
+    border-color: rgba(21, 101, 192, 0.75);
+    box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.12);
+}
+
+.chart-panel .chart-measures-scroll {
+    position: relative;
+}
+
+.chart-panel .chart-preview-playhead {
+    position: absolute;
+    width: 4px;
+    border-radius: 2px;
+    background: #00c853;
+    box-shadow: 0 0 0 2px rgba(0, 200, 83, 0.18);
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
+}
+
+.chart-panel .chart-preview-playhead.active {
+    opacity: 1;
+}
+
+.chart-panel .measure-cell.chart-preview-active-cell {
+    outline: 2px solid rgba(0, 200, 83, 0.85);
+    outline-offset: -2px;
+}
+
 /* 移動/回転/スケールボタン（JSで挿入） */
 .admin-panel-world-edit #panel-object > button {
     margin-right: 8px;

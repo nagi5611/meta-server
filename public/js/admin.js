@@ -42,6 +42,27 @@ let noteDragStartX = 0;
 /** ノーツを実際にドラッグしたか（移動量で判定） */
 let noteDragStarted = false;
 
+/** 小節ごとのBPM上書き（barIndex -> bpm）。未指定は base BPM */
+let chartMeasureBpms = {};
+
+/** 譜面プレビュー再生の状態 */
+let chartPreviewState = {
+    playing: false,
+    rafId: 0,
+    startedAtPerfMs: 0,
+    durationSec: 0,
+    sources: [],
+    playheadEl: null,
+    activeCellEl: null
+};
+
+/** 譜面プレビュー用の音（WebAudio） */
+let chartPreviewAudioCtx = null;
+let chartPreviewAudioBuffers = {
+    don: null,
+    ka: null
+};
+
 /** ログインユーザー一覧の現在ページ（1始まり） */
 let currentLoginUsersPage = 1;
 const LOGIN_USERS_PAGE_SIZE = 50;
@@ -57,6 +78,10 @@ function switchPanel(panelId) {
     const navItem = document.querySelector(`.admin-nav-item[data-panel="${panelId}"]`);
     if (panel) panel.classList.add('active');
     if (navItem) navItem.classList.add('active');
+
+    if (panelId !== 'panel-chart') {
+        stopChartPreview();
+    }
 
     if (panelId === 'panel-world-edit' && !worldEditInitialized) {
         worldEditInitialized = true;
@@ -123,6 +148,377 @@ async function loadCharts() {
 }
 
 /**
+ * 秒を mm:ss.ss 表示へ整形
+ * @param {number} sec
+ */
+function formatChartPreviewTime(sec) {
+    const s = Math.max(0, Number(sec) || 0);
+    const m = Math.floor(s / 60);
+    const r = s - m * 60;
+    const mm = String(m).padStart(2, '0');
+    const ss = String(Math.floor(r)).padStart(2, '0');
+    const cs = String(Math.floor((r - Math.floor(r)) * 100)).padStart(2, '0');
+    return `${mm}:${ss}.${cs}`;
+}
+
+/**
+ * 指定小節の有効BPMを返す（未設定ならbase BPM）
+ * @param {number} barIndex
+ */
+function getEffectiveBpmForBar(barIndex) {
+    const bi = Math.max(0, Number(barIndex) || 0);
+    const ov = chartMeasureBpms && Object.prototype.hasOwnProperty.call(chartMeasureBpms, String(bi))
+        ? Number(chartMeasureBpms[String(bi)])
+        : NaN;
+    if (Number.isFinite(ov) && ov >= 1 && ov <= 500) return ov;
+    return getChartTempo();
+}
+
+/**
+ * totalMeasures 分のタイムライン（barStartSec/barSec）を作る
+ * @param {number} totalMeasures
+ */
+function buildBarTimeline(totalMeasures) {
+    const tm = Math.max(1, Math.floor(Number(totalMeasures) || 1));
+    const barSec = new Array(tm);
+    const barStartSec = new Array(tm);
+    let acc = 0;
+    for (let i = 0; i < tm; i++) {
+        barStartSec[i] = acc;
+        const bpm = getEffectiveBpmForBar(i);
+        const sec = getBarSec(bpm);
+        barSec[i] = sec;
+        acc += sec;
+    }
+    return { barSec, barStartSec, totalSec: acc };
+}
+
+/**
+ * timeSecを小節/16分割に変換する（可変BPM対応）
+ * @param {number} timeSec
+ */
+function timeToBarStepVarBpm(timeSec) {
+    const t = Math.max(0, Number(timeSec) || 0);
+    const endEl = document.getElementById('chart-edit-end-time');
+    const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
+    const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : 16;
+    const { barSec, barStartSec } = buildBarTimeline(endMeasures + 64); // 余裕
+    let barIndex = 0;
+    for (let i = 0; i < barStartSec.length; i++) {
+        const s = barStartSec[i];
+        const e = s + barSec[i];
+        if (t >= s && t < e) { barIndex = i; break; }
+        if (t >= e) barIndex = i;
+    }
+    const s0 = barStartSec[barIndex] ?? 0;
+    const sec = barSec[barIndex] ?? getBarSec(getEffectiveBpmForBar(barIndex));
+    const within = Math.max(0, t - s0);
+    const stepSec = sec / 16;
+    let stepIndex = Math.round(within / stepSec);
+    if (stepIndex >= 16) stepIndex = 15;
+    if (stepIndex < 0) stepIndex = 0;
+    return { barIndex, stepIndex };
+}
+
+/**
+ * 小節/16分割を秒timeに変換する（可変BPM対応）
+ * @param {number} barIndex
+ * @param {number} stepIndex
+ */
+function barStepToTimeVarBpm(barIndex, stepIndex) {
+    const bi = Math.max(0, Number(barIndex) || 0);
+    const si = Math.max(0, Math.min(15, Number(stepIndex) || 0));
+    // 必要な小節までの累積を作る（biまで）
+    let acc = 0;
+    for (let i = 0; i < bi; i++) {
+        acc += getBarSec(getEffectiveBpmForBar(i));
+    }
+    const sec = getBarSec(getEffectiveBpmForBar(bi));
+    return acc + si * (sec / 16);
+}
+
+/**
+ * BPM/小節BPM変更時に、ノーツの小節/位置（16分割）を維持したまま time(秒) を更新する（可変BPM対応）
+ * @param {number} oldBaseBpm
+ * @param {number} newBaseBpm
+ */
+function retimeEditingNotesKeepGridPositionVarBpm(oldBaseBpm, newBaseBpm) {
+    const ob = Number(oldBaseBpm);
+    const nb = Number(newBaseBpm);
+    if (!Number.isFinite(ob) || !Number.isFinite(nb) || ob <= 0 || nb <= 0) return;
+    if (ob === nb) return;
+
+    // old/new の base BPM を使うため、一時的に getChartTempo を置き換えず、計算関数側で参照できないので
+    // ここでは「現在の chartMeasureBpms はそのまま、baseだけ old/new として扱う」ためのローカル関数を用意する。
+    const getEffective = (barIndex, baseBpm) => {
+        const bi = Math.max(0, Number(barIndex) || 0);
+        const ov = chartMeasureBpms && Object.prototype.hasOwnProperty.call(chartMeasureBpms, String(bi))
+            ? Number(chartMeasureBpms[String(bi)])
+            : NaN;
+        if (Number.isFinite(ov) && ov >= 1 && ov <= 500) return ov;
+        return baseBpm;
+    };
+    const barStepToTimeWithBase = (barIndex, stepIndex, baseBpm) => {
+        const bi = Math.max(0, Number(barIndex) || 0);
+        const si = Math.max(0, Math.min(15, Number(stepIndex) || 0));
+        let acc = 0;
+        for (let i = 0; i < bi; i++) acc += getBarSec(getEffective(i, baseBpm));
+        const sec = getBarSec(getEffective(bi, baseBpm));
+        return acc + si * (sec / 16);
+    };
+    const timeToBarStepWithBase = (timeSec, baseBpm) => {
+        const t = Math.max(0, Number(timeSec) || 0);
+        // まず十分長い範囲で探索（入力endMeasuresがあればそれを優先）
+        const endEl = document.getElementById('chart-edit-end-time');
+        const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
+        const maxMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) + 64 : 256;
+        let acc = 0;
+        let barIndex = 0;
+        for (let i = 0; i < maxMeasures; i++) {
+            const sec = getBarSec(getEffective(i, baseBpm));
+            if (t >= acc && t < acc + sec) { barIndex = i; break; }
+            acc += sec;
+            barIndex = i;
+        }
+        const sec = getBarSec(getEffective(barIndex, baseBpm));
+        const within = Math.max(0, t - acc);
+        const stepSec = sec / 16;
+        let stepIndex = Math.round(within / stepSec);
+        if (stepIndex >= 16) stepIndex = 15;
+        if (stepIndex < 0) stepIndex = 0;
+        return { barIndex, stepIndex };
+    };
+
+    for (const n of editingNotes) {
+        if (!n) continue;
+        if (n.type === 'roll') {
+            const s = Number(n.startTime ?? 0);
+            const e = Number(n.endTime ?? n.startTime ?? 0);
+            const ps = timeToBarStepWithBase(s, ob);
+            const pe = timeToBarStepWithBase(e, ob);
+            n.startTime = barStepToTimeWithBase(ps.barIndex, ps.stepIndex, nb);
+            n.endTime = barStepToTimeWithBase(pe.barIndex, pe.stepIndex, nb);
+            continue;
+        }
+        const t = Number(n.time ?? 0);
+        const p = timeToBarStepWithBase(t, ob);
+        n.time = barStepToTimeWithBase(p.barIndex, p.stepIndex, nb);
+    }
+}
+
+/**
+ * プレビューの再生総時間(秒)を算出（endTime入力優先、無ければ最大ノーツ時刻+1小節）
+ */
+function getChartPreviewDurationSec() {
+    const endEl = document.getElementById('chart-edit-end-time');
+    const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
+    const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : null;
+    if (endMeasures != null) {
+        return buildBarTimeline(endMeasures).totalSec;
+    }
+
+    const getNoteMaxTime = (n) => n?.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n?.time ?? 0);
+    const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
+    const lastBarSec = getBarSec(getEffectiveBpmForBar(0));
+    return Math.max(0, maxNoteTime + lastBarSec);
+}
+
+/**
+ * editingNotes からプレビュー用の音イベント列を作る（don/ka + roll区間は0.1sごとにdon）
+ * @returns {Array<{ time: number, type: 'don'|'ka' }>}
+ */
+function buildChartPreviewEvents() {
+    const events = [];
+    for (const n of editingNotes) {
+        if (!n) continue;
+        if (n.type === 'don' || n.type === 'ka') {
+            const t = Number(n.time ?? 0);
+            if (Number.isFinite(t) && t >= 0) events.push({ time: t, type: n.type });
+        }
+    }
+    for (const s of getRollSections()) {
+        const start = Number(s.start ?? 0);
+        const end = Number(s.end ?? 0);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+        const step = 0.1;
+        for (let t = start; t < end; t += step) {
+            events.push({ time: t, type: 'don' });
+        }
+    }
+    events.sort((a, b) => a.time - b.time);
+    return events;
+}
+
+/**
+ * プレビュー音源を読み込み（初回のみ）
+ */
+async function ensureChartPreviewAudioLoaded() {
+    if (chartPreviewAudioBuffers.don && chartPreviewAudioBuffers.ka) return;
+    if (!chartPreviewAudioCtx) {
+        chartPreviewAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (chartPreviewAudioCtx.state === 'suspended') {
+        await chartPreviewAudioCtx.resume();
+    }
+    const decode = async (url) => {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(res.statusText);
+        const buf = await res.arrayBuffer();
+        return await chartPreviewAudioCtx.decodeAudioData(buf);
+    };
+    const [don, ka] = await Promise.all([
+        chartPreviewAudioBuffers.don ? chartPreviewAudioBuffers.don : decode('/music/don.mp3'),
+        chartPreviewAudioBuffers.ka ? chartPreviewAudioBuffers.ka : decode('/music/ka.mp3')
+    ]);
+    chartPreviewAudioBuffers = { don, ka };
+}
+
+/**
+ * playhead要素を確保して返す
+ */
+function ensureChartPreviewPlayheadEl() {
+    if (chartPreviewState.playheadEl && chartPreviewState.playheadEl.isConnected) return chartPreviewState.playheadEl;
+    const scrollEl = document.getElementById('chart-measures-scroll');
+    if (!scrollEl) return null;
+    const el = document.createElement('div');
+    el.className = 'chart-preview-playhead';
+    scrollEl.appendChild(el);
+    chartPreviewState.playheadEl = el;
+    return el;
+}
+
+/**
+ * 再生ヘッドを指定時間に合わせてセル上へ配置
+ * @param {number} timeSec
+ */
+function setChartPreviewPlayheadAtTime(timeSec) {
+    const scrollEl = document.getElementById('chart-measures-scroll');
+    const gridEl = document.getElementById('chart-measures-grid');
+    const playhead = ensureChartPreviewPlayheadEl();
+    if (!scrollEl || !gridEl || !playhead) return;
+
+    const { barIndex, stepIndex } = timeToBarStepVarBpm(timeSec);
+    const cell = gridEl.querySelector(`.measure-cell[data-bar-index="${barIndex}"][data-step-index="${stepIndex}"]`);
+    if (!cell) return;
+
+    if (chartPreviewState.activeCellEl && chartPreviewState.activeCellEl !== cell) {
+        chartPreviewState.activeCellEl.classList.remove('chart-preview-active-cell');
+    }
+    chartPreviewState.activeCellEl = cell;
+    cell.classList.add('chart-preview-active-cell');
+
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const cellRect = cell.getBoundingClientRect();
+    const left = (cellRect.left - scrollRect.left) + scrollEl.scrollLeft + (cellRect.width / 2) - 2;
+    const top = (cellRect.top - scrollRect.top) + scrollEl.scrollTop;
+    playhead.style.height = `${cellRect.height}px`;
+    playhead.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+
+    // 追従スクロール（近傍）
+    cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+/**
+ * 譜面プレビューUI（ボタン状態/時刻表示）を更新
+ */
+function updateChartPreviewControlsUI() {
+    const btnPlay = document.getElementById('btn-chart-preview-play');
+    const btnStop = document.getElementById('btn-chart-preview-stop');
+    const timeEl = document.getElementById('chart-preview-time');
+    const enabled = Boolean(selectedChartId);
+    if (btnPlay) btnPlay.disabled = !enabled || chartPreviewState.playing;
+    if (btnStop) btnStop.disabled = !enabled || !chartPreviewState.playing;
+
+    const dur = getChartPreviewDurationSec();
+    chartPreviewState.durationSec = dur;
+    if (timeEl && !chartPreviewState.playing) {
+        timeEl.textContent = `${formatChartPreviewTime(0)} / ${formatChartPreviewTime(dur)}`;
+    }
+}
+
+/**
+ * プレビュー再生（音 + 緑バー）
+ */
+async function playChartPreview() {
+    if (!selectedChartId) return;
+    stopChartPreview();
+    const statusEl = document.getElementById('chart-status');
+    try {
+        await ensureChartPreviewAudioLoaded();
+    } catch (e) {
+        if (statusEl) statusEl.textContent = 'プレビュー音の読み込みに失敗: ' + e.message;
+        return;
+    }
+
+    const events = buildChartPreviewEvents();
+    const dur = getChartPreviewDurationSec();
+    chartPreviewState.durationSec = dur;
+
+    if (!chartPreviewAudioCtx) return;
+    if (chartPreviewAudioCtx.state === 'suspended') await chartPreviewAudioCtx.resume();
+    const baseTime = chartPreviewAudioCtx.currentTime + 0.05;
+
+    const sources = [];
+    for (const ev of events) {
+        const buf = ev.type === 'don' ? chartPreviewAudioBuffers.don : chartPreviewAudioBuffers.ka;
+        if (!buf) continue;
+        const t = Number(ev.time ?? 0);
+        if (!Number.isFinite(t) || t < 0 || t > dur + 1) continue;
+        const src = chartPreviewAudioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(chartPreviewAudioCtx.destination);
+        src.start(baseTime + t);
+        sources.push(src);
+    }
+
+    chartPreviewState.playing = true;
+    chartPreviewState.sources = sources;
+    chartPreviewState.startedAtPerfMs = performance.now();
+    const playhead = ensureChartPreviewPlayheadEl();
+    if (playhead) playhead.classList.add('active');
+
+    const timeEl = document.getElementById('chart-preview-time');
+    const tick = () => {
+        if (!chartPreviewState.playing) return;
+        const elapsed = (performance.now() - chartPreviewState.startedAtPerfMs) / 1000;
+        const clamped = Math.min(Math.max(0, elapsed), chartPreviewState.durationSec);
+        if (timeEl) timeEl.textContent = `${formatChartPreviewTime(clamped)} / ${formatChartPreviewTime(chartPreviewState.durationSec)}`;
+        setChartPreviewPlayheadAtTime(clamped);
+        if (elapsed >= chartPreviewState.durationSec) {
+            stopChartPreview();
+            return;
+        }
+        chartPreviewState.rafId = requestAnimationFrame(tick);
+    };
+    chartPreviewState.rafId = requestAnimationFrame(tick);
+    updateChartPreviewControlsUI();
+}
+
+/**
+ * プレビュー停止
+ */
+function stopChartPreview() {
+    if (chartPreviewState.rafId) cancelAnimationFrame(chartPreviewState.rafId);
+    chartPreviewState.rafId = 0;
+    if (chartPreviewState.sources && chartPreviewState.sources.length > 0) {
+        for (const s of chartPreviewState.sources) {
+            try { s.stop(); } catch { /* noop */ }
+        }
+    }
+    chartPreviewState.sources = [];
+    chartPreviewState.playing = false;
+    chartPreviewState.startedAtPerfMs = 0;
+
+    const playhead = chartPreviewState.playheadEl;
+    if (playhead) playhead.classList.remove('active');
+    if (chartPreviewState.activeCellEl) {
+        chartPreviewState.activeCellEl.classList.remove('chart-preview-active-cell');
+        chartPreviewState.activeCellEl = null;
+    }
+    updateChartPreviewControlsUI();
+}
+
+/**
  * 譜面一覧のDOMを更新し、選択状態を反映する
  * @param {Record<string, { id: string, name?: string, notes?: Array<{ time: number, type: string }> }>} charts
  */
@@ -157,6 +553,7 @@ function renderChartList(charts) {
  * @param {string} id
  */
 function selectChart(id) {
+    stopChartPreview();
     selectedChartId = id;
     const c = cachedCharts[id];
     const btnDelete = document.getElementById('btn-delete-chart');
@@ -182,13 +579,21 @@ function loadChartIntoEditor(chart) {
     if (nameEl) nameEl.value = chart.name || chart.id || '';
     if (difficultyEl) difficultyEl.value = chart.difficulty != null ? String(chart.difficulty) : '';
     if (tempoEl) tempoEl.value = chart.tempo != null ? String(chart.tempo) : '';
+    chartMeasureBpms = (chart && chart.measureBpms && typeof chart.measureBpms === 'object') ? { ...chart.measureBpms } : {};
     if (endTimeEl) {
-        const bpm = (chart.tempo != null && Number.isFinite(Number(chart.tempo))) ? Number(chart.tempo) : getChartTempo();
-        const barSec = getBarSec(bpm);
-        const endMeasures = chart.endTime != null && Number.isFinite(Number(chart.endTime)) && barSec > 0
-            ? Math.max(1, Math.ceil(Number(chart.endTime) / barSec))
-            : '';
-        endTimeEl.value = endMeasures === '' ? '' : String(endMeasures);
+        const endSec = chart.endTime != null && Number.isFinite(Number(chart.endTime)) ? Number(chart.endTime) : NaN;
+        if (Number.isFinite(endSec) && endSec > 0) {
+            let acc = 0;
+            let measures = 0;
+            const maxMeasures = 2000;
+            while (measures < maxMeasures && acc < endSec) {
+                acc += getBarSec(getEffectiveBpmForBar(measures));
+                measures += 1;
+            }
+            endTimeEl.value = String(Math.max(1, measures));
+        } else {
+            endTimeEl.value = '';
+        }
     }
     const panel = document.getElementById('panel-chart');
     if (panel) panel.dataset.hasChart = 'true';
@@ -207,6 +612,7 @@ function loadChartIntoEditor(chart) {
     selectedNoteIndex = -1;
     renderNotesStrip();
     if (btnSave) btnSave.disabled = false;
+    updateChartPreviewControlsUI();
 }
 
 /**
@@ -225,9 +631,11 @@ function clearChartEditor() {
     if (endTimeEl) endTimeEl.value = '';
     if (panel) delete panel.dataset.hasChart;
     editingNotes = [];
+    chartMeasureBpms = {};
     selectedNoteIndex = -1;
     renderNotesStrip();
     if (btnSave) btnSave.disabled = true;
+    updateChartPreviewControlsUI();
 }
 
 /**
@@ -289,7 +697,7 @@ function updateChartPalette(overRollZone = false) {
 function getChartTempo() {
     const el = document.getElementById('chart-edit-tempo');
     const v = el && el.value ? Number(el.value) : NaN;
-    return Number.isFinite(v) && v >= 60 && v <= 300 ? v : 120;
+    return Number.isFinite(v) && v >= 1 && v <= 500 ? v : 120;
 }
 
 /**
@@ -307,55 +715,24 @@ function getBarSec(bpm) {
  * @param {number} newBpm
  */
 function retimeEditingNotesKeepGridPosition(oldBpm, newBpm) {
-    const ob = Number(oldBpm);
-    const nb = Number(newBpm);
-    if (!Number.isFinite(ob) || !Number.isFinite(nb) || ob <= 0 || nb <= 0) return;
-    if (ob === nb) return;
-
-    for (const n of editingNotes) {
-        if (!n) continue;
-        if (n.type === 'roll') {
-            const s = Number(n.startTime ?? 0);
-            const e = Number(n.endTime ?? n.startTime ?? 0);
-            const ps = timeToBarStep(s, ob);
-            const pe = timeToBarStep(e, ob);
-            n.startTime = barStepToTime(ps.barIndex, ps.stepIndex, nb);
-            n.endTime = barStepToTime(pe.barIndex, pe.stepIndex, nb);
-            continue;
-        }
-        const t = Number(n.time ?? 0);
-        const p = timeToBarStep(t, ob);
-        n.time = barStepToTime(p.barIndex, p.stepIndex, nb);
-    }
+    // 互換のため関数は残すが、可変BPM対応版へ委譲する
+    retimeEditingNotesKeepGridPositionVarBpm(oldBpm, newBpm);
 }
 
 /**
  * 秒timeを小節/16分割に変換する（stepは0-15）
  */
 function timeToBarStep(timeSec, bpm) {
-    const barSec = getBarSec(bpm);
-    const t = Math.max(0, Number(timeSec) || 0);
-    let barIndex = Math.floor(t / barSec);
-    const within = t - barIndex * barSec;
-    const stepSec = barSec / 16;
-    let stepIndex = Math.round(within / stepSec);
-    if (stepIndex >= 16) {
-        barIndex += 1;
-        stepIndex = 0;
-    }
-    if (stepIndex < 0) stepIndex = 0;
-    if (stepIndex > 15) stepIndex = 15;
-    return { barIndex, stepIndex };
+    // 既存呼び出し互換（bpm引数は無視して可変BPM版を使う）
+    return timeToBarStepVarBpm(timeSec);
 }
 
 /**
  * 小節/16分割を秒timeに変換する
  */
 function barStepToTime(barIndex, stepIndex, bpm) {
-    const barSec = getBarSec(bpm);
-    const bi = Math.max(0, Number(barIndex) || 0);
-    const si = Math.max(0, Math.min(15, Number(stepIndex) || 0));
-    return bi * barSec + si * (barSec / 16);
+    // 既存呼び出し互換（bpm引数は無視して可変BPM版を使う）
+    return barStepToTimeVarBpm(barIndex, stepIndex);
 }
 
 /**
@@ -382,10 +759,10 @@ function renderNotesStrip() {
     // 並び替え後に selectedNoteIndices をインデックスで維持するのは不安定なので、範囲選択はセル座標ベースで行う
     // （renderNotesStrip 内では Set の整合性更新は行わない）
 
-    const barSec = getBarSec(bpm);
+    const barSecBase = getBarSec(bpm);
     const getNoteMaxTime = (n) => n.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n.time ?? 0);
     const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
-    const maxBarFromNotes = timeToBarStep(maxNoteTime, bpm).barIndex + 1;
+    const maxBarFromNotes = timeToBarStepVarBpm(maxNoteTime).barIndex + 1;
     const endEl = document.getElementById('chart-edit-end-time');
     const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
     const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : null;
@@ -429,6 +806,45 @@ function renderNotesStrip() {
         title.textContent = String(barIndex + 1);
         header.appendChild(title);
 
+        // 小節BPM（空欄=baseに追従、入力あり=この小節だけ固定）
+        const bpmWrap = document.createElement('div');
+        bpmWrap.className = 'measure-bpm-wrap';
+        const bpmInput = document.createElement('input');
+        bpmInput.type = 'number';
+        bpmInput.className = 'measure-bpm-input';
+        bpmInput.min = '1';
+        bpmInput.max = '500';
+        bpmInput.step = '1';
+        bpmInput.placeholder = `BPM:${getChartTempo()}`;
+        const key = String(barIndex);
+        const hasOverride = chartMeasureBpms && Object.prototype.hasOwnProperty.call(chartMeasureBpms, key);
+        if (hasOverride) {
+            bpmInput.value = String(chartMeasureBpms[key]);
+            bpmInput.dataset.overridden = 'true';
+        } else {
+            bpmInput.value = '';
+            bpmInput.dataset.overridden = 'false';
+        }
+        bpmInput.title = 'この小節のBPM（空欄でベースBPMに追従）';
+        bpmInput.addEventListener('input', () => {
+            const v = bpmInput.value.trim();
+            if (v === '') {
+                if (chartMeasureBpms && Object.prototype.hasOwnProperty.call(chartMeasureBpms, key)) {
+                    delete chartMeasureBpms[key];
+                }
+                bpmInput.dataset.overridden = 'false';
+                renderNotesStrip();
+                return;
+            }
+            const n = Number(v);
+            if (!Number.isFinite(n) || n < 1 || n > 500) return;
+            chartMeasureBpms[key] = Math.floor(n);
+            bpmInput.dataset.overridden = 'true';
+            renderNotesStrip();
+        });
+        bpmWrap.appendChild(bpmInput);
+        header.appendChild(bpmWrap);
+
         // 小節追加/削除ボタン（隣接配置）
         const btnWrap = document.createElement('div');
         btnWrap.className = 'measure-btns';
@@ -444,8 +860,19 @@ function renderNotesStrip() {
             e.stopPropagation();
             if (!selectedChartId) return;
             const insertAfterBarIndex = barIndex; // 0-based
-            const insertTime = (insertAfterBarIndex + 1) * barSec;
-            const shiftSec = barSec;
+            const insertTime = barStepToTimeVarBpm(insertAfterBarIndex + 1, 0);
+            const shiftSec = barSecBase; // 追加小節はbase BPM
+
+            // 以降の小節BPM上書きを1つ後ろへずらす
+            if (chartMeasureBpms && typeof chartMeasureBpms === 'object') {
+                const next = {};
+                for (const k of Object.keys(chartMeasureBpms)) {
+                    const bi = Number(k);
+                    if (!Number.isFinite(bi)) continue;
+                    next[String(bi > insertAfterBarIndex ? bi + 1 : bi)] = chartMeasureBpms[k];
+                }
+                chartMeasureBpms = next;
+            }
 
             editingNotes = editingNotes.map((n) => {
                 if (n && (n.type === 'don' || n.type === 'ka' || n.type === 'roll-start' || n.type === 'roll-end')) {
@@ -485,9 +912,21 @@ function renderNotesStrip() {
             if (!confirm(`第${barIndex + 1}小節を削除しますか？（この小節内のノーツは削除され、以降は前に詰められます）`)) return;
 
             const deleteBarIndex = barIndex; // 0-based
-            const startTime = deleteBarIndex * barSec;
-            const endTime = (deleteBarIndex + 1) * barSec;
-            const shiftSec = barSec;
+            const startTime = barStepToTimeVarBpm(deleteBarIndex, 0);
+            const endTime = barStepToTimeVarBpm(deleteBarIndex + 1, 0);
+            const shiftSec = Math.max(0, endTime - startTime);
+
+            // 小節BPM上書き: 対象を削除し、以降を前へずらす
+            if (chartMeasureBpms && typeof chartMeasureBpms === 'object') {
+                const next = {};
+                for (const k of Object.keys(chartMeasureBpms)) {
+                    const bi = Number(k);
+                    if (!Number.isFinite(bi)) continue;
+                    if (bi === deleteBarIndex) continue;
+                    next[String(bi > deleteBarIndex ? bi - 1 : bi)] = chartMeasureBpms[k];
+                }
+                chartMeasureBpms = next;
+            }
 
             editingNotes = editingNotes.flatMap((n) => {
                 if (!n) return [];
@@ -542,7 +981,7 @@ function renderNotesStrip() {
 
     editingNotes.forEach((note, i) => {
         const time = note.type === 'roll' ? (note.startTime ?? 0) : (note.time ?? 0);
-        const { barIndex, stepIndex } = timeToBarStep(time, bpm);
+        const { barIndex, stepIndex } = timeToBarStepVarBpm(time);
         const key = `${barIndex}:${stepIndex}`;
         const cell = cellMap.get(key);
         if (!cell) return;
@@ -738,10 +1177,24 @@ function bindChartPanelEvents() {
     const btnDelete = document.getElementById('btn-delete-chart');
     const btnExport = document.getElementById('btn-export-charts-json');
     const statusEl = document.getElementById('chart-status');
+    const btnPreviewPlay = document.getElementById('btn-chart-preview-play');
+    const btnPreviewStop = document.getElementById('btn-chart-preview-stop');
 
     if (btnExport) {
         btnExport.addEventListener('click', () => exportChartsJson());
     }
+
+    if (btnPreviewPlay) {
+        btnPreviewPlay.addEventListener('click', async () => {
+            await playChartPreview();
+        });
+    }
+    if (btnPreviewStop) {
+        btnPreviewStop.addEventListener('click', () => {
+            stopChartPreview();
+        });
+    }
+    updateChartPreviewControlsUI();
 
     if (btnAdd) {
         btnAdd.addEventListener('click', async () => {
@@ -790,14 +1243,14 @@ function bindChartPanelEvents() {
             const endMeasures = endTimeEl && endTimeEl.value !== '' ? Number(endTimeEl.value) : null;
             const bpm = tempo != null && Number.isFinite(tempo) ? tempo : getChartTempo();
             const endTime = endMeasures != null && Number.isFinite(endMeasures)
-                ? Math.max(0, Math.floor(endMeasures)) * getBarSec(bpm)
+                ? buildBarTimeline(Math.max(1, Math.floor(endMeasures))).totalSec
                 : null;
             statusEl.textContent = '保存中...';
             try {
                 const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId), {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name || selectedChartId, notes: editingNotes, difficulty, tempo, endTime })
+                    body: JSON.stringify({ name: name || selectedChartId, notes: editingNotes, difficulty, tempo, endTime, measureBpms: chartMeasureBpms })
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
@@ -805,7 +1258,7 @@ function bindChartPanelEvents() {
                     return;
                 }
                 statusEl.textContent = '保存しました';
-                cachedCharts[selectedChartId] = { ...cachedCharts[selectedChartId], name: name || selectedChartId, notes: editingNotes, difficulty, tempo, endTime };
+                cachedCharts[selectedChartId] = { ...cachedCharts[selectedChartId], name: name || selectedChartId, notes: editingNotes, difficulty, tempo, endTime, measureBpms: chartMeasureBpms };
                 renderChartList(cachedCharts);
             } catch (err) {
                 statusEl.textContent = '保存失敗: ' + err.message;
@@ -963,8 +1416,9 @@ function bindChartPanelEvents() {
             tempoEl.addEventListener('input', () => {
                 const oldBpm = lastRenderedChartBpm ?? getChartTempo();
                 const newBpm = getChartTempo();
-                retimeEditingNotesKeepGridPosition(oldBpm, newBpm);
+                retimeEditingNotesKeepGridPositionVarBpm(oldBpm, newBpm);
                 renderNotesStrip();
+                updateChartPreviewControlsUI();
             });
         }
     }

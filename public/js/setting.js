@@ -963,7 +963,12 @@ function loadWorldIntoScene(world) {
     const models = world.models || [];
     models.forEach((config, idx) => {
         const path = config.path || '';
-    loader.load(path, (gltf) => {
+        // Resolve as absolute URL ("/models/...") and encode path segments.
+        // Prevents accidental relative URLs (e.g. under "/admin/") returning HTML.
+        const pathStr = path.startsWith('/') ? path.slice(1) : path;
+        const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+        const url = '/' + encodedPath;
+    loader.load(url, (gltf) => {
         const model = gltf.scene;
         const pos = config.position || { x: 0, y: 0, z: 0 };
         const rot = config.rotation || { x: 0, y: 0, z: 0 };
@@ -975,7 +980,7 @@ function loadWorldIntoScene(world) {
         model.userData.editId = 'm' + idx;
         model.userData.config = { path, position: { ...pos }, rotation: { ...rot }, scale: { ...scale }, animate: config.animate ? { ...config.animate } : undefined, teleporter: config.teleporter ? { ...config.teleporter } : undefined, taiko: config.taiko ? { ...config.taiko } : undefined };
         editGroup.add(model);
-    }, undefined, (err) => console.error('Load model failed:', path, err));
+    }, undefined, (err) => console.error('Load model failed:', url, err));
     });
 
     const lights = world.lights || [];
@@ -1374,7 +1379,10 @@ function selectWorld(id) {
 function addModel(path) {
     if (!selectedWorldId) return;
     const loader = new GLTFLoader();
-    loader.load(path, (gltf) => {
+    const pathStr = path.startsWith('/') ? path.slice(1) : path;
+    const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+    const url = '/' + encodedPath;
+    loader.load(url, (gltf) => {
         pushUndo();
         const model = gltf.scene;
         model.position.set(0, 2, -5);
@@ -1385,7 +1393,7 @@ function addModel(path) {
         model.userData.config = { path, position: { x: 0, y: 2, z: -5 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
         editGroup.add(model);
         renderWorldObjectList();
-    }, undefined, (err) => console.error('Load model failed:', path, err));
+    }, undefined, (err) => console.error('Load model failed:', url, err));
 }
 
 function populateDestWorldSelect() {

@@ -49,6 +49,18 @@ export default defineConfig({
                 target: 'http://localhost:3000',
                 changeOrigin: true
             },
+            '/models': {
+                target: 'http://localhost:3000',
+                changeOrigin: true
+            },
+            '/pdfs': {
+                target: 'http://localhost:3000',
+                changeOrigin: true
+            },
+            '/images': {
+                target: 'http://localhost:3000',
+                changeOrigin: true
+            },
             '/vdbs': {
                 target: 'http://localhost:3000',
                 changeOrigin: true

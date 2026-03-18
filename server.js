@@ -2501,7 +2501,9 @@ app.post('/admin/charts', (req, res) => {
     const notesArr = Array.isArray(notes) ? notes : [];
     const difficulty = req.body.difficulty != null ? req.body.difficulty : null;
     const tempo = req.body.tempo != null ? Number(req.body.tempo) : null;
-    charts[id] = { id, name: name || id, notes: notesArr, difficulty, tempo };
+    const endTime = req.body.endTime != null && req.body.endTime !== '' ? Number(req.body.endTime) : null;
+    const measureBpms = req.body.measureBpms != null ? req.body.measureBpms : null;
+    charts[id] = { id, name: name || id, notes: notesArr, difficulty, tempo, endTime, measureBpms };
     try {
         writeCharts(charts);
         res.json({ success: true, chart: charts[id] });
@@ -2517,12 +2519,13 @@ app.put('/admin/charts/:id', (req, res) => {
     if (!charts[id]) {
         return res.status(404).json({ error: 'Chart not found' });
     }
-    const { name, notes, difficulty, tempo, endTime } = req.body || {};
+    const { name, notes, difficulty, tempo, endTime, measureBpms } = req.body || {};
     if (name !== undefined) charts[id].name = name;
     if (Array.isArray(notes)) charts[id].notes = notes;
     if (difficulty !== undefined) charts[id].difficulty = difficulty;
     if (tempo !== undefined) charts[id].tempo = tempo == null ? null : Number(tempo);
     if (endTime !== undefined) charts[id].endTime = endTime == null || endTime === '' ? null : Number(endTime);
+    if (measureBpms !== undefined) charts[id].measureBpms = measureBpms == null ? null : measureBpms;
     try {
         writeCharts(charts);
         res.json({ success: true, chart: charts[id] });
