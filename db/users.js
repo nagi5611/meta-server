@@ -4,21 +4,20 @@ import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { STORAGE_PATHS, validateAndPrepareStoragePaths } from '../config/storage-paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_PATH = path.join(DATA_DIR, 'users.db');
+validateAndPrepareStoragePaths();
+const DB_PATH = path.join(STORAGE_PATHS.DB_DIR, 'users.db');
 const BCRYPT_ROUNDS = 10;
 
 let db = null;
 
 /** Ensure data directory exists */
 function ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
+    if (!fs.existsSync(STORAGE_PATHS.DB_DIR)) fs.mkdirSync(STORAGE_PATHS.DB_DIR, { recursive: true });
 }
 
 /** Initialize database and create tables if they do not exist */

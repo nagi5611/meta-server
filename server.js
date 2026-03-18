@@ -12,9 +12,13 @@ import os from 'os';
 import * as mediasoup from 'mediasoup';
 import { initDb, verifyStudent, verifyTeacher, registerStudent, registerTeacher, listStudents, listTeachers, updateStudent, updateTeacher, deleteStudent, deleteTeacher } from './db/users.js';
 import { initUserSessionsDb, insertSession, getLatestSessionByUsername, getSessionsPaginated } from './db/user-sessions.js';
+import { STORAGE_PATHS, validateAndPrepareStoragePaths } from './config/storage-paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Validate required storage env vars early (throw to fail-fast on startup)
+validateAndPrepareStoragePaths();
 
 /** 本番: dist/index.html が存在し NODE_ENV=production のときは dist を配信 */
 const isProductionBuild = process.env.NODE_ENV === 'production' &&
@@ -22,8 +26,7 @@ const isProductionBuild = process.env.NODE_ENV === 'production' &&
 const STATIC_DIR = path.join(__dirname, isProductionBuild ? 'dist' : 'public');
 
 // Worlds config file (setting.html)
-const DATA_DIR = path.join(__dirname, 'data');
-const WORLDS_PATH = path.join(DATA_DIR, 'worlds.json');
+const WORLDS_PATH = STORAGE_PATHS.WORLDS_PATH;
 const DEFAULT_WORLDS = {
     'lobby': {
         id: 'lobby',
@@ -58,10 +61,6 @@ const DEFAULT_WORLDS = {
 };
 
 function ensureWorldsFile() {
-    if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-        console.log('Created data directory');
-    }
     if (!fs.existsSync(WORLDS_PATH)) {
         fs.writeFileSync(WORLDS_PATH, JSON.stringify(DEFAULT_WORLDS, null, 2), 'utf8');
         console.log('Created worlds.json from default');
@@ -84,13 +83,10 @@ function writeWorlds(worlds) {
     fs.renameSync(tmpPath, WORLDS_PATH);
 }
 
-const CHARTS_PATH = path.join(DATA_DIR, 'charts.json');
+const CHARTS_PATH = STORAGE_PATHS.CHARTS_PATH;
 const DEFAULT_CHARTS = {};
 
 function ensureChartsFile() {
-    if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
     if (!fs.existsSync(CHARTS_PATH)) {
         fs.writeFileSync(CHARTS_PATH, JSON.stringify(DEFAULT_CHARTS, null, 2), 'utf8');
         console.log('Created charts.json');
@@ -113,9 +109,10 @@ function writeCharts(charts) {
     fs.renameSync(tmpPath, CHARTS_PATH);
 }
 
-const MODELS_DIR = path.join(__dirname, 'public', 'models');
-const PDFS_DIR = path.join(__dirname, 'public', 'pdfs');
-const VDBS_DIR = path.join(__dirname, 'public', 'vdbs');
+const MODELS_DIR = STORAGE_PATHS.MODELS_DIR;
+const PDFS_DIR = STORAGE_PATHS.PDFS_DIR;
+const VDBS_DIR = STORAGE_PATHS.VDBS_DIR;
+const IMAGES_DIR = STORAGE_PATHS.IMAGES_DIR;
 const uploadStorage = multer.memoryStorage();
 const upload = multer({
     storage: uploadStorage,
@@ -524,9 +521,10 @@ app.use('/admin', basicAuth);
 app.use('/vendor/bootstrap-icons', express.static(path.join(__dirname, 'node_modules/bootstrap-icons/font')));
 
 // /models, /pdfs, /vdbs は常に public から（アップロード先）
-app.use('/models', express.static(path.join(__dirname, 'public', 'models')));
-app.use('/pdfs', express.static(path.join(__dirname, 'public', 'pdfs')));
+app.use('/models', express.static(MODELS_DIR));
+app.use('/pdfs', express.static(PDFS_DIR));
 app.use('/vdbs', express.static(VDBS_DIR));
+app.use('/images', express.static(IMAGES_DIR));
 
 // admin.html 用の /js, /css は常に public から（dist に含まれないため）
 app.use('/js', express.static(path.join(__dirname, 'public', 'js')));
@@ -581,6 +579,13 @@ function logWithStorage(level, ...args) {
     serverLogs.push({ timestamp, level, message });
     if (serverLogs.length > MAX_LOGS) {
         serverLogs.shift();
+    }
+    try {
+        const line = `${timestamp}\t${level}\t${message}\n`;
+        const logPath = path.join(STORAGE_PATHS.SERVER_LOG_DIR, 'server.log');
+        fs.appendFileSync(logPath, line, 'utf8');
+    } catch (e) {
+        // If log persistence fails, still continue server operation and print to original console.
     }
     originalByLevel[level](...args);
 }

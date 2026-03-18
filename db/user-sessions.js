@@ -3,20 +3,19 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { STORAGE_PATHS, validateAndPrepareStoragePaths } from '../config/storage-paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_PATH = path.join(DATA_DIR, 'user_sessions.db');
+validateAndPrepareStoragePaths();
+const DB_PATH = path.join(STORAGE_PATHS.DB_DIR, 'user_sessions.db');
 const RETENTION_DAYS = 30;
 
 let db = null;
 
 function ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
+    if (!fs.existsSync(STORAGE_PATHS.DB_DIR)) fs.mkdirSync(STORAGE_PATHS.DB_DIR, { recursive: true });
 }
 
 /**

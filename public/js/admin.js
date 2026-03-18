@@ -22,6 +22,12 @@ let cachedCharts = {};
 let editingNotes = [];
 /** 譜面編集エリアで選択中のノーツ索引。-1 は未選択 */
 let selectedNoteIndex = -1;
+/** 譜面編集エリアで範囲選択中のノーツ索引（複数選択） */
+let selectedNoteIndices = new Set();
+/** コピーされたノーツ（範囲選択/単体選択）を保持する内部クリップボード */
+let chartClipboard = null;
+/** BPM入力の変更前後でグリッド位置を維持するため、直近の描画BPMを保持する */
+let lastRenderedChartBpm = null;
 /** 譜面ストリップ: 1秒あたりのピクセル数（ホイールで拡大縮小） */
 let chartPixelsPerSecond = 60;
 /** 譜面の表示時間範囲（秒）。ノーツの最大時間を下回らないよう render 内で拡張 */
@@ -176,7 +182,17 @@ function loadChartIntoEditor(chart) {
     if (nameEl) nameEl.value = chart.name || chart.id || '';
     if (difficultyEl) difficultyEl.value = chart.difficulty != null ? String(chart.difficulty) : '';
     if (tempoEl) tempoEl.value = chart.tempo != null ? String(chart.tempo) : '';
-    if (endTimeEl) endTimeEl.value = chart.endTime != null ? String(chart.endTime) : '';
+    if (endTimeEl) {
+        const bpm = (chart.tempo != null && Number.isFinite(Number(chart.tempo))) ? Number(chart.tempo) : getChartTempo();
+        const barSec = getBarSec(bpm);
+        const endMeasures = chart.endTime != null && Number.isFinite(Number(chart.endTime)) && barSec > 0
+            ? Math.max(1, Math.ceil(Number(chart.endTime) / barSec))
+            : '';
+        endTimeEl.value = endMeasures === '' ? '' : String(endMeasures);
+    }
+    const panel = document.getElementById('panel-chart');
+    if (panel) panel.dataset.hasChart = 'true';
+
     let notes = Array.isArray(chart.notes) ? chart.notes.slice() : [];
     notes = notes.flatMap((n) => {
         if (n.type === 'roll' && n.startTime != null && n.endTime != null) {
@@ -201,11 +217,13 @@ function clearChartEditor() {
     const difficultyEl = document.getElementById('chart-edit-difficulty');
     const tempoEl = document.getElementById('chart-edit-tempo');
     const endTimeEl = document.getElementById('chart-edit-end-time');
+    const panel = document.getElementById('panel-chart');
     const btnSave = document.getElementById('btn-save-chart');
     if (nameEl) nameEl.value = '';
     if (difficultyEl) difficultyEl.value = '';
     if (tempoEl) tempoEl.value = '';
     if (endTimeEl) endTimeEl.value = '';
+    if (panel) delete panel.dataset.hasChart;
     editingNotes = [];
     selectedNoteIndex = -1;
     renderNotesStrip();
@@ -275,109 +293,440 @@ function getChartTempo() {
 }
 
 /**
- * 譜面編集エリアの時間ルーラーとノーツを再描画する。BPM に合わせて上に時間を表示する。
+ * BPMから1小節の秒数を返す（4/4固定）
+ */
+function getBarSec(bpm) {
+    const v = Number(bpm);
+    if (!Number.isFinite(v) || v <= 0) return 2;
+    return (60 / v) * 4;
+}
+
+/**
+ * BPM変更時に、ノーツの小節/位置（16分割）を維持したまま time(秒) を更新する
+ * @param {number} oldBpm
+ * @param {number} newBpm
+ */
+function retimeEditingNotesKeepGridPosition(oldBpm, newBpm) {
+    const ob = Number(oldBpm);
+    const nb = Number(newBpm);
+    if (!Number.isFinite(ob) || !Number.isFinite(nb) || ob <= 0 || nb <= 0) return;
+    if (ob === nb) return;
+
+    for (const n of editingNotes) {
+        if (!n) continue;
+        if (n.type === 'roll') {
+            const s = Number(n.startTime ?? 0);
+            const e = Number(n.endTime ?? n.startTime ?? 0);
+            const ps = timeToBarStep(s, ob);
+            const pe = timeToBarStep(e, ob);
+            n.startTime = barStepToTime(ps.barIndex, ps.stepIndex, nb);
+            n.endTime = barStepToTime(pe.barIndex, pe.stepIndex, nb);
+            continue;
+        }
+        const t = Number(n.time ?? 0);
+        const p = timeToBarStep(t, ob);
+        n.time = barStepToTime(p.barIndex, p.stepIndex, nb);
+    }
+}
+
+/**
+ * 秒timeを小節/16分割に変換する（stepは0-15）
+ */
+function timeToBarStep(timeSec, bpm) {
+    const barSec = getBarSec(bpm);
+    const t = Math.max(0, Number(timeSec) || 0);
+    let barIndex = Math.floor(t / barSec);
+    const within = t - barIndex * barSec;
+    const stepSec = barSec / 16;
+    let stepIndex = Math.round(within / stepSec);
+    if (stepIndex >= 16) {
+        barIndex += 1;
+        stepIndex = 0;
+    }
+    if (stepIndex < 0) stepIndex = 0;
+    if (stepIndex > 15) stepIndex = 15;
+    return { barIndex, stepIndex };
+}
+
+/**
+ * 小節/16分割を秒timeに変換する
+ */
+function barStepToTime(barIndex, stepIndex, bpm) {
+    const barSec = getBarSec(bpm);
+    const bi = Math.max(0, Number(barIndex) || 0);
+    const si = Math.max(0, Math.min(15, Number(stepIndex) || 0));
+    return bi * barSec + si * (barSec / 16);
+}
+
+/**
+ * 譜面編集エリアを小節グリッドで再描画する（4/4・1小節16分割）
  */
 function renderNotesStrip() {
-    const inner = document.getElementById('chart-notes-inner');
-    const ruler = document.getElementById('chart-notes-ruler');
-    const strip = document.getElementById('chart-notes-strip');
+    const grid = document.getElementById('chart-measures-grid');
     const btnRemove = document.getElementById('btn-remove-selected-note');
-    if (!inner || !ruler || !strip) return;
+    if (!grid) return;
 
     const bpm = getChartTempo();
-    const beatSec = 60 / bpm;
+    lastRenderedChartBpm = bpm;
+
+    // 1行（4小節）の先頭にだけ表示する楽譜UI（ト音記号 + 4/4）用フラグ
+    const staffMetaShownRows = new Set();
+
+    const selectedNote = selectedNoteIndex >= 0 ? editingNotes[selectedNoteIndex] : null;
+    editingNotes.sort((a, b) => {
+        const ta = a.type === 'roll' ? a.startTime : a.time;
+        const tb = b.type === 'roll' ? b.startTime : b.time;
+        return (ta ?? 0) - (tb ?? 0);
+    });
+    selectedNoteIndex = selectedNote ? editingNotes.indexOf(selectedNote) : -1;
+    // 並び替え後に selectedNoteIndices をインデックスで維持するのは不安定なので、範囲選択はセル座標ベースで行う
+    // （renderNotesStrip 内では Set の整合性更新は行わない）
+
+    const barSec = getBarSec(bpm);
     const getNoteMaxTime = (n) => n.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n.time ?? 0);
     const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
-    const timeRange = Math.max(CHART_TIME_RANGE_DEFAULT, maxNoteTime + 10);
-    const widthPx = timeRange * chartPixelsPerSecond;
-    inner.style.width = widthPx + 'px';
+    const maxBarFromNotes = timeToBarStep(maxNoteTime, bpm).barIndex + 1;
+    const endEl = document.getElementById('chart-edit-end-time');
+    const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
+    const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : null;
+    const defaultMeasures = 16;
+    const totalMeasures = Math.max(endMeasures ?? defaultMeasures, maxBarFromNotes, 1);
 
-    ruler.innerHTML = '';
-    const tickStep = Math.max(beatSec * 2, 0.5);
-    for (let t = 0; t <= timeRange; t += tickStep) {
-        const x = t * chartPixelsPerSecond;
-        const span = document.createElement('span');
-        span.className = 'ruler-tick';
-        span.style.left = x + 'px';
-        span.textContent = t.toFixed(1) + 's';
-        ruler.appendChild(span);
+    grid.innerHTML = '';
+    for (let barIndex = 0; barIndex < totalMeasures; barIndex++) {
+        const card = document.createElement('div');
+        card.className = 'measure-card staff-measure';
+        card.dataset.barIndex = String(barIndex);
+
+        const header = document.createElement('div');
+        header.className = 'measure-header staff-header';
+
+        const rowIndex = Math.floor(barIndex / 4);
+        const isFirstInRow = barIndex % 4 === 0;
+        if (isFirstInRow && !staffMetaShownRows.has(rowIndex)) {
+            staffMetaShownRows.add(rowIndex);
+            const meta = document.createElement('div');
+            meta.className = 'staff-meta';
+            const clef = document.createElement('div');
+            clef.className = 'staff-clef';
+            clef.textContent = '𝄞';
+            const ts = document.createElement('div');
+            ts.className = 'staff-time-signature';
+            ts.innerHTML = '<span>4</span><span>4</span>';
+            meta.appendChild(clef);
+            meta.appendChild(ts);
+            header.appendChild(meta);
+        } else {
+            // 画像のようにヘッダ情報は先頭だけ。スペース確保のみ。
+            const spacer = document.createElement('div');
+            spacer.className = 'staff-meta staff-meta-spacer';
+            header.appendChild(spacer);
+        }
+
+        // 小節番号は薄く（編集用の目印）
+        const title = document.createElement('div');
+        title.className = 'measure-title staff-measure-title';
+        title.textContent = String(barIndex + 1);
+        header.appendChild(title);
+
+        // 小節追加/削除ボタン（隣接配置）
+        const btnWrap = document.createElement('div');
+        btnWrap.className = 'measure-btns';
+
+        // 小節追加ボタン（クリックで「次の小節を挿入」して以降を後ろへずらす）
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'measure-add-btn';
+        addBtn.textContent = '+';
+        addBtn.title = '次の小節を追加';
+        addBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!selectedChartId) return;
+            const insertAfterBarIndex = barIndex; // 0-based
+            const insertTime = (insertAfterBarIndex + 1) * barSec;
+            const shiftSec = barSec;
+
+            editingNotes = editingNotes.map((n) => {
+                if (n && (n.type === 'don' || n.type === 'ka' || n.type === 'roll-start' || n.type === 'roll-end')) {
+                    const t = Number(n.time ?? 0);
+                    if (t >= insertTime) return { ...n, time: t + shiftSec };
+                    return n;
+                }
+                if (n && n.type === 'roll') {
+                    const s = Number(n.startTime ?? 0);
+                    const e2 = Number(n.endTime ?? n.startTime ?? 0);
+                    const ns = s >= insertTime ? s + shiftSec : s;
+                    const ne = e2 >= insertTime ? e2 + shiftSec : e2;
+                    return { ...n, startTime: ns, endTime: ne };
+                }
+                return n;
+            });
+
+            const curInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
+            const curMeasures = Number.isFinite(curInput) ? Math.max(1, Math.floor(curInput)) : totalMeasures;
+            if (endEl) endEl.value = String(curMeasures + 1);
+            renderNotesStrip();
+        });
+        btnWrap.appendChild(addBtn);
+
+        // 小節削除ボタン（クリックで「この小節を削除」して以降を前へずらす）
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'measure-del-btn';
+        delBtn.textContent = '−';
+        delBtn.title = 'この小節を削除';
+        delBtn.disabled = totalMeasures <= 1;
+        delBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!selectedChartId) return;
+            if (totalMeasures <= 1) return;
+            if (!confirm(`第${barIndex + 1}小節を削除しますか？（この小節内のノーツは削除され、以降は前に詰められます）`)) return;
+
+            const deleteBarIndex = barIndex; // 0-based
+            const startTime = deleteBarIndex * barSec;
+            const endTime = (deleteBarIndex + 1) * barSec;
+            const shiftSec = barSec;
+
+            editingNotes = editingNotes.flatMap((n) => {
+                if (!n) return [];
+                if (n.type === 'don' || n.type === 'ka' || n.type === 'roll-start' || n.type === 'roll-end') {
+                    const t = Number(n.time ?? 0);
+                    if (t >= startTime && t < endTime) return [];
+                    if (t >= endTime) return [{ ...n, time: t - shiftSec }];
+                    return [n];
+                }
+                if (n.type === 'roll') {
+                    const s = Number(n.startTime ?? 0);
+                    const e2 = Number(n.endTime ?? n.startTime ?? 0);
+                    const startInside = s >= startTime && s < endTime;
+                    const endInside = e2 >= startTime && e2 < endTime;
+                    if (startInside || endInside) return [];
+                    const ns = s >= endTime ? s - shiftSec : s;
+                    const ne = e2 >= endTime ? e2 - shiftSec : e2;
+                    return [{ ...n, startTime: ns, endTime: ne }];
+                }
+                return [n];
+            });
+
+            const curInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
+            const curMeasures = Number.isFinite(curInput) ? Math.max(1, Math.floor(curInput)) : totalMeasures;
+            if (endEl) endEl.value = String(Math.max(1, curMeasures - 1));
+            selectedNoteIndex = -1;
+            renderNotesStrip();
+        });
+        btnWrap.appendChild(delBtn);
+
+        header.appendChild(btnWrap);
+
+        card.appendChild(header);
+
+        const cells = document.createElement('div');
+        cells.className = 'measure-cells';
+        for (let stepIndex = 0; stepIndex < 16; stepIndex++) {
+            const cell = document.createElement('div');
+            cell.className = 'measure-cell';
+            cell.dataset.barIndex = String(barIndex);
+            cell.dataset.stepIndex = String(stepIndex);
+            cells.appendChild(cell);
+        }
+        card.appendChild(cells);
+        grid.appendChild(card);
+    }
+
+    const cellMap = new Map();
+    grid.querySelectorAll('.measure-cell').forEach((cell) => {
+        cellMap.set(`${cell.dataset.barIndex}:${cell.dataset.stepIndex}`, cell);
+    });
+
+    editingNotes.forEach((note, i) => {
+        const time = note.type === 'roll' ? (note.startTime ?? 0) : (note.time ?? 0);
+        const { barIndex, stepIndex } = timeToBarStep(time, bpm);
+        const key = `${barIndex}:${stepIndex}`;
+        const cell = cellMap.get(key);
+        if (!cell) return;
+
+        const chip = document.createElement('div');
+        const cls = note.type === 'ka' ? 'note-ka'
+            : note.type === 'don' ? 'note-don'
+                : note.type === 'roll-start' ? 'note-roll-start'
+                    : note.type === 'roll-end' ? 'note-roll-end'
+                        : 'note-don';
+        chip.className = `note-chip ${cls}`
+            + (i === selectedNoteIndex ? ' selected' : '')
+            + (selectedNoteIndices.has(i) ? ' multi-selected' : '');
+        chip.dataset.index = String(i);
+        // 楽譜っぽさ優先: 短いラベル（視認性）にする
+        chip.textContent = note.type === 'ka' ? 'K'
+            : note.type === 'don' ? 'D'
+                : note.type === 'roll-start' ? 'S'
+                    : note.type === 'roll-end' ? 'E'
+                        : 'D';
+        chip.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = parseInt(chip.dataset.index, 10);
+            selectedNoteIndex = (selectedNoteIndex === idx) ? -1 : idx;
+            selectedNoteIndices = new Set(selectedNoteIndex >= 0 ? [selectedNoteIndex] : []);
+            renderNotesStrip();
+        });
+        cell.innerHTML = '';
+        cell.appendChild(chip);
+    });
+
+    if (btnRemove) btnRemove.disabled = selectedNoteIndex < 0;
+    updateChartPalette(false);
+}
+
+/**
+ * 範囲選択の矩形（開始セル〜終了セル）に含まれるノーツのインデックスSetを作る
+ */
+function getNoteIndicesInRect(fromBar, fromStep, toBar, toStep) {
+    const minBar = Math.min(fromBar, toBar);
+    const maxBar = Math.max(fromBar, toBar);
+    const minStep = Math.min(fromStep, toStep);
+    const maxStep = Math.max(fromStep, toStep);
+    const bpm = getChartTempo();
+    const indices = new Set();
+    for (let i = 0; i < editingNotes.length; i++) {
+        const n = editingNotes[i];
+        const t = n?.type === 'roll' ? (n.startTime ?? 0) : (n?.time ?? 0);
+        const { barIndex, stepIndex } = timeToBarStep(t, bpm);
+        if (barIndex >= minBar && barIndex <= maxBar && stepIndex >= minStep && stepIndex <= maxStep) {
+            indices.add(i);
+        }
+    }
+    return indices;
+}
+
+/**
+ * 範囲選択の線形レンジ（開始セル〜終了セルの絶対ステップ範囲）に含まれるノーツのインデックスSetを作る
+ */
+function getNoteIndicesInAbsStepRange(fromBar, fromStep, toBar, toStep) {
+    const a = (Math.max(0, Number(fromBar) || 0) * 16) + Math.max(0, Math.min(15, Number(fromStep) || 0));
+    const b = (Math.max(0, Number(toBar) || 0) * 16) + Math.max(0, Math.min(15, Number(toStep) || 0));
+    const minAbs = Math.min(a, b);
+    const maxAbs = Math.max(a, b);
+    const bpm = getChartTempo();
+    const indices = new Set();
+    for (let i = 0; i < editingNotes.length; i++) {
+        const n = editingNotes[i];
+        const t = n?.type === 'roll' ? (n.startTime ?? 0) : (n?.time ?? 0);
+        const { barIndex, stepIndex } = timeToBarStep(t, bpm);
+        const abs = (barIndex * 16) + stepIndex;
+        if (abs >= minAbs && abs <= maxAbs) indices.add(i);
+    }
+    return indices;
+}
+
+/**
+ * 選択ノーツを内部クリップボードへコピー（セル座標の相対位置で保持）
+ */
+function copySelectedNotesToClipboard() {
+    if (!selectedChartId) return;
+    const bpm = getChartTempo();
+    const indices = selectedNoteIndices.size > 0
+        ? [...selectedNoteIndices]
+        : (selectedNoteIndex >= 0 ? [selectedNoteIndex] : []);
+    if (indices.length === 0) return;
+
+    const items = indices.map((i) => {
+        const n = editingNotes[i];
+        const t = n?.type === 'roll' ? (n.startTime ?? 0) : (n?.time ?? 0);
+        const pos = timeToBarStep(t, bpm);
+        const absStep = (pos.barIndex * 16) + pos.stepIndex;
+        return { note: n, absStep };
+    });
+    const originAbsStep = Math.min(...items.map((x) => x.absStep));
+
+    chartClipboard = {
+        originAbsStep,
+        items: items.map((x) => ({
+            dAbsStep: x.absStep - originAbsStep,
+            note: { ...x.note }
+        }))
+    };
+}
+
+/**
+ * 内部クリップボードのノーツを指定セル位置へ貼り付け（相対位置維持）
+ */
+function pasteClipboardNotesAt(barIndex, stepIndex) {
+    if (!selectedChartId) return;
+    if (!chartClipboard || !Array.isArray(chartClipboard.items) || chartClipboard.items.length === 0) return;
+
+    const bpm = getChartTempo();
+    const baseBar = Math.max(0, Number(barIndex) || 0);
+    const baseStep = Math.max(0, Math.min(15, Number(stepIndex) || 0));
+    const baseAbsStep = baseBar * 16 + baseStep;
+    let maxTouchedBar = baseBar;
+
+    for (const item of chartClipboard.items) {
+        const targetAbs = baseAbsStep + (item.dAbsStep || 0);
+        if (targetAbs < 0) continue;
+        const targetBar = Math.floor(targetAbs / 16);
+        const targetStep = targetAbs % 16;
+        maxTouchedBar = Math.max(maxTouchedBar, targetBar);
+        const time = barStepToTime(targetBar, targetStep, bpm);
+        const type = item.note?.type;
+        if (type === 'roll') {
+            // roll は現在UIでは直接扱っていないが、念のため start/end を同じだけ平行移動して貼る
+            const s = Number(item.note.startTime ?? 0);
+            const e2 = Number(item.note.endTime ?? item.note.startTime ?? 0);
+            const { barIndex: ob, stepIndex: os } = timeToBarStep(s, bpm);
+            const abs = ob * 16 + os;
+            const dAbs = abs - (chartClipboard.originAbsStep || 0);
+            const targetAbs2 = baseAbsStep + dAbs;
+            if (targetAbs2 < 0) continue;
+            const tb = Math.floor(targetAbs2 / 16);
+            const ts = targetAbs2 % 16;
+            maxTouchedBar = Math.max(maxTouchedBar, tb);
+            const ns = barStepToTime(tb, ts, bpm);
+            const ne = ns + Math.max(0, e2 - s);
+            editingNotes.push({ type: 'roll', startTime: ns, endTime: ne });
+            continue;
+        }
+        if (type === 'roll-start' || type === 'roll-end') {
+            const replaceIndex = editingNotes.findIndex((n) => {
+                if (n.type !== 'roll-start' && n.type !== 'roll-end') return false;
+                const pos = timeToBarStep(n.time ?? 0, bpm);
+                return pos.barIndex === targetBar && pos.stepIndex === targetStep;
+            });
+            if (replaceIndex >= 0) editingNotes[replaceIndex] = { type, time };
+            else editingNotes.push({ type, time });
+            continue;
+        }
+        if (type === 'don' || type === 'ka' || (!type && (item.note.time != null))) {
+            const noteType = type || item.note.type || 'don';
+            const replaceIndex = editingNotes.findIndex((n) => {
+                if (n.type !== 'don' && n.type !== 'ka') return false;
+                const pos = timeToBarStep(n.time ?? 0, bpm);
+                return pos.barIndex === targetBar && pos.stepIndex === targetStep;
+            });
+            if (replaceIndex >= 0) editingNotes[replaceIndex] = { time, type: noteType };
+            else editingNotes.push({ time, type: noteType });
+        }
+    }
+
+    // 貼り付けで末尾が伸びた場合、表示小節数も増やす
+    const endEl = document.getElementById('chart-edit-end-time');
+    if (endEl) {
+        const cur = endEl.value !== '' ? Number(endEl.value) : NaN;
+        const curMeasures = Number.isFinite(cur) ? Math.max(1, Math.floor(cur)) : null;
+        const needMeasures = Math.max(1, maxTouchedBar + 1);
+        if (curMeasures == null || curMeasures < needMeasures) {
+            endEl.value = String(needMeasures);
+        }
     }
 
     editingNotes.sort((a, b) => {
         const ta = a.type === 'roll' ? a.startTime : a.time;
         const tb = b.type === 'roll' ? b.startTime : b.time;
-        return ta - tb;
+        return (ta ?? 0) - (tb ?? 0);
     });
-    strip.innerHTML = '';
-    const rollPairs = [];
-    const starts = [];
-    const sorted = [...editingNotes].sort((a, b) => {
-        const ta = a.type === 'roll' ? a.startTime : a.time;
-        const tb = b.type === 'roll' ? b.startTime : b.time;
-        return ta - tb;
-    });
-    for (const n of sorted) {
-        if (n.type === 'roll-start') starts.push(n.time);
-        else if (n.type === 'roll-end' && starts.length > 0) rollPairs.push({ start: starts.shift(), end: n.time });
-    }
-    rollPairs.forEach((pair) => {
-        const bar = document.createElement('span');
-        bar.className = 'note-roll-bar';
-        bar.textContent = '連打';
-        const startPx = pair.start * chartPixelsPerSecond;
-        const widthPx = Math.max(20, (pair.end - pair.start) * chartPixelsPerSecond);
-        bar.style.left = startPx + 'px';
-        bar.style.width = widthPx + 'px';
-        bar.style.pointerEvents = 'none';
-        strip.appendChild(bar);
-    });
-    editingNotes.forEach((note, i) => {
-        if (note.type === 'roll') {
-            const bar = document.createElement('span');
-            bar.className = 'note-roll-bar' + (i === selectedNoteIndex ? ' selected' : '');
-            bar.textContent = '連打';
-            const startPx = (note.startTime ?? 0) * chartPixelsPerSecond;
-            const widthPx = Math.max(20, ((note.endTime ?? note.startTime ?? 0) - (note.startTime ?? 0)) * chartPixelsPerSecond);
-            bar.style.left = startPx + 'px';
-            bar.style.width = widthPx + 'px';
-            bar.dataset.index = String(i);
-            bar.addEventListener('mousedown', (e) => {
-                e.stopPropagation();
-                noteDragIndex = i;
-                noteDragStartX = e.clientX;
-                noteDragStarted = false;
-            });
-            strip.appendChild(bar);
-        } else if (note.type === 'roll-start' || note.type === 'roll-end') {
-            const span = document.createElement('span');
-            span.className = 'note-circle note-' + (note.type === 'roll-start' ? 'roll-start' : 'roll-end') + (i === selectedNoteIndex ? ' selected' : '');
-            span.textContent = note.type === 'roll-start' ? '始' : '終';
-            span.style.left = (note.time * chartPixelsPerSecond) + 'px';
-            span.dataset.index = String(i);
-            span.addEventListener('mousedown', (e) => {
-                e.stopPropagation();
-                noteDragIndex = i;
-                noteDragStartX = e.clientX;
-                noteDragStarted = false;
-            });
-            strip.appendChild(span);
-        } else {
-            const span = document.createElement('span');
-            span.className = 'note-circle note-' + (note.type === 'ka' ? 'ka' : 'don') + (i === selectedNoteIndex ? ' selected' : '');
-            span.textContent = note.type === 'ka' ? 'カ' : 'ドン';
-            span.style.left = (note.time * chartPixelsPerSecond) + 'px';
-            span.dataset.index = String(i);
-            span.addEventListener('mousedown', (e) => {
-                e.stopPropagation();
-                noteDragIndex = i;
-                noteDragStartX = e.clientX;
-                noteDragStarted = false;
-            });
-            strip.appendChild(span);
-        }
-    });
-    if (btnRemove) btnRemove.disabled = selectedNoteIndex < 0;
-    updateChartPalette(false);
+    selectedNoteIndex = -1;
+    selectedNoteIndices = new Set();
+    renderNotesStrip();
 }
 
 /**
@@ -387,7 +736,12 @@ function bindChartPanelEvents() {
     const btnAdd = document.getElementById('btn-add-chart');
     const btnEdit = document.getElementById('btn-edit-chart');
     const btnDelete = document.getElementById('btn-delete-chart');
+    const btnExport = document.getElementById('btn-export-charts-json');
     const statusEl = document.getElementById('chart-status');
+
+    if (btnExport) {
+        btnExport.addEventListener('click', () => exportChartsJson());
+    }
 
     if (btnAdd) {
         btnAdd.addEventListener('click', async () => {
@@ -433,7 +787,11 @@ function bindChartPanelEvents() {
             const name = nameEl ? nameEl.value.trim() : '';
             const difficulty = difficultyEl && difficultyEl.value ? difficultyEl.value : null;
             const tempo = tempoEl && tempoEl.value ? Number(tempoEl.value) : null;
-            const endTime = endTimeEl && endTimeEl.value !== '' ? Number(endTimeEl.value) : null;
+            const endMeasures = endTimeEl && endTimeEl.value !== '' ? Number(endTimeEl.value) : null;
+            const bpm = tempo != null && Number.isFinite(tempo) ? tempo : getChartTempo();
+            const endTime = endMeasures != null && Number.isFinite(endMeasures)
+                ? Math.max(0, Math.floor(endMeasures)) * getBarSec(bpm)
+                : null;
             statusEl.textContent = '保存中...';
             try {
                 const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId), {
@@ -448,6 +806,7 @@ function bindChartPanelEvents() {
                 }
                 statusEl.textContent = '保存しました';
                 cachedCharts[selectedChartId] = { ...cachedCharts[selectedChartId], name: name || selectedChartId, notes: editingNotes, difficulty, tempo, endTime };
+                renderChartList(cachedCharts);
             } catch (err) {
                 statusEl.textContent = '保存失敗: ' + err.message;
             }
@@ -457,6 +816,10 @@ function bindChartPanelEvents() {
     const btnRemoveNote = document.getElementById('btn-remove-selected-note');
     if (btnRemoveNote) {
         btnRemoveNote.addEventListener('click', () => {
+            if (!selectedChartId) {
+                if (statusEl) statusEl.textContent = '譜面を選択してください';
+                return;
+            }
             if (selectedNoteIndex < 0 || selectedNoteIndex >= editingNotes.length) return;
             editingNotes.splice(selectedNoteIndex, 1);
             selectedNoteIndex = -1;
@@ -468,36 +831,67 @@ function bindChartPanelEvents() {
         if (e.key !== 'Delete' && e.key !== 'Backspace') return;
         const chartPanel = document.getElementById('panel-chart');
         if (!chartPanel || !chartPanel.classList.contains('active')) return;
+        if (!selectedChartId) {
+            if (statusEl) statusEl.textContent = '譜面を選択してください';
+            return;
+        }
         if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-        if (selectedNoteIndex < 0 || selectedNoteIndex >= editingNotes.length) return;
         e.preventDefault();
-        editingNotes.splice(selectedNoteIndex, 1);
-        selectedNoteIndex = -1;
+        if (selectedNoteIndices && selectedNoteIndices.size > 0) {
+            const indices = [...selectedNoteIndices]
+                .filter((i) => Number.isInteger(i) && i >= 0 && i < editingNotes.length)
+                .sort((a, b) => b - a);
+            if (indices.length === 0) return;
+            for (const idx of indices) {
+                editingNotes.splice(idx, 1);
+            }
+            selectedNoteIndices = new Set();
+            selectedNoteIndex = -1;
+        } else {
+            if (selectedNoteIndex < 0 || selectedNoteIndex >= editingNotes.length) return;
+            editingNotes.splice(selectedNoteIndex, 1);
+            selectedNoteIndex = -1;
+        }
         renderNotesStrip();
     });
 
-    const scrollEl = document.getElementById('chart-notes-scroll');
-    const strip = document.getElementById('chart-notes-strip');
+    const scrollEl = document.getElementById('chart-measures-scroll');
+    const gridEl = document.getElementById('chart-measures-grid');
     const paletteDon = document.querySelector('.note-palette-item.note-don');
     const paletteKa = document.querySelector('.note-palette-item.note-ka');
     const paletteRollStart = document.querySelector('.note-palette-item.note-roll-start');
     const paletteRollEnd = document.querySelector('.note-palette-item.note-roll-end');
     const paletteItems = [paletteDon, paletteKa, paletteRollStart, paletteRollEnd].filter(Boolean);
-    if (scrollEl && strip && paletteItems.length > 0) {
+    if (scrollEl && gridEl && paletteItems.length > 0) {
         paletteItems.forEach((el) => {
             el.addEventListener('dragstart', (e) => {
                 e.dataTransfer.setData('text/plain', el.dataset.noteType || 'don');
                 e.dataTransfer.effectAllowed = 'copy';
             });
         });
+        gridEl.addEventListener('dragover', (e) => {
+            const cell = e.target.closest('.measure-cell');
+            if (!cell) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            cell.classList.add('drag-over');
+        });
+        gridEl.addEventListener('dragleave', (e) => {
+            const cell = e.target.closest('.measure-cell');
+            if (!cell) return;
+            if (!cell.contains(e.relatedTarget)) {
+                cell.classList.remove('drag-over');
+            }
+        });
         scrollEl.addEventListener('dragover', (e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
             scrollEl.classList.add('drag-over');
-            const innerEl = document.getElementById('chart-notes-inner');
-            const rect = innerEl ? innerEl.getBoundingClientRect() : null;
-            const dropX = rect ? (e.clientX - rect.left + scrollEl.scrollLeft) : 0;
-            const time = Math.max(0, dropX / chartPixelsPerSecond);
+            const cell = e.target.closest('.measure-cell');
+            if (!cell) return;
+            const barIndex = parseInt(cell.dataset.barIndex, 10);
+            const stepIndex = parseInt(cell.dataset.stepIndex, 10);
+            const time = barStepToTime(barIndex, stepIndex, getChartTempo());
             updateChartPalette(isTimeInRollSection(time));
         });
         scrollEl.addEventListener('dragleave', (e) => {
@@ -510,25 +904,48 @@ function bindChartPanelEvents() {
             e.preventDefault();
             scrollEl.classList.remove('drag-over');
             updateChartPalette(false);
+            if (!selectedChartId) {
+                if (statusEl) statusEl.textContent = '譜面を選択してください';
+                return;
+            }
             const type = (e.dataTransfer.getData('text/plain') || 'don').trim();
-            const innerEl = document.getElementById('chart-notes-inner');
-            const getNoteMaxTime = (n) => {
-                if (n.type === 'roll') return n.endTime ?? n.startTime ?? 0;
-                return n.time ?? 0;
-            };
-            const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
-            const timeRange = Math.max(CHART_TIME_RANGE_DEFAULT, maxNoteTime + 10);
-            const rect = innerEl ? innerEl.getBoundingClientRect() : null;
-            const dropX = rect ? (e.clientX - rect.left + scrollEl.scrollLeft) : 0;
-            const time = Math.max(0, Math.min(timeRange, dropX / chartPixelsPerSecond));
+            const cell = e.target.closest('.measure-cell');
+            if (!cell) return;
+            cell.classList.remove('drag-over');
+            const barIndex = parseInt(cell.dataset.barIndex, 10);
+            const stepIndex = parseInt(cell.dataset.stepIndex, 10);
+            const time = barStepToTime(barIndex, stepIndex, getChartTempo());
+
             if (type === 'roll-start' || type === 'roll-end') {
-                editingNotes.push({ type, time });
+                const { barIndex: bi, stepIndex: si } = timeToBarStep(time, getChartTempo());
+                const qTime = barStepToTime(bi, si, getChartTempo());
+                const replaceIndex = editingNotes.findIndex((n) => {
+                    if (n.type !== 'roll-start' && n.type !== 'roll-end') return false;
+                    const { barIndex: nbi, stepIndex: nsi } = timeToBarStep(n.time ?? 0, getChartTempo());
+                    return nbi === bi && nsi === si;
+                });
+                if (replaceIndex >= 0) {
+                    editingNotes[replaceIndex] = { type, time: qTime };
+                } else {
+                    editingNotes.push({ type, time: qTime });
+                }
             } else if (type === 'ka' || type === 'don') {
                 if (isTimeInRollSection(time)) {
                     if (statusEl) statusEl.textContent = '連打区間内にはドン・カを設置できません';
                     return;
                 }
-                editingNotes.push({ time, type });
+                const { barIndex: bi, stepIndex: si } = timeToBarStep(time, getChartTempo());
+                const qTime = barStepToTime(bi, si, getChartTempo());
+                const replaceIndex = editingNotes.findIndex((n) => {
+                    if (n.type !== 'don' && n.type !== 'ka') return false;
+                    const { barIndex: nbi, stepIndex: nsi } = timeToBarStep(n.time ?? 0, getChartTempo());
+                    return nbi === bi && nsi === si;
+                });
+                if (replaceIndex >= 0) {
+                    editingNotes[replaceIndex] = { time: qTime, type };
+                } else {
+                    editingNotes.push({ time: qTime, type });
+                }
             } else {
                 return;
             }
@@ -541,77 +958,104 @@ function bindChartPanelEvents() {
             renderNotesStrip();
             if (statusEl && (type === 'roll-start' || type === 'roll-end')) statusEl.textContent = '';
         });
-        let panStartX = null;
-        let panStartScroll = null;
-        scrollEl.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return;
-            if (e.target.closest('.note-circle') || e.target.closest('.note-roll-bar')) return;
-            panStartX = e.clientX;
-            panStartScroll = scrollEl.scrollLeft;
-        });
-        document.addEventListener('mousemove', (e) => {
-            if (noteDragIndex >= 0) {
-                if (!noteDragStarted && Math.abs(e.clientX - noteDragStartX) > 5) noteDragStarted = true;
-                if (noteDragStarted) {
-                    const rect = scrollEl.getBoundingClientRect();
-                    const contentX = scrollEl.scrollLeft + (e.clientX - rect.left);
-                    const getNoteMaxTime = (n) => n.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n.time ?? 0);
-                    const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
-                    const timeRange = Math.max(CHART_TIME_RANGE_DEFAULT, maxNoteTime + 10);
-                    const time = Math.max(0, Math.min(timeRange, contentX / chartPixelsPerSecond));
-                    const note = editingNotes[noteDragIndex];
-                    if (note.type === 'roll') {
-                        const duration = (note.endTime ?? note.startTime ?? 0) - (note.startTime ?? 0);
-                        note.startTime = time;
-                        note.endTime = time + duration;
-                    } else if (note.type === 'roll-start' || note.type === 'roll-end') {
-                        note.time = time;
-                    } else {
-                        note.time = time;
-                    }
-                    renderNotesStrip();
-                }
-                return;
-            }
-            if (panStartX === null) return;
-            scrollEl.scrollLeft = panStartScroll + (panStartX - e.clientX);
-        });
-        document.addEventListener('mouseup', () => {
-            if (noteDragIndex >= 0) {
-                if (noteDragStarted) {
-                    const draggedNote = editingNotes[noteDragIndex];
-                    editingNotes.sort((a, b) => {
-                        const ta = a.type === 'roll' ? a.startTime : a.time;
-                        const tb = b.type === 'roll' ? b.startTime : b.time;
-                        return ta - tb;
-                    });
-                    selectedNoteIndex = editingNotes.indexOf(draggedNote);
-                } else {
-                    selectedNoteIndex = selectedNoteIndex === noteDragIndex ? -1 : noteDragIndex;
-                }
-                renderNotesStrip();
-                noteDragIndex = -1;
-                noteDragStarted = false;
-            }
-            panStartX = null;
-            panStartScroll = null;
-        });
-        scrollEl.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const rect = scrollEl.getBoundingClientRect();
-            const contentX = scrollEl.scrollLeft + (e.clientX - rect.left);
-            const timeUnderMouse = contentX / chartPixelsPerSecond;
-            const factor = e.deltaY > 0 ? 0.9 : 1.1;
-            const newScale = Math.max(CHART_ZOOM_MIN, Math.min(CHART_ZOOM_MAX, (chartPixelsPerSecond / 60) * factor));
-            chartPixelsPerSecond = 60 * newScale;
-            renderNotesStrip();
-            const rect2 = scrollEl.getBoundingClientRect();
-            scrollEl.scrollLeft = Math.max(0, timeUnderMouse * chartPixelsPerSecond - (e.clientX - rect2.left));
-        }, { passive: false });
         const tempoEl = document.getElementById('chart-edit-tempo');
         if (tempoEl) {
-            tempoEl.addEventListener('input', () => renderNotesStrip());
+            tempoEl.addEventListener('input', () => {
+                const oldBpm = lastRenderedChartBpm ?? getChartTempo();
+                const newBpm = getChartTempo();
+                retimeEditingNotesKeepGridPosition(oldBpm, newBpm);
+                renderNotesStrip();
+            });
         }
+    }
+
+    // 範囲選択（ドラッグ） + コピー（Ctrl+C） + 右クリックペースト
+    if (gridEl) {
+        let selecting = false;
+        let startCell = null;
+        let lastCell = null;
+
+        function clearRangeHighlight() {
+            gridEl.querySelectorAll('.measure-cell.range-selected').forEach((c) => c.classList.remove('range-selected'));
+        }
+
+        function applyRangeHighlight(a, b) {
+            if (!a || !b) return;
+            const aBar = parseInt(a.dataset.barIndex, 10);
+            const aStep = parseInt(a.dataset.stepIndex, 10);
+            const bBar = parseInt(b.dataset.barIndex, 10);
+            const bStep = parseInt(b.dataset.stepIndex, 10);
+            const aAbs = aBar * 16 + aStep;
+            const bAbs = bBar * 16 + bStep;
+            const minAbs = Math.min(aAbs, bAbs);
+            const maxAbs = Math.max(aAbs, bAbs);
+            gridEl.querySelectorAll('.measure-cell').forEach((cell) => {
+                const bi = parseInt(cell.dataset.barIndex, 10);
+                const si = parseInt(cell.dataset.stepIndex, 10);
+                const abs = bi * 16 + si;
+                const inRange = abs >= minAbs && abs <= maxAbs;
+                cell.classList.toggle('range-selected', inRange);
+            });
+            selectedNoteIndices = getNoteIndicesInAbsStepRange(aBar, aStep, bBar, bStep);
+            selectedNoteIndex = -1;
+            renderNotesStrip();
+        }
+
+        gridEl.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            const cell = e.target.closest('.measure-cell');
+            if (!cell) return;
+            if (!selectedChartId) return;
+            selecting = true;
+            startCell = cell;
+            lastCell = cell;
+            clearRangeHighlight();
+            selectedNoteIndices = getNoteIndicesInAbsStepRange(
+                parseInt(cell.dataset.barIndex, 10),
+                parseInt(cell.dataset.stepIndex, 10),
+                parseInt(cell.dataset.barIndex, 10),
+                parseInt(cell.dataset.stepIndex, 10)
+            );
+            selectedNoteIndex = -1;
+            renderNotesStrip();
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!selecting) return;
+            const el = document.elementFromPoint(e.clientX, e.clientY);
+            const cell = el ? el.closest?.('.measure-cell') : null;
+            if (!cell || cell === lastCell) return;
+            lastCell = cell;
+            clearRangeHighlight();
+            applyRangeHighlight(startCell, lastCell);
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!selecting) return;
+            selecting = false;
+        });
+
+        gridEl.addEventListener('contextmenu', (e) => {
+            const cell = e.target.closest('.measure-cell');
+            if (!cell) return;
+            e.preventDefault();
+            if (!selectedChartId) return;
+            const bi = parseInt(cell.dataset.barIndex, 10);
+            const si = parseInt(cell.dataset.stepIndex, 10);
+            pasteClipboardNotesAt(bi, si);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            const chartPanel = document.getElementById('panel-chart');
+            if (!chartPanel || !chartPanel.classList.contains('active')) return;
+            if (!selectedChartId) return;
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+                if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+                e.preventDefault();
+                copySelectedNotesToClipboard();
+            }
+        });
     }
 
     if (btnDelete) {
@@ -640,6 +1084,14 @@ function bindChartPanelEvents() {
 document.addEventListener('DOMContentLoaded', () => {
     const savedTheme = localStorage.getItem(ADMIN_THEME_KEY);
     applyAdminTheme(savedTheme === 'dark');
+
+    // 左サイドバー: ホバー中だけ展開し、外れると収納
+    const adminSidebar = document.querySelector('.admin-sidebar');
+    if (adminSidebar) {
+        adminSidebar.classList.add('collapsed');
+        adminSidebar.addEventListener('mouseenter', () => adminSidebar.classList.remove('collapsed'));
+        adminSidebar.addEventListener('mouseleave', () => adminSidebar.classList.add('collapsed'));
+    }
 
     document.getElementById('admin-theme-toggle')?.addEventListener('click', () => {
         const isDark = !document.body.classList.contains('admin-dark');
@@ -2014,6 +2466,45 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+/**
+ * JSONをダウンロードする（UTF-8）
+ */
+function downloadJson(filename, data) {
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+/**
+ * 譜面（全件/選択中）をJSONでエクスポートする
+ */
+async function exportChartsJson() {
+    const statusEl = document.getElementById('chart-status');
+    const btn = document.getElementById('btn-export-charts-json');
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/admin/charts', { credentials: 'include' });
+        if (!res.ok) throw new Error(res.statusText);
+        const charts = await res.json();
+        const payload = {
+            exportedAt: new Date().toISOString(),
+            selectedChartId: selectedChartId || null,
+            charts,
+        };
+        const safeId = (selectedChartId && /^[a-zA-Z0-9_-]+$/.test(selectedChartId)) ? selectedChartId : 'all';
+        downloadJson(`charts_${safeId}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`, payload);
+        if (statusEl) statusEl.textContent = 'JSONをエクスポートしました';
+    } catch (err) {
+        if (statusEl) statusEl.textContent = 'エクスポート失敗: ' + err.message;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 /** 利用可能なコマンド名（Tab補完用）。 */

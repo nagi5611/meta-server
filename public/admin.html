@@ -671,19 +671,18 @@
 
             <div id="panel-chart" class="admin-panel chart-panel">
                 <div class="chart-edit-layout">
-                    <aside class="chart-category">
-                        <h2 class="section-title">譜面一覧</h2>
-                        <div class="chart-list" id="chart-list"></div>
-                        <div class="btn-row">
-                            <button type="button" id="btn-add-chart">譜面を追加</button>
-                            <button type="button" id="btn-edit-chart" disabled>譜面を編集</button>
-                            <button type="button" id="btn-delete-chart" disabled>譜面を削除</button>
-                        </div>
-                        <span id="chart-status" class="status-text"></span>
-                    </aside>
-                    <div class="chart-right">
+                    <div class="chart-editor-col">
                         <section class="chart-settings section">
                             <h2 class="section-title">設定</h2>
+                            <div class="chart-header-row">
+                                <div class="chart-list" id="chart-list"></div>
+                                <div class="chart-header-actions">
+                                    <button type="button" id="btn-add-chart">譜面を追加</button>
+                                    <button type="button" id="btn-edit-chart" disabled>譜面を編集</button>
+                                    <button type="button" id="btn-delete-chart" disabled>譜面を削除</button>
+                                </div>
+                            </div>
+                            <span id="chart-status" class="status-text"></span>
                             <div class="field-row">
                                 <label class="prop-label">譜面</label>
                                 <input type="text" id="chart-edit-name" class="prop-input" placeholder="譜面の表示名">
@@ -704,35 +703,35 @@
                                 <input type="number" id="chart-edit-tempo" class="prop-input num" min="60" max="300" placeholder="120">
                             </div>
                             <div class="field-row">
-                                <label class="prop-label">曲の終わり（秒）</label>
-                                <input type="number" id="chart-edit-end-time" class="prop-input num" min="0" step="0.1" placeholder="最後のノーツ以降">
+                                <label class="prop-label">曲の終わり（小節）</label>
+                                <input type="number" id="chart-edit-end-time" class="prop-input num" min="1" step="1" placeholder="例: 16">
                             </div>
                             <div class="btn-row">
                                 <button type="button" id="btn-save-chart" disabled>保存</button>
+                                <button type="button" id="btn-export-charts-json">JSONエクスポート</button>
                             </div>
                         </section>
                         <section class="chart-notes-section section">
-                            <h2 class="section-title">譜面</h2>
-                            <div class="chart-notes-scroll" id="chart-notes-scroll">
-                                <div class="chart-notes-inner" id="chart-notes-inner">
-                                    <div class="chart-notes-ruler" id="chart-notes-ruler"></div>
-                                    <div class="chart-notes-strip" id="chart-notes-strip" data-drop-zone="chart"></div>
+                            <h2 class="section-title">譜面（4/4・1小節16分割）</h2>
+                            <div class="chart-notes-row">
+                                <div class="chart-measures-scroll" id="chart-measures-scroll">
+                                    <div class="chart-measures-grid" id="chart-measures-grid" data-drop-zone="chart"></div>
                                 </div>
+                                <aside class="chart-notes-palette">
+                                    <h3 class="chart-notes-palette-title">メニュー</h3>
+                                    <div class="chart-menu-palette">
+                                        <span class="note-palette-item note-don" data-note-type="don" draggable="true" title="ドン">ドン</span>
+                                        <span class="note-palette-item note-ka" data-note-type="ka" draggable="true" title="カ">カ</span>
+                                        <span class="note-palette-item note-roll-start" data-note-type="roll-start" draggable="true" title="連打開始">連打始</span>
+                                        <span class="note-palette-item note-roll-end" data-note-type="roll-end" draggable="true" title="連打終了">連打終</span>
+                                    </div>
+                                    <p class="chart-drag-hint">drag & drop</p>
+                                </aside>
                             </div>
                             <div class="btn-row">
                                 <button type="button" id="btn-remove-selected-note" disabled>選択ノーツを削除</button>
                             </div>
-                            <p class="chart-drag-hint">メニューからドラッグ＆ドロップでノーツを追加</p>
-                        </section>
-                        <section class="chart-menu-section section">
-                            <h2 class="section-title">メニュー</h2>
-                            <div class="chart-menu-palette">
-                                <span class="note-palette-item note-don" data-note-type="don" draggable="true" title="ドン">ドン</span>
-                                <span class="note-palette-item note-ka" data-note-type="ka" draggable="true" title="カ">カ</span>
-                                <span class="note-palette-item note-roll-start" data-note-type="roll-start" draggable="true" title="連打開始">連打始</span>
-                                <span class="note-palette-item note-roll-end" data-note-type="roll-end" draggable="true" title="連打終了">連打終</span>
-                            </div>
-                            <p class="chart-drag-hint">drag & drop</p>
+                            <p class="chart-drag-hint">右メニューからドラッグ＆ドロップでノーツを追加</p>
                         </section>
                     </div>
                 </div>

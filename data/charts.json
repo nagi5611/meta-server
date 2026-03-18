@@ -56,5 +56,30 @@
     "difficulty": "1",
     "tempo": 120,
     "endTime": null
+  },
+  "test01": {
+    "id": "test01",
+    "name": "test01",
+    "notes": [
+      {
+        "time": 2,
+        "type": "don"
+      },
+      {
+        "time": 2.5,
+        "type": "don"
+      },
+      {
+        "time": 3,
+        "type": "don"
+      },
+      {
+        "time": 3.5,
+        "type": "ka"
+      }
+    ],
+    "difficulty": null,
+    "tempo": 120,
+    "endTime": null
   }
 }
