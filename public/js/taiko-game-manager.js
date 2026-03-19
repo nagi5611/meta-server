@@ -104,6 +104,9 @@ class TaikoGameManager {
         this._mpReadySent = false;
         /** @type {boolean} */
         this._mpNeedsBgm = false;
+
+        /** @type {boolean} マルチ開始（譜面/スケジューリング）済み */
+        this._mpGameStarted = false;
     }
 
     /** WebAudioコンテキストを確保して返す（ユーザー操作後に resume すること） */
@@ -273,6 +276,7 @@ class TaikoGameManager {
                 slotCount: Math.min(3, Math.max(1, Number(zone.slotCount) || 1))
             };
             this._mpClaimedPart = null;
+            this._mpGameStarted = false;
             this._setupMultiplayerLobby();
             return;
         }
@@ -438,6 +442,7 @@ class TaikoGameManager {
         this._mpPartNames = {};
         this._mpReadySent = false;
         this._mpNeedsBgm = false;
+        this._mpGameStarted = false;
     }
 
     /**
@@ -642,6 +647,28 @@ class TaikoGameManager {
             btn.disabled = taken && this._mpClaimedPart !== p;
         });
 
+        // ready状態（OK / 準備中）を全員分反映
+        wrap.querySelectorAll('.taiko-mp-part-pill').forEach((pillEl) => {
+            const pill = pillEl;
+            if (!(pill instanceof HTMLElement)) return;
+            const p = Number(pill.dataset.part);
+            const taken = parts[p]?.taken;
+            const ready = !!parts[p]?.ready;
+
+            pill.classList.remove('ready', 'loading');
+            if (!taken) {
+                pill.textContent = '未参加';
+                return;
+            }
+            if (ready) {
+                pill.classList.add('ready');
+                pill.textContent = 'OK';
+            } else {
+                pill.classList.add('loading');
+                pill.textContent = this._mpNeedsBgm ? 'BGM読込中' : '準備中';
+            }
+        });
+
         const hintEl = document.getElementById('taiko-mp-lobby-hint');
         const statusEl = document.getElementById('taiko-mp-status');
         if (payload.inGame && payload.startAt) {
@@ -651,6 +678,16 @@ class TaikoGameManager {
             if (statusEl) statusEl.textContent = `開始まで ${sec} 秒`;
             const ring = document.querySelector('.taiko-mp-wait-ring');
             if (ring) ring.classList.add('countdown');
+
+            // taiko-mp-sync-start を受け逃したケースを state から復旧
+            if (!this._mpGameStarted && this._mpClaimedPart != null) {
+                this._mpGameStarted = true;
+                this._onMultiplayerSyncStart({
+                    chartId: z.multiplayerChartId,
+                    startAt: payload.startAt,
+                    partIndex: this._mpClaimedPart
+                });
+            }
         } else {
             const ring = document.querySelector('.taiko-mp-wait-ring');
             if (ring) ring.classList.remove('countdown');
@@ -663,6 +700,8 @@ class TaikoGameManager {
     _onMultiplayerSyncStart(payload) {
         const z = this._mpZone;
         if (!z || !payload || !payload.chartId) return;
+        if (this._mpGameStarted) return;
+        this._mpGameStarted = true;
         const part = payload.partIndex != null ? Number(payload.partIndex) : this._mpClaimedPart;
         if (part == null) return;
 

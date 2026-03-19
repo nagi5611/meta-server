@@ -1368,7 +1368,13 @@ io.on('connection', (socket) => {
         socket.join(roomName);
         for (const st of taikoMpRooms.values()) {
             for (const [pi, sid] of [...st.parts.entries()]) {
-                if (sid === socket.id) st.parts.delete(pi);
+                if (sid === socket.id) {
+                    // 以前取っていたパートを完全に解放（names/ready/finished も同期対象から除外）
+                    st.parts.delete(pi);
+                    st.names.delete(pi);
+                    st.ready.delete(pi);
+                    st.finished.delete(pi);
+                }
             }
         }
         let st = taikoMpRooms.get(k);
