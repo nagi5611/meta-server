@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { AnimationMixer } from 'three';
+import { createGLTFLoaderWithDraco } from './gltf-loader-draco.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 class PlayerManager {
@@ -8,7 +8,7 @@ class PlayerManager {
         this.scene = scene;
         this.localPlayer = null;
         this.remotePlayers = new Map();
-        this.gltfLoader = new GLTFLoader();
+        this.gltfLoader = createGLTFLoaderWithDraco();
         /** @type {{ scene: THREE.Group, animations: THREE.AnimationClip[] } | null} */
         this.avatarModelCache = null;
         this.avatarPath = 'models/avatar.glb';

@@ -6,6 +6,18 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/TransformControls.js';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/DRACOLoader.js';
+import { DRACO_DECODER_PATH } from './draco-decoder-path.js';
+import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
+import { MTLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
+import {
+    MODEL_MAX_BYTES_OBJ,
+    MODEL_MAX_BYTES_GLTF,
+    MODEL_MAX_TRIANGLES_TOTAL,
+    MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD,
+    fetchModelContentLength,
+    countTrianglesInObject
+} from './model-load-limits.js';
 
 // --- State ---
 let scene, camera, renderer, controls, transformControls;
@@ -14,7 +26,8 @@ let worlds = {};
 let selectedWorldId = null;
 let selectedObject = null;
 let modelList = [];
-let selectedModelPath = null; // 左パネル「モデル一覧」で選択中のモデル（models/xxx.glb）
+let mtlList = []; // MTL ファイル名（models/ 配下、ファイル名のみ）
+let selectedModelPath = null; // 左パネル「モデル一覧」で選択中のモデル（models/xxx.glb または .obj）
 let pdfList = [];
 let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（pdfs/xxx.pdf）
 let lightHelpers = []; // { light, mesh? } for point/spot position drag
@@ -22,8 +35,180 @@ let worldObjectList = []; // 右パネル「オブジェクト一覧」の並び
 let objectListExpanded = { lights: false, models: false, pdfs: false }; // オブジェクト一覧の階層展開状態
 let editorGround = null; // 編集プレビュー用の床メッシュ（表示切替用）
 let editorGrid = null;   // 編集プレビュー用のグリッド（表示切替用）
+let editorDracoLoader = null;
 const pointer = new THREE.Vector2();
+
+/**
+ * ワールド編集プレビュー用の DRACOLoader（Blender Draco 圧縮 GLB 用）
+ * @returns {DRACOLoader}
+ */
+function getEditorDracoLoader() {
+    if (!editorDracoLoader) {
+        editorDracoLoader = new DRACOLoader();
+        editorDracoLoader.setDecoderPath(DRACO_DECODER_PATH);
+    }
+    return editorDracoLoader;
+}
 const raycaster = new THREE.Raycaster();
+
+/**
+ * アセットパスを同一オリジンの絶対 URL に変換（セグメントごとに encode）
+ * @param {string} assetPath - 例: models/foo.obj
+ * @returns {string}
+ */
+function buildEncodedModelUrl(assetPath) {
+    const pathStr = assetPath.startsWith('/') ? assetPath.slice(1) : assetPath;
+    const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+    return '/' + encodedPath;
+}
+
+/**
+ * @param {string} path
+ * @returns {boolean}
+ */
+function isObjPath(path) {
+    return typeof path === 'string' && path.toLowerCase().endsWith('.obj');
+}
+
+/**
+ * ワールド用モデル 1 件を読み込み（サイズ・ポリゴン上限あり）
+ * @param {{ path: string, mtlPath?: string }} config
+ * @returns {Promise<{ model: THREE.Object3D, triangleCount: number }>}
+ */
+async function loadModelFromConfig(config) {
+    const path = config.path || '';
+    const url = buildEncodedModelUrl(path);
+    const maxB = isObjPath(path) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
+    const len = await fetchModelContentLength(url);
+    if (len != null && len > maxB) {
+        throw new Error(
+            `「${path.split('/').pop()}」が大きすぎます（約 ${Math.round(len / 1024 / 1024)}MB）。上限約 ${Math.round(maxB / 1024 / 1024)}MB です。`
+        );
+    }
+
+    const model = await new Promise((resolve, reject) => {
+        if (!isObjPath(path)) {
+            const gltfLoader = new GLTFLoader();
+            gltfLoader.setDRACOLoader(getEditorDracoLoader());
+            gltfLoader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+            return;
+        }
+
+        const objLoader = new OBJLoader();
+        const mtlPath = (config.mtlPath || '').trim();
+        if (!mtlPath) {
+            objLoader.load(url, (obj) => resolve(obj), undefined, reject);
+            return;
+        }
+
+        const mtlEncoded = buildEncodedModelUrl(mtlPath);
+        const mtlDirUrl = mtlEncoded.slice(0, mtlEncoded.lastIndexOf('/') + 1);
+        const mtlFile = mtlPath.split('/').pop();
+        const objDirUrl = url.slice(0, url.lastIndexOf('/') + 1);
+        const objFile = path.split('/').pop();
+
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setPath(mtlDirUrl);
+        mtlLoader.load(
+            mtlFile,
+            (materials) => {
+                materials.preload();
+                objLoader.setMaterials(materials);
+                objLoader.setPath(objDirUrl);
+                objLoader.load(objFile, (object) => resolve(object), undefined, reject);
+            },
+            undefined,
+            reject
+        );
+    });
+
+    const triangleCount = countTrianglesInObject(model);
+    if (triangleCount > MODEL_MAX_TRIANGLES_TOTAL) {
+        disposeObjectTree(model);
+        throw new Error(
+            `ポリゴンが多すぎます（約 ${triangleCount.toLocaleString()} 三角）。上限約 ${MODEL_MAX_TRIANGLES_TOTAL.toLocaleString()} 三角です。`
+        );
+    }
+    return { model, triangleCount };
+}
+
+/**
+ * ポリゴン数に応じてシャドウを付与（重いモデルはオフ）
+ * @param {THREE.Object3D} model
+ * @param {number} triangleCount
+ */
+function applyModelShadowByTriangleCount(model, triangleCount) {
+    const disableSh = triangleCount > MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD;
+    model.traverse((o) => {
+        if (o.isMesh) {
+            o.castShadow = !disableSh;
+            o.receiveShadow = !disableSh;
+        }
+    });
+}
+
+/**
+ * オブジェクトツリーのジオメトリ・マテリアルを破棄
+ * @param {THREE.Object3D} obj
+ */
+function disposeObjectTree(obj) {
+    obj.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+            const mats = Array.isArray(o.material) ? o.material : [o.material];
+            mats.forEach((m) => {
+                if (m.map) m.map.dispose();
+                m.dispose();
+            });
+        }
+    });
+}
+
+/**
+ * MTL 用 select の選択肢を埋める
+ * @param {HTMLSelectElement} selectEl
+ * @param {string} [currentPath] - models/xxx.mtl
+ */
+function fillMtlSelectOptions(selectEl, currentPath) {
+    const cur = currentPath || '';
+    selectEl.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = '（なし）';
+    selectEl.appendChild(opt0);
+    const seen = new Set(mtlList.map((n) => 'models/' + n));
+    mtlList.forEach((name) => {
+        const p = 'models/' + name;
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = name;
+        selectEl.appendChild(opt);
+    });
+    if (cur && !seen.has(cur)) {
+        const opt = document.createElement('option');
+        opt.value = cur;
+        opt.textContent = cur.split('/').pop() + ' (不在)';
+        selectEl.appendChild(opt);
+    }
+    selectEl.value = '';
+    if (cur && Array.from(selectEl.options).some((o) => o.value === cur)) {
+        selectEl.value = cur;
+    }
+}
+
+/**
+ * 左パネル: OBJ 選択時のみ MTL 行を表示
+ */
+function updateAddObjMtlRowVisibility() {
+    const row = document.getElementById('add-obj-mtl-row');
+    if (!row) return;
+    const show = !!(selectedModelPath && isObjPath(selectedModelPath));
+    row.style.display = show ? '' : 'none';
+    if (show) {
+        const sel = document.getElementById('add-obj-mtl');
+        if (sel) fillMtlSelectOptions(sel, sel.value || '');
+    }
+}
 
 // Blender風: G/R/S 押下後のマウス追従変形用
 let customTransformMode = null; // 'translate' | 'rotate' | 'scale'
@@ -639,6 +824,17 @@ function updateObjectPanel(obj) {
     if (!obj) return;
     const c = obj.userData.config || obj.userData.pdfConfig;
     if (!c) return;
+    const mtlRow = document.getElementById('obj-mtl-row');
+    const mtlSel = document.getElementById('obj-mtl-path');
+    if (mtlRow && mtlSel) {
+        const op = (obj.userData.config && c.path) || '';
+        if (obj.userData.config && isObjPath(op)) {
+            mtlRow.style.display = '';
+            fillMtlSelectOptions(mtlSel, c.mtlPath || '');
+        } else {
+            mtlRow.style.display = 'none';
+        }
+    }
     document.getElementById('obj-path').value = (c.path || (c.framePaths && c.framePaths[0])) || '';
     document.getElementById('obj-pos-x').value = obj.position.x;
     document.getElementById('obj-pos-y').value = obj.position.y;
@@ -712,6 +908,15 @@ function syncObjectFromPanel() {
     };
     c.scale = { x: selectedObject.scale.x, y: selectedObject.scale.y, z: selectedObject.scale.z };
     if (selectedObject.userData.config) {
+        const p = c.path || '';
+        if (isObjPath(p)) {
+            const mtlEl = document.getElementById('obj-mtl-path');
+            const mv = mtlEl && mtlEl.value ? mtlEl.value.trim() : '';
+            if (mv) c.mtlPath = mv;
+            else delete c.mtlPath;
+        } else {
+            delete c.mtlPath;
+        }
         if (document.getElementById('obj-animate').checked) {
             c.animate = {
                 rotation: {
@@ -815,6 +1020,7 @@ function buildWorldsFromScene() {
                     if (c.animate) c.animate = { ...c.animate, rotation: c.animate.rotation ? { ...c.animate.rotation } : {} };
                     if (c.teleporter) c.teleporter = { ...c.teleporter };
                     if (c.taiko) c.taiko = { ...c.taiko };
+                    if (!isObjPath(c.path || '')) delete c.mtlPath;
                     w.models.push(c);
                 }
                 if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
@@ -862,29 +1068,52 @@ function loadWorldIntoScene(world) {
     document.getElementById('object-hint').style.display = 'block';
     document.getElementById('object-props').style.display = 'none';
 
-    const loader = new GLTFLoader();
     const models = world.models || [];
-    models.forEach((config, idx) => {
-        const path = config.path || '';
-        // Resolve as absolute URL ("/models/...") and encode path segments.
-        // Prevents accidental relative URLs (e.g. under "/admin/") returning HTML.
-        const pathStr = path.startsWith('/') ? path.slice(1) : path;
-        const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
-        const url = '/' + encodedPath;
-    loader.load(url, (gltf) => {
-        const model = gltf.scene;
-        const pos = config.position || { x: 0, y: 0, z: 0 };
-        const rot = config.rotation || { x: 0, y: 0, z: 0 };
-        const scale = config.scale || { x: 1, y: 1, z: 1 };
-        model.position.set(pos.x, pos.y, pos.z);
-        model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
-        model.scale.set(scale.x, scale.y, scale.z);
-        model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-        model.userData.editId = 'm' + idx;
-        model.userData.config = { path, position: { ...pos }, rotation: { ...rot }, scale: { ...scale }, animate: config.animate ? { ...config.animate } : undefined, teleporter: config.teleporter ? { ...config.teleporter } : undefined, taiko: config.taiko ? { ...config.taiko } : undefined };
-        editGroup.add(model);
-    }, undefined, (err) => console.error('Load model failed:', url, err));
-    });
+    void (async () => {
+        const errs = [];
+        for (let idx = 0; idx < models.length; idx++) {
+            const config = models[idx];
+            const path = config.path || '';
+            const pos = config.position || { x: 0, y: 0, z: 0 };
+            const rot = config.rotation || { x: 0, y: 0, z: 0 };
+            const scale = config.scale || { x: 1, y: 1, z: 1 };
+            const cfgBase = {
+                path,
+                position: { ...pos },
+                rotation: { ...rot },
+                scale: { ...scale },
+                animate: config.animate ? { ...config.animate } : undefined,
+                teleporter: config.teleporter ? { ...config.teleporter } : undefined,
+                taiko: config.taiko ? { ...config.taiko } : undefined
+            };
+            if (isObjPath(path) && config.mtlPath) {
+                cfgBase.mtlPath = config.mtlPath;
+            }
+            try {
+                const { model, triangleCount } = await loadModelFromConfig({
+                    path,
+                    mtlPath: isObjPath(path) ? (config.mtlPath || '') : ''
+                });
+                model.position.set(pos.x, pos.y, pos.z);
+                model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
+                model.scale.set(scale.x, scale.y, scale.z);
+                applyModelShadowByTriangleCount(model, triangleCount);
+                model.userData.editId = 'm' + idx;
+                model.userData.config = cfgBase;
+                editGroup.add(model);
+            } catch (err) {
+                console.error('Load model failed:', path, err);
+                errs.push(err.message || String(err));
+            }
+        }
+        if (errs.length) {
+            const el = document.getElementById('save-status');
+            if (el) {
+                el.textContent = errs.join(' ');
+                el.className = 'error';
+            }
+        }
+    })();
 
     const lights = world.lights || [];
     lights.forEach((cfg, idx) => {
@@ -1011,6 +1240,12 @@ async function fetchModels() {
     const res = await fetch('/admin/models', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load models');
     modelList = await res.json();
+}
+
+async function fetchMtls() {
+    const res = await fetch('/admin/model-mtls', { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to load MTL list');
+    mtlList = await res.json();
 }
 
 async function fetchPdfs() {
@@ -1206,6 +1441,7 @@ function renderModelList() {
         });
         el.appendChild(div);
     });
+    updateAddObjMtlRowVisibility();
 }
 
 function selectWorld(id) {
@@ -1228,24 +1464,84 @@ function selectWorld(id) {
     populateDestWorldSelect();
 }
 
-function addModel(path) {
+/**
+ * シーンにモデルを追加（path は models/...）
+ * @param {string} path
+ * @param {string} [mtlPath] - OBJ 時のみ models/...mtl
+ */
+function addModel(path, mtlPath) {
     if (!selectedWorldId) return;
-    const loader = new GLTFLoader();
-    const pathStr = path.startsWith('/') ? path.slice(1) : path;
-    const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
-    const url = '/' + encodedPath;
-    loader.load(url, (gltf) => {
-        pushUndo();
-        const model = gltf.scene;
-        model.position.set(0, 2, -5);
-        model.rotation.set(0, 0, 0);
-        model.scale.set(1, 1, 1);
-        model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-        model.userData.editId = 'm' + Date.now();
-        model.userData.config = { path, position: { x: 0, y: 2, z: -5 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
-        editGroup.add(model);
-        renderWorldObjectList();
-    }, undefined, (err) => console.error('Load model failed:', url, err));
+    const mtl = isObjPath(path) ? (mtlPath || '').trim() : '';
+    const cfg = {
+        path,
+        position: { x: 0, y: 2, z: -5 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 }
+    };
+    if (mtl) cfg.mtlPath = mtl;
+    void (async () => {
+        try {
+            const { model, triangleCount } = await loadModelFromConfig({ path, mtlPath: mtl });
+            pushUndo();
+            model.position.set(0, 2, -5);
+            model.rotation.set(0, 0, 0);
+            model.scale.set(1, 1, 1);
+            applyModelShadowByTriangleCount(model, triangleCount);
+            model.userData.editId = 'm' + Date.now();
+            model.userData.config = cfg;
+            editGroup.add(model);
+            renderWorldObjectList();
+        } catch (err) {
+            console.error('Load model failed:', path, err);
+            alert(err.message || String(err));
+        }
+    })();
+}
+
+/**
+ * オブジェクトパネルで MTL を変更したとき、選択中の OBJ を再読込する
+ */
+function reloadSelectedObjModelFromMtlChange() {
+    if (!selectedObject || !selectedObject.userData.config) return;
+    const c = selectedObject.userData.config;
+    if (!isObjPath(c.path || '')) return;
+    const mtlEl = document.getElementById('obj-mtl-path');
+    const mv = mtlEl && mtlEl.value ? mtlEl.value.trim() : '';
+    if (mv) c.mtlPath = mv;
+    else delete c.mtlPath;
+
+    const pos = selectedObject.position.clone();
+    const rot = selectedObject.rotation.clone();
+    const scale = selectedObject.scale.clone();
+    const editId = selectedObject.userData.editId;
+    const fullCfg = JSON.parse(JSON.stringify(c));
+
+    void (async () => {
+        try {
+            const { model, triangleCount } = await loadModelFromConfig({
+                path: fullCfg.path,
+                mtlPath: fullCfg.mtlPath || ''
+            });
+            pushUndo();
+            transformControls.detach();
+            editGroup.remove(selectedObject);
+            disposeObjectTree(selectedObject);
+            model.position.copy(pos);
+            model.rotation.copy(rot);
+            model.scale.copy(scale);
+            applyModelShadowByTriangleCount(model, triangleCount);
+            model.userData.editId = editId;
+            model.userData.config = fullCfg;
+            editGroup.add(model);
+            selectedObject = model;
+            transformControls.attach(selectedObject);
+            updateObjectPanel(selectedObject);
+            renderWorldObjectList();
+        } catch (err) {
+            console.error('Reload OBJ failed:', err);
+            alert(err.message || String(err));
+        }
+    })();
 }
 
 function populateDestWorldSelect() {
@@ -1319,6 +1615,14 @@ function bindEvents() {
     document.getElementById('obj-scale-x').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-scale-y').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-scale-z').addEventListener('change', syncObjectFromPanel);
+    const objMtlPathEl = document.getElementById('obj-mtl-path');
+    if (objMtlPathEl) {
+        objMtlPathEl.addEventListener('change', () => {
+            if (!selectedObject || !selectedObject.userData.config) return;
+            if (!isObjPath(selectedObject.userData.config.path || '')) return;
+            reloadSelectedObjModelFromMtlChange();
+        });
+    }
     document.getElementById('obj-animate').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-anim-x').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-anim-y').addEventListener('change', syncObjectFromPanel);
@@ -1444,8 +1748,16 @@ function bindEvents() {
 
     document.getElementById('btn-add-model').addEventListener('click', () => {
         const path = selectedModelPath || (modelList.length ? 'models/' + modelList[0] : null);
-        if (path) addModel(path);
-        else alert('モデルをアップロードするか、一覧から選択してください');
+        if (!path) {
+            alert('モデルをアップロードするか、一覧から選択してください');
+            return;
+        }
+        let mtlPath = '';
+        if (isObjPath(path)) {
+            const mtlSel = document.getElementById('add-obj-mtl');
+            mtlPath = mtlSel && mtlSel.value ? mtlSel.value.trim() : '';
+        }
+        addModel(path, mtlPath);
     });
 
     document.getElementById('btn-add-pdf').addEventListener('click', () => {
@@ -1495,37 +1807,55 @@ function bindEvents() {
         e.target.value = '';
     });
     document.getElementById('upload-input').addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const files = Array.from(e.target.files || []);
+        e.target.value = '';
+        if (!files.length) return;
         const status = document.getElementById('upload-status');
         status.textContent = '';
         status.className = '';
-        const name = file.name.toLowerCase().endsWith('.glb') ? file.name : file.name + '.glb';
-        const exists = modelList.some((n) => n.toLowerCase() === name.toLowerCase());
-        let url = '/admin/upload';
-        if (exists && !confirm('同名ファイルがあります。上書きしますか？')) {
-            e.target.value = '';
-            return;
-        }
-        if (exists) url += '?confirm=1';
-        const form = new FormData();
-        form.append('model', file);
-        try {
-            const res = await fetch(url, { method: 'POST', credentials: 'include', body: form });
-            if (res.status === 409) {
-                status.textContent = '同名ファイルがあります。上書きするには確認して再送信してください。';
-                status.className = 'error';
-                return;
+        let ok = 0;
+        let skipped = 0;
+        let failed = 0;
+        let lastErr = '';
+        let needMtlRefresh = false;
+        for (const file of files) {
+            const name = file.name.replace(/^.*[/\\]/, '');
+            const exists = modelList.some((n) => n.toLowerCase() === name.toLowerCase());
+            let url = '/admin/upload';
+            if (exists && !confirm(`「${name}」は既にあります。上書きしますか？`)) {
+                skipped++;
+                continue;
             }
-            if (!res.ok) throw new Error(await res.text());
-            await fetchModels();
-            renderModelList();
-            status.textContent = 'アップロードしました: ' + name;
-        } catch (err) {
-            status.textContent = 'アップロード失敗: ' + err.message;
-            status.className = 'error';
+            if (exists) url += '?confirm=1';
+            const form = new FormData();
+            form.append('model', file);
+            try {
+                const res = await fetch(url, { method: 'POST', credentials: 'include', body: form });
+                if (res.status === 409) {
+                    lastErr = '同名の上書き確認が必要: ' + name;
+                    failed++;
+                    continue;
+                }
+                if (!res.ok) throw new Error(await res.text());
+                await fetchModels();
+                if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
+                ok++;
+            } catch (err) {
+                lastErr = err.message || String(err);
+                failed++;
+            }
         }
-        e.target.value = '';
+        if (needMtlRefresh) await fetchMtls();
+        renderModelList();
+        const parts = [];
+        if (ok) parts.push(`成功 ${ok} 件`);
+        if (skipped) parts.push(`スキップ ${skipped} 件`);
+        if (failed) parts.push(`失敗 ${failed} 件`);
+        status.textContent = parts.length ? parts.join('、') : 'ファイルがありませんでした';
+        if (failed || (skipped === files.length && !ok)) {
+            status.className = 'error';
+            if (lastErr && failed) status.textContent += ' — ' + lastErr;
+        }
     });
 
     document.getElementById('btn-add-light').addEventListener('click', () => {
@@ -1634,6 +1964,7 @@ async function init() {
     try {
         await fetchWorlds();
         await fetchModels();
+        await fetchMtls();
         await fetchPdfs();
     } catch (e) {
         console.error('Init fetch error:', e);

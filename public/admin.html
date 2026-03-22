@@ -380,6 +380,10 @@
                                 <section class="section">
                                     <h2 class="section-title">モデル一覧</h2>
                                     <div class="model-list" id="model-list"></div>
+                                    <div class="field-row" id="add-obj-mtl-row" style="display:none">
+                                        <label class="prop-label" for="add-obj-mtl">MTL（OBJ時）</label>
+                                        <select id="add-obj-mtl" class="prop-input full" aria-label="OBJ用MTLファイル"></select>
+                                    </div>
                                     <button type="button" id="btn-add-model">モデルを追加</button>
                                 </section>
                             </div>
@@ -405,7 +409,7 @@
                             <div id="we-cat-file" class="we-category-pane">
                                 <section class="section">
                                     <h2 class="section-title">モデルをアップロード</h2>
-                                    <input type="file" id="upload-input" accept=".glb" style="display:none">
+                                    <input type="file" id="upload-input" accept=".glb,.obj,.mtl,.png,.jpg,.jpeg,.webp" multiple style="display:none">
                                     <button type="button" id="btn-upload">ファイルを選択</button>
                                     <span id="upload-status" class="status-text"></span>
                                 </section>
@@ -448,6 +452,10 @@
                                         <div class="prop-row">
                                             <label class="prop-label" for="obj-path">Path</label>
                                             <input type="text" id="obj-path" class="prop-input full" readonly>
+                                        </div>
+                                        <div class="prop-row" id="obj-mtl-row" style="display:none">
+                                            <label class="prop-label" for="obj-mtl-path">MTL</label>
+                                            <select id="obj-mtl-path" class="prop-input full" aria-label="OBJ用MTL"></select>
                                         </div>
                                         <div class="prop-group-label">位置</div>
                                         <div class="prop-row">

@@ -1,6 +1,16 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { createGLTFLoaderWithDraco } from './gltf-loader-draco.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { MeshBVH, StaticGeometryGenerator } from 'three-mesh-bvh';
+import {
+    MODEL_MAX_BYTES_OBJ,
+    MODEL_MAX_BYTES_GLTF,
+    MODEL_MAX_TRIANGLES_TOTAL,
+    MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD,
+    fetchModelContentLength,
+    countTrianglesInObject
+} from './model-load-limits.js';
 
 class SceneManager {
     constructor() {
@@ -113,6 +123,42 @@ class SceneManager {
     }
 
     /**
+     * アセットパスを同一オリジンの絶対 URL に変換（セグメントごとに encode）
+     * @param {string} assetPath
+     * @returns {string}
+     */
+    _buildEncodedModelUrl(assetPath) {
+        const pathStr = assetPath.startsWith('/') ? assetPath.slice(1) : assetPath;
+        const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+        return '/' + encodedPath;
+    }
+
+    /**
+     * @param {string} p
+     * @returns {boolean}
+     */
+    _isObjPath(p) {
+        return typeof p === 'string' && p.toLowerCase().endsWith('.obj');
+    }
+
+    /**
+     * 読み込み棄却時にジオメトリ・マテリアルを破棄
+     * @param {THREE.Object3D} root
+     */
+    _disposeModelObject(root) {
+        root.traverse((o) => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) {
+                const mats = Array.isArray(o.material) ? o.material : [o.material];
+                mats.forEach((m) => {
+                    if (m.map) m.map.dispose();
+                    m.dispose();
+                });
+            }
+        });
+    }
+
+    /**
      * Load multiple world models
      * @param {Array<Object|string>} modelConfigs - Array of model configs or paths
      * @param {function} onComplete - Callback when all models are loaded
@@ -125,110 +171,156 @@ class SceneManager {
         }
 
         console.log(`Loading ${modelConfigs.length} models...`);
-        const loader = new GLTFLoader();
         let loadedCount = 0;
 
-        // Load each model
-        const loadPromises = modelConfigs.map((config) => {
-            // Support both old string format and new object format
-            const modelPath = typeof config === 'string' ? config : config.path;
+        /**
+         * @param {THREE.Object3D} model
+         * @param {object} config
+         * @param {string} modelPath
+         * @param {number} triangleCount
+         */
+        const finishAddModel = (model, config, modelPath, triangleCount = 0) => {
             const position = config.position || { x: 0, y: 0, z: 0 };
-            const rotation = config.rotation || { x: 0, y: 0, z: 0 }; // degrees
+            const rotation = config.rotation || { x: 0, y: 0, z: 0 };
             const scale = config.scale || { x: 1, y: 1, z: 1 };
 
-            return new Promise((resolve, reject) => {
-                loader.load(
-                    modelPath,
-                    (gltf) => {
-                        const model = gltf.scene;
+            model.position.set(position.x, position.y, position.z);
+            model.rotation.set(
+                rotation.x * Math.PI / 180,
+                rotation.y * Math.PI / 180,
+                rotation.z * Math.PI / 180
+            );
+            model.scale.set(scale.x, scale.y, scale.z);
+            model.updateMatrixWorld(true);
 
-                        // Apply position
-                        model.position.set(position.x, position.y, position.z);
-
-                        // Apply rotation (convert degrees to radians)
-                        model.rotation.set(
-                            rotation.x * Math.PI / 180,
-                            rotation.y * Math.PI / 180,
-                            rotation.z * Math.PI / 180
-                        );
-
-                        // Apply scale
-                        model.scale.set(scale.x, scale.y, scale.z);
-
-                        model.updateMatrixWorld(true);
-
-                        // Enable shadows
-                        model.traverse((child) => {
-                            if (child.isMesh) {
-                                child.castShadow = true;
-                                child.receiveShadow = true;
-                            }
-                        });
-
-                        // Add to environment group
-                        this.environmentGroup.add(model);
-
-                        // Track animated models
-                        if (config.animate) {
-                            this.animatedModels.push({
-                                model: model,
-                                animation: config.animate
-                            });
-                            console.log(`  Animation: Rotation (${config.animate.rotation.x}°, ${config.animate.rotation.y}°, ${config.animate.rotation.z}°) per frame`);
-                        }
-
-                        // Track teleporter models
-                        if (config.teleporter) {
-                            this.teleporters.push({
-                                id: config.teleporter.id,
-                                position: position,
-                                destinationWorld: config.teleporter.destinationWorld,
-                                radius: config.teleporter.radius || 3,
-                                label: config.teleporter.label || config.teleporter.destinationWorld,
-                                access: config.teleporter.access || 'public'
-                            });
-                            console.log(`  Teleporter: ID=${config.teleporter.id}, Destination=${config.teleporter.destinationWorld}, access=${config.teleporter.access || 'public'}`);
-                        }
-
-                        // Track taiko drum models
-                        if (config.taiko) {
-                            const t = config.taiko;
-                            this.taikos.push({
-                                position,
-                                radius: t.radius || 3,
-                                multiplayer: !!t.multiplayer,
-                                groupId: t.multiplayer ? String(t.groupId || '').trim() : '',
-                                multiplayerChartId: t.multiplayer ? String(t.multiplayerChartId || '').trim() : ''
-                            });
-                            console.log(`  Taiko: radius=${t.radius || 3}${t.multiplayer ? ` mp group=${t.groupId}` : ''}`);
-                        }
-
-                        loadedCount++;
-                        console.log(`Loaded model ${loadedCount}/${modelConfigs.length}: ${modelPath}`);
-                        console.log(`  Position: (${position.x}, ${position.y}, ${position.z})`);
-                        console.log(`  Rotation: (${rotation.x}°, ${rotation.y}°, ${rotation.z}°)`);
-                        console.log(`  Scale: (${scale.x}, ${scale.y}, ${scale.z})`);
-                        resolve();
-                    },
-                    (progress) => {
-                        const percent = (progress.loaded / progress.total) * 100;
-                        console.log(`Loading ${modelPath}: ${percent.toFixed(2)}%`);
-                    },
-                    (error) => {
-                        console.error(`Error loading model ${modelPath}:`, error);
-                        reject(error);
-                    }
-                );
+            const disableSh = triangleCount > MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD;
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = !disableSh;
+                    child.receiveShadow = !disableSh;
+                }
             });
-        });
 
-        // Wait for all models to load
+            this.environmentGroup.add(model);
+
+            if (config.animate) {
+                this.animatedModels.push({
+                    model: model,
+                    animation: config.animate
+                });
+                console.log(`  Animation: Rotation (${config.animate.rotation.x}°, ${config.animate.rotation.y}°, ${config.animate.rotation.z}°) per frame`);
+            }
+
+            if (config.teleporter) {
+                this.teleporters.push({
+                    id: config.teleporter.id,
+                    position: position,
+                    destinationWorld: config.teleporter.destinationWorld,
+                    radius: config.teleporter.radius || 3,
+                    label: config.teleporter.label || config.teleporter.destinationWorld,
+                    access: config.teleporter.access || 'public'
+                });
+                console.log(`  Teleporter: ID=${config.teleporter.id}, Destination=${config.teleporter.destinationWorld}, access=${config.teleporter.access || 'public'}`);
+            }
+
+            if (config.taiko) {
+                const t = config.taiko;
+                this.taikos.push({
+                    position,
+                    radius: t.radius || 3,
+                    multiplayer: !!t.multiplayer,
+                    groupId: t.multiplayer ? String(t.groupId || '').trim() : '',
+                    multiplayerChartId: t.multiplayer ? String(t.multiplayerChartId || '').trim() : ''
+                });
+                console.log(`  Taiko: radius=${t.radius || 3}${t.multiplayer ? ` mp group=${t.groupId}` : ''}`);
+            }
+
+            loadedCount++;
+            console.log(`Loaded model ${loadedCount}/${modelConfigs.length}: ${modelPath}`);
+            console.log(`  Position: (${position.x}, ${position.y}, ${position.z})`);
+            console.log(`  Rotation: (${rotation.x}°, ${rotation.y}°, ${rotation.z}°)`);
+            console.log(`  Scale: (${scale.x}, ${scale.y}, ${scale.z})`);
+        };
+
+        const loadOne = async (config) => {
+            const fullConfig = typeof config === 'string' ? { path: config } : config;
+            const modelPath = fullConfig.path;
+            if (!modelPath) return;
+
+            const url = this._buildEncodedModelUrl(modelPath);
+            const maxBytes = this._isObjPath(modelPath) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
+            const contentLen = await fetchModelContentLength(url);
+            if (contentLen != null && contentLen > maxBytes) {
+                const mb = Math.round(contentLen / 1024 / 1024);
+                const maxMb = Math.round(maxBytes / 1024 / 1024);
+                console.error(`[SceneManager] モデルが大きすぎます (${mb}MB, 上限約 ${maxMb}MB): ${modelPath}`);
+                window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
+                    detail: { path: modelPath, reason: 'file_too_large', bytes: contentLen, maxBytes }
+                }));
+                return;
+            }
+
+            try {
+                const model = await new Promise((resolve, reject) => {
+                    if (this._isObjPath(modelPath)) {
+                        const mtlPath = String(fullConfig.mtlPath || '').trim();
+                        const objLoader = new OBJLoader();
+                        if (!mtlPath) {
+                            objLoader.load(url, (object) => resolve(object), undefined, reject);
+                            return;
+                        }
+                        const mtlEncoded = this._buildEncodedModelUrl(mtlPath);
+                        const mtlDirUrl = mtlEncoded.slice(0, mtlEncoded.lastIndexOf('/') + 1);
+                        const mtlFile = mtlPath.split('/').pop();
+                        const objDirUrl = url.slice(0, url.lastIndexOf('/') + 1);
+                        const objFile = modelPath.split('/').pop();
+                        const mtlLoader = new MTLLoader();
+                        mtlLoader.setPath(mtlDirUrl);
+                        mtlLoader.load(
+                            mtlFile,
+                            (materials) => {
+                                materials.preload();
+                                objLoader.setMaterials(materials);
+                                objLoader.setPath(objDirUrl);
+                                objLoader.load(objFile, (object) => resolve(object), undefined, reject);
+                            },
+                            undefined,
+                            reject
+                        );
+                        return;
+                    }
+
+                    const loader = createGLTFLoaderWithDraco();
+                    loader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+                });
+
+                const tris = countTrianglesInObject(model);
+                if (tris > MODEL_MAX_TRIANGLES_TOTAL) {
+                    this._disposeModelObject(model);
+                    console.error(`[SceneManager] ポリゴン過多のため読み込み中止 (約 ${tris} 三角): ${modelPath}`);
+                    window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
+                        detail: {
+                            path: modelPath,
+                            reason: 'too_many_triangles',
+                            triangles: tris,
+                            maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
+                        }
+                    }));
+                    return;
+                }
+                finishAddModel(model, fullConfig, modelPath, tris);
+            } catch (error) {
+                console.error(`Error loading model ${modelPath}:`, error);
+            }
+        };
+
         try {
-            await Promise.all(loadPromises);
+            for (const config of modelConfigs) {
+                await loadOne(config);
+            }
             this.environmentGroup.updateMatrixWorld(true);
             console.log('All models loaded, generating BVH...');
 
-            // Generate BVH for collision detection
             this.generateBVH();
 
             if (onComplete) {
@@ -580,24 +672,19 @@ class SceneManager {
      * Generate BVH collision mesh from environment group
      */
     generateBVH() {
-        // Generate merged geometry for BVH collision from ALL static objects
         const staticGenerator = new StaticGeometryGenerator(this.environmentGroup);
         staticGenerator.attributes = ['position'];
 
         const mergedGeometry = staticGenerator.generate();
         console.log('Merged geometry created (all objects), triangle count:', mergedGeometry.index.count / 3);
 
-        // Generate BVH for the merged geometry
         mergedGeometry.boundsTree = new MeshBVH(mergedGeometry, {
-            strategy: 0, // CENTER split strategy
+            strategy: 0,
             maxDepth: 40,
             maxLeafTris: 10,
             verbose: false
         });
 
-        console.log('BVH generated successfully for all static objects');
-
-        // Remove old collider if exists
         if (this.collider) {
             this.scene.remove(this.collider);
             if (this.collider.geometry) {
@@ -605,12 +692,10 @@ class SceneManager {
             }
         }
 
-        // Create invisible collider mesh with BVH
         this.collider = new THREE.Mesh(mergedGeometry);
         this.collider.visible = false;
         this.scene.add(this.collider);
 
-        // Pass BVH collider to physics manager
         if (this.physicsManager) {
             this.physicsManager.setCollider(this.collider);
             console.log('BVH collider set in physics manager');

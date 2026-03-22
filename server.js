@@ -151,16 +151,13 @@ const PDFS_DIR = STORAGE_PATHS.PDFS_DIR;
 const IMAGES_DIR = STORAGE_PATHS.IMAGES_DIR;
 const CHART_BGM_DIR = STORAGE_PATHS.CHART_BGM_DIR;
 const uploadStorage = multer.memoryStorage();
+/** models 配下へアップロード可能な拡張子（GLB / OBJ / MTL / テクスチャ） */
+const MODEL_UPLOAD_EXTS = new Set(['.glb', '.obj', '.mtl', '.png', '.jpg', '.jpeg', '.webp']);
 const upload = multer({
     storage: uploadStorage,
     fileFilter: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        const ok = ext === '.glb' && (
-            file.mimetype === 'model/gltf-binary' ||
-            file.mimetype === 'application/octet-stream' ||
-            file.mimetype === 'model/gltf+json'
-        );
-        cb(null, !!ok);
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        cb(null, MODEL_UPLOAD_EXTS.has(ext));
     }
 });
 const uploadPdf = multer({
@@ -2959,11 +2956,30 @@ app.get('/admin/models', (req, res) => {
             return res.json([]);
         }
         const names = fs.readdirSync(MODELS_DIR)
-            .filter((n) => n.toLowerCase().endsWith('.glb'));
+            .filter((n) => {
+                const low = n.toLowerCase();
+                return low.endsWith('.glb') || low.endsWith('.obj');
+            })
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         res.json(names);
     } catch (err) {
         console.error('GET /admin/models error:', err);
         res.status(500).json({ error: 'Failed to list models' });
+    }
+});
+
+app.get('/admin/model-mtls', (req, res) => {
+    try {
+        if (!fs.existsSync(MODELS_DIR)) {
+            return res.json([]);
+        }
+        const names = fs.readdirSync(MODELS_DIR)
+            .filter((n) => n.toLowerCase().endsWith('.mtl'))
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        res.json(names);
+    } catch (err) {
+        console.error('GET /admin/model-mtls error:', err);
+        res.status(500).json({ error: 'Failed to list model MTL files' });
     }
 });
 
@@ -2973,8 +2989,8 @@ app.post('/admin/upload', upload.single('model'), (req, res) => {
     }
     const filename = path.basename(req.file.originalname);
     const ext = path.extname(filename).toLowerCase();
-    if (ext !== '.glb') {
-        return res.status(400).json({ error: 'Only .glb files are allowed' });
+    if (!MODEL_UPLOAD_EXTS.has(ext)) {
+        return res.status(400).json({ error: 'File type not allowed for model upload' });
     }
     const destPath = path.join(MODELS_DIR, filename);
     if (fs.existsSync(destPath) && req.query.confirm !== '1') {

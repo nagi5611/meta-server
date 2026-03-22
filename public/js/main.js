@@ -106,6 +106,15 @@ class MetaverseApp {
         this.sceneManager.physicsManager = this.physicsManager;
         this.physicsManager.setSpawnPointGetter(() => this.worldManager.getSpawnPoint());
 
+        window.addEventListener('metaverse-model-load-guard', (ev) => {
+            const d = ev.detail || {};
+            if (d.reason === 'file_too_large') {
+                console.warn('[Metaverse] モデルが大きすぎるため読み込みをスキップ:', d.path);
+            } else if (d.reason === 'too_many_triangles') {
+                console.warn('[Metaverse] ポリゴン過多のため読み込みをスキップ:', d.path);
+            }
+        });
+
         // Initialize Teleport Manager
         this.teleportManager = new TeleportManager(this.worldManager, this.uiManager);
         this.userRole = (window.location.pathname === '/admin') ? 'admin' : (localStorage.getItem('userRole') || 'guest');
