@@ -2128,6 +2128,47 @@ section h2 {
     justify-content: flex-end;
 }
 
+.overwrite-select-card {
+    max-width: 620px;
+}
+
+.overwrite-select-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.overwrite-select-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 14px;
+    background: #fafafa;
+}
+
+.overwrite-select-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+}
+
+.overwrite-select-item + .overwrite-select-item {
+    border-top: 1px solid #ececec;
+}
+
+.overwrite-select-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.overwrite-select-item-name {
+    word-break: break-all;
+}
+
 .btn-primary {
     background: #2196f3;
     color: white;
@@ -2331,6 +2372,16 @@ body.admin-dark .modal-content h3 {
 body.admin-dark .modal-content textarea {
     background: #25231d;
     border-color: #2d2a24;
+    color: #e6e4df;
+}
+body.admin-dark .overwrite-select-list {
+    background: #25231d;
+    border-color: #2d2a24;
+}
+body.admin-dark .overwrite-select-item + .overwrite-select-item {
+    border-top-color: #2d2a24;
+}
+body.admin-dark .overwrite-select-item-name {
     color: #e6e4df;
 }
 body.admin-dark .user-session-dl dt {

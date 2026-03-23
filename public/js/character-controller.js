@@ -36,6 +36,8 @@ class CharacterController {
 
         // Movement direction
         this.direction = new THREE.Vector3();
+        /** 三人称カメラの理想位置（衝突クランプ前） */
+        this._desiredCameraWorld = new THREE.Vector3();
 
         // Admin controls
         this.isFlyMode = false;
@@ -347,15 +349,24 @@ class CharacterController {
             this.cameraHeight - this.cameraDistance * Math.sin(this.cameraPitch),
             Math.cos(this.cameraYaw) * this.cameraDistance * Math.cos(this.cameraPitch)
         );
-        
-        this.camera.position.copy(characterPos).add(cameraOffset);
-        
-        // Look at player position (slightly above ground)
+
         const lookAtTarget = new THREE.Vector3(
             characterPos.x,
             characterPos.y + 1.0,
             characterPos.z
         );
+
+        this._desiredCameraWorld.copy(characterPos).add(cameraOffset);
+        if (this.isFlyMode) {
+            this.camera.position.copy(this._desiredCameraWorld);
+        } else {
+            this.physicsManager.clampThirdPersonCameraPosition(
+                lookAtTarget,
+                this._desiredCameraWorld,
+                this.camera.position
+            );
+        }
+
         this.camera.lookAt(lookAtTarget);
     }
 

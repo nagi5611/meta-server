@@ -9,6 +9,31 @@ class WorldManager {
         this.currentWorld = null;
         this.onWorldChangeCallback = null;
         this.worlds = null; // Set by init() from API
+        /** @type {{ begin?: (o: { total: number }) => void, progress?: (o: { fileName: string, current: number, total: number }) => void, end?: () => void } | null} */
+        this._worldLoadUi = null;
+    }
+
+    /**
+     * ワールド読み込み中のロードバー等（メインクライアントから登録）
+     * @param {{ begin?: (o: { total: number }) => void, progress?: (o: { fileName: string, current: number, total: number }) => void, end?: () => void } | null} handlers
+     */
+    setWorldLoadUiHandlers(handlers) {
+        this._worldLoadUi = handlers || null;
+    }
+
+    /**
+     * モデル設定から path ありの件数を数える
+     * @param {Array} modelList
+     * @returns {number}
+     */
+    _countModelsWithPath(modelList) {
+        if (!Array.isArray(modelList)) return 0;
+        let n = 0;
+        for (const c of modelList) {
+            const p = typeof c === 'string' ? c : c?.path;
+            if (p) n++;
+        }
+        return n;
     }
 
     /**
@@ -80,21 +105,41 @@ class WorldManager {
         // Add world-specific lights (position, type, intensity)
         this.sceneManager.addWorldLights(world.lights);
 
-        // Load world models
-        await this.sceneManager.loadWorldModels(world.models, async () => {
-            await this.sceneManager.loadWorldPdfs(world.pdfs || []);
-            console.log(`World loaded: ${worldId}`);
+        const modelList = Array.isArray(world.models) ? world.models : [];
+        const pdfList = Array.isArray(world.pdfs) ? world.pdfs : [];
+        const totalAssets = this._countModelsWithPath(modelList) + pdfList.length;
+        let assetStep = 0;
+        const onAssetStart = (fileName) => {
+            assetStep += 1;
+            this._worldLoadUi?.progress?.({
+                fileName,
+                current: assetStep,
+                total: totalAssets
+            });
+        };
 
-            // Call completion callback
-            if (onComplete) {
-                onComplete(world);
-            }
+        if (totalAssets > 0) {
+            this._worldLoadUi?.begin?.({ total: totalAssets });
+        }
 
-            // Call world change callback
-            if (this.onWorldChangeCallback) {
-                this.onWorldChangeCallback(world);
+        try {
+            await this.sceneManager.loadWorldModels(world.models, async () => {
+                await this.sceneManager.loadWorldPdfs(world.pdfs || [], onAssetStart);
+                console.log(`World loaded: ${worldId}`);
+
+                if (onComplete) {
+                    onComplete(world);
+                }
+
+                if (this.onWorldChangeCallback) {
+                    this.onWorldChangeCallback(world);
+                }
+            }, onAssetStart);
+        } finally {
+            if (totalAssets > 0) {
+                this._worldLoadUi?.end?.();
             }
-        });
+        }
     }
 
     /**

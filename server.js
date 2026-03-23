@@ -182,6 +182,25 @@ const uploadChartBgm = multer({
         cb(null, !!ok);
     }
 });
+
+/**
+ * multipart 由来の文字化けを避けるため、クライアント送信の UTF-8(base64) ファイル名を優先して正規化する。
+ * @param {import('express').Request} req
+ * @param {string} fallbackName
+ * @returns {string}
+ */
+function getSafeUploadedFilename(req, fallbackName) {
+    let filename = fallbackName;
+    if (req.body && typeof req.body.filename_b64 === 'string') {
+        try {
+            filename = Buffer.from(req.body.filename_b64, 'base64').toString('utf8');
+        } catch (_) {
+            filename = fallbackName;
+        }
+    }
+    return path.basename(String(filename || '')).replace(/[/\\\0]/g, '');
+}
+
 const app = express();
 
 /** HTTPS: SSL_CERT_PATH と SSL_KEY_PATH が両方設定されていれば HTTPS で待ち受ける */
@@ -2987,7 +3006,7 @@ app.post('/admin/upload', upload.single('model'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file or invalid file' });
     }
-    const filename = path.basename(req.file.originalname);
+    const filename = getSafeUploadedFilename(req, req.file.originalname);
     const ext = path.extname(filename).toLowerCase();
     if (!MODEL_UPLOAD_EXTS.has(ext)) {
         return res.status(400).json({ error: 'File type not allowed for model upload' });
@@ -3026,18 +3045,7 @@ app.post('/admin/upload-pdf', uploadPdf.single('pdf'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file or invalid file' });
     }
-    // クライアントから UTF-8 で送ったファイル名を使う（originalname はマルチパートで文字化けすることがある）
-    let filename;
-    if (req.body && typeof req.body.filename_b64 === 'string') {
-        try {
-            filename = Buffer.from(req.body.filename_b64, 'base64').toString('utf8');
-        } catch (_) {
-            filename = req.file.originalname;
-        }
-    } else {
-        filename = req.file.originalname;
-    }
-    filename = path.basename(filename).replace(/[/\\]/g, '');
+    let filename = getSafeUploadedFilename(req, req.file.originalname);
     if (!filename.toLowerCase().endsWith('.pdf')) {
         filename = filename + '.pdf';
     }

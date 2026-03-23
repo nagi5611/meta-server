@@ -6,6 +6,14 @@ class UIManager {
     constructor() {
         this.teleportPrompt = null;
         this.onWatchVideo = null;
+        this.worldLoadOverlay = null;
+        this.worldLoadLabel = null;
+        this.worldLoadBarContainer = null;
+        this.worldLoadRedBall = null;
+        this.worldLoadBlueBall = null;
+        this.worldLoadPercentage = null;
+        /** @type {ReturnType<typeof setTimeout> | null} */
+        this._worldLoadHideTimer = null;
         this.init();
     }
 
@@ -45,6 +53,154 @@ class UIManager {
                 }
             });
         }
+
+        this.worldLoadOverlay = document.getElementById('world-load-overlay');
+        this.worldLoadLabel = document.getElementById('world-load-label');
+        this.worldLoadBarContainer = document.getElementById('world-load-bar-container');
+        this.worldLoadRedBall = this.worldLoadOverlay?.querySelector('.world-load-dna-ball.red') || null;
+        this.worldLoadBlueBall = this.worldLoadOverlay?.querySelector('.world-load-dna-ball.blue') || null;
+        this.worldLoadPercentage = document.getElementById('world-load-percentage');
+    }
+
+    /**
+     * DNA ロードバー用レイアウト（松山南 mmh プリローダーと同じ三角関数・回転・スケール式）
+     * @param {number} progress - 0〜100
+     * @returns {{ xPosition: number, redY: number, blueY: number, ballWidth: number, rotateAngle: number, scale: number } | null}
+     */
+    _getWorldLoadDnaLayout(progress) {
+        const container = this.worldLoadBarContainer;
+        const redBall = this.worldLoadRedBall;
+        if (!container || !redBall) return null;
+        const containerWidth = container.offsetWidth;
+        const ballWidth = redBall.offsetWidth || 12;
+        const maxPosition = Math.max(0, containerWidth - ballWidth);
+        const p = Math.min(100, Math.max(0, progress));
+        const xPosition = (p / 100) * maxPosition;
+        const angle = (p / 100) * Math.PI * 10;
+        const h = container.offsetHeight || 60;
+        const centerY = h * (25 / 60);
+        const amplitude = Math.min(12, h * (10 / 60));
+        const redY = centerY + Math.sin(angle) * amplitude;
+        const blueY = centerY + Math.sin(angle + Math.PI) * amplitude;
+        const rotateAngle = (p / 100) * 360 * 16;
+        const scale = 1 + 0.2 * Math.sin(angle * 10);
+        return { xPosition, redY, blueY, ballWidth, rotateAngle, scale };
+    }
+
+    /**
+     * 軌跡ドットを追加（mmh createTrailPoint と同等）
+     * @param {number} x - コンテナ内の中心 x
+     * @param {number} y - コンテナ内の中心 y
+     * @param {'red' | 'blue'} type
+     */
+    _createWorldLoadTrailPoint(x, y, type) {
+        const container = this.worldLoadBarContainer;
+        if (!container) return;
+        const trailPoint = document.createElement('div');
+        trailPoint.className = `world-load-dna-trail-point ${type}-trail`;
+        container.appendChild(trailPoint);
+        const half = Math.max(2, trailPoint.offsetWidth / 2);
+        trailPoint.style.left = `${x - half}px`;
+        trailPoint.style.top = `${y - half}px`;
+        setTimeout(() => {
+            trailPoint.classList.add('fade-out');
+            setTimeout(() => {
+                trailPoint.remove();
+            }, 200);
+        }, 200);
+    }
+
+    /**
+     * 既存の軌跡ドットを削除
+     */
+    _clearWorldLoadTrailPoints() {
+        const container = this.worldLoadBarContainer;
+        if (!container) return;
+        container.querySelectorAll('.world-load-dna-trail-point').forEach((el) => el.remove());
+    }
+
+    /**
+     * 進捗 0〜100 に応じて DNA 球の位置・変形を更新する
+     * @param {number} progressPct
+     */
+    _updateWorldLoadDnaVisual(progressPct) {
+        const layout = this._getWorldLoadDnaLayout(progressPct);
+        const redBall = this.worldLoadRedBall;
+        const blueBall = this.worldLoadBlueBall;
+        if (!layout || !redBall || !blueBall) return;
+        const { xPosition, redY, blueY, ballWidth, rotateAngle, scale } = layout;
+        redBall.style.left = `${xPosition}px`;
+        redBall.style.top = `${redY}px`;
+        redBall.style.transform = `translateY(-50%) rotate(${rotateAngle}deg) scale(${scale})`;
+        blueBall.style.left = `${xPosition}px`;
+        blueBall.style.top = `${blueY}px`;
+        blueBall.style.transform = `translateY(-50%) rotate(${-rotateAngle}deg) scale(${scale})`;
+        this._createWorldLoadTrailPoint(xPosition + ballWidth / 2, redY, 'red');
+        this._createWorldLoadTrailPoint(xPosition + ballWidth / 2, blueY, 'blue');
+    }
+
+    /**
+     * ワールドアセット読み込み開始時にオーバーを表示する
+     * @param {number} total - 合計件数（表示用）
+     */
+    showWorldLoadProgress(total) {
+        if (!this.worldLoadOverlay || !this.worldLoadLabel) return;
+        if (this._worldLoadHideTimer) {
+            clearTimeout(this._worldLoadHideTimer);
+            this._worldLoadHideTimer = null;
+        }
+        this.worldLoadOverlay.classList.remove('world-load-fade-out');
+        this.worldLoadOverlay.style.display = 'flex';
+        this.worldLoadOverlay.setAttribute('aria-busy', 'true');
+        this.worldLoadOverlay.setAttribute('aria-hidden', 'false');
+        this.worldLoadLabel.textContent = '読み込み中…';
+        if (this.worldLoadPercentage) {
+            this.worldLoadPercentage.textContent = total > 0 ? '0%' : '100%';
+        }
+        this._clearWorldLoadTrailPoints();
+        requestAnimationFrame(() => {
+            const pct = total > 0 ? 0 : 100;
+            this._updateWorldLoadDnaVisual(pct);
+        });
+    }
+
+    /**
+     * 読み込み中ファイル名とプログレスバーを更新する
+     * @param {string} fileName - 例: xxx.glb
+     * @param {number} current - 現在の番号（1 始まり）
+     * @param {number} total - 合計件数
+     */
+    updateWorldLoadProgress(fileName, current, total) {
+        if (!this.worldLoadLabel) return;
+        const name = (fileName && String(fileName).trim()) || '—';
+        this.worldLoadLabel.textContent = `読み込み中（${name}）`;
+        const t = Math.max(1, Math.floor(Number(total)) || 1);
+        const c = Math.min(Math.max(0, Math.floor(Number(current)) || 0), t);
+        const pct = Math.round((c / t) * 100);
+        if (this.worldLoadPercentage) {
+            this.worldLoadPercentage.textContent = `${pct}%`;
+        }
+        this._updateWorldLoadDnaVisual(pct);
+    }
+
+    /**
+     * ワールド読み込みオーバーを閉じる
+     */
+    hideWorldLoadProgress() {
+        if (!this.worldLoadOverlay) return;
+        if (this._worldLoadHideTimer) {
+            clearTimeout(this._worldLoadHideTimer);
+            this._worldLoadHideTimer = null;
+        }
+        this.worldLoadOverlay.classList.add('world-load-fade-out');
+        this._worldLoadHideTimer = setTimeout(() => {
+            this._worldLoadHideTimer = null;
+            this.worldLoadOverlay.style.display = 'none';
+            this.worldLoadOverlay.classList.remove('world-load-fade-out');
+            this.worldLoadOverlay.setAttribute('aria-busy', 'false');
+            this.worldLoadOverlay.setAttribute('aria-hidden', 'true');
+            this._clearWorldLoadTrailPoints();
+        }, 200);
     }
 
     /**

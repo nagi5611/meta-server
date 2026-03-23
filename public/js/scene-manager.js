@@ -162,8 +162,9 @@ class SceneManager {
      * Load multiple world models
      * @param {Array<Object|string>} modelConfigs - Array of model configs or paths
      * @param {function} onComplete - Callback when all models are loaded
+     * @param {(fileName: string) => void} [onAssetStart] - 各モデル読み込み開始時（ファイル名のみ）
      */
-    async loadWorldModels(modelConfigs, onComplete) {
+    async loadWorldModels(modelConfigs, onComplete, onAssetStart) {
         if (!modelConfigs || modelConfigs.length === 0) {
             console.warn('No models to load');
             if (onComplete) onComplete();
@@ -246,6 +247,9 @@ class SceneManager {
             const fullConfig = typeof config === 'string' ? { path: config } : config;
             const modelPath = fullConfig.path;
             if (!modelPath) return;
+
+            const fileLabel = modelPath.split(/[/\\]/).pop() || modelPath;
+            if (typeof onAssetStart === 'function') onAssetStart(fileLabel);
 
             const url = this._buildEncodedModelUrl(modelPath);
             const maxBytes = this._isObjPath(modelPath) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
@@ -335,8 +339,9 @@ class SceneManager {
     /**
      * Load PDF posters (2D planes) for the current world. Renders first page via PDF.js.
      * @param {Array<Object>} [pdfConfigs] - Each item: { path, position?, rotation?, scale? }
+     * @param {(fileName: string) => void} [onAssetStart] - 各PDF読み込み開始時（ファイル名のみ）
      */
-    async loadWorldPdfs(pdfConfigs) {
+    async loadWorldPdfs(pdfConfigs, onAssetStart) {
         if (!pdfConfigs || pdfConfigs.length === 0) return;
         let pdfjsLib;
         try {
@@ -356,6 +361,8 @@ class SceneManager {
         }
         for (const config of pdfConfigs) {
             const path = config.path || 'pdfs/placeholder.pdf';
+            const pdfLabel = path.split(/[/\\]/).pop() || path;
+            if (typeof onAssetStart === 'function') onAssetStart(pdfLabel);
             const url = path.startsWith('/') ? path : '/' + path;
             const position = config.position || { x: 0, y: 2, z: -5 };
             const rotation = config.rotation || { x: 0, y: 0, z: 0 };

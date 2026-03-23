@@ -67,6 +67,26 @@
 
     <div id="teleport-prompt" style="display: none;"></div>
 
+    <!-- ワールド切替時: モデル・PDF 読み込み完了まで（mmh トップページプリローダーと同系のアニメーション） -->
+    <div id="world-load-overlay" class="world-load-overlay" style="display: none;" aria-hidden="true" role="status">
+        <div class="world-load-metaverse-bg" aria-hidden="true"></div>
+        <div class="world-load-grid-lines" aria-hidden="true"></div>
+        <div class="world-load-preloader-content">
+            <div class="world-load-loader-logo">
+                <p id="world-load-label" class="world-load-logo-text">読み込み中…</p>
+                <div class="world-load-rotating-line" aria-hidden="true"></div>
+            </div>
+            <div id="world-load-bar-container" class="world-load-bar-container">
+                <div class="world-load-dna-trail" aria-hidden="true"></div>
+                <div class="world-load-bar-track">
+                    <div class="world-load-dna-ball red"></div>
+                    <div class="world-load-dna-ball blue"></div>
+                </div>
+            </div>
+            <div id="world-load-percentage" class="world-load-progress-percentage">0%</div>
+        </div>
+    </div>
+
     <!-- PDF Viewer Overlay (E key near PDF object) -->
     <div id="pdf-viewer-overlay" class="pdf-viewer-overlay" style="display: none;">
         <button type="button" id="pdf-viewer-close" class="pdf-viewer-close" title="閉じる">×</button>

@@ -38,6 +38,15 @@ class PhysicsManager {
         this.ROLLBACK_WINDOW_MS = 3000;
         /** この長さ以上の位置補正だけをロールバックとみなす（m）。小さい補正は通常の壁/床接触 */
         this.ROLLBACK_MIN_OFFSET = 0.08;
+
+        /** 三人称カメラの壁抜け防止用（レイ・座標の一時領域） */
+        this._camRay = new THREE.Ray();
+        this._camRayOriginLocal = new THREE.Vector3();
+        this._camRayEndLocal = new THREE.Vector3();
+        this._camRayDirLocal = new THREE.Vector3();
+        this._camDirWorld = new THREE.Vector3();
+        this._camHitWorld = new THREE.Vector3();
+        this._camAlongScratch = new THREE.Vector3();
     }
 
     async init() {
@@ -47,6 +56,71 @@ class PhysicsManager {
     setCollider(collider) {
         this.collider = collider;
         console.log('BVH collider set, triangle count:', collider.geometry.index.count / 3);
+    }
+
+    /**
+     * 注視点から理想カメラ位置への直線が静的メッシュに遮られる場合、手前（アバター側）に寄せた位置を out に書く
+     * @param {THREE.Vector3} pivotWorld 注視点（ワールド）
+     * @param {THREE.Vector3} desiredCameraWorld 障害物なしのカメラ位置（ワールド）
+     * @param {THREE.Vector3} out 結果のカメラ位置
+     * @returns {THREE.Vector3} out
+     */
+    clampThirdPersonCameraPosition(pivotWorld, desiredCameraWorld, out) {
+        if (!this.collider || !this.collider.geometry.boundsTree) {
+            out.copy(desiredCameraWorld);
+            return out;
+        }
+
+        const skinWidth = 0.15;
+        const rayNearLocal = 0.02;
+
+        const dirWorld = this._camDirWorld.subVectors(desiredCameraWorld, pivotWorld);
+        const maxDist = dirWorld.length();
+        if (maxDist < 1e-4) {
+            out.copy(desiredCameraWorld);
+            return out;
+        }
+        dirWorld.multiplyScalar(1 / maxDist);
+
+        const inv = this.tempMat.copy(this.collider.matrixWorld).invert();
+        const originLocal = this._camRayOriginLocal.copy(pivotWorld).applyMatrix4(inv);
+        const endLocal = this._camRayEndLocal.copy(desiredCameraWorld).applyMatrix4(inv);
+        const dirLocal = this._camRayDirLocal.subVectors(endLocal, originLocal);
+        const localSpan = dirLocal.length();
+        if (localSpan < 1e-6) {
+            out.copy(desiredCameraWorld);
+            return out;
+        }
+        dirLocal.multiplyScalar(1 / localSpan);
+
+        this._camRay.set(originLocal, dirLocal);
+        const hit = this.collider.geometry.boundsTree.raycastFirst(
+            this._camRay,
+            THREE.DoubleSide,
+            rayNearLocal,
+            localSpan
+        );
+
+        if (!hit || hit.point == null) {
+            out.copy(desiredCameraWorld);
+            return out;
+        }
+
+        const hitWorld = this._camHitWorld.copy(hit.point).applyMatrix4(this.collider.matrixWorld);
+        const alongWorld = this._camAlongScratch.subVectors(hitWorld, pivotWorld).dot(dirWorld);
+        let allowed = Math.min(maxDist, alongWorld - skinWidth);
+        if (!Number.isFinite(allowed)) {
+            out.copy(desiredCameraWorld);
+            return out;
+        }
+        allowed = Math.max(0, allowed);
+        if (allowed < 1e-3) {
+            out.copy(pivotWorld).addScaledVector(dirWorld, Math.min(maxDist, 0.08));
+            return out;
+        }
+
+        out.copy(pivotWorld).addScaledVector(dirWorld, allowed);
+        return out;
     }
 
     updatePlayer(delta, moveDirection) {

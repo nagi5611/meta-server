@@ -102,6 +102,13 @@ class MetaverseApp {
         this.worldManager = new WorldManager(this.sceneManager);
         await this.worldManager.init();
 
+        this.worldManager.setWorldLoadUiHandlers({
+            begin: ({ total }) => this.uiManager.showWorldLoadProgress(total),
+            progress: ({ fileName, current, total }) =>
+                this.uiManager.updateWorldLoadProgress(fileName, current, total),
+            end: () => this.uiManager.hideWorldLoadProgress()
+        });
+
         // Set physics manager reference in scene manager for BVH collider
         this.sceneManager.physicsManager = this.physicsManager;
         this.physicsManager.setSpawnPointGetter(() => this.worldManager.getSpawnPoint());

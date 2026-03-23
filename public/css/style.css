@@ -3011,3 +3011,256 @@ a.admin-menu-link:hover {
         height: 45px;
     }
 }
+
+/* ワールド切替: mmh index プリローダー準拠（DNA 二球・軌跡・回転リング・%） */
+.world-load-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9200;
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: radial-gradient(circle at center, #0a0a0a 0%, #000000 100%);
+    overflow: hidden;
+    pointer-events: all;
+    opacity: 1;
+    transition: opacity 0.2s ease;
+}
+
+.world-load-overlay.world-load-fade-out {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.world-load-metaverse-bg {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 20% 20%, rgba(255, 107, 157, 0.1) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(45, 165, 151, 0.1) 0%, transparent 50%);
+    animation: world-load-bg-shift 8s ease-in-out infinite;
+}
+
+.world-load-grid-lines {
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 50px 50px;
+    animation: world-load-grid-move 10s linear infinite;
+}
+
+.world-load-preloader-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: clamp(40px, 12vw, 100px);
+    padding: 0 16px;
+}
+
+.world-load-loader-logo {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 56px;
+}
+
+.world-load-logo-text {
+    position: relative;
+    z-index: 2;
+    max-width: min(90vw, 520px);
+    margin: 0;
+    font-size: clamp(15px, 3.8vw, 22px);
+    font-weight: bold;
+    color: #ffffff;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+    text-align: center;
+    line-height: 1.4;
+    word-break: break-all;
+}
+
+.world-load-rotating-line {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 200px;
+    height: 200px;
+    border: 2px solid transparent;
+    border-top: 2px solid #ff6b9d;
+    border-right: 2px solid #2da597;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    animation: world-load-rotate-line 2s linear infinite;
+    pointer-events: none;
+}
+
+.world-load-bar-container {
+    position: relative;
+    width: min(400px, 88vw);
+    height: 60px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 30px;
+    overflow: visible;
+}
+
+.world-load-bar-track {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+}
+
+.world-load-dna-ball {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+}
+
+.world-load-dna-ball.red {
+    background: #ff6b9d;
+    box-shadow: 0 0 15px #ff6b9d, 0 0 25px rgba(255, 107, 157, 0.5);
+}
+
+.world-load-dna-ball.blue {
+    background: #2da597;
+    box-shadow: 0 0 15px #2da597, 0 0 25px rgba(45, 165, 151, 0.5);
+}
+
+.world-load-dna-trail-point {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    pointer-events: none;
+    transition: all 0.5s linear;
+    z-index: 1;
+    opacity: 0.8;
+}
+
+.world-load-dna-trail-point.red-trail {
+    background: rgba(255, 107, 157, 0.7);
+    box-shadow: 0 0 6px rgba(255, 107, 157, 0.5);
+}
+
+.world-load-dna-trail-point.blue-trail {
+    background: rgba(45, 165, 151, 0.7);
+    box-shadow: 0 0 6px rgba(45, 165, 151, 0.5);
+}
+
+.world-load-dna-trail-point.fade-out {
+    opacity: 0;
+    transform: scale(0.3);
+}
+
+.world-load-progress-percentage {
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+    margin-top: 4px;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+.world-load-dna-trail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.world-load-dna-trail::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(255, 107, 157, 0.3) 25%,
+        rgba(45, 165, 151, 0.3) 50%,
+        rgba(255, 107, 157, 0.3) 75%,
+        transparent 100%);
+    transform: translateY(-50%);
+    opacity: 0.5;
+}
+
+.world-load-dna-trail::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 100%;
+    height: 1px;
+    background: repeating-linear-gradient(90deg,
+        transparent 0px,
+        rgba(255, 255, 255, 0.1) 10px,
+        transparent 20px);
+    transform: translateY(-50%);
+    animation: world-load-dna-trail-flow 2s linear infinite;
+}
+
+@keyframes world-load-rotate-line {
+    0% { transform: translate(-50%, -50%) rotate(0deg); }
+    100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes world-load-bg-shift {
+    0%, 100% { transform: rotate(0deg) scale(1); }
+    50% { transform: rotate(180deg) scale(1.1); }
+}
+
+@keyframes world-load-grid-move {
+    0% { transform: translate(0, 0); }
+    100% { transform: translate(50px, 50px); }
+}
+
+@keyframes world-load-dna-trail-flow {
+    0% { transform: translateY(-50%) translateX(0); }
+    100% { transform: translateY(-50%) translateX(20px); }
+}
+
+@media (max-width: 768px) {
+    .world-load-logo-text {
+        font-size: clamp(14px, 4vw, 18px);
+    }
+
+    .world-load-rotating-line {
+        width: 150px;
+        height: 150px;
+    }
+
+    .world-load-bar-container {
+        width: min(300px, 92vw);
+        height: 50px;
+    }
+
+    .world-load-dna-ball {
+        width: 10px;
+        height: 10px;
+    }
+
+    .world-load-dna-trail-point {
+        width: 4px;
+        height: 4px;
+    }
+
+    .world-load-progress-percentage {
+        font-size: 14px;
+    }
+}

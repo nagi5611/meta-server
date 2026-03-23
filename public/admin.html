@@ -813,6 +813,21 @@
         </div>
     </div>
 
+    <div id="overwrite-select-modal" class="modal">
+        <div class="modal-content overwrite-select-card">
+            <h3>以下のファイルが上書きされますが、よろしいですか？</h3>
+            <div class="overwrite-select-actions">
+                <button type="button" id="overwrite-select-check-all" class="btn btn-secondary">すべて選択</button>
+                <button type="button" id="overwrite-select-uncheck-all" class="btn btn-secondary">すべて解除</button>
+            </div>
+            <div id="overwrite-select-list" class="overwrite-select-list"></div>
+            <div class="modal-buttons">
+                <button type="button" id="overwrite-select-apply" class="btn btn-primary">選択したファイルを上書き</button>
+                <button type="button" id="overwrite-select-cancel" class="btn btn-secondary">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/js/admin.js"></script>
 </body>
 </html>

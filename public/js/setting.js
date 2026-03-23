@@ -1768,6 +1768,76 @@ function bindEvents() {
 
     document.getElementById('btn-upload').addEventListener('click', () => document.getElementById('upload-input').click());
     document.getElementById('btn-upload-pdf').addEventListener('click', () => document.getElementById('upload-pdf-input').click());
+    const showOverwriteSelectionCard = (targetNames) => new Promise((resolve) => {
+        const modal = document.getElementById('overwrite-select-modal');
+        const listEl = document.getElementById('overwrite-select-list');
+        const applyBtn = document.getElementById('overwrite-select-apply');
+        const cancelBtn = document.getElementById('overwrite-select-cancel');
+        const checkAllBtn = document.getElementById('overwrite-select-check-all');
+        const uncheckAllBtn = document.getElementById('overwrite-select-uncheck-all');
+        if (!modal || !listEl || !applyBtn || !cancelBtn || !checkAllBtn || !uncheckAllBtn) {
+            resolve(new Set(targetNames));
+            return;
+        }
+
+        const uniqueNames = [...new Set(targetNames)];
+        listEl.innerHTML = '';
+        for (const name of uniqueNames) {
+            const row = document.createElement('label');
+            row.className = 'overwrite-select-item';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = name;
+            checkbox.checked = true;
+            const nameEl = document.createElement('span');
+            nameEl.className = 'overwrite-select-item-name';
+            nameEl.textContent = name;
+            row.appendChild(checkbox);
+            row.appendChild(nameEl);
+            listEl.appendChild(row);
+        }
+
+        const getCheckedNames = () => new Set(
+            Array.from(listEl.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value)
+        );
+
+        const cleanup = () => {
+            applyBtn.removeEventListener('click', handleApply);
+            cancelBtn.removeEventListener('click', handleCancel);
+            checkAllBtn.removeEventListener('click', handleCheckAll);
+            uncheckAllBtn.removeEventListener('click', handleUncheckAll);
+            modal.removeEventListener('click', handleBackdropClick);
+            modal.classList.remove('show');
+        };
+
+        const handleApply = () => {
+            const selected = getCheckedNames();
+            cleanup();
+            resolve(selected);
+        };
+        const handleCancel = () => {
+            cleanup();
+            resolve(null);
+        };
+        const handleCheckAll = () => {
+            for (const el of listEl.querySelectorAll('input[type="checkbox"]')) el.checked = true;
+        };
+        const handleUncheckAll = () => {
+            for (const el of listEl.querySelectorAll('input[type="checkbox"]')) el.checked = false;
+        };
+        const handleBackdropClick = (event) => {
+            if (event.target !== modal) return;
+            cleanup();
+            resolve(null);
+        };
+
+        applyBtn.addEventListener('click', handleApply);
+        cancelBtn.addEventListener('click', handleCancel);
+        checkAllBtn.addEventListener('click', handleCheckAll);
+        uncheckAllBtn.addEventListener('click', handleUncheckAll);
+        modal.addEventListener('click', handleBackdropClick);
+        modal.classList.add('show');
+    });
     document.getElementById('upload-pdf-input').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -1813,28 +1883,68 @@ function bindEvents() {
         const status = document.getElementById('upload-status');
         status.textContent = '';
         status.className = '';
+        const isMultipleUpload = files.length > 1;
+        const entries = files.map((file) => ({ file, name: file.name.replace(/^.*[/\\]/, '') }));
+        const lowerModelNames = new Set(modelList.map((n) => n.toLowerCase()));
+        const overwriteTargets = entries
+            .map((entry) => entry.name)
+            .filter((name) => lowerModelNames.has(name.toLowerCase()));
+
+        let approvedOverwriteNames = new Set();
+        if (isMultipleUpload && overwriteTargets.length > 0) {
+            const selectedNames = await showOverwriteSelectionCard(overwriteTargets);
+            if (selectedNames === null) {
+                status.textContent = 'アップロードをキャンセルしました';
+                return;
+            }
+            approvedOverwriteNames = selectedNames;
+        }
         let ok = 0;
         let skipped = 0;
         let failed = 0;
         let lastErr = '';
         let needMtlRefresh = false;
-        for (const file of files) {
-            const name = file.name.replace(/^.*[/\\]/, '');
-            const exists = modelList.some((n) => n.toLowerCase() === name.toLowerCase());
+        const conflictEntries = [];
+        for (const entry of entries) {
+            const { file, name } = entry;
+            const exists = lowerModelNames.has(name.toLowerCase());
             let url = '/admin/upload';
-            if (exists && !confirm(`「${name}」は既にあります。上書きしますか？`)) {
-                skipped++;
-                continue;
+            if (exists) {
+                if (isMultipleUpload) {
+                    if (!approvedOverwriteNames.has(name)) {
+                        skipped++;
+                        continue;
+                    }
+                    url += '?confirm=1';
+                } else {
+                    if (!confirm(`「${name}」は既にあります。上書きしますか？`)) {
+                        skipped++;
+                        continue;
+                    }
+                    url += '?confirm=1';
+                }
             }
-            if (exists) url += '?confirm=1';
             const form = new FormData();
             form.append('model', file);
+            form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
             try {
-                const res = await fetch(url, { method: 'POST', credentials: 'include', body: form });
+                let res = await fetch(url, { method: 'POST', credentials: 'include', body: form });
                 if (res.status === 409) {
-                    lastErr = '同名の上書き確認が必要: ' + name;
-                    failed++;
-                    continue;
+                    if (isMultipleUpload) {
+                        conflictEntries.push(entry);
+                        continue;
+                    }
+                    const shouldConfirmConflictOverwrite = confirm(`「${name}」は既にあります。上書きしますか？`);
+                    if (!shouldConfirmConflictOverwrite) {
+                        skipped++;
+                        continue;
+                    }
+                    res = await fetch('/admin/upload?confirm=1', { method: 'POST', credentials: 'include', body: form });
+                    if (res.status === 409) {
+                        lastErr = '同名の上書き確認が必要: ' + name;
+                        failed++;
+                        continue;
+                    }
                 }
                 if (!res.ok) throw new Error(await res.text());
                 await fetchModels();
@@ -1845,6 +1955,41 @@ function bindEvents() {
                 failed++;
             }
         }
+
+        if (conflictEntries.length > 0) {
+            const conflictNames = conflictEntries.map((entry) => entry.name);
+            const selectedConflictNames = await showOverwriteSelectionCard(conflictNames);
+            if (selectedConflictNames === null) {
+                skipped += conflictEntries.length;
+            } else {
+                for (const entry of conflictEntries) {
+                    const { file, name } = entry;
+                    if (!selectedConflictNames.has(name)) {
+                        skipped++;
+                        continue;
+                    }
+                    const form = new FormData();
+                    form.append('model', file);
+                    form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+                    try {
+                        const res = await fetch('/admin/upload?confirm=1', { method: 'POST', credentials: 'include', body: form });
+                        if (res.status === 409) {
+                            lastErr = '同名の上書き確認が必要: ' + name;
+                            failed++;
+                            continue;
+                        }
+                        if (!res.ok) throw new Error(await res.text());
+                        await fetchModels();
+                        if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
+                        ok++;
+                    } catch (err) {
+                        lastErr = err.message || String(err);
+                        failed++;
+                    }
+                }
+            }
+        }
+
         if (needMtlRefresh) await fetchMtls();
         renderModelList();
         const parts = [];
