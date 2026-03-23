@@ -858,6 +858,8 @@ function updateObjectPanel(obj) {
         document.getElementById('obj-tp-radius').value = tp ? (tp.radius ?? 3) : 3;
         document.getElementById('obj-tp-label').value = tp ? (tp.label || '') : '';
         document.getElementById('obj-tp-access').value = tp && tp.access ? tp.access : 'public';
+        document.getElementById('obj-tp-auto-teleport').checked = !!(tp && tp.autoTeleport);
+        document.getElementById('obj-tp-auto-contact-teleport').checked = !!(tp && tp.autoTeleportOnContact);
         const taiko = c.taiko;
         document.getElementById('obj-taiko').checked = !!taiko;
         document.getElementById('obj-taiko-radius').value = taiko ? (taiko.radius ?? 3) : 3;
@@ -877,6 +879,8 @@ function updateObjectPanel(obj) {
         document.getElementById('obj-tp-radius').value = tp ? (tp.radius ?? 3) : 3;
         document.getElementById('obj-tp-label').value = tp ? (tp.label || '') : '';
         document.getElementById('obj-tp-access').value = tp && tp.access ? tp.access : 'public';
+        document.getElementById('obj-tp-auto-teleport').checked = !!(tp && tp.autoTeleport);
+        document.getElementById('obj-tp-auto-contact-teleport').checked = !!(tp && tp.autoTeleportOnContact);
     }
 }
 
@@ -931,12 +935,18 @@ function syncObjectFromPanel() {
         if (document.getElementById('obj-teleporter').checked) {
             const accessEl = document.getElementById('obj-tp-access');
             const accessVal = accessEl && accessEl.value ? accessEl.value : 'public';
+            const autoTeleportEl = document.getElementById('obj-tp-auto-teleport');
+            const autoTeleport = !!(autoTeleportEl && autoTeleportEl.checked);
+            const autoContactTeleportEl = document.getElementById('obj-tp-auto-contact-teleport');
+            const autoTeleportOnContact = !!(autoContactTeleportEl && autoContactTeleportEl.checked);
             c.teleporter = {
                 id: document.getElementById('obj-tp-id').value.trim() || 'tp1',
                 destinationWorld: document.getElementById('obj-tp-dest').value || Object.keys(worlds)[0],
                 radius: parseFloat(document.getElementById('obj-tp-radius').value) || 3,
                 label: document.getElementById('obj-tp-label').value.trim() || '',
-                access: accessVal
+                access: accessVal,
+                autoTeleport,
+                autoTeleportOnContact
             };
         } else {
             delete c.teleporter;
@@ -973,12 +983,18 @@ function syncObjectFromPanel() {
         if (document.getElementById('obj-teleporter').checked) {
             const accessEl = document.getElementById('obj-tp-access');
             const accessVal = accessEl && accessEl.value ? accessEl.value : 'public';
+            const autoTeleportEl = document.getElementById('obj-tp-auto-teleport');
+            const autoTeleport = !!(autoTeleportEl && autoTeleportEl.checked);
+            const autoContactTeleportEl = document.getElementById('obj-tp-auto-contact-teleport');
+            const autoTeleportOnContact = !!(autoContactTeleportEl && autoContactTeleportEl.checked);
             c.teleporter = {
                 id: document.getElementById('obj-tp-id').value.trim() || 'tp1',
                 destinationWorld: document.getElementById('obj-tp-dest').value || Object.keys(worlds)[0],
                 radius: parseFloat(document.getElementById('obj-tp-radius').value) || 3,
                 label: document.getElementById('obj-tp-label').value.trim() || '',
-                access: accessVal
+                access: accessVal,
+                autoTeleport,
+                autoTeleportOnContact
             };
         } else {
             delete c.teleporter;
@@ -1633,6 +1649,8 @@ function bindEvents() {
     document.getElementById('obj-tp-radius').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-tp-label').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-tp-access').addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-tp-auto-teleport').addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-tp-auto-contact-teleport').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-taiko').addEventListener('change', () => {
         if (!document.getElementById('obj-taiko').checked) {
             document.getElementById('obj-taiko-multiplayer').checked = false;

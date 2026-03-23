@@ -219,7 +219,9 @@ class SceneManager {
                     destinationWorld: config.teleporter.destinationWorld,
                     radius: config.teleporter.radius || 3,
                     label: config.teleporter.label || config.teleporter.destinationWorld,
-                    access: config.teleporter.access || 'public'
+                    access: config.teleporter.access || 'public',
+                    autoTeleport: !!config.teleporter.autoTeleport,
+                    autoTeleportOnContact: !!config.teleporter.autoTeleportOnContact
                 });
                 console.log(`  Teleporter: ID=${config.teleporter.id}, Destination=${config.teleporter.destinationWorld}, access=${config.teleporter.access || 'public'}`);
             }
@@ -398,7 +400,9 @@ class SceneManager {
                         destinationWorld: config.teleporter.destinationWorld,
                         radius: config.teleporter.radius || 3,
                         label: config.teleporter.label || config.teleporter.destinationWorld,
-                        access: config.teleporter.access || 'public'
+                        access: config.teleporter.access || 'public',
+                        autoTeleport: !!config.teleporter.autoTeleport,
+                        autoTeleportOnContact: !!config.teleporter.autoTeleportOnContact
                     });
                     console.log(`  PDF Teleporter: ID=${config.teleporter.id}, Destination=${config.teleporter.destinationWorld}`);
                 }
@@ -465,10 +469,35 @@ class SceneManager {
                 destinationWorld: teleporterConfig.destinationWorld,
                 radius: teleporterConfig.radius || 3,
                 label: teleporterConfig.label || teleporterConfig.destinationWorld,
-                access: teleporterConfig.access || 'public'
+                access: teleporterConfig.access || 'public',
+                autoTeleport: !!teleporterConfig.autoTeleport,
+                autoTeleportOnContact: !!teleporterConfig.autoTeleportOnContact
             });
         }
         this.environmentGroup.add(mesh);
+    }
+
+    /**
+     * プレイヤーが接触しているPDFテレポーターを返す
+     * @param {THREE.Vector3} playerPosition
+     * @param {number} [padding=0.2]
+     * @returns {{ teleporter: object } | null}
+     */
+    getTouchedPdfTeleporter(playerPosition, padding = 0.2) {
+        const worldBox = new THREE.Box3();
+        let touched = null;
+        this.environmentGroup.traverse((obj) => {
+            if (touched) return;
+            if (!obj.isMesh || !obj.userData.pdfPath) return;
+            const tp = obj.userData.teleporter;
+            if (!tp || !tp.autoTeleportOnContact) return;
+            worldBox.setFromObject(obj);
+            worldBox.expandByScalar(Math.max(0, Number(padding) || 0));
+            if (worldBox.containsPoint(playerPosition)) {
+                touched = { teleporter: tp };
+            }
+        });
+        return touched;
     }
 
     /**

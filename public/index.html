@@ -67,23 +67,16 @@
 
     <div id="teleport-prompt" style="display: none;"></div>
 
-    <!-- ワールド切替時: モデル・PDF 読み込み完了まで（mmh トップページプリローダーと同系のアニメーション） -->
+    <!-- ワールド切替時: モデル・PDF 読み込み完了まで -->
     <div id="world-load-overlay" class="world-load-overlay" style="display: none;" aria-hidden="true" role="status">
-        <div class="world-load-metaverse-bg" aria-hidden="true"></div>
-        <div class="world-load-grid-lines" aria-hidden="true"></div>
-        <div class="world-load-preloader-content">
-            <div class="world-load-loader-logo">
-                <p id="world-load-label" class="world-load-logo-text">読み込み中…</p>
-                <div class="world-load-rotating-line" aria-hidden="true"></div>
-            </div>
-            <div id="world-load-bar-container" class="world-load-bar-container">
-                <div class="world-load-dna-trail" aria-hidden="true"></div>
+        <div class="world-load-panel">
+            <p id="world-load-label" class="world-load-label">読み込み中…</p>
+            <div class="world-load-bar-wrap">
                 <div class="world-load-bar-track">
-                    <div class="world-load-dna-ball red"></div>
-                    <div class="world-load-dna-ball blue"></div>
+                    <div id="world-load-bar-fill" class="world-load-bar-fill"></div>
                 </div>
+                <span id="world-load-pct" class="world-load-pct">0%</span>
             </div>
-            <div id="world-load-percentage" class="world-load-progress-percentage">0%</div>
         </div>
     </div>
 
@@ -400,6 +393,11 @@
                     </div>
                     <div class="settings-section" id="draw-section">
                         <h4>描画</h4>
+                        <div class="setting-item">
+                            <label for="viewModeToggle">画面表示</label>
+                            <button type="button" id="viewModeToggle" class="mic-test-btn">1人称と3人称を切り替える</button>
+                            <div class="setting-description">1人称はアバターの頭部視点になります</div>
+                        </div>
                         <div class="setting-item">
                             <label for="drawQualityLow">低品質モード</label>
                             <input type="checkbox" id="drawQualityLow" checked>

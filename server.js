@@ -198,7 +198,21 @@ function getSafeUploadedFilename(req, fallbackName) {
             filename = fallbackName;
         }
     }
-    return path.basename(String(filename || '')).replace(/[/\\\0]/g, '');
+    const rawName = path.basename(String(filename || '')).replace(/[/\\\0]/g, '');
+    return decodeLikelyMojibakeFilename(rawName);
+}
+
+/**
+ * UTF-8 バイト列が latin1 として解釈された文字化けを、日本語を含む元文字列へ復元する。
+ * @param {string} filename
+ * @returns {string}
+ */
+function decodeLikelyMojibakeFilename(filename) {
+    const source = String(filename || '');
+    const decoded = Buffer.from(source, 'latin1').toString('utf8');
+    const hasJapanese = /[\u3040-\u30ff\u3400-\u9fff]/.test(decoded);
+    const hasLatin1Noise = /[\u0080-\u00ff]/.test(source);
+    return hasJapanese && hasLatin1Noise ? decoded : source;
 }
 
 const app = express();
@@ -2979,6 +2993,7 @@ app.get('/admin/models', (req, res) => {
                 const low = n.toLowerCase();
                 return low.endsWith('.glb') || low.endsWith('.obj');
             })
+            .map((n) => decodeLikelyMojibakeFilename(n))
             .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         res.json(names);
     } catch (err) {
@@ -2994,6 +3009,7 @@ app.get('/admin/model-mtls', (req, res) => {
         }
         const names = fs.readdirSync(MODELS_DIR)
             .filter((n) => n.toLowerCase().endsWith('.mtl'))
+            .map((n) => decodeLikelyMojibakeFilename(n))
             .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         res.json(names);
     } catch (err) {
@@ -3033,7 +3049,8 @@ app.get('/admin/pdfs', (req, res) => {
             return res.json([]);
         }
         const names = fs.readdirSync(PDFS_DIR)
-            .filter((n) => n.toLowerCase().endsWith('.pdf'));
+            .filter((n) => n.toLowerCase().endsWith('.pdf'))
+            .map((n) => decodeLikelyMojibakeFilename(n));
         res.json(names);
     } catch (err) {
         console.error('GET /admin/pdfs error:', err);

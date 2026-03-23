@@ -54,6 +54,7 @@ class MenuManager {
         this.onAdminInvisibleChange = null;
         this.onAdminFlyChange = null;
         this.onAdminSpeedChange = null;
+        this.onViewModeChange = null;
 
         // Settings
         this.settings = {
@@ -65,7 +66,8 @@ class MenuManager {
             drawQualityLow: true,
             shadowQuality: 'low',
             fogFar: 800,
-            pixelRatioCap: 1
+            pixelRatioCap: 1,
+            viewMode: 'third'
         };
         
         this.init();
@@ -115,6 +117,14 @@ class MenuManager {
      */
     setSceneManager(sceneManager) {
         this.sceneManager = sceneManager;
+    }
+
+    /**
+     * 視点モード変更時のコールバックを登録する。
+     * @param {(mode: 'first'|'third') => void} callback
+     */
+    setViewModeChangeHandler(callback) {
+        this.onViewModeChange = callback;
     }
 
     /**
@@ -485,6 +495,14 @@ class MenuManager {
             this.saveSettings();
             this.sceneManager?.applyRenderQuality(this.settings);
         });
+        document.getElementById('viewModeToggle')?.addEventListener('click', () => {
+            this.settings.viewMode = this.settings.viewMode === 'first' ? 'third' : 'first';
+            this.updateViewModeButton();
+            this.saveSettings();
+            if (typeof this.onViewModeChange === 'function') {
+                this.onViewModeChange(this.settings.viewMode);
+            }
+        });
 
         // ESC key to close modals
         document.addEventListener('keydown', (e) => {
@@ -765,6 +783,9 @@ class MenuManager {
         if (saved) {
             try {
                 this.settings = { ...this.settings, ...JSON.parse(saved) };
+                if (!['first', 'third'].includes(this.settings.viewMode)) {
+                    this.settings.viewMode = 'third';
+                }
             } catch (e) {
                 console.error('Failed to load settings:', e);
             }
@@ -805,6 +826,18 @@ class MenuManager {
         }
         if (pixelRatioCapEl) pixelRatioCapEl.value = this.settings.pixelRatioCap === 'full' ? 'full' : String(this.settings.pixelRatioCap ?? 1);
         this.updateDrawQualityDisabled();
+        this.updateViewModeButton();
+    }
+
+    /**
+     * 視点切替ボタンの表示ラベルを更新する。
+     */
+    updateViewModeButton() {
+        const btn = document.getElementById('viewModeToggle');
+        if (!btn) return;
+        btn.textContent = this.settings.viewMode === 'first'
+            ? '3人称視点に切り替える'
+            : '1人称と3人称を切り替える';
     }
 
     /**

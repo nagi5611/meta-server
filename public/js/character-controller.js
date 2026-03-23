@@ -29,6 +29,8 @@ class CharacterController {
         this.cameraPitch = -0.3;  // Vertical camera angle (radians, slightly looking down)
         this.mouseSensitivity = 0.002;
         this.isPointerLocked = false;
+        this.isFirstPersonView = false;
+        this.getHeadWorldPosition = null;
 
         // Player orientation
         this.playerYaw = 0;  // Player's facing direction (radians)
@@ -38,6 +40,8 @@ class CharacterController {
         this.direction = new THREE.Vector3();
         /** 三人称カメラの理想位置（衝突クランプ前） */
         this._desiredCameraWorld = new THREE.Vector3();
+        this._firstPersonHeadWorld = new THREE.Vector3();
+        this._firstPersonLookTarget = new THREE.Vector3();
 
         // Admin controls
         this.isFlyMode = false;
@@ -340,9 +344,27 @@ class CharacterController {
             this.physicsManager.updatePlayer(deltaTime, moveDirection);
         }
 
-        // Update camera position (third-person view)
+        // Update camera position (third-person / first-person view)
         const characterPos = this.physicsManager.getCharacterPosition();
-        
+        if (this.isFirstPersonView) {
+            const headWorld = this._firstPersonHeadWorld;
+            if (typeof this.getHeadWorldPosition === 'function' && this.getHeadWorldPosition(headWorld)) {
+                // PlayerManager から取得できた頭部位置を使用
+            } else {
+                headWorld.set(characterPos.x, characterPos.y + 1.65, characterPos.z);
+            }
+            this.camera.position.copy(headWorld);
+
+            const forward = new THREE.Vector3(
+                -Math.sin(this.cameraYaw) * Math.cos(this.cameraPitch),
+                Math.sin(this.cameraPitch),
+                -Math.cos(this.cameraYaw) * Math.cos(this.cameraPitch)
+            ).normalize();
+            this._firstPersonLookTarget.copy(headWorld).add(forward);
+            this.camera.lookAt(this._firstPersonLookTarget);
+            return;
+        }
+
         // Calculate camera position behind and above player
         const cameraOffset = new THREE.Vector3(
             Math.sin(this.cameraYaw) * this.cameraDistance * Math.cos(this.cameraPitch),
@@ -410,6 +432,22 @@ class CharacterController {
             return;
         }
         this.adminSpeedMultiplier = multiplier;
+    }
+
+    /**
+     * 視点モードを設定する。
+     * @param {'first'|'third'} mode
+     */
+    setViewMode(mode) {
+        this.isFirstPersonView = mode === 'first';
+    }
+
+    /**
+     * 頭部ワールド座標の取得関数を設定する。
+     * @param {(out: THREE.Vector3) => boolean} fn
+     */
+    setHeadPositionProvider(fn) {
+        this.getHeadWorldPosition = typeof fn === 'function' ? fn : null;
     }
 }
 

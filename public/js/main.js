@@ -292,6 +292,13 @@ class MetaverseApp {
         });
         this.menuManager.setSceneManager(this.sceneManager);
         this.sceneManager.applyRenderQuality(this.menuManager.settings);
+        this.characterController.setHeadPositionProvider((out) => this.playerManager.getLocalHeadWorldPosition(out));
+        this.characterController.setViewMode(this.menuManager.settings.viewMode || 'third');
+        this.playerManager.setLocalPlayerVisible((this.menuManager.settings.viewMode || 'third') !== 'first');
+        this.menuManager.setViewModeChangeHandler((mode) => {
+            this.characterController.setViewMode(mode);
+            this.playerManager.setLocalPlayerVisible(mode !== 'first');
+        });
 
         // Admin quick controls (透明化 / 飛行 / 高速移動)
         if (this.userRole === 'admin' && this.menuManager) {
@@ -454,7 +461,9 @@ class MetaverseApp {
                 destinationWorld: teleporter.destinationWorld,
                 label: teleporter.label,
                 worldId: currentWorldId,
-                access: teleporter.access || 'public'
+                access: teleporter.access || 'public',
+                autoTeleport: !!teleporter.autoTeleport,
+                autoTeleportOnContact: !!teleporter.autoTeleportOnContact
             });
             console.log(`  Teleporter ${teleporter.id}: ${teleporter.label} -> ${teleporter.destinationWorld} (${teleporter.access || 'public'}) at (${teleporter.position.x}, ${teleporter.position.y}, ${teleporter.position.z})`);
         });
@@ -607,6 +616,12 @@ class MetaverseApp {
             const pdfObj = this.sceneManager.getNearbyPdfObject(position, 5);
             // PDFがテレポーターのときは「PDFを表示」にせずテレポート扱いにする
             this.nearbyPdfPath = (pdfObj && !pdfObj.teleporter) ? pdfObj.pdfPath : null;
+            const touchedPdfTeleporter = this.sceneManager.getTouchedPdfTeleporter(position);
+            if (touchedPdfTeleporter && this.teleportManager) {
+                this.teleportManager.tryAutoTeleportOnContact(touchedPdfTeleporter.teleporter?.id, this.worldManager.getCurrentWorldId());
+            } else if (this.teleportManager) {
+                this.teleportManager.tryAutoTeleportOnContact('', this.worldManager.getCurrentWorldId());
+            }
             if (this.pdfViewerManager && this.pdfViewerManager.isOpen()) {
                 this.uiManager.hideTeleportPrompt();
             } else if (this.taikoGameManager && this.taikoGameManager.isOpen()) {

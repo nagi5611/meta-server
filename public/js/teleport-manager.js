@@ -24,6 +24,8 @@ class TeleportManager {
         this.nearestTaikoZone = null;
         this.openTaikoGame = null;
         this.keyPressed = false;
+        this.lastAutoTeleportZoneKey = '';
+        this.lastContactTeleportZoneKey = '';
         this.getPdfPath = null;
         this.openPdfViewer = null;
         /** ユーザーの実効ロール: 'guest' | 'student' | 'teacher' | 'admin' */
@@ -108,7 +110,9 @@ class TeleportManager {
             destinationWorld: zone.destinationWorld,
             label: zone.label || zone.destinationWorld,
             worldId: zone.worldId,
-            access: zone.access || 'public'
+            access: zone.access || 'public',
+            autoTeleport: !!zone.autoTeleport,
+            autoTeleportOnContact: !!zone.autoTeleportOnContact
         });
     }
 
@@ -159,6 +163,17 @@ class TeleportManager {
         });
 
         this.nearestZone = closestZone || null;
+        if (!this.nearestZone) this.lastAutoTeleportZoneKey = '';
+        if (this.nearestZone && this.nearestZone.autoTeleport) {
+            const zoneKey = `${currentWorldId}:${this.nearestZone.id || ''}:${this.nearestZone.destinationWorld || ''}`;
+            if (zoneKey !== this.lastAutoTeleportZoneKey) {
+                this.lastAutoTeleportZoneKey = zoneKey;
+                this.handleTeleport();
+                return;
+            }
+        } else {
+            this.lastAutoTeleportZoneKey = '';
+        }
 
         // Find closest taiko zone in current world
         let closestTaiko = null;
@@ -176,6 +191,35 @@ class TeleportManager {
             }
         });
         this.nearestTaikoZone = closestTaiko || null;
+    }
+
+    /**
+     * PDFテレポーター接触時の自動テレポートを試行する
+     * @param {string} teleporterId
+     * @param {string} currentWorldId
+     * @returns {boolean}
+     */
+    tryAutoTeleportOnContact(teleporterId, currentWorldId) {
+        if (!teleporterId || !currentWorldId) {
+            this.lastContactTeleportZoneKey = '';
+            return false;
+        }
+        const zone = this.teleportZones.find((z) =>
+            z.worldId === currentWorldId &&
+            z.id === teleporterId &&
+            z.autoTeleportOnContact
+        );
+        if (!zone) {
+            this.lastContactTeleportZoneKey = '';
+            return false;
+        }
+        if (!canUseTeleporter(zone.access, this.userRole)) return false;
+        const zoneKey = `${currentWorldId}:${zone.id || ''}:${zone.destinationWorld || ''}`;
+        if (zoneKey === this.lastContactTeleportZoneKey) return false;
+        this.lastContactTeleportZoneKey = zoneKey;
+        this.nearestZone = zone;
+        this.handleTeleport();
+        return true;
     }
 
     /**
@@ -216,6 +260,8 @@ class TeleportManager {
     clearZones() {
         this.teleportZones = [];
         this.nearestZone = null;
+        this.lastAutoTeleportZoneKey = '';
+        this.lastContactTeleportZoneKey = '';
         this.clearTaikoZones();
         this.uiManager.hideTeleportPrompt();
     }

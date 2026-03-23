@@ -14,6 +14,7 @@ class PlayerManager {
         this.avatarPath = 'models/avatar.glb';
         /** Avatar GLB scale (change to resize model) */
         this.avatarScale = { x: 1.5, y: 1.5, z: 1.5 };
+        this._headWorldOffset = new THREE.Vector3(0, 0.08, 0);
     }
 
     /**
@@ -123,6 +124,7 @@ class PlayerManager {
             avatarModel.position.y = 0;
             avatarModel.scale.set(this.avatarScale.x, this.avatarScale.y, this.avatarScale.z);
             this.localPlayer.add(avatarModel);
+            this.localPlayer.userData.headBone = this.findHeadBone(avatarModel);
             const anim = this.setupAvatarAnimation(avatarModel, animations);
             if (anim) {
                 this.localPlayer.userData.mixer = anim.mixer;
@@ -136,9 +138,44 @@ class PlayerManager {
             console.error('Failed to load avatar, using placeholder:', error);
             this.localPlayer = this.createPlaceholder(0x00ff88);
             this.localPlayer.position.set(position.x, position.y, position.z);
+            this.localPlayer.userData.headBone = this.localPlayer.children[0] || null;
             this.scene.add(this.localPlayer);
             console.log('Local player created with placeholder');
         }
+    }
+
+    /**
+     * アバター階層から頭部ボーンを探索する。
+     * @param {THREE.Object3D} root
+     * @returns {THREE.Object3D | null}
+     */
+    findHeadBone(root) {
+        let headBone = null;
+        root.traverse((obj) => {
+            if (headBone) return;
+            if (!obj.isBone) return;
+            const n = String(obj.name || '').toLowerCase();
+            if (n.includes('head')) headBone = obj;
+        });
+        return headBone;
+    }
+
+    /**
+     * ローカルプレイヤーの頭部ワールド座標を返す。
+     * @param {THREE.Vector3} out
+     * @returns {boolean}
+     */
+    getLocalHeadWorldPosition(out) {
+        if (!this.localPlayer || !out) return false;
+        const head = this.localPlayer.userData.headBone;
+        if (head && typeof head.getWorldPosition === 'function') {
+            head.getWorldPosition(out);
+            out.add(this._headWorldOffset);
+            return true;
+        }
+        this.localPlayer.getWorldPosition(out);
+        out.y += 1.65;
+        return true;
     }
 
     /**
