@@ -1292,8 +1292,17 @@ a.admin-menu-link:hover {
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
-#viewModeToggle {
-    width: 100%;
+.view-mode-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.view-mode-label {
+    font-size: 13px;
+    color: #64748b;
+    min-width: 74px;
+    text-align: right;
 }
 
 .mic-test-btn.stop {

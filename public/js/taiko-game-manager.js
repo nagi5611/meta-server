@@ -43,8 +43,8 @@ const JUDGE_OK_PX = 90;
 const JUDGE_MISS_PX = 130;
 
 /** ヒット音のパス */
-const SOUND_DON = '/music/don.mp3';
-const SOUND_KA = '/music/ka.mp3';
+const SOUND_DON = '/music/don_.mp3';
+const SOUND_KA = '/music/ka_.mp3';
 
 class TaikoGameManager {
     constructor() {

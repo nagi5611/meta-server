@@ -495,8 +495,8 @@ class MenuManager {
             this.saveSettings();
             this.sceneManager?.applyRenderQuality(this.settings);
         });
-        document.getElementById('viewModeToggle')?.addEventListener('click', () => {
-            this.settings.viewMode = this.settings.viewMode === 'first' ? 'third' : 'first';
+        document.getElementById('viewModeToggle')?.addEventListener('change', (e) => {
+            this.settings.viewMode = e.target.checked ? 'first' : 'third';
             this.updateViewModeButton();
             this.saveSettings();
             if (typeof this.onViewModeChange === 'function') {
@@ -833,11 +833,14 @@ class MenuManager {
      * 視点切替ボタンの表示ラベルを更新する。
      */
     updateViewModeButton() {
-        const btn = document.getElementById('viewModeToggle');
-        if (!btn) return;
-        btn.textContent = this.settings.viewMode === 'first'
-            ? '3人称視点に切り替える'
-            : '1人称と3人称を切り替える';
+        const toggle = document.getElementById('viewModeToggle');
+        const label = document.getElementById('viewModeLabel');
+        if (!toggle) return;
+        const isFirst = this.settings.viewMode === 'first';
+        toggle.checked = isFirst;
+        if (label) {
+            label.textContent = isFirst ? '1人称視点' : '3人称視点';
+        }
     }
 
     /**

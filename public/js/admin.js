@@ -392,8 +392,8 @@ async function ensureChartPreviewAudioLoaded() {
         return await chartPreviewAudioCtx.decodeAudioData(buf);
     };
     const [don, ka] = await Promise.all([
-        chartPreviewAudioBuffers.don ? chartPreviewAudioBuffers.don : decode('/music/don.mp3'),
-        chartPreviewAudioBuffers.ka ? chartPreviewAudioBuffers.ka : decode('/music/ka.mp3')
+        chartPreviewAudioBuffers.don ? chartPreviewAudioBuffers.don : decode('/music/don_.mp3'),
+        chartPreviewAudioBuffers.ka ? chartPreviewAudioBuffers.ka : decode('/music/ka_.mp3')
     ]);
     chartPreviewAudioBuffers = { don, ka };
 }
@@ -1377,6 +1377,92 @@ function pasteClipboardNotesAt(barIndex, stepIndex) {
 }
 
 /**
+ * 編集用ノーツのグリッド上の絶対位置（小節×16+ステップ）を返す
+ * @param {{ type?: string, time?: number, startTime?: number, endTime?: number }} note
+ * @returns {number}
+ */
+function getNoteEditorAbsStep(note) {
+    if (!note) return 0;
+    const t = note.type === 'roll' ? (note.startTime ?? 0) : (note.time ?? 0);
+    const { barIndex, stepIndex } = timeToBarStepVarBpm(t);
+    return barIndex * 16 + stepIndex;
+}
+
+/**
+ * 選択中のノーツをグリッド上で左右に1マス移動する。移動先に別ノーツがある場合は何もしない。
+ * @param {number} delta -1 で左、+1 で右
+ * @returns {boolean} 移動したら true
+ */
+function tryMoveSelectedNotesHorizontally(delta) {
+    if (!delta) return false;
+    const indices = selectedNoteIndices.size > 0
+        ? [...selectedNoteIndices].filter((i) => Number.isInteger(i) && i >= 0 && i < editingNotes.length)
+        : (selectedNoteIndex >= 0 ? [selectedNoteIndex] : []);
+    if (indices.length === 0) return false;
+
+    const notesToMove = indices.map((i) => editingNotes[i]);
+    const newAbsList = notesToMove.map((n) => getNoteEditorAbsStep(n) + delta);
+
+    if (newAbsList.some((a) => a < 0)) return false;
+
+    if (new Set(newAbsList).size !== newAbsList.length) return false;
+
+    const movingSet = new Set(indices);
+    for (let j = 0; j < editingNotes.length; j++) {
+        if (movingSet.has(j)) continue;
+        const stayAbs = getNoteEditorAbsStep(editingNotes[j]);
+        if (newAbsList.includes(stayAbs)) return false;
+    }
+
+    const maxNewBar = Math.max(...newAbsList.map((a) => Math.floor(a / 16)));
+    const endEl = document.getElementById('chart-edit-end-time');
+    if (endEl) {
+        const cur = endEl.value !== '' ? Number(endEl.value) : NaN;
+        const curMeasures = Number.isFinite(cur) ? Math.max(1, Math.floor(cur)) : null;
+        const needMeasures = Math.max(1, maxNewBar + 1);
+        if (curMeasures == null || curMeasures < needMeasures) {
+            endEl.value = String(needMeasures);
+        }
+    }
+
+    const selectedRefs = notesToMove.slice();
+    for (let k = 0; k < notesToMove.length; k++) {
+        const n = notesToMove[k];
+        const na = newAbsList[k];
+        const nb = Math.floor(na / 16);
+        const ns = na % 16;
+        const newT = barStepToTimeVarBpm(nb, ns);
+        if (n.type === 'roll') {
+            const s = Number(n.startTime ?? 0);
+            const e = Number(n.endTime ?? n.startTime ?? 0);
+            const d = Math.max(0, e - s);
+            n.startTime = newT;
+            n.endTime = newT + d;
+        } else {
+            n.time = newT;
+        }
+    }
+
+    editingNotes.sort((a, b) => {
+        const ta = a.type === 'roll' ? a.startTime : a.time;
+        const tb = b.type === 'roll' ? b.startTime : b.time;
+        return (ta ?? 0) - (tb ?? 0);
+    });
+
+    selectedNoteIndices = new Set();
+    selectedNoteIndex = -1;
+    for (let i = 0; i < editingNotes.length; i++) {
+        if (selectedRefs.includes(editingNotes[i])) selectedNoteIndices.add(i);
+    }
+    if (selectedNoteIndices.size === 1) {
+        selectedNoteIndex = [...selectedNoteIndices][0];
+    }
+
+    renderNotesStrip();
+    return true;
+}
+
+/**
  * 譜面作成パネルのボタン・リストのイベントを一度だけバインドする
  */
 function bindChartPanelEvents() {
@@ -1664,6 +1750,20 @@ function bindChartPanelEvents() {
             selectedNoteIndex = -1;
         }
         renderNotesStrip();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        const chartPanel = document.getElementById('panel-chart');
+        if (!chartPanel || !chartPanel.classList.contains('active')) return;
+        if (!selectedChartId) return;
+        if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+        const hasSelection = selectedNoteIndices.size > 0
+            || (selectedNoteIndex >= 0 && selectedNoteIndex < editingNotes.length);
+        if (!hasSelection) return;
+        e.preventDefault();
+        const delta = e.key === 'ArrowRight' ? 1 : -1;
+        tryMoveSelectedNotesHorizontally(delta);
     });
 
     const scrollEl = document.getElementById('chart-measures-scroll');

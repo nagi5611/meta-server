@@ -393,26 +393,17 @@
                     </div>
                     <div class="settings-section" id="draw-section">
                         <h4>描画</h4>
-                        <div class="setting-item">
+                        <div class="setting-item setting-row">
                             <label for="viewModeToggle">画面表示</label>
-                            <button type="button" id="viewModeToggle" class="mic-test-btn">1人称と3人称を切り替える</button>
-                            <div class="setting-description">1人称はアバターの頭部視点になります</div>
+                            <div class="view-mode-control">
+                                <span id="viewModeLabel" class="view-mode-label">3人称視点</span>
+                                <label class="toggle-switch" title="1人称と3人称を切り替える">
+                                    <input type="checkbox" id="viewModeToggle">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
                         </div>
-                        <div class="setting-item">
-                            <label for="drawQualityLow">低品質モード</label>
-                            <input type="checkbox" id="drawQualityLow" checked>
-                            <div class="setting-description">軽いPCでも快適に。オフにすると高品質になります。</div>
-                        </div>
-                        <div class="setting-item">
-                            <label for="shadowQuality">シャドウ:</label>
-                            <select id="shadowQuality">
-                                <option value="low">低</option>
-                                <option value="medium">中</option>
-                                <option value="high">高</option>
-                                <option value="highest">最高</option>
-                            </select>
-                            <div class="setting-description">シャドウの品質（低は負荷を抑えます）</div>
-                        </div>
+                        <div class="setting-description">1人称はアバターの頭部視点になります</div>
                         <div class="setting-item">
                             <label for="fogFar">描画範囲:</label>
                             <select id="fogFar">
