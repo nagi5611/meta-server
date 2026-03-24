@@ -4,7 +4,7 @@
 import { isMobile } from './mobile-utils.js';
 
 /**
- * ノーツ定義: { time: 秒, type: 'don'|'ka' } または { type: 'roll', startTime: 秒, endTime: 秒 }
+ * ノーツ定義: { time: 秒, type: 'don'|'ka', volume?: 0.1〜3 } または { type: 'roll', startTime: 秒, endTime: 秒 }
  * デモ譜面（固定）。後から外部ファイルに分離可能。
  */
 const DEMO_CHART = [
@@ -45,6 +45,17 @@ const JUDGE_MISS_PX = 130;
 /** ヒット音のパス */
 const SOUND_DON = '/music/don_.mp3';
 const SOUND_KA = '/music/ka_.mp3';
+
+/**
+ * 譜面の volume（倍率、未指定は 1）を 10%〜300% に丸める
+ * @param {unknown} v
+ * @returns {number}
+ */
+function clampChartNoteVolume(v) {
+    const x = Number(v);
+    if (!Number.isFinite(x)) return 1;
+    return Math.min(3, Math.max(0.1, x));
+}
 
 class TaikoGameManager {
     constructor() {
@@ -107,6 +118,11 @@ class TaikoGameManager {
 
         /** @type {boolean} マルチ開始（譜面/スケジューリング）済み */
         this._mpGameStarted = false;
+
+        /** @type {{ don: AudioBuffer, ka: AudioBuffer } | null} */
+        this._hitSoundBuffers = null;
+        /** @type {Promise<void> | null} */
+        this._hitSoundDecodePromise = null;
     }
 
     /** WebAudioコンテキストを確保して返す（ユーザー操作後に resume すること） */
@@ -852,14 +868,65 @@ class TaikoGameManager {
     }
 
     /**
-     * ドン／カッのヒット音を再生する
-     * @param {'don'|'ka'} type
+     * ドン／カのデコード済みバッファを確保する（BGM と同じ AudioContext を使用）
+     * @returns {Promise<void>}
      */
-    _playHitSound(type) {
-        const src = type === 'don' ? SOUND_DON : SOUND_KA;
-        const audio = new Audio(src);
-        audio.volume = 1;
-        audio.play().catch(() => {});
+    _ensureHitSoundBuffers() {
+        if (this._hitSoundBuffers?.don && this._hitSoundBuffers?.ka) return Promise.resolve();
+        if (this._hitSoundDecodePromise) return this._hitSoundDecodePromise;
+        const ctx = this._ensureBgmAudioCtx();
+        if (!ctx) return Promise.resolve();
+        const load = async (url) => {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(res.statusText);
+            const ab = await res.arrayBuffer();
+            return ctx.decodeAudioData(ab.slice(0));
+        };
+        this._hitSoundDecodePromise = Promise.all([load(SOUND_DON), load(SOUND_KA)])
+            .then(([don, ka]) => {
+                this._hitSoundBuffers = { don, ka };
+            })
+            .finally(() => {
+                this._hitSoundDecodePromise = null;
+            });
+        return this._hitSoundDecodePromise;
+    }
+
+    /**
+     * ドン／カッのヒット音を再生する（譜面 volume は 10%〜300%）
+     * @param {'don'|'ka'} type
+     * @param {number} [volumeMultiplier=1]
+     */
+    _playHitSound(type, volumeMultiplier = 1) {
+        const v = clampChartNoteVolume(volumeMultiplier);
+        const playWithBuffer = () => {
+            const ctx = this._ensureBgmAudioCtx();
+            if (!ctx || !this._hitSoundBuffers?.don || !this._hitSoundBuffers?.ka) return false;
+            const buf = type === 'ka' ? this._hitSoundBuffers.ka : this._hitSoundBuffers.don;
+            if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+            const src = ctx.createBufferSource();
+            const gain = ctx.createGain();
+            src.buffer = buf;
+            gain.gain.value = v;
+            src.connect(gain);
+            gain.connect(ctx.destination);
+            src.start();
+            return true;
+        };
+        const playFallback = () => {
+            const audio = new Audio(type === 'don' ? SOUND_DON : SOUND_KA);
+            audio.volume = Math.min(1, v);
+            audio.play().catch(() => {});
+        };
+        if (this._hitSoundBuffers?.don && this._hitSoundBuffers?.ka) {
+            if (!playWithBuffer()) playFallback();
+            return;
+        }
+        this._ensureHitSoundBuffers()
+            .then(() => {
+                if (!playWithBuffer()) playFallback();
+            })
+            .catch(() => playFallback());
     }
 
     /**
@@ -869,7 +936,6 @@ class TaikoGameManager {
     _hit(type) {
         if (!this._open) return;
 
-        this._playHitSound(type);
         this._flashButton(type);
 
         if (this._socket) {
@@ -901,11 +967,21 @@ class TaikoGameManager {
             }
         }
 
+        const volFromSrc = (activeNote) => {
+            const sn = activeNote?.srcNote;
+            if (!sn || sn.type === 'roll') return 1;
+            return clampChartNoteVolume(sn.volume);
+        };
+
         if (best) {
             if (bestDistancePx <= JUDGE_GOOD_PX) {
+                this._playHitSound(type, volFromSrc(best));
                 this._judge('good', best);
             } else if (bestDistancePx <= JUDGE_OK_PX) {
+                this._playHitSound(type, volFromSrc(best));
                 this._judge('ok', best);
+            } else {
+                this._playHitSound(type, 1);
             }
             return;
         }
@@ -916,9 +992,11 @@ class TaikoGameManager {
         );
         if (inRoll) {
             this._rollCount++;
-            this._playHitSound(type);
-            this._flashButton(type);
+            this._playHitSound(type, 1);
+            this._playHitSound(type, 1);
             this._showRollHitEffect();
+        } else {
+            this._playHitSound(type, 1);
         }
     }
 
@@ -1085,6 +1163,8 @@ class TaikoGameManager {
                 } else {
                     el.className = `taiko-note ${note.type}`;
                     el.textContent = note.type === 'don' ? 'ドン' : 'カッ';
+                    const vm = clampChartNoteVolume(note.volume);
+                    el.style.transform = `translateY(-50%) scaleY(${vm})`;
                     this._notesContainer?.appendChild(el);
                     this._activeNotes.push({
                         el,

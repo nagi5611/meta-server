@@ -752,6 +752,9 @@
                                 </div>
                             </div>
                             <div class="btn-row">
+                                <button type="button" id="btn-chart-play-all-parts" class="chart-action-btn" disabled title="1P〜3Pを同時にプレビュー（表示は再生位置の4小節）">現在地から再生</button>
+                            </div>
+                            <div class="btn-row">
                                 <button type="button" id="btn-save-chart" class="chart-action-btn" disabled>保存</button>
                                 <button type="button" id="btn-export-charts-json" class="chart-action-btn">JSONエクスポート</button>
                             </div>
@@ -766,6 +769,7 @@
                             <div class="chart-notes-row">
                                 <div class="chart-measures-scroll" id="chart-measures-scroll">
                                     <div class="chart-measures-grid" id="chart-measures-grid" data-drop-zone="chart"></div>
+                                    <div id="chart-playback-multi-wrap" class="chart-playback-multi-wrap" hidden></div>
                                 </div>
                                 <aside class="chart-notes-palette">
                                     <h3 class="chart-notes-palette-title">メニュー</h3>

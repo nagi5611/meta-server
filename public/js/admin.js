@@ -18,8 +18,79 @@ let chartPanelInitialized = false;
 let selectedChartId = null;
 /** 譜面一覧のキャッシュ（renderChartList/selectChart で参照） */
 let cachedCharts = {};
-/** 編集中のノーツ配列（{ time, type }[] または { type:'roll', startTime, endTime }[]）。譜面編集エリアと同期 */
+/** 編集中のノーツ配列（{ time, type, volume? }[] または { type:'roll', startTime, endTime }[]）。譜面編集エリアと同期 */
 let editingNotes = [];
+/** 譜面エディタ: ノーツ音量ドラッグ中の pointerId。-1 はなし */
+let chartVolumeDragPointerId = -1;
+/** ドン・カノーツの音量倍率（1.0=100%、0.1〜3.0） */
+const NOTE_VOLUME_MIN = 0.1;
+const NOTE_VOLUME_MAX = 3;
+/** 縦移動がこの px を超えたら音量ドラッグとみなす（クリック選択と区別） */
+const CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX = 4;
+
+/**
+ * ノーツ音量を 10%〜300% に丸める（未指定は 100%）
+ * @param {unknown} v
+ * @returns {number}
+ */
+function clampNoteVolume(v) {
+    const x = Number(v);
+    if (!Number.isFinite(x)) return 1;
+    return Math.min(NOTE_VOLUME_MAX, Math.max(NOTE_VOLUME_MIN, x));
+}
+
+/**
+ * エディタ表示・保存用の音量（don/ka のみ。既定 1）
+ * @param {{ type?: string, volume?: unknown } | null | undefined} note
+ * @returns {number}
+ */
+function getNoteVolumeForEditor(note) {
+    if (!note || (note.type !== 'don' && note.type !== 'ka')) return 1;
+    return clampNoteVolume(note.volume != null ? note.volume : 1);
+}
+
+/**
+ * セル内のポインタ Y からノーツ音量を算出（中心=10%、端=300%）
+ * @param {number} clientY
+ * @param {DOMRect} cellRect
+ * @returns {number}
+ */
+function chartNoteVolumeFromPointerY(clientY, cellRect) {
+    const cy = (cellRect.top + cellRect.bottom) / 2;
+    const half = Math.max(1, cellRect.height / 2);
+    const dist = Math.abs(clientY - cy);
+    const t = Math.min(1, dist / half);
+    return NOTE_VOLUME_MIN + t * (NOTE_VOLUME_MAX - NOTE_VOLUME_MIN);
+}
+
+/**
+ * ドラッグ中チップのセル内 Y から音量を決め、指定した全ドン・カに同じ volume を適用する
+ * @param {number | number[]} noteIndices 単一インデックスまたは配列
+ * @param {number} clientY
+ * @param {HTMLElement} chipEl ドラッグ起点のチップ（セル座標の基準）
+ */
+function applyChartNoteVolumeFromPointer(noteIndices, clientY, chipEl) {
+    const cell = chipEl.parentElement;
+    if (!cell) return;
+    const rect = cell.getBoundingClientRect();
+    const vol = clampNoteVolume(chartNoteVolumeFromPointerY(clientY, rect));
+    const list = Array.isArray(noteIndices) ? noteIndices : [noteIndices];
+    for (const ni of list) {
+        const n = editingNotes[ni];
+        if (!n || (n.type !== 'don' && n.type !== 'ka')) continue;
+        n.volume = vol;
+    }
+    flushChartPartSlot();
+    const grid = document.getElementById('chart-measures-grid');
+    if (grid) {
+        for (const ni of list) {
+            const n = editingNotes[ni];
+            if (!n || (n.type !== 'don' && n.type !== 'ka')) continue;
+            const el = grid.querySelector(`.note-chip[data-index="${ni}"]`);
+            if (el) el.style.height = `${Math.max(4, 16 * vol)}px`;
+        }
+    }
+}
 /** マルチプレイ用 1P/2P/3P の切替（1..3） */
 let chartEditingPart = 1;
 /** 選択中譜面のパート別ノーツ（インデックス 0=1P,1=2P,2=3P） */
@@ -75,7 +146,13 @@ let chartPreviewState = {
     playDurationSec: 0,
     sources: [],
     playheadEl: null,
-    activeCellEl: null
+    activeCellEl: null,
+    /** 全パート再生時: 3行×4小節ビュー */
+    allPartsPlayback: false,
+    /** 表示中の4小節ブロック先頭（0始まり）。未初期化は -1 */
+    playbackWindowStartBar: -1,
+    /** 全パート再生時: ハイライトする各パートのセル */
+    activeMultiCells: /** @type {HTMLElement[] | null} */ (null)
 };
 
 /** 譜面プレビュー用の音（WebAudio） */
@@ -349,29 +426,381 @@ function getChartPreviewDurationSec() {
 }
 
 /**
- * editingNotes からプレビュー用の音イベント列を作る（don/ka + roll区間は0.1sごとにdon）
- * @returns {Array<{ time: number, type: 'don'|'ka' }>}
+ * ノーツ配列から連打区間 [{start, end}, ...] を算出
+ * @param {Array<{ type?: string, time?: number, startTime?: number, endTime?: number }>} notes
  */
-function buildChartPreviewEvents() {
+function getRollSectionsFromNotes(notes) {
+    const sorted = [...notes].sort((a, b) => {
+        const ta = a.type === 'roll' ? a.startTime : a.time;
+        const tb = b.type === 'roll' ? b.startTime : b.time;
+        return (ta ?? 0) - (tb ?? 0);
+    });
+    const sections = [];
+    const starts = [];
+    for (const n of sorted) {
+        if (n.type === 'roll') {
+            const s = n.startTime ?? 0;
+            const e = n.endTime ?? n.startTime ?? 0;
+            if (e > s) sections.push({ start: s, end: e });
+        } else if (n.type === 'roll-start') {
+            starts.push(n.time);
+        } else if (n.type === 'roll-end' && starts.length > 0) {
+            const start = starts.shift();
+            if (n.time > start) sections.push({ start, end: n.time });
+        }
+    }
+    return sections;
+}
+
+/**
+ * ノーツ配列からプレビュー用の音イベント列を作る（don/ka + roll区間は0.1sごとにdon）
+ * @param {Array<{ type?: string, time?: number, volume?: unknown }>} notes
+ * @returns {Array<{ time: number, type: 'don'|'ka', volume: number }>}
+ */
+function buildChartPreviewEventsFromNotes(notes) {
     const events = [];
-    for (const n of editingNotes) {
+    for (const n of notes) {
         if (!n) continue;
         if (n.type === 'don' || n.type === 'ka') {
             const t = Number(n.time ?? 0);
-            if (Number.isFinite(t) && t >= 0) events.push({ time: t, type: n.type });
+            if (Number.isFinite(t) && t >= 0) {
+                events.push({ time: t, type: n.type, volume: getNoteVolumeForEditor(n) });
+            }
         }
     }
-    for (const s of getRollSections()) {
+    for (const s of getRollSectionsFromNotes(notes)) {
         const start = Number(s.start ?? 0);
         const end = Number(s.end ?? 0);
         if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
         const step = 0.1;
         for (let t = start; t < end; t += step) {
-            events.push({ time: t, type: 'don' });
+            events.push({ time: t, type: 'don', volume: 1 });
         }
     }
     events.sort((a, b) => a.time - b.time);
     return events;
+}
+
+/**
+ * editingNotes からプレビュー用の音イベント列を作る（don/ka + roll区間は0.1sごとにdon）
+ * @returns {Array<{ time: number, type: 'don'|'ka', volume: number }>}
+ */
+function buildChartPreviewEvents() {
+    return buildChartPreviewEventsFromNotes(editingNotes);
+}
+
+/**
+ * 1P〜3Pスロットを結合したプレビュー用イベント列（再生前に flushChartPartSlot 済みであること）
+ */
+function buildChartPreviewEventsAllParts() {
+    const merged = [];
+    for (let p = 0; p < 3; p++) {
+        merged.push(...buildChartPreviewEventsFromNotes(chartPartNoteSlots[p] || []));
+    }
+    merged.sort((a, b) => a.time - b.time);
+    return merged;
+}
+
+/**
+ * 全パートのノーツからプレビュー総時間(秒)を算出（endTime入力優先）
+ */
+function getChartPreviewDurationSecAllParts() {
+    const endEl = document.getElementById('chart-edit-end-time');
+    const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
+    const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : null;
+    if (endMeasures != null) {
+        return buildBarTimeline(endMeasures).totalSec;
+    }
+
+    const getNoteMaxTime = (n) => n?.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n?.time ?? 0);
+    let maxNoteTime = 0;
+    for (let p = 0; p < 3; p++) {
+        const notes = chartPartNoteSlots[p] || [];
+        if (notes.length) {
+            const m = Math.max(...notes.map(getNoteMaxTime));
+            if (m > maxNoteTime) maxNoteTime = m;
+        }
+    }
+    const lastBarSec = getBarSec(getEffectiveBpmForBar(0));
+    return Math.max(0, maxNoteTime + lastBarSec);
+}
+
+/**
+ * 1P〜3Pのノーツと終了小節から、譜面の総小節数を返す（renderNotesStrip と整合）
+ * @returns {number}
+ */
+function getChartEditorTotalMeasuresAllParts() {
+    const getNoteMaxTime = (n) => n.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n.time ?? 0);
+    let maxNoteTime = 0;
+    for (let p = 0; p < 3; p++) {
+        const notes = chartPartNoteSlots[p] || [];
+        if (notes.length) {
+            const m = Math.max(...notes.map(getNoteMaxTime));
+            if (m > maxNoteTime) maxNoteTime = m;
+        }
+    }
+    const maxBarFromNotes = maxNoteTime > 0 ? timeToBarStepVarBpm(maxNoteTime).barIndex + 1 : 0;
+    const endEl = document.getElementById('chart-edit-end-time');
+    const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
+    const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : null;
+    const defaultMeasures = 16;
+    return Math.max(endMeasures ?? defaultMeasures, maxBarFromNotes, 1);
+}
+
+/**
+ * 再生秒から「4小節ウィンドウ」の先頭小節インデックス（0始まり）を返す
+ * @param {number} timeSec
+ * @returns {number}
+ */
+function getPlaybackFourBarWindowStart(timeSec) {
+    const { barIndex } = timeToBarStepVarBpm(timeSec);
+    return Math.floor(barIndex / 4) * 4;
+}
+
+/**
+ * 全パート再生の開始秒（選択中ノーツがあればその時刻、なければ曲頭）
+ * @returns {number}
+ */
+function getChartAllPartsPlaybackStartSec() {
+    if (selectedNoteIndex >= 0 && editingNotes[selectedNoteIndex]) {
+        const n = editingNotes[selectedNoteIndex];
+        if (n.type === 'roll') return Number(n.startTime ?? 0);
+        return Number(n.time ?? 0);
+    }
+    if (selectedNoteIndices.size > 0) {
+        const first = Math.min(...selectedNoteIndices);
+        const n = editingNotes[first];
+        if (n) {
+            if (n.type === 'roll') return Number(n.startTime ?? 0);
+            return Number(n.time ?? 0);
+        }
+    }
+    return 0;
+}
+
+/**
+ * 全パート再生用の3行ビューを表示開始する（編集グリッドは非表示）
+ */
+function enterChartMultiPartPlaybackView() {
+    chartPreviewState.allPartsPlayback = true;
+    chartPreviewState.playbackWindowStartBar = -1;
+    const multiWrap = document.getElementById('chart-playback-multi-wrap');
+    const grid = document.getElementById('chart-measures-grid');
+    if (grid) grid.style.display = 'none';
+    if (multiWrap) multiWrap.hidden = false;
+}
+
+/**
+ * 全パート再生ビューを閉じ、編集グリッドを復帰する
+ */
+function exitChartMultiPartPlaybackView() {
+    const multiWrap = document.getElementById('chart-playback-multi-wrap');
+    const grid = document.getElementById('chart-measures-grid');
+    if (multiWrap) {
+        multiWrap.hidden = true;
+        multiWrap.innerHTML = '';
+    }
+    if (grid) grid.style.display = '';
+    chartPreviewState.allPartsPlayback = false;
+    chartPreviewState.playbackWindowStartBar = -1;
+    chartPreviewState.activeMultiCells = null;
+    renderNotesStrip();
+}
+
+/**
+ * プレビュー用の1小節カード（読み取り専用）を組み立てる
+ * @param {number} barIndex
+ * @param {boolean} isPlaceholder 譜面終端を超える空き小節
+ * @returns {HTMLElement}
+ */
+function buildChartPlaybackMeasureCard(barIndex, isPlaceholder) {
+    const card = document.createElement('div');
+    card.className = 'measure-card staff-measure' + (isPlaceholder ? ' chart-playback-measure-placeholder' : '');
+    card.dataset.barIndex = String(barIndex);
+
+    const header = document.createElement('div');
+    header.className = 'measure-header staff-header';
+
+    const isFirstInRow = barIndex % 4 === 0;
+    if (isFirstInRow) {
+        const meta = document.createElement('div');
+        meta.className = 'staff-meta';
+        const clef = document.createElement('div');
+        clef.className = 'staff-clef';
+        clef.textContent = '𝄞';
+        const ts = document.createElement('div');
+        ts.className = 'staff-time-signature';
+        ts.innerHTML = '<span>4</span><span>4</span>';
+        meta.appendChild(clef);
+        meta.appendChild(ts);
+        header.appendChild(meta);
+    } else {
+        const spacer = document.createElement('div');
+        spacer.className = 'staff-meta staff-meta-spacer';
+        header.appendChild(spacer);
+    }
+
+    const title = document.createElement('div');
+    title.className = 'measure-title staff-measure-title';
+    title.textContent = isPlaceholder ? '—' : String(barIndex + 1);
+    header.appendChild(title);
+
+    const bpmWrap = document.createElement('div');
+    bpmWrap.className = 'measure-bpm-wrap chart-playback-measure-bpm-readonly';
+    const key = String(barIndex);
+    const hasOverride = chartMeasureBpms && Object.prototype.hasOwnProperty.call(chartMeasureBpms, key);
+    const eff = getEffectiveBpmForBar(barIndex);
+    const bpmLabel = document.createElement('span');
+    bpmLabel.className = 'chart-playback-bpm-label';
+    bpmLabel.textContent = hasOverride ? `BPM ${chartMeasureBpms[key]}` : `BPM ${eff}`;
+    bpmWrap.appendChild(bpmLabel);
+    header.appendChild(bpmWrap);
+
+    card.appendChild(header);
+
+    const cells = document.createElement('div');
+    cells.className = 'measure-cells';
+    for (let stepIndex = 0; stepIndex < 16; stepIndex++) {
+        const cell = document.createElement('div');
+        cell.className = 'measure-cell' + (isPlaceholder ? ' chart-playback-cell-disabled' : '');
+        cell.dataset.barIndex = String(barIndex);
+        cell.dataset.stepIndex = String(stepIndex);
+        cells.appendChild(cell);
+    }
+    card.appendChild(cells);
+    return card;
+}
+
+/**
+ * 指定ノーツをプレビューグリッドのセルへ描画する（読み取り専用チップ）
+ * @param {HTMLElement} gridEl
+ * @param {Array<{ type?: string, time?: number, startTime?: number, endTime?: number, volume?: unknown }>} notes
+ */
+function fillPlaybackNoteChipsInGrid(gridEl, notes) {
+    const cellMap = new Map();
+    gridEl.querySelectorAll('.measure-cell').forEach((cell) => {
+        cellMap.set(`${cell.dataset.barIndex}:${cell.dataset.stepIndex}`, cell);
+    });
+    notes.forEach((note, i) => {
+        if (!note) return;
+        const time = note.type === 'roll' ? (note.startTime ?? 0) : (note.time ?? 0);
+        const { barIndex, stepIndex } = timeToBarStepVarBpm(time);
+        const key = `${barIndex}:${stepIndex}`;
+        const cell = cellMap.get(key);
+        if (!cell || cell.classList.contains('chart-playback-cell-disabled')) return;
+
+        const chip = document.createElement('div');
+        const cls = note.type === 'ka' ? 'note-ka'
+            : note.type === 'don' ? 'note-don'
+                : note.type === 'roll-start' ? 'note-roll-start'
+                    : note.type === 'roll-end' ? 'note-roll-end'
+                        : 'note-don';
+        chip.className = `note-chip ${cls}`;
+        chip.dataset.pbIndex = String(i);
+        chip.textContent = note.type === 'ka' ? 'K'
+            : note.type === 'don' ? 'D'
+                : note.type === 'roll-start' ? 'S'
+                    : note.type === 'roll-end' ? 'E'
+                        : 'D';
+        if (note.type === 'don' || note.type === 'ka') {
+            const vol = getNoteVolumeForEditor(note);
+            chip.style.height = `${Math.max(4, 16 * vol)}px`;
+        }
+        cell.innerHTML = '';
+        cell.appendChild(chip);
+    });
+}
+
+/**
+ * 再生位置に合わせ3パート×4小節のDOMを同期する（4小節ブロックが変わったときだけ再構築）
+ * @param {number} songTimeSec
+ */
+function syncMultiPartPlaybackWindowDom(songTimeSec) {
+    const wrap = document.getElementById('chart-playback-multi-wrap');
+    if (!wrap) return;
+
+    const winStart = getPlaybackFourBarWindowStart(songTimeSec);
+    if (winStart === chartPreviewState.playbackWindowStartBar && wrap.querySelector('#chart-playback-multi-rows')) {
+        return;
+    }
+    chartPreviewState.playbackWindowStartBar = winStart;
+
+    const totalMeasures = getChartEditorTotalMeasuresAllParts();
+    const rowsRoot = document.createElement('div');
+    rowsRoot.id = 'chart-playback-multi-rows';
+    rowsRoot.className = 'chart-playback-multi-rows';
+
+    for (let part = 1; part <= 3; part++) {
+        const name = (chartPartNames[part] && chartPartNames[part].trim()) ? chartPartNames[part].trim() : `${part}P`;
+        const block = document.createElement('div');
+        block.className = 'chart-playback-part-block';
+        block.dataset.part = String(part);
+
+        const titleEl = document.createElement('div');
+        titleEl.className = 'chart-playback-part-title';
+        titleEl.textContent = name;
+        block.appendChild(titleEl);
+
+        const innerGrid = document.createElement('div');
+        innerGrid.className = 'chart-measures-grid chart-playback-part-grid';
+        innerGrid.dataset.part = String(part);
+
+        for (let k = 0; k < 4; k++) {
+            const barIndex = winStart + k;
+            const isPh = barIndex >= totalMeasures;
+            innerGrid.appendChild(buildChartPlaybackMeasureCard(barIndex, isPh));
+        }
+
+        const notes = chartPartNoteSlots[part - 1] || [];
+        fillPlaybackNoteChipsInGrid(innerGrid, notes);
+        block.appendChild(innerGrid);
+        rowsRoot.appendChild(block);
+    }
+
+    wrap.innerHTML = '';
+    wrap.appendChild(rowsRoot);
+}
+
+/**
+ * 全パート再生の再生ヘッドとセルハイライトを更新する
+ * @param {number} timeSec
+ */
+function setChartPreviewPlayheadAtTimeAllParts(timeSec) {
+    const scrollEl = document.getElementById('chart-measures-scroll');
+    const playhead = ensureChartPreviewPlayheadEl();
+    if (!scrollEl || !playhead) return;
+
+    const rowsRoot = document.getElementById('chart-playback-multi-rows');
+    if (!rowsRoot) return;
+
+    const { barIndex, stepIndex } = timeToBarStepVarBpm(timeSec);
+    const rowEls = rowsRoot.querySelectorAll('.chart-playback-part-block');
+    const cells = [];
+    for (const row of rowEls) {
+        const c = row.querySelector(`.measure-cell[data-bar-index="${barIndex}"][data-step-index="${stepIndex}"]`);
+        if (c && !c.classList.contains('chart-playback-cell-disabled')) cells.push(c);
+    }
+    if (cells.length === 0) return;
+
+    if (chartPreviewState.activeMultiCells && chartPreviewState.activeMultiCells.length) {
+        for (const el of chartPreviewState.activeMultiCells) {
+            el.classList.remove('chart-preview-active-cell');
+        }
+    }
+    chartPreviewState.activeMultiCells = cells;
+    for (const c of cells) c.classList.add('chart-preview-active-cell');
+    chartPreviewState.activeCellEl = cells[0];
+
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const topCell = cells[0].getBoundingClientRect();
+    const botCell = cells[cells.length - 1].getBoundingClientRect();
+    const left = (topCell.left - scrollRect.left) + scrollEl.scrollLeft + (topCell.width / 2) - 2;
+    const top = (topCell.top - scrollRect.top) + scrollEl.scrollTop;
+    const height = Math.max(topCell.height, (botCell.bottom - topCell.top));
+    playhead.style.height = `${height}px`;
+    playhead.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+
+    cells[0].scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 /**
@@ -475,10 +904,22 @@ function ensureChartPreviewPlayheadEl() {
  * @param {number} timeSec
  */
 function setChartPreviewPlayheadAtTime(timeSec) {
+    if (chartPreviewState.allPartsPlayback) {
+        setChartPreviewPlayheadAtTimeAllParts(timeSec);
+        return;
+    }
+
     const scrollEl = document.getElementById('chart-measures-scroll');
     const gridEl = document.getElementById('chart-measures-grid');
     const playhead = ensureChartPreviewPlayheadEl();
     if (!scrollEl || !gridEl || !playhead) return;
+
+    if (chartPreviewState.activeMultiCells && chartPreviewState.activeMultiCells.length) {
+        for (const el of chartPreviewState.activeMultiCells) {
+            el.classList.remove('chart-preview-active-cell');
+        }
+        chartPreviewState.activeMultiCells = null;
+    }
 
     const { barIndex, stepIndex } = timeToBarStepVarBpm(timeSec);
     const cell = gridEl.querySelector(`.measure-cell[data-bar-index="${barIndex}"][data-step-index="${stepIndex}"]`);
@@ -506,10 +947,12 @@ function setChartPreviewPlayheadAtTime(timeSec) {
  */
 function updateChartPreviewControlsUI() {
     const btnPlay = document.getElementById('btn-chart-preview-play');
+    const btnPlayAllParts = document.getElementById('btn-chart-play-all-parts');
     const btnStop = document.getElementById('btn-chart-preview-stop');
     const timeEl = document.getElementById('chart-preview-time');
     const enabled = Boolean(selectedChartId);
     if (btnPlay) btnPlay.disabled = !enabled || chartPreviewState.playing;
+    if (btnPlayAllParts) btnPlayAllParts.disabled = !enabled || chartPreviewState.playing;
     if (btnStop) btnStop.disabled = !enabled || !chartPreviewState.playing;
 
     const dur = getChartPreviewDurationSec();
@@ -520,11 +963,15 @@ function updateChartPreviewControlsUI() {
 }
 
 /**
- * プレビュー再生（音 + 緑バー）
- * @param {number} [startFromSec=0] 曲頭からの秒。指定時はその位置から終端まで再生
+ * プレビュー用イベント列を再生する（音 + 緑バー）
+ * @param {Array<{ time: number, type: 'don'|'ka', volume?: number }>} events
+ * @param {number} totalDur
+ * @param {number} [startFromSec=0]
+ * @param {{ allPartsLayout?: boolean }} [options]
  */
-async function playChartPreview(startFromSec = 0) {
+async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, options = {}) {
     if (!selectedChartId) return;
+    const allPartsLayout = Boolean(options.allPartsLayout);
     stopChartPreview();
     const statusEl = document.getElementById('chart-status');
     try {
@@ -545,8 +992,6 @@ async function playChartPreview(startFromSec = 0) {
         }
     }
 
-    const events = buildChartPreviewEvents();
-    const totalDur = getChartPreviewDurationSec();
     const startSec = Math.min(Math.max(0, Number(startFromSec) || 0), totalDur);
     const playDuration = Math.max(0, totalDur - startSec);
     chartPreviewState.durationSec = totalDur;
@@ -560,6 +1005,12 @@ async function playChartPreview(startFromSec = 0) {
 
     if (!chartPreviewAudioCtx) return;
     if (chartPreviewAudioCtx.state === 'suspended') await chartPreviewAudioCtx.resume();
+
+    if (allPartsLayout) {
+        enterChartMultiPartPlaybackView();
+        syncMultiPartPlaybackWindowDom(startSec);
+    }
+
     const baseTime = chartPreviewAudioCtx.currentTime + 0.05;
 
     const sources = [];
@@ -583,9 +1034,12 @@ async function playChartPreview(startFromSec = 0) {
         if (!buf) continue;
         const t = Number(ev.time ?? 0);
         if (!Number.isFinite(t) || t < startSec || t > totalDur + 0.001) continue;
+        const gain = chartPreviewAudioCtx.createGain();
+        gain.gain.value = clampNoteVolume(ev.volume != null ? ev.volume : 1);
         const src = chartPreviewAudioCtx.createBufferSource();
         src.buffer = buf;
-        src.connect(chartPreviewAudioCtx.destination);
+        src.connect(gain);
+        gain.connect(chartPreviewAudioCtx.destination);
         src.start(baseTime + (t - startSec));
         sources.push(src);
     }
@@ -604,6 +1058,9 @@ async function playChartPreview(startFromSec = 0) {
         if (timeEl) {
             timeEl.textContent = `${formatChartPreviewTime(songTime)} / ${formatChartPreviewTime(chartPreviewState.durationSec)}`;
         }
+        if (chartPreviewState.allPartsPlayback) {
+            syncMultiPartPlaybackWindowDom(songTime);
+        }
         setChartPreviewPlayheadAtTime(songTime);
         if (elapsed >= chartPreviewState.playDurationSec) {
             stopChartPreview();
@@ -616,9 +1073,31 @@ async function playChartPreview(startFromSec = 0) {
 }
 
 /**
+ * プレビュー再生（現在編集中パートのみ）
+ * @param {number} [startFromSec=0] 曲頭からの秒。指定時はその位置から終端まで再生
+ */
+async function playChartPreview(startFromSec = 0) {
+    const events = buildChartPreviewEvents();
+    const totalDur = getChartPreviewDurationSec();
+    await runChartPreviewPlayback(events, totalDur, startFromSec);
+}
+
+/**
+ * 1P・2P・3P をまとめて再生（未保存の編集内容はスロットへ反映してから再生）
+ * @param {number} [startFromSec=0]
+ */
+async function playChartPreviewAllParts(startFromSec = 0) {
+    flushChartPartSlot();
+    const events = buildChartPreviewEventsAllParts();
+    const totalDur = getChartPreviewDurationSecAllParts();
+    await runChartPreviewPlayback(events, totalDur, startFromSec, { allPartsLayout: true });
+}
+
+/**
  * プレビュー停止
  */
 function stopChartPreview() {
+    const wasAllParts = chartPreviewState.allPartsPlayback;
     if (chartPreviewState.rafId) cancelAnimationFrame(chartPreviewState.rafId);
     chartPreviewState.rafId = 0;
     if (chartPreviewState.sources && chartPreviewState.sources.length > 0) {
@@ -634,9 +1113,18 @@ function stopChartPreview() {
 
     const playhead = chartPreviewState.playheadEl;
     if (playhead) playhead.classList.remove('active');
+    if (chartPreviewState.activeMultiCells && chartPreviewState.activeMultiCells.length) {
+        for (const el of chartPreviewState.activeMultiCells) {
+            el.classList.remove('chart-preview-active-cell');
+        }
+        chartPreviewState.activeMultiCells = null;
+    }
     if (chartPreviewState.activeCellEl) {
         chartPreviewState.activeCellEl.classList.remove('chart-preview-active-cell');
         chartPreviewState.activeCellEl = null;
+    }
+    if (wasAllParts) {
+        exitChartMultiPartPlaybackView();
     }
     updateChartPreviewControlsUI();
 }
@@ -741,6 +1229,7 @@ function loadChartIntoEditor(chart) {
     const tempoEl = document.getElementById('chart-edit-tempo');
     const endTimeEl = document.getElementById('chart-edit-end-time');
     const btnSave = document.getElementById('btn-save-chart');
+    const btnPlayAllParts = document.getElementById('btn-chart-play-all-parts');
     if (nameEl) nameEl.value = chart.name || chart.id || '';
     if (difficultyEl) difficultyEl.value = chart.difficulty != null ? String(chart.difficulty) : '';
     if (tempoEl) tempoEl.value = chart.tempo != null ? String(chart.tempo) : '';
@@ -787,6 +1276,7 @@ function loadChartIntoEditor(chart) {
     selectedNoteIndex = -1;
     renderNotesStrip();
     if (btnSave) btnSave.disabled = false;
+    if (btnPlayAllParts) btnPlayAllParts.disabled = false;
     invalidateChartBgmPreviewCache();
     updateChartBgmRowUi();
     updateChartPreviewControlsUI();
@@ -802,6 +1292,7 @@ function clearChartEditor() {
     const endTimeEl = document.getElementById('chart-edit-end-time');
     const panel = document.getElementById('panel-chart');
     const btnSave = document.getElementById('btn-save-chart');
+    const btnPlayAllParts = document.getElementById('btn-chart-play-all-parts');
     if (nameEl) nameEl.value = '';
     if (difficultyEl) difficultyEl.value = '';
     if (tempoEl) tempoEl.value = '';
@@ -825,6 +1316,7 @@ function clearChartEditor() {
     selectedNoteIndex = -1;
     renderNotesStrip();
     if (btnSave) btnSave.disabled = true;
+    if (btnPlayAllParts) btnPlayAllParts.disabled = true;
     invalidateChartBgmPreviewCache();
     updateChartBgmRowUi();
     updateChartPreviewControlsUI();
@@ -834,26 +1326,7 @@ function clearChartEditor() {
  * 編集ノーツから連打区間 [{start, end}, ...] を算出
  */
 function getRollSections() {
-    const sorted = [...editingNotes].sort((a, b) => {
-        const ta = a.type === 'roll' ? a.startTime : a.time;
-        const tb = b.type === 'roll' ? b.startTime : b.time;
-        return (ta ?? 0) - (tb ?? 0);
-    });
-    const sections = [];
-    const starts = [];
-    for (const n of sorted) {
-        if (n.type === 'roll') {
-            const s = n.startTime ?? 0;
-            const e = n.endTime ?? n.startTime ?? 0;
-            if (e > s) sections.push({ start: s, end: e });
-        } else if (n.type === 'roll-start') {
-            starts.push(n.time);
-        } else if (n.type === 'roll-end' && starts.length > 0) {
-            const start = starts.shift();
-            if (n.time > start) sections.push({ start, end: n.time });
-        }
-    }
-    return sections;
+    return getRollSectionsFromNotes(editingNotes);
 }
 
 /**
@@ -1210,13 +1683,77 @@ function renderNotesStrip() {
                 : note.type === 'roll-start' ? 'S'
                     : note.type === 'roll-end' ? 'E'
                         : 'D';
-        chip.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const idx = parseInt(chip.dataset.index, 10);
-            selectedNoteIndex = (selectedNoteIndex === idx) ? -1 : idx;
-            selectedNoteIndices = new Set(selectedNoteIndex >= 0 ? [selectedNoteIndex] : []);
-            renderNotesStrip();
-        });
+        if (note.type === 'don' || note.type === 'ka') {
+            const vol = getNoteVolumeForEditor(note);
+            chip.style.height = `${Math.max(4, 16 * vol)}px`;
+            chip.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0) return;
+                e.stopPropagation();
+                const idx = parseInt(chip.dataset.index, 10);
+                const donKaInSelection = [...selectedNoteIndices].filter((i) => {
+                    const n = editingNotes[i];
+                    return n && (n.type === 'don' || n.type === 'ka');
+                });
+                const volumeResizeIndices = (selectedNoteIndices.has(idx) && donKaInSelection.length > 0)
+                    ? donKaInSelection
+                    : [idx];
+                const startY = e.clientY;
+                const startX = e.clientX;
+                let didVolumeDrag = false;
+                chartVolumeDragPointerId = e.pointerId;
+                try {
+                    chip.setPointerCapture(e.pointerId);
+                } catch {
+                    /* noop */
+                }
+                const onMove = (ev) => {
+                    if (ev.pointerId !== chartVolumeDragPointerId) return;
+                    const dx = ev.clientX - startX;
+                    const dy = ev.clientY - startY;
+                    if (Math.hypot(dx, dy) < CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX) return;
+                    if (!didVolumeDrag) {
+                        didVolumeDrag = true;
+                        ev.preventDefault();
+                        selectedNoteIndex = idx;
+                        if (volumeResizeIndices.length <= 1) {
+                            selectedNoteIndices = new Set([idx]);
+                        }
+                    }
+                    applyChartNoteVolumeFromPointer(volumeResizeIndices, ev.clientY, chip);
+                };
+                const onUp = (ev) => {
+                    if (ev.pointerId !== chartVolumeDragPointerId) return;
+                    chip.removeEventListener('pointermove', onMove);
+                    chip.removeEventListener('pointerup', onUp);
+                    chip.removeEventListener('pointercancel', onUp);
+                    try {
+                        chip.releasePointerCapture(ev.pointerId);
+                    } catch {
+                        /* noop */
+                    }
+                    chartVolumeDragPointerId = -1;
+                    if (didVolumeDrag) {
+                        flushChartPartSlot();
+                        renderNotesStrip();
+                    } else {
+                        selectedNoteIndex = (selectedNoteIndex === idx) ? -1 : idx;
+                        selectedNoteIndices = new Set(selectedNoteIndex >= 0 ? [selectedNoteIndex] : []);
+                        renderNotesStrip();
+                    }
+                };
+                chip.addEventListener('pointermove', onMove);
+                chip.addEventListener('pointerup', onUp);
+                chip.addEventListener('pointercancel', onUp);
+            });
+        } else {
+            chip.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(chip.dataset.index, 10);
+                selectedNoteIndex = (selectedNoteIndex === idx) ? -1 : idx;
+                selectedNoteIndices = new Set(selectedNoteIndex >= 0 ? [selectedNoteIndex] : []);
+                renderNotesStrip();
+            });
+        }
         cell.innerHTML = '';
         cell.appendChild(chip);
     });
@@ -1350,8 +1887,10 @@ function pasteClipboardNotesAt(barIndex, stepIndex) {
                 const pos = timeToBarStep(n.time ?? 0, bpm);
                 return pos.barIndex === targetBar && pos.stepIndex === targetStep;
             });
-            if (replaceIndex >= 0) editingNotes[replaceIndex] = { time, type: noteType };
-            else editingNotes.push({ time, type: noteType });
+            const base = { time, type: noteType };
+            if (item.note && item.note.volume != null) base.volume = clampNoteVolume(item.note.volume);
+            if (replaceIndex >= 0) editingNotes[replaceIndex] = base;
+            else editingNotes.push(base);
         }
     }
 
@@ -1485,6 +2024,13 @@ function bindChartPanelEvents() {
     if (btnPreviewStop) {
         btnPreviewStop.addEventListener('click', () => {
             stopChartPreview();
+        });
+    }
+    const btnPlayAllParts = document.getElementById('btn-chart-play-all-parts');
+    if (btnPlayAllParts) {
+        btnPlayAllParts.addEventListener('click', async () => {
+            const t0 = getChartAllPartsPlaybackStartSec();
+            await playChartPreviewAllParts(t0);
         });
     }
     updateChartPreviewControlsUI();
@@ -1853,7 +2399,7 @@ function bindChartPanelEvents() {
                     return nbi === bi && nsi === si;
                 });
                 if (replaceIndex >= 0) {
-                    editingNotes[replaceIndex] = { time: qTime, type };
+                    editingNotes[replaceIndex] = { ...editingNotes[replaceIndex], time: qTime, type };
                 } else {
                     editingNotes.push({ time: qTime, type });
                 }
@@ -1915,6 +2461,8 @@ function bindChartPanelEvents() {
 
         gridEl.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
+            // ノーツチップ上は範囲選択にしない（ドン・カの音量ドラッグと DOM 再生成の競合を防ぐ）
+            if (e.target.closest('.note-chip')) return;
             const cell = e.target.closest('.measure-cell');
             if (!cell) return;
             if (!selectedChartId) return;

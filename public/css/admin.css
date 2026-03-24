@@ -693,6 +693,62 @@ body.admin-dark .chart-panel .chart-bgm-status {
     align-items: start;
 }
 
+/* 全パート再生: 3行×4小節のみ表示 */
+.chart-panel .chart-playback-multi-wrap {
+    width: 100%;
+}
+
+.chart-panel .chart-playback-multi-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.chart-panel .chart-playback-part-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 6px;
+    letter-spacing: 0.02em;
+}
+
+.chart-panel .chart-playback-part-grid {
+    width: 100%;
+}
+
+.chart-panel .chart-playback-measure-placeholder {
+    opacity: 0.55;
+}
+
+.chart-panel .chart-playback-measure-bpm-readonly {
+    min-width: 72px;
+    justify-content: flex-end;
+}
+
+.chart-panel .chart-playback-bpm-label {
+    font-size: 11px;
+    color: #666;
+    white-space: nowrap;
+}
+
+.chart-panel .chart-playback-cell-disabled {
+    background: repeating-linear-gradient(
+        -45deg,
+        rgba(0, 0, 0, 0.04),
+        rgba(0, 0, 0, 0.04) 6px,
+        transparent 6px,
+        transparent 12px
+    );
+}
+
+body.admin-dark .chart-panel .chart-playback-part-title {
+    color: #e8e4dc;
+}
+
+body.admin-dark .chart-panel .chart-playback-bpm-label {
+    color: #9c9992;
+}
+
 .chart-panel .measure-card {
     border: 1px solid #e0e0e0;
     border-radius: 8px;
@@ -899,8 +955,10 @@ body.admin-dark .chart-panel .chart-bgm-status {
     left: 50%;
     top: 50%;
     width: 22px;
+    min-height: 4px;
     height: 16px;
     transform: translate(-50%, -50%);
+    touch-action: none;
     border-radius: 999px;
     display: inline-flex;
     align-items: center;
