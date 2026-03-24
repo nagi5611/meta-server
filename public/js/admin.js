@@ -142,8 +142,10 @@ let chartPreviewState = {
     durationSec: 0,
     /** プレビュー開始位置（曲頭からの秒） */
     startOffsetSec: 0,
-    /** 今回の再生長（秒）= durationSec - startOffsetSec */
+    /** 今回の再生長（実時間・秒）。小節BPMでグリッド時間に対する伸縮あり */
     playDurationSec: 0,
+    /** 再生開始時の実時間オフセット（wallAtUniform(startOffsetSec)） */
+    playbackWallAnchor: 0,
     sources: [],
     playheadEl: null,
     activeCellEl: null,
@@ -277,44 +279,18 @@ function getEffectiveBpmForBar(barIndex) {
 }
 
 /**
- * totalMeasures 分のタイムライン（barStartSec/barSec）を作る
- * @param {number} totalMeasures
- */
-function buildBarTimeline(totalMeasures) {
-    const tm = Math.max(1, Math.floor(Number(totalMeasures) || 1));
-    const barSec = new Array(tm);
-    const barStartSec = new Array(tm);
-    let acc = 0;
-    for (let i = 0; i < tm; i++) {
-        barStartSec[i] = acc;
-        const bpm = getEffectiveBpmForBar(i);
-        const sec = getBarSec(bpm);
-        barSec[i] = sec;
-        acc += sec;
-    }
-    return { barSec, barStartSec, totalSec: acc };
-}
-
-/**
- * timeSecを小節/16分割に変換する（可変BPM対応）
+ * 編集グリッド用: ベースBPMのみで各小節の長さが一定のタイムライン上の秒 → 小節/16分割
+ * （小節ごとのBPMはノーツ位置に影響しない）
  * @param {number} timeSec
+ * @param {number} baseBpm
+ * @returns {{ barIndex: number, stepIndex: number }}
  */
-function timeToBarStepVarBpm(timeSec) {
+function timeToBarStepUniformSecs(timeSec, baseBpm) {
     const t = Math.max(0, Number(timeSec) || 0);
-    const endEl = document.getElementById('chart-edit-end-time');
-    const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
-    const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : 16;
-    const { barSec, barStartSec } = buildBarTimeline(endMeasures + 64); // 余裕
-    let barIndex = 0;
-    for (let i = 0; i < barStartSec.length; i++) {
-        const s = barStartSec[i];
-        const e = s + barSec[i];
-        if (t >= s && t < e) { barIndex = i; break; }
-        if (t >= e) barIndex = i;
-    }
-    const s0 = barStartSec[barIndex] ?? 0;
-    const sec = barSec[barIndex] ?? getBarSec(getEffectiveBpmForBar(barIndex));
-    const within = Math.max(0, t - s0);
+    const sec = getBarSec(baseBpm);
+    if (sec <= 0) return { barIndex: 0, stepIndex: 0 };
+    const barIndex = Math.floor(t / sec);
+    const within = t - barIndex * sec;
     const stepSec = sec / 16;
     let stepIndex = Math.round(within / stepSec);
     if (stepIndex >= 16) stepIndex = 15;
@@ -323,24 +299,66 @@ function timeToBarStepVarBpm(timeSec) {
 }
 
 /**
- * 小節/16分割を秒timeに変換する（可変BPM対応）
+ * 編集グリッド用: 小節/16分割 → ベースBPMの等間隔タイムライン上の秒
  * @param {number} barIndex
  * @param {number} stepIndex
+ * @param {number} baseBpm
  */
-function barStepToTimeVarBpm(barIndex, stepIndex) {
+function barStepToTimeUniformSecs(barIndex, stepIndex, baseBpm) {
     const bi = Math.max(0, Number(barIndex) || 0);
     const si = Math.max(0, Math.min(15, Number(stepIndex) || 0));
-    // 必要な小節までの累積を作る（biまで）
-    let acc = 0;
-    for (let i = 0; i < bi; i++) {
-        acc += getBarSec(getEffectiveBpmForBar(i));
-    }
-    const sec = getBarSec(getEffectiveBpmForBar(bi));
-    return acc + si * (sec / 16);
+    const sec = getBarSec(baseBpm);
+    return bi * sec + si * (sec / 16);
 }
 
 /**
- * BPM/小節BPM変更時に、ノーツの小節/位置（16分割）を維持したまま time(秒) を更新する（可変BPM対応）
+ * グリッド時間(秒)を実時間(秒)へ。小節BPMが高いほど同じグリッド区間の実時間が短くなる。
+ * @param {number} uSec
+ */
+function wallAtUniform(uSec) {
+    const u = Math.max(0, Number(uSec) || 0);
+    const base = getChartTempo();
+    const Tuni = getBarSec(base);
+    if (Tuni <= 0) return 0;
+    const barIndex = Math.floor(u / Tuni);
+    const within = u - barIndex * Tuni;
+    let wall = 0;
+    for (let i = 0; i < barIndex; i++) {
+        wall += getBarSec(getEffectiveBpmForBar(i));
+    }
+    const Twall = getBarSec(getEffectiveBpmForBar(barIndex));
+    wall += (within / Tuni) * Twall;
+    return wall;
+}
+
+/**
+ * 実時間(秒)をグリッド時間(秒)へ（wallAtUniform の逆変換）
+ * @param {number} wallSec
+ */
+function uniformAtWall(wallSec) {
+    let wallRem = Math.max(0, Number(wallSec) || 0);
+    const base = getChartTempo();
+    const Tuni = getBarSec(base);
+    if (Tuni <= 0) return 0;
+    let u = 0;
+    let barIndex = 0;
+    const maxBars = 200000;
+    while (wallRem > 1e-9 && barIndex < maxBars) {
+        const Twall = getBarSec(getEffectiveBpmForBar(barIndex));
+        if (wallRem >= Twall) {
+            wallRem -= Twall;
+            u += Tuni;
+            barIndex++;
+        } else {
+            u += (wallRem / Twall) * Tuni;
+            wallRem = 0;
+        }
+    }
+    return u;
+}
+
+/**
+ * BPM/ベースBPM変更時に、ノーツの小節/位置（16分割）を維持したまま time(秒) を更新する
  * @param {number} oldBaseBpm
  * @param {number} newBaseBpm
  */
@@ -350,61 +368,20 @@ function retimeEditingNotesKeepGridPositionVarBpm(oldBaseBpm, newBaseBpm) {
     if (!Number.isFinite(ob) || !Number.isFinite(nb) || ob <= 0 || nb <= 0) return;
     if (ob === nb) return;
 
-    // old/new の base BPM を使うため、一時的に getChartTempo を置き換えず、計算関数側で参照できないので
-    // ここでは「現在の chartMeasureBpms はそのまま、baseだけ old/new として扱う」ためのローカル関数を用意する。
-    const getEffective = (barIndex, baseBpm) => {
-        const bi = Math.max(0, Number(barIndex) || 0);
-        const ov = chartMeasureBpms && Object.prototype.hasOwnProperty.call(chartMeasureBpms, String(bi))
-            ? Number(chartMeasureBpms[String(bi)])
-            : NaN;
-        if (Number.isFinite(ov) && ov >= 1 && ov <= 500) return ov;
-        return baseBpm;
-    };
-    const barStepToTimeWithBase = (barIndex, stepIndex, baseBpm) => {
-        const bi = Math.max(0, Number(barIndex) || 0);
-        const si = Math.max(0, Math.min(15, Number(stepIndex) || 0));
-        let acc = 0;
-        for (let i = 0; i < bi; i++) acc += getBarSec(getEffective(i, baseBpm));
-        const sec = getBarSec(getEffective(bi, baseBpm));
-        return acc + si * (sec / 16);
-    };
-    const timeToBarStepWithBase = (timeSec, baseBpm) => {
-        const t = Math.max(0, Number(timeSec) || 0);
-        // まず十分長い範囲で探索（入力endMeasuresがあればそれを優先）
-        const endEl = document.getElementById('chart-edit-end-time');
-        const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
-        const maxMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) + 64 : 256;
-        let acc = 0;
-        let barIndex = 0;
-        for (let i = 0; i < maxMeasures; i++) {
-            const sec = getBarSec(getEffective(i, baseBpm));
-            if (t >= acc && t < acc + sec) { barIndex = i; break; }
-            acc += sec;
-            barIndex = i;
-        }
-        const sec = getBarSec(getEffective(barIndex, baseBpm));
-        const within = Math.max(0, t - acc);
-        const stepSec = sec / 16;
-        let stepIndex = Math.round(within / stepSec);
-        if (stepIndex >= 16) stepIndex = 15;
-        if (stepIndex < 0) stepIndex = 0;
-        return { barIndex, stepIndex };
-    };
-
     for (const n of editingNotes) {
         if (!n) continue;
         if (n.type === 'roll') {
             const s = Number(n.startTime ?? 0);
             const e = Number(n.endTime ?? n.startTime ?? 0);
-            const ps = timeToBarStepWithBase(s, ob);
-            const pe = timeToBarStepWithBase(e, ob);
-            n.startTime = barStepToTimeWithBase(ps.barIndex, ps.stepIndex, nb);
-            n.endTime = barStepToTimeWithBase(pe.barIndex, pe.stepIndex, nb);
+            const ps = timeToBarStepUniformSecs(s, ob);
+            const pe = timeToBarStepUniformSecs(e, ob);
+            n.startTime = barStepToTimeUniformSecs(ps.barIndex, ps.stepIndex, nb);
+            n.endTime = barStepToTimeUniformSecs(pe.barIndex, pe.stepIndex, nb);
             continue;
         }
         const t = Number(n.time ?? 0);
-        const p = timeToBarStepWithBase(t, ob);
-        n.time = barStepToTimeWithBase(p.barIndex, p.stepIndex, nb);
+        const p = timeToBarStepUniformSecs(t, ob);
+        n.time = barStepToTimeUniformSecs(p.barIndex, p.stepIndex, nb);
     }
 }
 
@@ -415,13 +392,14 @@ function getChartPreviewDurationSec() {
     const endEl = document.getElementById('chart-edit-end-time');
     const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
     const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : null;
+    const base = getChartTempo();
     if (endMeasures != null) {
-        return buildBarTimeline(endMeasures).totalSec;
+        return endMeasures * getBarSec(base);
     }
 
     const getNoteMaxTime = (n) => n?.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n?.time ?? 0);
     const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
-    const lastBarSec = getBarSec(getEffectiveBpmForBar(0));
+    const lastBarSec = getBarSec(base);
     return Math.max(0, maxNoteTime + lastBarSec);
 }
 
@@ -508,8 +486,9 @@ function getChartPreviewDurationSecAllParts() {
     const endEl = document.getElementById('chart-edit-end-time');
     const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
     const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : null;
+    const base = getChartTempo();
     if (endMeasures != null) {
-        return buildBarTimeline(endMeasures).totalSec;
+        return endMeasures * getBarSec(base);
     }
 
     const getNoteMaxTime = (n) => n?.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n?.time ?? 0);
@@ -521,7 +500,7 @@ function getChartPreviewDurationSecAllParts() {
             if (m > maxNoteTime) maxNoteTime = m;
         }
     }
-    const lastBarSec = getBarSec(getEffectiveBpmForBar(0));
+    const lastBarSec = getBarSec(base);
     return Math.max(0, maxNoteTime + lastBarSec);
 }
 
@@ -539,7 +518,7 @@ function getChartEditorTotalMeasuresAllParts() {
             if (m > maxNoteTime) maxNoteTime = m;
         }
     }
-    const maxBarFromNotes = maxNoteTime > 0 ? timeToBarStepVarBpm(maxNoteTime).barIndex + 1 : 0;
+    const maxBarFromNotes = maxNoteTime > 0 ? timeToBarStepUniformSecs(maxNoteTime, getChartTempo()).barIndex + 1 : 0;
     const endEl = document.getElementById('chart-edit-end-time');
     const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
     const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : null;
@@ -553,7 +532,7 @@ function getChartEditorTotalMeasuresAllParts() {
  * @returns {number}
  */
 function getPlaybackFourBarWindowStart(timeSec) {
-    const { barIndex } = timeToBarStepVarBpm(timeSec);
+    const { barIndex } = timeToBarStepUniformSecs(timeSec, getChartTempo());
     return Math.floor(barIndex / 4) * 4;
 }
 
@@ -684,7 +663,7 @@ function fillPlaybackNoteChipsInGrid(gridEl, notes) {
     notes.forEach((note, i) => {
         if (!note) return;
         const time = note.type === 'roll' ? (note.startTime ?? 0) : (note.time ?? 0);
-        const { barIndex, stepIndex } = timeToBarStepVarBpm(time);
+        const { barIndex, stepIndex } = timeToBarStep(time, getChartTempo());
         const key = `${barIndex}:${stepIndex}`;
         const cell = cellMap.get(key);
         if (!cell || cell.classList.contains('chart-playback-cell-disabled')) return;
@@ -773,7 +752,7 @@ function setChartPreviewPlayheadAtTimeAllParts(timeSec) {
     const rowsRoot = document.getElementById('chart-playback-multi-rows');
     if (!rowsRoot) return;
 
-    const { barIndex, stepIndex } = timeToBarStepVarBpm(timeSec);
+    const { barIndex, stepIndex } = timeToBarStep(timeSec, getChartTempo());
     const rowEls = rowsRoot.querySelectorAll('.chart-playback-part-block');
     const cells = [];
     for (const row of rowEls) {
@@ -921,7 +900,7 @@ function setChartPreviewPlayheadAtTime(timeSec) {
         chartPreviewState.activeMultiCells = null;
     }
 
-    const { barIndex, stepIndex } = timeToBarStepVarBpm(timeSec);
+    const { barIndex, stepIndex } = timeToBarStep(timeSec, getChartTempo());
     const cell = gridEl.querySelector(`.measure-cell[data-bar-index="${barIndex}"][data-step-index="${stepIndex}"]`);
     if (!cell) return;
 
@@ -993,12 +972,15 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
     }
 
     const startSec = Math.min(Math.max(0, Number(startFromSec) || 0), totalDur);
-    const playDuration = Math.max(0, totalDur - startSec);
+    const wallStart = wallAtUniform(startSec);
+    const wallEnd = wallAtUniform(totalDur);
+    const playDurationWall = Math.max(0, wallEnd - wallStart);
     chartPreviewState.durationSec = totalDur;
     chartPreviewState.startOffsetSec = startSec;
-    chartPreviewState.playDurationSec = playDuration;
+    chartPreviewState.playDurationSec = playDurationWall;
+    chartPreviewState.playbackWallAnchor = wallStart;
 
-    if (playDuration <= 0) {
+    if (playDurationWall <= 0) {
         updateChartPreviewControlsUI();
         return;
     }
@@ -1015,9 +997,9 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
 
     const sources = [];
     if (bgmBuffer && bgmBuffer.duration > 0) {
-        const sliceStart = Math.min(Math.max(0, startSec), Math.max(0, bgmBuffer.duration - 1e-6));
-        const maxFromSlice = Math.max(0, bgmBuffer.duration - sliceStart);
-        const bgmPlayLen = Math.min(playDuration, maxFromSlice);
+        const sliceStartWall = Math.min(Math.max(0, wallStart), Math.max(0, bgmBuffer.duration - 1e-6));
+        const maxFromSlice = Math.max(0, bgmBuffer.duration - sliceStartWall);
+        const bgmPlayLen = Math.min(playDurationWall, maxFromSlice);
         if (bgmPlayLen > 0.02) {
             const gain = chartPreviewAudioCtx.createGain();
             gain.gain.value = 0.42;
@@ -1025,7 +1007,7 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
             bgmSrc.buffer = bgmBuffer;
             bgmSrc.connect(gain);
             gain.connect(chartPreviewAudioCtx.destination);
-            bgmSrc.start(baseTime, sliceStart, bgmPlayLen);
+            bgmSrc.start(baseTime, sliceStartWall, bgmPlayLen);
             sources.push(bgmSrc);
         }
     }
@@ -1040,7 +1022,8 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
         src.buffer = buf;
         src.connect(gain);
         gain.connect(chartPreviewAudioCtx.destination);
-        src.start(baseTime + (t - startSec));
+        const evWall = wallAtUniform(t);
+        src.start(baseTime + (evWall - wallStart));
         sources.push(src);
     }
 
@@ -1054,7 +1037,8 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
     const tick = () => {
         if (!chartPreviewState.playing) return;
         const elapsed = (performance.now() - chartPreviewState.startedAtPerfMs) / 1000;
-        const songTime = chartPreviewState.startOffsetSec + Math.min(elapsed, chartPreviewState.playDurationSec);
+        const wallNow = chartPreviewState.playbackWallAnchor + Math.min(elapsed, chartPreviewState.playDurationSec);
+        const songTime = uniformAtWall(wallNow);
         if (timeEl) {
             timeEl.textContent = `${formatChartPreviewTime(songTime)} / ${formatChartPreviewTime(chartPreviewState.durationSec)}`;
         }
@@ -1110,6 +1094,7 @@ function stopChartPreview() {
     chartPreviewState.startedAtPerfMs = 0;
     chartPreviewState.startOffsetSec = 0;
     chartPreviewState.playDurationSec = 0;
+    chartPreviewState.playbackWallAnchor = 0;
 
     const playhead = chartPreviewState.playheadEl;
     if (playhead) playhead.classList.remove('active');
@@ -1385,19 +1370,21 @@ function retimeEditingNotesKeepGridPosition(oldBpm, newBpm) {
 }
 
 /**
- * 秒timeを小節/16分割に変換する（stepは0-15）
+ * 秒timeを小節/16分割に変換する（stepは0-15）。編集グリッドはベースBPMの等間隔タイムライン。
+ * @param {number} timeSec
+ * @param {number} bpm
  */
 function timeToBarStep(timeSec, bpm) {
-    // 既存呼び出し互換（bpm引数は無視して可変BPM版を使う）
-    return timeToBarStepVarBpm(timeSec);
+    const b = Number.isFinite(Number(bpm)) && Number(bpm) > 0 ? Number(bpm) : getChartTempo();
+    return timeToBarStepUniformSecs(timeSec, b);
 }
 
 /**
- * 小節/16分割を秒timeに変換する
+ * 小節/16分割を秒timeに変換する（編集用・ベースBPMの等間隔）
  */
 function barStepToTime(barIndex, stepIndex, bpm) {
-    // 既存呼び出し互換（bpm引数は無視して可変BPM版を使う）
-    return barStepToTimeVarBpm(barIndex, stepIndex);
+    const b = Number.isFinite(Number(bpm)) && Number(bpm) > 0 ? Number(bpm) : getChartTempo();
+    return barStepToTimeUniformSecs(barIndex, stepIndex, b);
 }
 
 /**
@@ -1427,7 +1414,7 @@ function renderNotesStrip() {
     const barSecBase = getBarSec(bpm);
     const getNoteMaxTime = (n) => n.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n.time ?? 0);
     const maxNoteTime = editingNotes.length ? Math.max(...editingNotes.map(getNoteMaxTime)) : 0;
-    const maxBarFromNotes = timeToBarStepVarBpm(maxNoteTime).barIndex + 1;
+    const maxBarFromNotes = timeToBarStepUniformSecs(maxNoteTime, bpm).barIndex + 1;
     const endEl = document.getElementById('chart-edit-end-time');
     const endMeasuresInput = endEl && endEl.value !== '' ? Number(endEl.value) : NaN;
     const endMeasures = Number.isFinite(endMeasuresInput) ? Math.max(1, Math.floor(endMeasuresInput)) : null;
@@ -1454,7 +1441,7 @@ function renderNotesStrip() {
             e.preventDefault();
             e.stopPropagation();
             if (!selectedChartId) return;
-            const t0 = barStepToTimeVarBpm(barIndex, 0);
+            const t0 = barStepToTime(barIndex, 0, getChartTempo());
             playChartPreview(t0);
         });
         header.appendChild(previewPlayBtn);
@@ -1541,7 +1528,7 @@ function renderNotesStrip() {
             e.stopPropagation();
             if (!selectedChartId) return;
             const insertAfterBarIndex = barIndex; // 0-based
-            const insertTime = barStepToTimeVarBpm(insertAfterBarIndex + 1, 0);
+            const insertTime = barStepToTime(insertAfterBarIndex + 1, 0, getChartTempo());
             const shiftSec = barSecBase; // 追加小節はbase BPM
 
             // 以降の小節BPM上書きを1つ後ろへずらす
@@ -1593,8 +1580,8 @@ function renderNotesStrip() {
             if (!confirm(`第${barIndex + 1}小節を削除しますか？（この小節内のノーツは削除され、以降は前に詰められます）`)) return;
 
             const deleteBarIndex = barIndex; // 0-based
-            const startTime = barStepToTimeVarBpm(deleteBarIndex, 0);
-            const endTime = barStepToTimeVarBpm(deleteBarIndex + 1, 0);
+            const startTime = barStepToTime(deleteBarIndex, 0, getChartTempo());
+            const endTime = barStepToTime(deleteBarIndex + 1, 0, getChartTempo());
             const shiftSec = Math.max(0, endTime - startTime);
 
             // 小節BPM上書き: 対象を削除し、以降を前へずらす
@@ -1662,7 +1649,7 @@ function renderNotesStrip() {
 
     editingNotes.forEach((note, i) => {
         const time = note.type === 'roll' ? (note.startTime ?? 0) : (note.time ?? 0);
-        const { barIndex, stepIndex } = timeToBarStepVarBpm(time);
+        const { barIndex, stepIndex } = timeToBarStep(time, bpm);
         const key = `${barIndex}:${stepIndex}`;
         const cell = cellMap.get(key);
         if (!cell) return;
@@ -1923,7 +1910,7 @@ function pasteClipboardNotesAt(barIndex, stepIndex) {
 function getNoteEditorAbsStep(note) {
     if (!note) return 0;
     const t = note.type === 'roll' ? (note.startTime ?? 0) : (note.time ?? 0);
-    const { barIndex, stepIndex } = timeToBarStepVarBpm(t);
+    const { barIndex, stepIndex } = timeToBarStep(t, getChartTempo());
     return barIndex * 16 + stepIndex;
 }
 
@@ -1970,7 +1957,7 @@ function tryMoveSelectedNotesHorizontally(delta) {
         const na = newAbsList[k];
         const nb = Math.floor(na / 16);
         const ns = na % 16;
-        const newT = barStepToTimeVarBpm(nb, ns);
+        const newT = barStepToTime(nb, ns, getChartTempo());
         if (n.type === 'roll') {
             const s = Number(n.startTime ?? 0);
             const e = Number(n.endTime ?? n.startTime ?? 0);
@@ -2186,7 +2173,7 @@ function bindChartPanelEvents() {
             const endMeasures = endTimeEl && endTimeEl.value !== '' ? Number(endTimeEl.value) : null;
             const bpm = tempo != null && Number.isFinite(tempo) ? tempo : getChartTempo();
             const endTime = endMeasures != null && Number.isFinite(endMeasures)
-                ? buildBarTimeline(Math.max(1, Math.floor(endMeasures))).totalSec
+                ? Math.max(1, Math.floor(endMeasures)) * getBarSec(bpm)
                 : null;
             statusEl.textContent = '保存中...';
             flushChartPartSlot();

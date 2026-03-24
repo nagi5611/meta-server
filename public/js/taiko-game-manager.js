@@ -57,6 +57,46 @@ function clampChartNoteVolume(v) {
     return Math.min(3, Math.max(0.1, x));
 }
 
+/**
+ * BPM から 4/4 の1小節の秒数
+ * @param {number} bpm
+ */
+function taikoBarSecFromBpm(bpm) {
+    const v = Number(bpm);
+    if (!Number.isFinite(v) || v <= 0) return 2;
+    return (60 / v) * 4;
+}
+
+/**
+ * 譜面エディタのグリッド時間(秒)を実時間(秒)へ変換する（小節ごとBPMで伸縮）
+ * @param {number} uSec
+ * @param {number} baseBpm
+ * @param {Record<string, number>} measureBpms
+ */
+function taikoWallAtUniform(uSec, baseBpm, measureBpms) {
+    const u = Math.max(0, Number(uSec) || 0);
+    const base = Number.isFinite(baseBpm) && baseBpm > 0 ? baseBpm : 120;
+    const Tuni = taikoBarSecFromBpm(base);
+    if (Tuni <= 0) return 0;
+    const eff = (barIndex) => {
+        const bi = Math.max(0, Number(barIndex) || 0);
+        const ov = measureBpms && Object.prototype.hasOwnProperty.call(measureBpms, String(bi))
+            ? Number(measureBpms[String(bi)])
+            : NaN;
+        if (Number.isFinite(ov) && ov >= 1 && ov <= 500) return ov;
+        return base;
+    };
+    const barIndex = Math.floor(u / Tuni);
+    const within = u - barIndex * Tuni;
+    let wall = 0;
+    for (let i = 0; i < barIndex; i++) {
+        wall += taikoBarSecFromBpm(eff(i));
+    }
+    const Twall = taikoBarSecFromBpm(eff(barIndex));
+    wall += (within / Tuni) * Twall;
+    return wall;
+}
+
 class TaikoGameManager {
     constructor() {
         this._overlay = null;
@@ -72,7 +112,11 @@ class TaikoGameManager {
         this._score = 0;
         this._maxScore = 0; // 満点（全ノーツ良 = 100pt × ノーツ数）
         this._chart = [];
-        this._chartMeta = null; // { id, name, difficulty, endTime } 選曲時
+        this._chartMeta = null; // { id, name, difficulty, endTime, tempo?, measureBpms? } 選曲時
+        /** @type {number} 譜面のベース BPM（グリッド時間の定義に使用） */
+        this._chartBaseBpm = 120;
+        /** @type {Record<string, number>} 小節インデックス → BPM 上書き */
+        this._chartMeasureBpms = {};
         this._judgeCounts = { good: 0, ok: 0, miss: 0 };
         this._currentCombo = 0;
         this._maxCombo = 0;
@@ -329,7 +373,14 @@ class TaikoGameManager {
                 li.dataset.chartId = id;
                 li.addEventListener('click', () => {
                     const notes = Array.isArray(c.notes) ? c.notes : [];
-                    const meta = { id, name: c.name || id, difficulty: c.difficulty, endTime: c.endTime };
+                    const meta = {
+                        id,
+                        name: c.name || id,
+                        difficulty: c.difficulty,
+                        endTime: c.endTime,
+                        tempo: c.tempo,
+                        measureBpms: c.measureBpms
+                    };
                     this._startGamePlay(notes.length ? notes : DEMO_CHART, meta);
                 });
                 this._chartListEl.appendChild(li);
@@ -347,7 +398,7 @@ class TaikoGameManager {
     /**
      * 選んだ譜面でゲームを開始する
      * @param {Array<{time:number, type:string}>} chart - 譜面
-     * @param {{ id: string, name: string, difficulty?: number, endTime?: number } | null} meta - 曲メタ（選曲時）
+     * @param {{ id: string, name: string, difficulty?: number, endTime?: number, tempo?: number, measureBpms?: Record<string, number> | null } | null} meta - 曲メタ（選曲時）
      * @param {{ startAtPerfSec?: number } | undefined} [opts]
      */
     _startGamePlay(chart, meta, opts) {
@@ -357,7 +408,12 @@ class TaikoGameManager {
         const resultsEl = document.getElementById('taiko-results');
         if (resultsEl) resultsEl.style.display = 'none';
 
-        this._chart = this._normalizeChart(chart);
+        const tempoRaw = meta && meta.tempo != null ? Number(meta.tempo) : NaN;
+        this._chartBaseBpm = Number.isFinite(tempoRaw) && tempoRaw >= 1 && tempoRaw <= 500 ? tempoRaw : 120;
+        this._chartMeasureBpms = (meta && meta.measureBpms && typeof meta.measureBpms === 'object')
+            ? { ...meta.measureBpms }
+            : {};
+        this._chart = this._applyWallTimesToChart(this._normalizeChart(chart));
         this._chartMeta = meta || null;
         this._score = 0;
         const donKaCount = this._chart.filter((n) => n.type !== 'roll').length;
@@ -408,6 +464,29 @@ class TaikoGameManager {
         });
     }
 
+    /**
+     * グリッド上の時刻を実時間に変換（インスタンスのベース BPM・小節 BPM を使用）
+     * @param {number} uSec
+     */
+    _wallAtUniform(uSec) {
+        return taikoWallAtUniform(uSec, this._chartBaseBpm, this._chartMeasureBpms);
+    }
+
+    /**
+     * 正規化済み譜面各ノーツに実時間でのヒット時刻を付与する
+     * @param {Array<Record<string, unknown>>} chart
+     */
+    _applyWallTimesToChart(chart) {
+        return chart.map((n) => {
+            if (n.type === 'roll') {
+                const ws = this._wallAtUniform(n.startTime ?? 0);
+                const we = this._wallAtUniform(n.endTime ?? n.startTime ?? 0);
+                return { ...n, _wallStart: ws, _wallEnd: we };
+            }
+            return { ...n, _wallHit: this._wallAtUniform(n.time ?? 0) };
+        });
+    }
+
     close() {
         if (!this._open) return;
         this._stopBgm();
@@ -420,6 +499,8 @@ class TaikoGameManager {
         this._activeNotes = [];
         this._chart = [];
         this._chartMeta = null;
+        this._chartBaseBpm = 120;
+        this._chartMeasureBpms = {};
         this._processedChartIndices = new Set();
         this._startTime = null;
         clearTimeout(this._judgeTimer);
@@ -778,7 +859,9 @@ class TaikoGameManager {
                     id: payload.chartId,
                     name: c?.name || payload.chartId,
                     difficulty: c?.difficulty,
-                    endTime: c?.endTime
+                    endTime: c?.endTime,
+                    tempo: c?.tempo,
+                    measureBpms: c?.measureBpms
                 };
                 this._startGamePlay(notes, meta, { startAtPerfSec });
             } catch (e) {
@@ -988,7 +1071,7 @@ class TaikoGameManager {
 
         const now = this._now();
         const inRoll = this._chart.some(
-            (n) => n.type === 'roll' && now >= (n.startTime ?? 0) && now <= (n.endTime ?? n.startTime ?? 0)
+            (n) => n.type === 'roll' && now >= (n._wallStart ?? 0) && now <= (n._wallEnd ?? n._wallStart ?? 0)
         );
         if (inRoll) {
             this._rollCount++;
@@ -1139,22 +1222,23 @@ class TaikoGameManager {
         // 新規ノーツ生成（到達時刻 - NOTE_TRAVEL_TIME 秒前に出現）
         this._chart.forEach((note, chartIndex) => {
             if (this._processedChartIndices.has(chartIndex)) return;
-            const spawnTime = note.type === 'roll' ? (note.startTime ?? 0) : (note.targetTime ?? note.time);
+            const hitWall = note.type === 'roll' ? note._wallStart : note._wallHit;
+            const spawnWall = (hitWall ?? 0) - NOTE_TRAVEL_TIME;
             const exists = this._activeNotes.some(n => n.chartIndex === chartIndex);
-            if (!exists && now >= spawnTime - NOTE_TRAVEL_TIME) {
+            if (!exists && now >= spawnWall) {
                 const el = document.createElement('div');
                 if (note.type === 'roll') {
                     el.className = 'taiko-note taiko-note-roll';
                     el.textContent = '連打';
-                    const duration = (note.endTime ?? note.startTime ?? 0) - (note.startTime ?? 0);
+                    const duration = (note._wallEnd ?? 0) - (note._wallStart ?? 0);
                     const widthPx = Math.max(40, (duration / NOTE_TRAVEL_TIME) * laneSpan);
                     el.style.width = widthPx + 'px';
                     el.style.boxSizing = 'border-box';
                     this._notesContainer?.appendChild(el);
                     this._activeNotes.push({
                         el,
-                        targetTime: note.startTime ?? 0,
-                        endTime: note.endTime ?? note.startTime ?? 0,
+                        targetTime: note._wallStart ?? 0,
+                        endTime: note._wallEnd ?? note._wallStart ?? 0,
                         type: 'roll',
                         hit: false,
                         chartIndex,
@@ -1164,11 +1248,11 @@ class TaikoGameManager {
                     el.className = `taiko-note ${note.type}`;
                     el.textContent = note.type === 'don' ? 'ドン' : 'カッ';
                     const vm = clampChartNoteVolume(note.volume);
-                    el.style.transform = `translateY(-50%) scaleY(${vm})`;
+                    el.style.transform = `translateY(-50%) scale(${vm})`;
                     this._notesContainer?.appendChild(el);
                     this._activeNotes.push({
                         el,
-                        targetTime: spawnTime,
+                        targetTime: note._wallHit ?? 0,
                         type: note.type,
                         hit: false,
                         chartIndex,
@@ -1237,12 +1321,14 @@ class TaikoGameManager {
             return false;
         });
 
-        // 曲終了チェック: 終了時間を過ぎた、または全ノーツ処理済みで余韻後
-        const getNoteEndTime = (n) => n.type === 'roll' ? (n.endTime ?? n.startTime ?? 0) : (n.time ?? 0);
-        const lastNoteTime = this._chart.length ? Math.max(...this._chart.map(getNoteEndTime)) : 0;
-        const endTime = this._chartMeta?.endTime != null ? this._chartMeta.endTime : lastNoteTime + 1;
+        // 曲終了チェック: 終了時間を過ぎた、または全ノーツ処理済みで余韻後（実時間）
+        const getNoteEndWall = (n) => (n.type === 'roll' ? (n._wallEnd ?? 0) : (n._wallHit ?? 0));
+        const lastNoteWall = this._chart.length ? Math.max(...this._chart.map(getNoteEndWall)) : 0;
+        const endWall = this._chartMeta?.endTime != null
+            ? this._wallAtUniform(this._chartMeta.endTime)
+            : lastNoteWall + 1;
         const allDone = this._chart.length > 0 && this._activeNotes.every(n => n.hit);
-        if (allDone && now >= endTime) {
+        if (allDone && now >= endWall) {
             this._rafId = null;
             setTimeout(() => this._onSongEnd(), 300);
             return;
