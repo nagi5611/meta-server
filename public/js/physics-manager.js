@@ -31,13 +31,15 @@ class PhysicsManager {
         /** Cached feet position (bottom of capsule) for getCharacterPosition */
         this._feetPosition = new THREE.Vector3();
 
-        /** 壁貫通ロールバック検出: 直近3秒間のロールバック時刻（ms） */
-        this._rollbackTimestamps = [];
-        /** 3秒間にこの回数以上ロールバックしたら初期位置へTP */
-        this.ROLLBACK_TP_THRESHOLD = 20;
-        this.ROLLBACK_WINDOW_MS = 3000;
-        /** この長さ以上の位置補正だけをロールバックとみなす（m）。小さい補正は通常の壁/床接触 */
-        this.ROLLBACK_MIN_OFFSET = 0.08;
+        /** 挟み込み検出: 直近3秒間に大きな位置補正があった時刻（ms） */
+        this._stuckResolveTimestamps = [];
+        /** 3秒間にこの回数以上なら Y を持ち上げて抜ける */
+        this.STUCK_RESOLVE_THRESHOLD = 20;
+        this.STUCK_RESOLVE_WINDOW_MS = 3000;
+        /** この長さ以上の位置補正だけを挟み込み候補とみなす（m）。小さい補正は通常の壁/床接触 */
+        this.STUCK_MIN_OFFSET = 0.08;
+        /** 挟み込み解除時に加算する Y（m） */
+        this.STUCK_Y_LIFT = 3;
 
         /** 三人称カメラの壁抜け防止用（レイ・座標の一時領域） */
         this._camRay = new THREE.Ray();
@@ -207,17 +209,18 @@ class PhysicsManager {
         // Apply position adjustment
         this.playerPosition.add(deltaVector);
 
-        // 壁貫通ロールバック: 補正が十分大きいときだけカウントし、3秒間に20回以上なら初期位置へTP
-        if (offset >= this.ROLLBACK_MIN_OFFSET) {
+        // 床・メッシュ挟み込み: 大きな補正が短時間に繰り返されたら Y を持ち上げて抜ける（スポーン TP はしない）
+        if (offset >= this.STUCK_MIN_OFFSET) {
             const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-            this._rollbackTimestamps.push(now);
-            const cutoff = now - this.ROLLBACK_WINDOW_MS;
-            while (this._rollbackTimestamps.length > 0 && this._rollbackTimestamps[0] < cutoff) {
-                this._rollbackTimestamps.shift();
+            this._stuckResolveTimestamps.push(now);
+            const cutoff = now - this.STUCK_RESOLVE_WINDOW_MS;
+            while (this._stuckResolveTimestamps.length > 0 && this._stuckResolveTimestamps[0] < cutoff) {
+                this._stuckResolveTimestamps.shift();
             }
-            if (this._rollbackTimestamps.length >= this.ROLLBACK_TP_THRESHOLD) {
-                this._rollbackTimestamps.length = 0;
-                this.reset();
+            if (this._stuckResolveTimestamps.length >= this.STUCK_RESOLVE_THRESHOLD) {
+                this._stuckResolveTimestamps.length = 0;
+                this.playerPosition.y += this.STUCK_Y_LIFT;
+                this.playerVelocity.set(0, 0, 0);
                 return;
             }
         }
@@ -270,7 +273,7 @@ class PhysicsManager {
     }
 
     reset() {
-        this._rollbackTimestamps.length = 0;
+        this._stuckResolveTimestamps.length = 0;
         if (typeof this.getSpawnPoint === 'function') {
             const spawn = this.getSpawnPoint();
             if (spawn && typeof spawn.x === 'number' && typeof spawn.y === 'number' && typeof spawn.z === 'number') {

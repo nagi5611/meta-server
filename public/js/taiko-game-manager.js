@@ -323,7 +323,6 @@ class TaikoGameManager {
         const resultsEl = document.getElementById('taiko-results');
         if (resultsEl) resultsEl.style.display = 'none';
         const lobbyEl = document.getElementById('taiko-mp-lobby');
-
         const isMp = zone && zone.multiplayer && zone.groupId && zone.multiplayerChartId
             && zone.worldId && (zone.slotCount || 1) >= 1;
         if (isMp) {
