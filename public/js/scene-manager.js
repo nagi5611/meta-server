@@ -159,12 +159,86 @@ class SceneManager {
     }
 
     /**
+     * 各アセットの Content-Length を集計し、進捗バー用の総バイト数を返す（HEAD 不可時は仮定値を混ぜる）
+     * @param {Array<Object|string>} modelConfigs
+     * @param {Array<Object>} [pdfConfigs]
+     * @returns {Promise<{ totalBytes: number, modelByIndex: Map<number, { fileLabel: string, totalFileBytes: number, wMtl: number, wObj: number, contentLenObj: number|null }>, pdfByIndex: Map<number, { fileLabel: string, totalFileBytes: number }> }>}
+     */
+    async planWorldLoadBytes(modelConfigs, pdfConfigs) {
+        const FALLBACK = 5 * 1024 * 1024;
+        let totalBytes = 0;
+        const modelByIndex = new Map();
+        const list = Array.isArray(modelConfigs) ? modelConfigs : [];
+        for (let idx = 0; idx < list.length; idx++) {
+            const config = list[idx];
+            const fullConfig = typeof config === 'string' ? { path: config } : config;
+            const modelPath = fullConfig.path;
+            if (!modelPath) continue;
+            const url = this._buildEncodedModelUrl(modelPath);
+            const fileLabel = modelPath.split(/[/\\]/).pop() || modelPath;
+            if (this._isObjPath(modelPath)) {
+                const objLen = await fetchModelContentLength(url);
+                const mtlPath = String(fullConfig.mtlPath || '').trim();
+                let mtlLen = 0;
+                if (mtlPath) {
+                    const mtlUrl = this._buildEncodedModelUrl(mtlPath);
+                    const fetched = await fetchModelContentLength(mtlUrl);
+                    mtlLen = fetched != null && fetched > 0 ? fetched : 0;
+                }
+                let wMtl = 0;
+                let wObj = 0;
+                if (mtlPath) {
+                    wMtl = mtlLen > 0 ? mtlLen : Math.min(FALLBACK, Math.max(4096, Math.floor(FALLBACK * 0.05)));
+                    wObj = objLen != null && objLen > 0 ? objLen : Math.max(1, FALLBACK - wMtl);
+                } else {
+                    wObj = objLen != null && objLen > 0 ? objLen : FALLBACK;
+                }
+                const totalFile = wMtl + wObj;
+                modelByIndex.set(idx, {
+                    fileLabel,
+                    totalFileBytes: totalFile,
+                    wMtl,
+                    wObj,
+                    contentLenObj: objLen
+                });
+                totalBytes += totalFile;
+            } else {
+                const glbLen = await fetchModelContentLength(url);
+                const totalFile = glbLen != null && glbLen > 0 ? glbLen : FALLBACK;
+                modelByIndex.set(idx, {
+                    fileLabel,
+                    totalFileBytes: totalFile,
+                    wMtl: 0,
+                    wObj: totalFile,
+                    contentLenObj: glbLen
+                });
+                totalBytes += totalFile;
+            }
+        }
+        const pdfByIndex = new Map();
+        const pdfs = Array.isArray(pdfConfigs) ? pdfConfigs : [];
+        for (let idx = 0; idx < pdfs.length; idx++) {
+            const path = pdfs[idx].path || '';
+            const pdfPath = path || 'pdfs/placeholder.pdf';
+            const pdfUrl = pdfPath.startsWith('/') ? pdfPath : '/' + pdfPath;
+            const len = await fetchModelContentLength(pdfUrl);
+            const fileLabel = pdfPath.split(/[/\\]/).pop() || pdfPath;
+            const totalFile = len != null && len > 0 ? len : FALLBACK;
+            pdfByIndex.set(idx, { fileLabel, totalFileBytes: totalFile });
+            totalBytes += totalFile;
+        }
+        return { totalBytes, modelByIndex, pdfByIndex };
+    }
+
+    /**
      * Load multiple world models
      * @param {Array<Object|string>} modelConfigs - Array of model configs or paths
      * @param {function} onComplete - Callback when all models are loaded
-     * @param {(fileName: string) => void} [onAssetStart] - 各モデル読み込み開始時（ファイル名のみ）
+     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void }} [loadOptions]
      */
-    async loadWorldModels(modelConfigs, onComplete, onAssetStart) {
+    async loadWorldModels(modelConfigs, onComplete, loadOptions = {}) {
+        const { bytePlan, loadState, onByteProgress } = loadOptions;
+
         if (!modelConfigs || modelConfigs.length === 0) {
             console.warn('No models to load');
             if (onComplete) onComplete();
@@ -173,6 +247,23 @@ class SceneManager {
 
         console.log(`Loading ${modelConfigs.length} models...`);
         let loadedCount = 0;
+
+        const tb = loadState?.totalBytes ?? 0;
+        /**
+         * このアセット開始時点の completedBytes を base とし、ファイル内 xhr 進捗を反映する
+         * @param {string} fileName
+         * @param {number} loadedInFile
+         * @param {number} totalInFile
+         * @param {number} fileBudget
+         * @param {number} baseBytes
+         */
+        const emitFromBase = (fileName, loadedInFile, totalInFile, fileBudget, baseBytes) => {
+            if (!onByteProgress || !bytePlan || !loadState) return;
+            const denom = totalInFile > 0 ? totalInFile : fileBudget;
+            const frac = denom > 0 ? Math.min(1, loadedInFile / denom) : 0;
+            const loadedBytes = Math.min(tb, baseBytes + frac * fileBudget);
+            onByteProgress({ fileName, loadedBytes, totalBytes: tb });
+        };
 
         /**
          * @param {THREE.Object3D} model
@@ -245,17 +336,35 @@ class SceneManager {
             console.log(`  Scale: (${scale.x}, ${scale.y}, ${scale.z})`);
         };
 
-        const loadOne = async (config) => {
+        const loadOne = async (config, idx) => {
             const fullConfig = typeof config === 'string' ? { path: config } : config;
             const modelPath = fullConfig.path;
             if (!modelPath) return;
 
-            const fileLabel = modelPath.split(/[/\\]/).pop() || modelPath;
-            if (typeof onAssetStart === 'function') onAssetStart(fileLabel);
+            const plan = bytePlan?.modelByIndex?.get(idx);
+            const fileLabel = plan?.fileLabel || (modelPath.split(/[/\\]/).pop() || modelPath);
+            const fileBudget = plan?.totalFileBytes ?? (5 * 1024 * 1024);
+            const fileStart = loadState?.completedBytes ?? 0;
+
+            /**
+             * 読み込み失敗・棄却時でもバーが止まらないよう、このアセット分の見積バイトを進捗に反映する
+             */
+            const snapBudgetDone = () => {
+                if (!loadState || !bytePlan || !plan) return;
+                loadState.completedBytes = Math.min(tb, fileStart + plan.totalFileBytes);
+                onByteProgress?.({
+                    fileName: plan.fileLabel,
+                    loadedBytes: loadState.completedBytes,
+                    totalBytes: tb
+                });
+            };
 
             const url = this._buildEncodedModelUrl(modelPath);
             const maxBytes = this._isObjPath(modelPath) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
-            const contentLen = await fetchModelContentLength(url);
+            let contentLen = plan?.contentLenObj;
+            if (contentLen === undefined) {
+                contentLen = await fetchModelContentLength(url);
+            }
             if (contentLen != null && contentLen > maxBytes) {
                 const mb = Math.round(contentLen / 1024 / 1024);
                 const maxMb = Math.round(maxBytes / 1024 / 1024);
@@ -263,6 +372,7 @@ class SceneManager {
                 window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
                     detail: { path: modelPath, reason: 'file_too_large', bytes: contentLen, maxBytes }
                 }));
+                snapBudgetDone();
                 return;
             }
 
@@ -271,33 +381,51 @@ class SceneManager {
                     if (this._isObjPath(modelPath)) {
                         const mtlPath = String(fullConfig.mtlPath || '').trim();
                         const objLoader = new OBJLoader();
+                        const wMtl = plan?.wMtl ?? 0;
+                        const wObj = plan?.wObj ?? fileBudget;
                         if (!mtlPath) {
-                            objLoader.load(url, (object) => resolve(object), undefined, reject);
+                            objLoader.load(
+                                url,
+                                (object) => resolve(object),
+                                (xhr) => emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, fileBudget, fileStart),
+                                reject
+                            );
                             return;
                         }
                         const mtlEncoded = this._buildEncodedModelUrl(mtlPath);
                         const mtlDirUrl = mtlEncoded.slice(0, mtlEncoded.lastIndexOf('/') + 1);
-                        const mtlFile = mtlPath.split('/').pop();
+                        const mtlFile = mtlPath.split('/').pop() || '';
                         const objDirUrl = url.slice(0, url.lastIndexOf('/') + 1);
                         const objFile = modelPath.split('/').pop();
                         const mtlLoader = new MTLLoader();
                         mtlLoader.setPath(mtlDirUrl);
+                        const baseAfterMtl = fileStart + wMtl;
                         mtlLoader.load(
                             mtlFile,
                             (materials) => {
                                 materials.preload();
                                 objLoader.setMaterials(materials);
                                 objLoader.setPath(objDirUrl);
-                                objLoader.load(objFile, (object) => resolve(object), undefined, reject);
+                                objLoader.load(
+                                    objFile,
+                                    (object) => resolve(object),
+                                    (xhr) => emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, wObj, baseAfterMtl),
+                                    reject
+                                );
                             },
-                            undefined,
+                            (xhr) => emitFromBase(mtlFile || fileLabel, xhr.loaded, xhr.total || 0, wMtl, fileStart),
                             reject
                         );
                         return;
                     }
 
                     const loader = createGLTFLoaderWithDraco();
-                    loader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+                    loader.load(
+                        url,
+                        (gltf) => resolve(gltf.scene),
+                        (xhr) => emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, fileBudget, fileStart),
+                        reject
+                    );
                 });
 
                 const tris = countTrianglesInObject(model);
@@ -312,17 +440,22 @@ class SceneManager {
                             maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
                         }
                     }));
+                    snapBudgetDone();
                     return;
                 }
                 finishAddModel(model, fullConfig, modelPath, tris);
+                if (loadState) {
+                    loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                }
             } catch (error) {
                 console.error(`Error loading model ${modelPath}:`, error);
+                snapBudgetDone();
             }
         };
 
         try {
-            for (const config of modelConfigs) {
-                await loadOne(config);
+            for (let mi = 0; mi < modelConfigs.length; mi++) {
+                await loadOne(modelConfigs[mi], mi);
             }
             this.environmentGroup.updateMatrixWorld(true);
             console.log('All models loaded, generating BVH...');
@@ -341,10 +474,12 @@ class SceneManager {
     /**
      * Load PDF posters (2D planes) for the current world. Renders first page via PDF.js.
      * @param {Array<Object>} [pdfConfigs] - Each item: { path, position?, rotation?, scale? }
-     * @param {(fileName: string) => void} [onAssetStart] - 各PDF読み込み開始時（ファイル名のみ）
+     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void }} [options]
      */
-    async loadWorldPdfs(pdfConfigs, onAssetStart) {
+    async loadWorldPdfs(pdfConfigs, options = {}) {
         if (!pdfConfigs || pdfConfigs.length === 0) return;
+        const { bytePlan, loadState, onByteProgress } = options;
+        const tb = loadState?.totalBytes ?? 0;
         let pdfjsLib;
         try {
             pdfjsLib = await import('pdfjs-dist');
@@ -361,16 +496,29 @@ class SceneManager {
                 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.8.69'}/pdf.worker.min.mjs`;
             }
         }
-        for (const config of pdfConfigs) {
+        for (let pi = 0; pi < pdfConfigs.length; pi++) {
+            const config = pdfConfigs[pi];
             const path = config.path || 'pdfs/placeholder.pdf';
             const pdfLabel = path.split(/[/\\]/).pop() || path;
-            if (typeof onAssetStart === 'function') onAssetStart(pdfLabel);
             const url = path.startsWith('/') ? path : '/' + path;
+            const pdfEntry = bytePlan?.pdfByIndex?.get(pi);
+            const fileBudget = pdfEntry?.totalFileBytes ?? (5 * 1024 * 1024);
+            const fileStart = loadState?.completedBytes ?? 0;
+            const emitPdf = (loadedInFile, totalInFile) => {
+                if (!onByteProgress || !bytePlan || !loadState) return;
+                const denom = totalInFile > 0 ? totalInFile : fileBudget;
+                const frac = denom > 0 ? Math.min(1, loadedInFile / denom) : 0;
+                const loadedBytes = Math.min(tb, fileStart + frac * fileBudget);
+                onByteProgress({ fileName: pdfLabel, loadedBytes, totalBytes: tb });
+            };
             const position = config.position || { x: 0, y: 2, z: -5 };
             const rotation = config.rotation || { x: 0, y: 0, z: 0 };
             const scale = config.scale || { x: 2, y: 2.8, z: 1 };
             try {
                 const loadingTask = pdfjsLib.getDocument(url);
+                loadingTask.onProgress = ({ loaded, total }) => {
+                    emitPdf(loaded, total || 0);
+                };
                 const pdf = await loadingTask.promise;
                 const page = await pdf.getPage(1);
                 // 720p相当に制限してテクスチャを軽くする（最長辺 1280px）
@@ -407,9 +555,20 @@ class SceneManager {
                     console.log(`  PDF Teleporter: ID=${config.teleporter.id}, Destination=${config.teleporter.destinationWorld}`);
                 }
                 this.environmentGroup.add(mesh);
+                if (loadState) {
+                    loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                }
             } catch (err) {
                 console.error('Failed to load PDF:', path, err);
                 this._addPdfPlaceholderMesh(position, rotation, scale, path, config.teleporter);
+                if (loadState && bytePlan) {
+                    loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                    onByteProgress?.({
+                        fileName: pdfLabel,
+                        loadedBytes: loadState.completedBytes,
+                        totalBytes: tb
+                    });
+                }
             }
         }
         console.log(`Loaded ${pdfConfigs.length} PDF poster(s)`);

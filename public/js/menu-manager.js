@@ -25,6 +25,10 @@ class MenuManager {
         this.videoStartBtn = document.getElementById('video-start-btn');
         this.videoStopBtn = document.getElementById('video-stop-btn');
         this.videoErrorEl = document.getElementById('video-modal-error');
+
+        this.helpBtn = document.getElementById('help-btn');
+        this.helpModal = document.getElementById('help-modal');
+        this.helpCloseBtn = document.getElementById('help-close-btn');
         
         // Icons
         this.micIcon = document.getElementById('mic-icon');
@@ -409,6 +413,14 @@ class MenuManager {
                 this.closeSettings();
             }
         });
+
+        this.helpBtn?.addEventListener('click', () => this.openHelpModal());
+        this.helpCloseBtn?.addEventListener('click', () => this.closeHelpModal());
+        this.helpModal?.addEventListener('click', (e) => {
+            if (e.target === this.helpModal) {
+                this.closeHelpModal();
+            }
+        });
         
         // Settings tabs
         const categoryButtons = document.querySelectorAll('.settings-category');
@@ -506,16 +518,21 @@ class MenuManager {
 
         // ESC key to close modals
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                if (this.settingsModal?.classList.contains('visible')) {
-                    this.closeSettings();
-                }
-                if (this.logoutModal?.classList.contains('visible')) {
-                    this.closeLogoutModal();
-                }
-                if (this.videoModal?.classList.contains('visible')) {
-                    this.closeVideoModal();
-                }
+            if (e.key !== 'Escape') return;
+            if (this.helpModal?.classList.contains('visible')) {
+                this.closeHelpModal();
+                return;
+            }
+            if (this.settingsModal?.classList.contains('visible')) {
+                this.closeSettings();
+                return;
+            }
+            if (this.logoutModal?.classList.contains('visible')) {
+                this.closeLogoutModal();
+                return;
+            }
+            if (this.videoModal?.classList.contains('visible')) {
+                this.closeVideoModal();
             }
         });
 
@@ -641,6 +658,18 @@ class MenuManager {
     closeSettings() {
         this.stopMicTest();
         this.settingsModal.classList.remove('visible');
+    }
+
+    /** 操作方法ヘルプを開く */
+    openHelpModal() {
+        this.helpModal?.classList.add('visible');
+        if (this.helpModal) this.helpModal.setAttribute('aria-hidden', 'false');
+    }
+
+    /** 操作方法ヘルプを閉じる */
+    closeHelpModal() {
+        this.helpModal?.classList.remove('visible');
+        if (this.helpModal) this.helpModal.setAttribute('aria-hidden', 'true');
     }
 
     switchSettingsSection(sectionName) {

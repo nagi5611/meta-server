@@ -39,7 +39,7 @@ class PhysicsManager {
         /** この長さ以上の位置補正だけを挟み込み候補とみなす（m）。小さい補正は通常の壁/床接触 */
         this.STUCK_MIN_OFFSET = 0.08;
         /** 挟み込み解除時に加算する Y（m） */
-        this.STUCK_Y_LIFT = 3;
+        this.STUCK_Y_LIFT = 2;
 
         /** 三人称カメラの壁抜け防止用（レイ・座標の一時領域） */
         this._camRay = new THREE.Ray();

@@ -15,6 +15,9 @@ class PlayerManager {
         /** Avatar GLB scale (change to resize model) */
         this.avatarScale = { x: 1.5, y: 1.5, z: 1.5 };
         this._headWorldOffset = new THREE.Vector3(0, 0.08, 0);
+        /** 他プレイヤー: サーバー snapshot 間の水平移動量から歩行/ダッシュ判定（約30Hz想定） */
+        this._remoteAnimWalkDistSq = 0.02 * 0.02;
+        this._remoteAnimDashDistSq = 0.11 * 0.11;
     }
 
     /**
@@ -227,8 +230,12 @@ class PlayerManager {
             avatarModel.scale.set(this.avatarScale.x, this.avatarScale.y, this.avatarScale.z);
             remotePlayer.add(avatarModel);
             const anim = this.setupAvatarAnimation(avatarModel, animations);
-            if (anim) remotePlayer.userData.mixer = anim.mixer;
-            
+            if (anim) {
+                remotePlayer.userData.mixer = anim.mixer;
+                remotePlayer.userData.avatarActions = anim.actions;
+                remotePlayer.userData.animationState = 'idle';
+            }
+
             remotePlayer.userData.playerId = playerId;
             remotePlayer.userData.username = displayName;
             remotePlayer.userData.isLoading = false;
@@ -350,9 +357,52 @@ class PlayerManager {
         }
     }
 
+    /**
+     * 受信した位置スナップショット間の移動量からリモートアバターの idle / walk / dash を切り替える。
+     * @param {THREE.Object3D} player
+     * @param {{ x: number, y: number, z: number }} position
+     */
+    updateRemotePlayerMovementAnimation(player, position) {
+        const actions = player.userData.avatarActions;
+        if (!actions || !position) return;
+
+        const last = player.userData._lastRemotePosForAnim;
+        if (last) {
+            const dx = position.x - last.x;
+            const dz = position.z - last.z;
+            const distSq = dx * dx + dz * dz;
+
+            let newState = 'idle';
+            if (distSq > this._remoteAnimDashDistSq) {
+                newState = actions.dash ? 'dash' : 'walk';
+            } else if (distSq > this._remoteAnimWalkDistSq) {
+                newState = 'walk';
+            }
+
+            const currentState = player.userData.animationState || 'idle';
+            if (newState !== currentState) {
+                const newAction = actions[newState];
+                const currentAction = actions[currentState];
+                if (newAction) {
+                    newAction.reset().play();
+                    if (currentAction && currentAction !== newAction) {
+                        currentAction.crossFadeTo(newAction, 0.15);
+                    }
+                    player.userData.animationState = newState;
+                }
+            }
+        }
+        if (!player.userData._lastRemotePosForAnim) {
+            player.userData._lastRemotePosForAnim = new THREE.Vector3();
+        }
+        player.userData._lastRemotePosForAnim.set(position.x, position.y, position.z);
+    }
+
     updateRemotePlayer(playerId, position, rotation, username = null) {
         const player = this.remotePlayers.get(playerId);
         if (!player) return;
+
+        this.updateRemotePlayerMovementAnimation(player, position);
 
         // Smooth interpolation
         player.position.lerp(

@@ -58,15 +58,15 @@ class UIManager {
 
     /**
      * ワールドアセット読み込み開始時にオーバーを表示する
-     * @param {number} total - 合計件数（表示用）
+     * @param {number} totalBytes - 読み込み予定の総バイト数（0 のときは空ワールド扱い）
      */
-    showWorldLoadProgress(total) {
+    showWorldLoadProgress(totalBytes) {
         if (!this.worldLoadOverlay || !this.worldLoadLabel || !this.worldLoadBarFill) return;
         this.worldLoadOverlay.style.display = 'flex';
         this.worldLoadOverlay.setAttribute('aria-busy', 'true');
         this.worldLoadOverlay.setAttribute('aria-hidden', 'false');
         this.worldLoadLabel.textContent = '読み込み中…';
-        const initialPct = total > 0 ? 0 : 100;
+        const initialPct = totalBytes > 0 ? 0 : 100;
         this.worldLoadBarFill.style.width = `${initialPct}%`;
         if (this.worldLoadPct) {
             this.worldLoadPct.textContent = `${initialPct}%`;
@@ -74,17 +74,17 @@ class UIManager {
     }
 
     /**
-     * 読み込み中ファイル名とプログレスバーを更新する
+     * 読み込み中ファイル名とプログレスバーを更新する（総バイトベース）
      * @param {string} fileName - 例: xxx.glb
-     * @param {number} current - 現在の番号（1 始まり）
-     * @param {number} total - 合計件数
+     * @param {number} loadedBytes - 現在までに読み込んだバイト相当
+     * @param {number} totalBytes - 見積もり総バイト数
      */
-    updateWorldLoadProgress(fileName, current, total) {
+    updateWorldLoadProgress(fileName, loadedBytes, totalBytes) {
         if (!this.worldLoadLabel || !this.worldLoadBarFill) return;
         const name = (fileName && String(fileName).trim()) || '—';
         this.worldLoadLabel.textContent = `読み込み中（${name}）`;
-        const t = Math.max(1, Math.floor(Number(total)) || 1);
-        const c = Math.min(Math.max(0, Math.floor(Number(current)) || 0), t);
+        const t = Math.max(1, Math.floor(Number(totalBytes)) || 1);
+        const c = Math.min(Math.max(0, Number(loadedBytes) || 0), t);
         const pct = Math.round((c / t) * 100);
         this.worldLoadBarFill.style.width = `${pct}%`;
         if (this.worldLoadPct) {

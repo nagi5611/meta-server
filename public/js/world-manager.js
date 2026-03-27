@@ -9,13 +9,13 @@ class WorldManager {
         this.currentWorld = null;
         this.onWorldChangeCallback = null;
         this.worlds = null; // Set by init() from API
-        /** @type {{ begin?: (o: { total: number }) => void, progress?: (o: { fileName: string, current: number, total: number }) => void, end?: () => void } | null} */
+        /** @type {{ begin?: (o: { totalBytes: number }) => void, progress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void, end?: () => void } | null} */
         this._worldLoadUi = null;
     }
 
     /**
      * ワールド読み込み中のロードバー等（メインクライアントから登録）
-     * @param {{ begin?: (o: { total: number }) => void, progress?: (o: { fileName: string, current: number, total: number }) => void, end?: () => void } | null} handlers
+     * @param {{ begin?: (o: { totalBytes: number }) => void, progress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void, end?: () => void } | null} handlers
      */
     setWorldLoadUiHandlers(handlers) {
         this._worldLoadUi = handlers || null;
@@ -108,33 +108,53 @@ class WorldManager {
         const modelList = Array.isArray(world.models) ? world.models : [];
         const pdfList = Array.isArray(world.pdfs) ? world.pdfs : [];
         const totalAssets = this._countModelsWithPath(modelList) + pdfList.length;
-        let assetStep = 0;
-        const onAssetStart = (fileName) => {
-            assetStep += 1;
+
+        /** @type {{ completedBytes: number, totalBytes: number }} */
+        const loadState = { completedBytes: 0, totalBytes: 0 };
+        const bytePlan = totalAssets > 0
+            ? await this.sceneManager.planWorldLoadBytes(world.models, world.pdfs || [])
+            : null;
+        if (bytePlan) {
+            loadState.totalBytes = bytePlan.totalBytes;
+        }
+
+        const onByteProgress = ({ fileName, loadedBytes, totalBytes }) => {
             this._worldLoadUi?.progress?.({
                 fileName,
-                current: assetStep,
-                total: totalAssets
+                loadedBytes,
+                totalBytes
             });
         };
 
-        if (totalAssets > 0) {
-            this._worldLoadUi?.begin?.({ total: totalAssets });
+        if (totalAssets > 0 && bytePlan) {
+            this._worldLoadUi?.begin?.({ totalBytes: bytePlan.totalBytes });
         }
 
         try {
-            await this.sceneManager.loadWorldModels(world.models, async () => {
-                await this.sceneManager.loadWorldPdfs(world.pdfs || [], onAssetStart);
-                console.log(`World loaded: ${worldId}`);
+            await this.sceneManager.loadWorldModels(
+                world.models,
+                async () => {
+                    await this.sceneManager.loadWorldPdfs(world.pdfs || [], {
+                        bytePlan,
+                        loadState,
+                        onByteProgress
+                    });
+                    console.log(`World loaded: ${worldId}`);
 
-                if (onComplete) {
-                    onComplete(world);
-                }
+                    if (onComplete) {
+                        onComplete(world);
+                    }
 
-                if (this.onWorldChangeCallback) {
-                    this.onWorldChangeCallback(world);
+                    if (this.onWorldChangeCallback) {
+                        this.onWorldChangeCallback(world);
+                    }
+                },
+                {
+                    bytePlan,
+                    loadState,
+                    onByteProgress
                 }
-            }, onAssetStart);
+            );
         } finally {
             if (totalAssets > 0) {
                 this._worldLoadUi?.end?.();
