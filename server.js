@@ -1085,6 +1085,13 @@ async function getOrCreateVideoVCRouter(roomId) {
 // roomStates: Map<roomId, { players: Map<socketId, playerState> }>
 const roomStates = new Map();
 
+const VALID_PLAYER_ANIM_STATES = new Set(['idle', 'walk', 'dash', 'jump']);
+
+/** @param {unknown} s */
+function normalizePlayerAnimState(s) {
+    return typeof s === 'string' && VALID_PLAYER_ANIM_STATES.has(s) ? s : 'idle';
+}
+
 // Per-player ping (socketId -> { pingMs, reportedAt })
 const playerPings = new Map();
 const PING_STALE_MS = 15000;
@@ -1328,7 +1335,8 @@ io.on('connection', (socket) => {
         quaternion: { x: 0, y: 0, z: 0, w: 1 },
         world: currentRoom,
         timestamp: 0, // Will be updated on first player-update
-        adminInvisible: false
+        adminInvisible: false,
+        animState: 'idle'
     };
     roomState.players.set(socket.id, initialPlayerState);
 
@@ -1689,6 +1697,9 @@ io.on('connection', (socket) => {
         if (data.adminInvisible !== undefined) {
             player.adminInvisible = !!data.adminInvisible;
         }
+        if (data.animState !== undefined && data.animState !== null) {
+            player.animState = normalizePlayerAnimState(data.animState);
+        }
         player.timestamp = incomingTimestamp;
         player.world = currentRoom;
     });
@@ -1747,7 +1758,8 @@ io.on('connection', (socket) => {
             quaternion: { x: 0, y: 0, z: 0, w: 1 },
             world: newRoom,
             timestamp: 0,
-            adminInvisible: !!(oldPlayerState && oldPlayerState.adminInvisible)
+            adminInvisible: !!(oldPlayerState && oldPlayerState.adminInvisible),
+            animState: normalizePlayerAnimState(oldPlayerState?.animState) || 'idle'
         };
         newRoomState.players.set(socket.id, playerState);
 
@@ -2798,6 +2810,7 @@ setInterval(() => {
                 quaternion: player.quaternion,
                 world: player.world,
                 adminInvisible: !!player.adminInvisible,
+                animState: normalizePlayerAnimState(player.animState),
                 vcMicOn,
                 vcSpeakerOn,
                 vcVideoOn,
@@ -3367,7 +3380,8 @@ app.post('/admin/command', async (req, res) => {
                     quaternion: { x: 0, y: 0, z: 0, w: 1 },
                     world: newRoom,
                     timestamp: 0,
-                    adminInvisible: !!(oldPlayer && oldPlayer.adminInvisible)
+                    adminInvisible: !!(oldPlayer && oldPlayer.adminInvisible),
+                    animState: normalizePlayerAnimState(oldPlayer?.animState) || 'idle'
                 };
                 newRoomState.players.set(targetSocketId, playerState);
                 io.to(newRoom).emit('player-joined', playerState);

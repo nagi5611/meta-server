@@ -67,7 +67,12 @@ class NetworkManager {
                 if (player.id !== this.myPlayerId && player.world === this.currentWorld) {
                     try {
                         const name = player.displayName || player.username;
-                        await this.playerManager.createRemotePlayer(player.id, player.position, name);
+                        await this.playerManager.createRemotePlayer(
+                            player.id,
+                            player.position,
+                            name,
+                            player.animState || 'idle'
+                        );
                         this.playerManager.setRemotePlayerVisible(player.id, !player.adminInvisible);
                     } catch (error) {
                         console.error(`Failed to create remote player ${player.id}:`, error);
@@ -87,7 +92,12 @@ class NetworkManager {
             if (player.id !== this.myPlayerId && player.world === this.currentWorld) {
                 try {
                     const name = player.displayName || player.username;
-                    await this.playerManager.createRemotePlayer(player.id, player.position, name);
+                    await this.playerManager.createRemotePlayer(
+                        player.id,
+                        player.position,
+                        name,
+                        player.animState || 'idle'
+                    );
                     this.playerManager.setRemotePlayerVisible(player.id, !player.adminInvisible);
                     this.updatePlayerCount();
                 } catch (error) {
@@ -141,7 +151,12 @@ class NetworkManager {
                         if (!this.playerManager.hasRemotePlayer(player.id)) {
                             try {
                                 const name = player.displayName || player.username;
-                                await this.playerManager.createRemotePlayer(player.id, player.position, name);
+                                await this.playerManager.createRemotePlayer(
+                                    player.id,
+                                    player.position,
+                                    name,
+                                    player.animState || 'idle'
+                                );
                             } catch (error) {
                                 console.error(`Failed to create remote player ${player.id} during update:`, error);
                             }
@@ -153,7 +168,8 @@ class NetworkManager {
                                 player.id,
                                 player.position,
                                 rotation,
-                                name
+                                name,
+                                player.animState || 'idle'
                             );
                         }
                         this.playerManager.setRemotePlayerVisible(player.id, !player.adminInvisible);
@@ -244,6 +260,7 @@ class NetworkManager {
                     z: rotation.z,
                     w: rotation.w
                 },
+                animState: characterController.getAnimationState(),
                 timestamp: Date.now(), // Add timestamp for server validation
                 world: this.currentWorld,
                 adminInvisible: this.adminInvisible

@@ -15,17 +15,6 @@ class PlayerManager {
         /** Avatar GLB scale (change to resize model) */
         this.avatarScale = { x: 1.5, y: 1.5, z: 1.5 };
         this._headWorldOffset = new THREE.Vector3(0, 0.08, 0);
-        /** 他プレイヤー: サーバー snapshot 間の水平移動（約30Hz）。ヒステリシスで idle/walk のチラつきを抑える */
-        this._remoteWalkEnterDistSq = 0.02 * 0.02;
-        this._remoteWalkStillDistSq = 0.008 * 0.008;
-        this._remoteDashEnterDistSq = 0.11 * 0.11;
-        this._remoteDashExitDistSq = 0.06 * 0.06;
-        /** 連続して「止まった」とみなす snapshot 数（約30Hz → 3 で約100ms） */
-        this._remoteStillFramesForIdle = 3;
-        /** ジャンプ: 直前スナップショットとの Y 差分（m） */
-        this._remoteJumpDyStrong = 0.055;
-        this._remoteJumpDyWeak = 0.035;
-        this._remoteJumpMaxHorizDistSq = 0.025 * 0.025;
     }
 
     /**
@@ -209,7 +198,13 @@ class PlayerManager {
         player.visible = !!visible;
     }
 
-    async createRemotePlayer(playerId, position = { x: 0, y: 2, z: 0 }, username = null) {
+    /**
+     * @param {string} playerId
+     * @param {{ x: number, y: number, z: number }} [position]
+     * @param {string|null} [username]
+     * @param {'idle'|'walk'|'dash'|'jump'} [animState]
+     */
+    async createRemotePlayer(playerId, position = { x: 0, y: 2, z: 0 }, username = null, animState = 'idle') {
         console.log(`Creating remote player: ${playerId}`);
         
         const displayName = username || `Player ${playerId.substring(0, 4)}`;
@@ -220,6 +215,7 @@ class PlayerManager {
         placeholder.userData.playerId = playerId;
         placeholder.userData.username = displayName;
         placeholder.userData.isLoading = true;
+        placeholder.userData.networkAnimState = 'idle';
         
         // Add name tag to placeholder
         this.addNameTag(placeholder, displayName);
@@ -248,6 +244,7 @@ class PlayerManager {
             remotePlayer.userData.playerId = playerId;
             remotePlayer.userData.username = displayName;
             remotePlayer.userData.isLoading = false;
+            remotePlayer.userData.networkAnimState = 'idle';
             
             // Transfer name tag from placeholder to new avatar
             const nameTag = placeholder.children.find(child => child instanceof THREE.Sprite);
@@ -260,6 +257,8 @@ class PlayerManager {
             this.scene.remove(placeholder);
             this.scene.add(remotePlayer);
             this.remotePlayers.set(playerId, remotePlayer);
+
+            this.applyRemoteAnimationStateFromNetwork(remotePlayer, animState);
             
             // Dispose placeholder
             placeholder.traverse((child) => {
@@ -332,7 +331,78 @@ class PlayerManager {
             if (player.userData.mixer) {
                 player.userData.mixer.update(deltaTime);
             }
+            this.pollRemoteJumpFinished(player);
         });
+    }
+
+    /**
+     * ジャンプ clip 終端の検出（mixer の finished が来ない環境・paused 時の crossFade 不整合のフォールバック）
+     * @param {THREE.Object3D} player
+     */
+    pollRemoteJumpFinished(player) {
+        if (!player.userData.avatarActions?.jump) return;
+        if ((player.userData.animationState || 'idle') !== 'jump') return;
+
+        const ja = player.userData.avatarActions.jump;
+        const clip = ja.getClip();
+        if (!clip || clip.duration <= 0) return;
+
+        const dur = clip.duration;
+        const t = ja.time;
+        if (ja.paused && t >= dur - 0.1) {
+            this.onRemoteJumpClipFinished(player);
+            return;
+        }
+        if (dur >= 0.2 && t >= dur - 0.025) {
+            this.onRemoteJumpClipFinished(player);
+        }
+    }
+
+    /**
+     * リモートアバターのアニメ・移動判定デバッグログ
+     * @param {THREE.Object3D} player
+     * @param {string} message
+     * @param {Record<string, unknown>} [extra]
+     */
+    logRemoteAnim(player, message, extra = {}) {
+        const id = player?.userData?.playerId ?? 'unknown';
+        console.log(`[RemoteAnim] playerId=${id} ${message}`, extra);
+    }
+
+    /**
+     * サーバー同期の animState を反映する（他プレイヤー用）
+     * @param {THREE.Object3D} player
+     * @param {string} animStateRaw
+     */
+    applyRemoteAnimationStateFromNetwork(player, animStateRaw) {
+        const actions = player.userData.avatarActions;
+        if (!actions) return;
+        const valid = ['idle', 'walk', 'dash', 'jump'];
+        const s = valid.includes(animStateRaw) ? animStateRaw : 'idle';
+        player.userData.networkAnimState = s;
+        this.applyRemoteLocomotionActionTransition(player, s, actions);
+        const applied = player.userData.animationState || 'idle';
+        if (applied === 'walk' || applied === 'dash') {
+            this.ensureRemoteLocomotionActionActive(player, applied, actions);
+        }
+    }
+
+    /**
+     * jump クリップ終了時。サーバーがまだ jump のときは一旦 idle へ（次の同期で上書き）
+     * @param {THREE.Object3D} player
+     */
+    onRemoteJumpClipFinished(player) {
+        const actions = player.userData.avatarActions;
+        if (!actions) return;
+        if ((player.userData.animationState || 'idle') !== 'jump') return;
+        let target = player.userData.networkAnimState || 'idle';
+        const valid = ['idle', 'walk', 'dash', 'jump'];
+        if (!valid.includes(target)) target = 'idle';
+        if (target === 'jump') target = 'idle';
+        this.applyRemoteLocomotionActionTransition(player, target, actions);
+        if (target === 'walk' || target === 'dash') {
+            this.ensureRemoteLocomotionActionActive(player, target, actions);
+        }
     }
 
     /**
@@ -361,26 +431,20 @@ class PlayerManager {
                     newAction.reset().play();
                     if (currentAction && currentAction !== newAction) currentAction.crossFadeTo(newAction, 0.15);
                     this.localPlayer.userData.animationState = newState;
+                    const phase = newState === 'idle' ? '待機中' : '移動中';
+                    console.log('[RemoteAnim] playerId=local アニメ遷移', {
+                        phase,
+                        anim: newState,
+                        prevAnim: currentState,
+                        movementState: {
+                            isMoving: movementState.isMoving,
+                            isDashing: movementState.isDashing,
+                            isGrounded: movementState.isGrounded
+                        }
+                    });
                 }
             }
         }
-    }
-
-    /**
-     * ジャンプクリップ終了時にロック解除し、直近の移動量に合わせて歩行へ戻す。
-     * @param {THREE.Object3D} player
-     */
-    onRemoteJumpFinished(player) {
-        const actions = player.userData.avatarActions;
-        if (!actions) return;
-        const distSq = player.userData._lastRemoteDistSq ?? 0;
-        let newState = 'idle';
-        if (distSq > this._remoteDashEnterDistSq) {
-            newState = actions.dash ? 'dash' : 'walk';
-        } else if (distSq > this._remoteWalkEnterDistSq) {
-            newState = 'walk';
-        }
-        this.applyRemoteLocomotionActionTransition(player, newState, actions);
     }
 
     /**
@@ -392,10 +456,9 @@ class PlayerManager {
         if (!actions?.jump || !mixer) return;
         const jumpAction = actions.jump;
         const onFinished = (e) => {
-            if (e.action !== jumpAction) return;
-            if (player.userData.animationState !== 'jump') return;
-            player.userData._remoteJumpLock = false;
-            this.onRemoteJumpFinished(player);
+            if (e?.type !== 'finished' || e.action !== jumpAction) return;
+            if ((player.userData.animationState || 'idle') !== 'jump') return;
+            this.onRemoteJumpClipFinished(player);
         };
         mixer.addEventListener('finished', onFinished);
         player.userData._remoteJumpFinishedListener = onFinished;
@@ -430,6 +493,21 @@ class PlayerManager {
             return;
         }
 
+        if (currentState === 'jump' && newState !== 'jump' && actions.jump) {
+            const j = actions.jump;
+            j.fadeOut(duration);
+            if (newState === 'walk') {
+                next.play();
+                next.fadeIn(duration);
+            } else {
+                next.reset();
+                next.play();
+                next.fadeIn(duration);
+            }
+            player.userData.animationState = newState;
+            return;
+        }
+
         if (newState === 'walk' && (currentState === 'idle' || currentState === 'dash')) {
             if (cur) {
                 cur.fadeOut(duration);
@@ -449,88 +527,58 @@ class PlayerManager {
     }
 
     /**
-     * 受信スナップショット間の移動量で idle/walk/dash、Y 差分で jump を推定する。
-     * 停止判定は連続フレームで遅らせ、歩行ループを途切れさせない。
+     * userData は walk/dash だが AnimationAction の weight が低いとき、他をフェードアウトして再生を立て直す（dash→dash で apply がスキップされる場合の補修）
      * @param {THREE.Object3D} player
-     * @param {{ x: number, y: number, z: number }} position
+     * @param {'idle'|'walk'|'dash'|'jump'} target
+     * @param {*} actions
      */
-    updateRemotePlayerMovementAnimation(player, position) {
-        const actions = player.userData.avatarActions;
-        if (!actions || !position) return;
+    ensureRemoteLocomotionActionActive(player, target, actions) {
+        if (!actions || target === 'idle' || target === 'jump') return;
+        const main = actions[target];
+        if (!main) return;
 
-        if (!player.userData._lastRemotePosForAnim) {
-            player.userData._lastRemotePosForAnim = new THREE.Vector3();
-            player.userData._lastRemotePosForAnim.set(position.x, position.y, position.z);
-            player.userData._remoteStillFrames = 0;
-            player.userData._lastRemoteDistSq = 0;
-            return;
-        }
+        const w = main.getEffectiveWeight();
+        const running = typeof main.isRunning === 'function' ? main.isRunning() : true;
+        if (w > 0.4 && running) return;
 
-        const last = player.userData._lastRemotePosForAnim;
-        const dx = position.x - last.x;
-        const dy = position.y - last.y;
-        const dz = position.z - last.z;
-        const distSq = dx * dx + dz * dz;
-        player.userData._lastRemoteDistSq = distSq;
-
-        if (player.userData._remoteJumpLock) {
-            player.userData._lastRemotePosForAnim.set(position.x, position.y, position.z);
-            return;
-        }
-
-        const teleportSkipJump = dy > 0.45 || dy < -0.45;
-
-        if (actions.jump && !teleportSkipJump) {
-            const strongJump = dy > this._remoteJumpDyStrong;
-            const weakJump = dy > this._remoteJumpDyWeak && distSq < this._remoteJumpMaxHorizDistSq;
-            if (strongJump || weakJump) {
-                player.userData._remoteJumpLock = true;
-                player.userData._remoteStillFrames = 0;
-                this.applyRemoteLocomotionActionTransition(player, 'jump', actions);
-                player.userData._lastRemotePosForAnim.set(position.x, position.y, position.z);
-                return;
+        const d = 0.12;
+        const others = ['idle', 'walk', 'dash'];
+        for (let i = 0; i < others.length; i++) {
+            const key = others[i];
+            if (key === target) continue;
+            const a = actions[key];
+            if (a) {
+                a.fadeOut(d);
             }
         }
 
-        let raw = 'idle';
-        if (distSq > this._remoteDashEnterDistSq) {
-            raw = actions.dash ? 'dash' : 'walk';
-        } else if (distSq > this._remoteWalkEnterDistSq) {
-            raw = 'walk';
+        main.paused = false;
+        main.enabled = true;
+        main.play();
+        main.fadeIn(d);
+
+        if (!player.userData._remoteRepairLogAt || performance.now() > player.userData._remoteRepairLogAt) {
+            player.userData._remoteRepairLogAt = performance.now() + 2000;
+            this.logRemoteAnim(player, 'locomotion アクション再同期（weight 低下時）', {
+                target,
+                effectiveWeightBefore: w,
+                wasRunning: running
+            });
         }
-
-        const prevState = player.userData.animationState || 'idle';
-        let newState = prevState;
-
-        if (raw === 'dash' || raw === 'walk') {
-            player.userData._remoteStillFrames = 0;
-            newState = raw;
-        } else {
-            if (prevState === 'dash' && distSq < this._remoteDashExitDistSq && distSq > this._remoteWalkEnterDistSq) {
-                player.userData._remoteStillFrames = 0;
-                newState = 'walk';
-            } else {
-                player.userData._remoteStillFrames = (player.userData._remoteStillFrames || 0) + 1;
-                if (player.userData._remoteStillFrames >= this._remoteStillFramesForIdle) {
-                    newState = 'idle';
-                } else {
-                    newState = prevState;
-                    if (newState === 'dash' && distSq < this._remoteDashExitDistSq) {
-                        newState = distSq > this._remoteWalkEnterDistSq ? 'walk' : newState;
-                    }
-                }
-            }
-        }
-
-        this.applyRemoteLocomotionActionTransition(player, newState, actions);
-        player.userData._lastRemotePosForAnim.set(position.x, position.y, position.z);
     }
 
-    updateRemotePlayer(playerId, position, rotation, username = null) {
+    /**
+     * @param {string} playerId
+     * @param {{ x: number, y: number, z: number }} position
+     * @param {{ x: number, y: number, z: number, w?: number }} rotation
+     * @param {string|null} [username]
+     * @param {string} [animState]
+     */
+    updateRemotePlayer(playerId, position, rotation, username = null, animState = 'idle') {
         const player = this.remotePlayers.get(playerId);
         if (!player) return;
 
-        this.updateRemotePlayerMovementAnimation(player, position);
+        this.applyRemoteAnimationStateFromNetwork(player, animState);
 
         // Smooth interpolation
         player.position.lerp(

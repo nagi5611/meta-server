@@ -216,6 +216,18 @@ class CharacterController {
         return { isMoving, isDashing: (isMoving && this.keysShift) || mobileDashing, isGrounded };
     }
 
+    /**
+     * ネットワーク同期用のアニメ状態（idle / walk / dash / jump）。ローカル表示と同じ判定。
+     * @returns {'idle'|'walk'|'dash'|'jump'}
+     */
+    getAnimationState() {
+        const { isMoving, isDashing, isGrounded } = this.getMovementState();
+        if (!isGrounded) return 'jump';
+        if (isDashing) return 'dash';
+        if (isMoving) return 'walk';
+        return 'idle';
+    }
+
     onMouseMove(event) {
         if (!this.isPointerLocked) return;
 
