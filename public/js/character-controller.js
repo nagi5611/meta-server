@@ -82,7 +82,7 @@ class CharacterController {
     }
 
     /**
-     * VR 左スティック移動（-1..1、y 正で前進想定に合わせて呼び出し側で符号調整）
+     * VR 用スムーズ移動ベクトル（現状 WebXRLocomotion では常に 0。テレポートのみ移動）
      * @param {{ x: number, y: number, force?: number }} v
      */
     setXrMoveVector(v) {

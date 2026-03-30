@@ -46,6 +46,8 @@ class MetaverseApp {
         this.resizeUnsubscribe = null;
         this.webxrLocomotion = null;
         this._frameCallback = null;
+        /** @type {'first'|'third'|null} VR 開始前の視点モード（終了時に復元） */
+        this._viewModeBeforeVr = null;
 
         // Setup page visibility handling
         this.setupPageVisibility();
@@ -365,7 +367,19 @@ class MetaverseApp {
             sceneManager: this.sceneManager,
             physicsManager: this.physicsManager,
             characterController: this.characterController,
-            domOverlayRoot: xrOverlayRoot || null
+            domOverlayRoot: xrOverlayRoot || null,
+            onVrSessionStart: () => {
+                const vm = this.menuManager.settings.viewMode;
+                this._viewModeBeforeVr = (vm === 'first' || vm === 'third') ? vm : 'third';
+                this.characterController.setViewMode('first');
+                this.playerManager.setLocalPlayerVisible(false);
+            },
+            onVrSessionEnd: () => {
+                const mode = this._viewModeBeforeVr != null ? this._viewModeBeforeVr : 'third';
+                this._viewModeBeforeVr = null;
+                this.characterController.setViewMode(mode);
+                this.playerManager.setLocalPlayerVisible(mode !== 'first');
+            }
         });
 
         // Start game loop (WebXR 対応の setAnimationLoop)

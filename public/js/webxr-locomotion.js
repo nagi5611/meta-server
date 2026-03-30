@@ -1,4 +1,4 @@
-// public/js/webxr-locomotion.js — WebXR 移動（スムーズ／テレポート／スナップターン）と DOM Overlay 連携
+// public/js/webxr-locomotion.js — WebXR（テレポート／スナップターン／ジャンプ）。左スティック移動は行わない。
 
 import * as THREE from 'three';
 
@@ -6,7 +6,6 @@ const LS_LOCOMOTION = 'metaverse-vr-locomotion';
 const SNAP_RAD = (Math.PI / 180) * 30;
 const SNAP_COOLDOWN_SEC = 0.38;
 const TELEPORT_COOLDOWN_SEC = 0.45;
-const STICK_DEADZONE = 0.17;
 const SNAP_THRESHOLD = 0.72;
 const TELEPORT_MAX_DIST = 28;
 const DOWN_CAST = 4;
@@ -21,13 +20,25 @@ export default class WebXRLocomotion {
      * @param {import('./physics-manager.js').default} opts.physicsManager
      * @param {import('./character-controller.js').default} opts.characterController
      * @param {HTMLElement|null} [opts.domOverlayRoot]
+     * @param {() => void} [opts.onVrSessionStart] renderer.xr sessionstart 時（一人称化など）
+     * @param {() => void} [opts.onVrSessionEnd] sessionend 時（視点復元など）
      */
-    constructor({ renderer, sceneManager, physicsManager, characterController, domOverlayRoot = null }) {
+    constructor({
+        renderer,
+        sceneManager,
+        physicsManager,
+        characterController,
+        domOverlayRoot = null,
+        onVrSessionStart = null,
+        onVrSessionEnd = null
+    }) {
         this.renderer = renderer;
         this.sceneManager = sceneManager;
         this.physicsManager = physicsManager;
         this.characterController = characterController;
         this.domOverlayRoot = domOverlayRoot;
+        this.onVrSessionStart = typeof onVrSessionStart === 'function' ? onVrSessionStart : null;
+        this.onVrSessionEnd = typeof onVrSessionEnd === 'function' ? onVrSessionEnd : null;
 
         /** @type {LocomotionMode} */
         this.locomotionMode = this._loadLocomotionMode();
@@ -102,12 +113,26 @@ export default class WebXRLocomotion {
 
     _handleSessionStart() {
         document.exitPointerLock?.();
+        if (this.onVrSessionStart) {
+            try {
+                this.onVrSessionStart();
+            } catch (e) {
+                console.error('[WebXR] onVrSessionStart:', e);
+            }
+        }
         this._savedPixelRatio = this.renderer.getPixelRatio();
         this.renderer.setPixelRatio(Math.min(this._savedPixelRatio, 1));
         this.sceneManager.onWindowResize();
     }
 
     _handleSessionEnd() {
+        if (this.onVrSessionEnd) {
+            try {
+                this.onVrSessionEnd();
+            } catch (e) {
+                console.error('[WebXR] onVrSessionEnd:', e);
+            }
+        }
         if (this._savedPixelRatio != null) {
             this.renderer.setPixelRatio(this._savedPixelRatio);
             this._savedPixelRatio = null;
@@ -132,18 +157,10 @@ export default class WebXRLocomotion {
         this._snapCooldown = Math.max(0, this._snapCooldown - deltaTime);
         this._teleportCooldown = Math.max(0, this._teleportCooldown - deltaTime);
 
-        const { moveX, moveY, snapX, leftGrip } = this._readInputs(session);
+        const { snapX, leftGrip } = this._readInputs(session);
 
-        const mode = this.locomotionMode;
-        if (mode === 'smooth' || mode === 'both') {
-            this.characterController.setXrMoveVector({
-                x: moveX,
-                y: moveY,
-                force: 1
-            });
-        } else {
-            this.characterController.setXrMoveVector({ x: 0, y: 0, force: 0 });
-        }
+        // 左スティックによるスムーズ移動は行わない（WebXR 入力は MDN XRInputSource.gamepad を参照）
+        this.characterController.setXrMoveVector({ x: 0, y: 0, force: 0 });
 
         this._maybeSnapTurn(snapX);
 
@@ -157,8 +174,6 @@ export default class WebXRLocomotion {
      * @param {XRSession} session
      */
     _readInputs(session) {
-        let moveX = 0;
-        let moveY = 0;
         let snapX = 0;
         let leftGrip = false;
 
@@ -167,11 +182,8 @@ export default class WebXRLocomotion {
             if (!gp || !gp.axes || gp.axes.length < 2) continue;
 
             const ax0 = gp.axes[0] || 0;
-            const ay0 = gp.axes[1] || 0;
 
             if (src.handedness === 'left') {
-                moveX = Math.abs(ax0) < STICK_DEADZONE ? 0 : ax0;
-                moveY = Math.abs(ay0) < STICK_DEADZONE ? 0 : -ay0;
                 const b1 = gp.buttons[1];
                 leftGrip = !!(b1 && b1.pressed);
             } else if (src.handedness === 'right') {
@@ -179,7 +191,7 @@ export default class WebXRLocomotion {
             }
         }
 
-        return { moveX, moveY, snapX, leftGrip };
+        return { snapX, leftGrip };
     }
 
     _maybeSnapTurn(snapX) {
