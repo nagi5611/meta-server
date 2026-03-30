@@ -296,6 +296,39 @@ class PhysicsManager {
     setSpawnPointGetter(fn) {
         this.getSpawnPoint = typeof fn === 'function' ? fn : null;
     }
+
+    /**
+     * 静的 BVH コライダーへのワールド空間レイキャスト（テレポート着地など用）
+     * @param {THREE.Vector3} originWorld
+     * @param {THREE.Vector3} directionWorld 正規化済み推奨
+     * @param {number} maxDistance
+     * @returns {{ point: THREE.Vector3, distance: number } | null}
+     */
+    raycastStaticWorld(originWorld, directionWorld, maxDistance) {
+        if (!this.collider || !this.collider.geometry?.boundsTree) return null;
+
+        const dir = this.tempVector2.copy(directionWorld);
+        if (dir.lengthSq() < 1e-12) return null;
+        dir.normalize();
+
+        const inv = this.tempMat.copy(this.collider.matrixWorld).invert();
+        const originLocal = this.tempVector.copy(originWorld).applyMatrix4(inv);
+        const dirLocal = this._camRayDirLocal.copy(dir).transformDirection(inv).normalize();
+
+        this._camRay.set(originLocal, dirLocal);
+        const hit = this.collider.geometry.boundsTree.raycastFirst(
+            this._camRay,
+            THREE.DoubleSide,
+            0.02,
+            maxDistance
+        );
+
+        if (!hit || hit.point == null) return null;
+
+        const pointWorld = hit.point.clone().applyMatrix4(this.collider.matrixWorld);
+        const dist = originWorld.distanceTo(pointWorld);
+        return { point: pointWorld, distance: dist };
+    }
 }
 
 export default PhysicsManager;

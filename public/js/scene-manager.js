@@ -104,6 +104,7 @@ class SceneManager {
             antialias
         });
         this.renderer = renderer;
+        this.renderer.xr.enabled = true;
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(this._getPixelRatio());
         this.renderer.shadowMap.enabled = true;

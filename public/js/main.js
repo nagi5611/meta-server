@@ -17,6 +17,8 @@ import TaikoGameManager from './taiko-game-manager.js';
 import { isMobile, setupFullscreen, tryLockLandscape, onResize } from './mobile-utils.js';
 import MobileJoystickManager from './mobile-joystick-manager.js';
 import MobileUIManager from './mobile-ui-manager.js';
+import { createMetaverseVRButton } from './vr-entry-button.js';
+import WebXRLocomotion from './webxr-locomotion.js';
 
 const DEFAULT_ROOM = 'lobby';
 
@@ -42,6 +44,8 @@ class MetaverseApp {
         this.nearbyPdfPath = null;
         this.isMobileMode = false;
         this.resizeUnsubscribe = null;
+        this.webxrLocomotion = null;
+        this._frameCallback = null;
 
         // Setup page visibility handling
         this.setupPageVisibility();
@@ -351,9 +355,28 @@ class MetaverseApp {
             this.setupAdminPlayerInfoClick();
         }
 
-        // Start game loop
+        const xrOverlayRoot = document.getElementById('xr-dom-overlay-root');
+        const vrBtn = createMetaverseVRButton(this.sceneManager.getRenderer(), {
+            domOverlayRoot: xrOverlayRoot || null
+        });
+        document.body.appendChild(vrBtn);
+        this.webxrLocomotion = new WebXRLocomotion({
+            renderer: this.sceneManager.getRenderer(),
+            sceneManager: this.sceneManager,
+            physicsManager: this.physicsManager,
+            characterController: this.characterController,
+            domOverlayRoot: xrOverlayRoot || null
+        });
+
+        // Start game loop (WebXR 対応の setAnimationLoop)
         this.clock = performance.now();
-        this.animate();
+        this._frameCallback = (time, frame) => this.frameUpdate(time, frame);
+        const renderer = this.sceneManager.getRenderer();
+        renderer.setAnimationLoop(this._frameCallback);
+        window.addEventListener('beforeunload', () => {
+            renderer.setAnimationLoop(null);
+            if (this.webxrLocomotion) this.webxrLocomotion.dispose();
+        });
 
         console.log('Metaverse Simple initialized!');
         if (this.isMobileMode) {
@@ -582,11 +605,14 @@ class MetaverseApp {
         console.log(`[Admin TP] Teleported to ${worldId} (${x}, ${y}, ${z})`);
     }
 
-    animate() {
-        requestAnimationFrame(() => this.animate());
-
-        // Calculate delta time
-        const currentTime = performance.now();
+    /**
+     * メインフレーム（WebGLRenderer#setAnimationLoop）。WebXR 時は第2引数に XRFrame が渡る場合がある。
+     * @param {number} timeMs
+     * @param {XRFrame} [_xrFrame]
+     */
+    frameUpdate(timeMs, _xrFrame) {
+        // Calculate delta time（rAF / XR からの時刻は ms）
+        const currentTime = timeMs;
         let deltaTime = (currentTime - this.clock) / 1000;
         this.clock = currentTime;
 
@@ -595,11 +621,15 @@ class MetaverseApp {
         const MAX_DELTA_TIME = 0.1;
         if (deltaTime > MAX_DELTA_TIME) {
             deltaTime = MAX_DELTA_TIME;
-            console.warn(`DeltaTime clamped from ${deltaTime.toFixed(3)}s to ${MAX_DELTA_TIME}s`);
         }
 
-        // Only update physics when page is visible
-        if (this.isPageVisible) {
+        if (this.webxrLocomotion) {
+            this.webxrLocomotion.update(deltaTime);
+        }
+
+        const xrActive = this.sceneManager.getRenderer().xr.isPresenting;
+        // WebXR 中はタブがバックグラウンド扱いでも物理を回す（ヘッドセット表示を維持）
+        if (this.isPageVisible || xrActive) {
             // Update character controller (includes physics)
             this.characterController.update(deltaTime);
 

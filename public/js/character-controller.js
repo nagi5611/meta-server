@@ -49,7 +49,55 @@ class CharacterController {
         this.flyUp = false;
         this.flyDown = false;
 
+        /** WebXR 没入中はカメラ操作をスキップし、移動は HMD＋リグヨー基準 */
+        this.xrPresenting = false;
+        this.xrMoveVector = { x: 0, y: 0 };
+        this.xrMoveForce = 0;
+        /** スナップターン累積（ラジアン）。移動の前方向に適用 */
+        this.xrRigYaw = 0;
+        this._xrVrSpeedScale = 0.72;
+        this._xrUp = new THREE.Vector3(0, 1, 0);
+        this._xrHeadFwd = new THREE.Vector3();
+        this._xrMoveFwd = new THREE.Vector3();
+        this._xrMoveRight = new THREE.Vector3();
+        this._xrRigQuat = new THREE.Quaternion();
+
         this.setupControls();
+    }
+
+    /**
+     * WebXR セッションの有無（main / WebXRLocomotion から設定）
+     * @param {boolean} presenting
+     */
+    setXrPresenting(presenting) {
+        const next = !!presenting;
+        if (this.xrPresenting === next) return;
+        this.xrPresenting = next;
+        if (!next) {
+            this.xrRigYaw = 0;
+            this.xrMoveVector.x = 0;
+            this.xrMoveVector.y = 0;
+            this.xrMoveForce = 0;
+        }
+    }
+
+    /**
+     * VR 左スティック移動（-1..1、y 正で前進想定に合わせて呼び出し側で符号調整）
+     * @param {{ x: number, y: number, force?: number }} v
+     */
+    setXrMoveVector(v) {
+        this.xrMoveVector.x = v.x;
+        this.xrMoveVector.y = v.y;
+        this.xrMoveForce = typeof v.force === 'number' ? Math.min(1, Math.max(0, v.force)) : 1;
+    }
+
+    /**
+     * スナップターン（ラジアン）
+     * @param {number} deltaYaw
+     */
+    applyXrSnapTurn(deltaYaw) {
+        if (!Number.isFinite(deltaYaw)) return;
+        this.xrRigYaw += deltaYaw;
     }
 
     setMobileMode(enabled) {
@@ -98,7 +146,7 @@ class CharacterController {
         const canvas = document.getElementById('canvas');
         if (canvas) {
             canvas.addEventListener('click', () => {
-                if (this.isMobileMode) return;
+                if (this.isMobileMode || this.xrPresenting) return;
                 if (!this.isPointerLocked) {
                     document.body.requestPointerLock();
                 }
@@ -124,6 +172,7 @@ class CharacterController {
         if (this.isInputActive()) {
             return;
         }
+        if (this.xrPresenting) return;
 
         switch (event.code) {
             case 'KeyU':
@@ -165,6 +214,7 @@ class CharacterController {
         if (this.isInputActive()) {
             return;
         }
+        if (this.xrPresenting) return;
 
         switch (event.code) {
             case 'KeyW':
@@ -210,7 +260,8 @@ class CharacterController {
     getMovementState() {
         const kbMoving = this.moveForward || this.moveBackward || this.moveLeft || this.moveRight;
         const mobileMoving = this.isMobileMode && (this.mobileMoveVector.x !== 0 || this.mobileMoveVector.y !== 0);
-        const isMoving = kbMoving || mobileMoving;
+        const xrMoving = this.xrPresenting && (this.xrMoveVector.x !== 0 || this.xrMoveVector.y !== 0);
+        const isMoving = kbMoving || mobileMoving || xrMoving;
         const mobileDashing = this.isMobileMode && mobileMoving && this.mobileMoveForce >= 0.85;
         const isGrounded = this.isFlyMode ? true : this.physicsManager.isGrounded();
         return { isMoving, isDashing: (isMoving && this.keysShift) || mobileDashing, isGrounded };
@@ -229,6 +280,7 @@ class CharacterController {
     }
 
     onMouseMove(event) {
+        if (this.xrPresenting) return;
         if (!this.isPointerLocked) return;
 
         // Update camera horizontal rotation (yaw)
@@ -271,6 +323,11 @@ class CharacterController {
     }
 
     update(deltaTime) {
+        if (this.xrPresenting) {
+            this._updateXrMovement(deltaTime);
+            return;
+        }
+
         // Apply mobile camera delta (right stick) before movement
         if (this.isMobileMode && (this.mobileCameraDelta.x !== 0 || this.mobileCameraDelta.y !== 0)) {
             this.cameraYaw -= this.mobileCameraDelta.x;
@@ -402,6 +459,56 @@ class CharacterController {
         }
 
         this.camera.lookAt(lookAtTarget);
+    }
+
+    /**
+     * WebXR 中: 物理移動のみ。カメラは WebXRManager が更新する。
+     * @param {number} deltaTime
+     */
+    _updateXrMovement(deltaTime) {
+        this.direction.set(0, 0, 0);
+
+        const headFwd = this._xrHeadFwd.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        headFwd.y = 0;
+        if (headFwd.lengthSq() < 1e-8) {
+            headFwd.set(0, 0, -1);
+        } else {
+            headFwd.normalize();
+        }
+
+        this._xrRigQuat.setFromAxisAngle(this._xrUp, this.xrRigYaw);
+        const moveFwd = this._xrMoveFwd.copy(headFwd).applyQuaternion(this._xrRigQuat);
+        const moveRight = this._xrMoveRight.crossVectors(this._xrUp, moveFwd).normalize();
+
+        const useXrMove = this.xrMoveVector.x !== 0 || this.xrMoveVector.y !== 0;
+        if (useXrMove) {
+            this.direction.add(moveFwd.clone().multiplyScalar(this.xrMoveVector.y));
+            this.direction.add(moveRight.clone().multiplyScalar(this.xrMoveVector.x));
+        }
+
+        if (this.direction.length() > 0) {
+            this.direction.normalize();
+            this.playerYaw = Math.atan2(this.direction.x, this.direction.z);
+            this.playerQuaternion.setFromAxisAngle(this._xrUp, this.playerYaw);
+        }
+
+        const moveDirection = new THREE.Vector3();
+        if (this.direction.length() > 0) {
+            const speed = this.moveSpeed * this.adminSpeedMultiplier * this._xrVrSpeedScale * this.xrMoveForce;
+            moveDirection.copy(this.direction).multiplyScalar(speed * deltaTime);
+        }
+
+        if (this.isFlyMode) {
+            const pos = this.physicsManager.getCharacterPosition().clone();
+            pos.add(moveDirection);
+            const flySpeed = this.moveSpeed * this.adminSpeedMultiplier * 2;
+            if (this.flyUp) pos.y += flySpeed * deltaTime;
+            if (this.flyDown) pos.y -= flySpeed * deltaTime;
+            this.physicsManager.setCharacterPosition(pos.x, pos.y, pos.z);
+            this.physicsManager.resetVelocity();
+        } else {
+            this.physicsManager.updatePlayer(deltaTime, moveDirection);
+        }
     }
 
     getPosition() {

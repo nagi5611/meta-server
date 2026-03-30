@@ -3232,3 +3232,65 @@ a.admin-menu-link:hover {
     background: linear-gradient(90deg, #0288d1, #26c6da);
     transition: width 0.2s ease-out;
 }
+
+/* WebXR DOM Overlay / VR 移動モード */
+.xr-dom-overlay-root {
+    position: fixed;
+    left: 12px;
+    bottom: 56px;
+    z-index: 9998;
+    max-width: min(360px, 92vw);
+    pointer-events: auto;
+}
+
+.xr-dom-overlay-panel {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(20, 24, 32, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #f0f4f8;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.xr-dom-overlay-title {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.xr-dom-overlay-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.xr-loco-btn {
+    flex: 1;
+    min-width: 72px;
+    padding: 10px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.xr-loco-btn.active {
+    background: rgba(2, 136, 209, 0.55);
+    border-color: #4fc3f7;
+}
+
+.xr-dom-overlay-hint {
+    font-size: 10px;
+    opacity: 0.85;
+    margin: 0;
+}
+
+#metaverse-vr-button {
+    z-index: 10000 !important;
+}
