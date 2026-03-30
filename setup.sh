@@ -25,13 +25,18 @@ fi
 
 # 日付フォーマット: 月日-時間（例: 0311-2244）
 TS="$(date +'%m%d-%H%M')"
+BACKUP_DIR="meta-server-old${TS}"
 # 既存フォルダをバックアップ
-cp -r meta-server "meta-server-old${TS}"
+cp -r meta-server "${BACKUP_DIR}"
 # 既存フォルダを削除
 rm -rf meta-server
 # 再クローン
 git clone https://github.com/nagi5611/meta-server
 cd meta-server
+# バックアップした .env を新しいディレクトリへ復元
+if [ -f "../${BACKUP_DIR}/.env" ]; then
+  cp "../${BACKUP_DIR}/.env" .env
+fi
 # 依存関係インストール（package-lock.json 前提）
 npm ci
 # 脆弱性の自動修正
