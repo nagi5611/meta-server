@@ -8,6 +8,9 @@
  */
 export function createMetaverseVRButton(renderer, options = {}) {
     const domOverlayRoot = options.domOverlayRoot || null;
+    if (domOverlayRoot) {
+        domOverlayRoot.style.display = 'none';
+    }
 
     const optionalFeatures = ['local-floor'];
     if (domOverlayRoot) {
@@ -49,19 +52,9 @@ export function createMetaverseVRButton(renderer, options = {}) {
     }
 
     if (!('xr' in navigator)) {
-        const message = document.createElement('a');
-        if (window.isSecureContext === false) {
-            message.href = document.location.href.replace(/^http:/, 'https:');
-            message.textContent = 'WebXR は HTTPS が必要です';
-        } else {
-            message.href = 'https://immersiveweb.dev/';
-            message.textContent = 'WebXR 非対応';
-        }
-        message.style.left = 'calc(50% - 90px)';
-        message.style.width = '180px';
-        message.style.textDecoration = 'none';
-        stylizeElement(message);
-        return message;
+        const hidden = document.createElement('span');
+        hidden.style.display = 'none';
+        return hidden;
     }
 
     stylizeElement(button);
@@ -104,11 +97,12 @@ export function createMetaverseVRButton(renderer, options = {}) {
 
     navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
         if (!supported) {
-            button.style.display = '';
-            button.textContent = 'VR 未対応';
+            if (domOverlayRoot) domOverlayRoot.style.display = 'none';
+            button.style.display = 'none';
             disableButton();
             return;
         }
+        if (domOverlayRoot) domOverlayRoot.style.display = '';
         button.style.display = '';
         button.onclick = tryEnterVR;
         button.onmouseenter = () => { button.style.opacity = '1'; };
@@ -119,8 +113,8 @@ export function createMetaverseVRButton(renderer, options = {}) {
         }
     }).catch((e) => {
         console.warn('[WebXR] isSessionSupported:', e);
-        button.style.display = '';
-        button.textContent = 'VR 不可';
+        if (domOverlayRoot) domOverlayRoot.style.display = 'none';
+        button.style.display = 'none';
         disableButton();
     });
 
