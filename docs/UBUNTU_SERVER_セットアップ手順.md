@@ -235,7 +235,7 @@ sudo apt install -y certbot
 
 ```bash
 # 例: ドメインが meta.example.com の場合
-sudo certbot certonly --standalone -d meta.example.com
+sudo certbot certonly --standalone -d meta.mmh-virtual.jp
 ```
 
 証明書は次の場所に保存されます。
