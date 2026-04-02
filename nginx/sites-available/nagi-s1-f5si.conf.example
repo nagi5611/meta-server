@@ -1,0 +1,29 @@
+# 例: http://nagi-s1.f5.si/ でホスト監視ダッシュボードへ誘導し、API も同じ Node に渡す
+# Node は meta 用インスタンス（例: 127.0.0.1:3000）で動かし、.env に HOST_MONITOR_UNITS を設定すること
+#
+# sudo cp nginx/sites-available/nagi-s1-f5si.conf.example /etc/nginx/sites-available/nagi-s1-f5si.conf
+# sudo nano /etc/nginx/sites-available/nagi-s1-f5si.conf   # proxy_pass のポートを環境に合わせる
+# sudo ln -sf /etc/nginx/sites-available/nagi-s1-f5si.conf /etc/nginx/sites-enabled/
+# sudo nginx -t && sudo systemctl reload nginx
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name nagi-s1.f5.si;
+
+    # 管理画面の 3D モデル等（multipart）用。未指定だと nginx 既定 1m で 413 になる
+    client_max_body_size 200m;
+
+    location = / {
+        return 302 /host-monitor/;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

@@ -38,14 +38,13 @@
 
 ## アップロードサイズ
 
-`server.js` では譜面 BGM など **最大約 80MB** のアップロードがあるため、設定例では `client_max_body_size 100m` としています。
+`server.js` では譜面 BGM など **最大約 80MB**、3D モデルアップロードは **最大 200MB** のため、設定例では `client_max_body_size 200m` としています。
 
 ## インストール（Ubuntu 例）
 
 ```bash
 sudo apt update
 sudo apt install -y nginx
-sudo systemctl enable --now nginx
 ```
 
 ## 設定ファイルの配置
@@ -110,11 +109,42 @@ sudo ufw enable
 
 WebRTC（mediasoup）用の **UDP/TCP の VC ポート範囲**は別途開ける必要があります。プロジェクトの `VC_*` / `VIDEO_*` / `PDF_*` と [DEPLOY_PRODUCTION_HTTPS.md](../DEPLOY_PRODUCTION_HTTPS.md) を参照してください。
 
+## ホスト監視ダッシュボード（任意）
+
+別ホスト名（例: `http://nagi-s1.f5.si/`）から **systemd のユニット状態を表示し、停止中なら Web から起動**できる機能があります。
+
+### Node 側（`.env`）
+
+```env
+# カンマ区切り。表示・起動の対象にする systemd ユニット名（例）
+HOST_MONITOR_UNITS=meta-server.service,nginx.service
+```
+
+未設定（空）のときは **ルートは出さない**（機能オフ）。
+
+### sudo（起動ボタン用）
+
+Node プロセスのユーザー（例: `nagi`）に、**パスワードなし**で `systemctl start` だけを許可します（`visudo` で編集）。
+
+```text
+# 例: 許可するユニットは HOST_MONITOR_UNITS と一致させる
+nagi ALL=(ALL) NOPASSWD: /bin/systemctl start meta-server.service, /bin/systemctl start nginx.service
+```
+
+`is-active` は通常 **sudo なし**で読めることが多いです。読めない環境では別途権限を検討してください。
+
+### nginx（専用ホスト名）
+
+[sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) を参照。`/` を **`302 /host-monitor/`** にし、以降は `proxy_pass` で Node のフルパスを渡します。
+
+**注意**: このダッシュボードは **ADMIN Basic 認証**付きです。インターネットに晒す場合は強力な `ADMIN_PASSWORD` と、可能なら **VPN / IP 制限**を推奨します。
+
 ## ファイル一覧（リポジトリ）
 
 | ファイル | 説明 |
 |----------|------|
 | [sites-available/metaverse-proxy.conf.example](sites-available/metaverse-proxy.conf.example) | `server_name` 別に `proxy_pass` する完全例 |
+| [sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) | ホスト監視用ホスト名（HTTP）の例 |
 | [snippets/metaverse-proxy-headers.conf.example](snippets/metaverse-proxy-headers.conf.example) | WebSocket 向けヘッダ等（`location` 内で include） |
 
 ## 動作確認

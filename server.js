@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
 import express from 'express';
 import http from 'http';
 import https from 'https';
@@ -153,8 +154,10 @@ const CHART_BGM_DIR = STORAGE_PATHS.CHART_BGM_DIR;
 const uploadStorage = multer.memoryStorage();
 /** models 配下へアップロード可能な拡張子（GLB / OBJ / MTL / テクスチャ） */
 const MODEL_UPLOAD_EXTS = new Set(['.glb', '.obj', '.mtl', '.png', '.jpg', '.jpeg', '.webp']);
+/** 3D モデル一式アップロード（GLB 大容量など）。nginx client_max_body_size と揃える */
 const upload = multer({
     storage: uploadStorage,
+    limits: { fileSize: 200 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         const ext = path.extname(file.originalname || '').toLowerCase();
         cb(null, MODEL_UPLOAD_EXTS.has(ext));
@@ -645,6 +648,112 @@ app.get('/login', (req, res) => {
 app.get('/login/', (req, res) => {
     res.sendFile(loginIndexPath);
 });
+
+// ============================
+// Host monitor: systemd ユニットの状態と起動（任意・ADMIN Basic 認証）
+// HOST_MONITOR_UNITS=meta-server.service,nginx.service のようにカンマ区切り
+// 起動には sudoers で「sudo -n systemctl start <unit>」を許可すること（nginx/README.md 参照）
+// ============================
+const HOST_MONITOR_UNITS = (process.env.HOST_MONITOR_UNITS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((u) => /^[a-zA-Z0-9_.@-]+$/.test(u));
+
+/**
+ * systemctl is-active の結果を返す
+ * @param {string} unit
+ * @returns {Promise<{ active: boolean, state: string, error?: string }>}
+ */
+function execSystemctlIsActive(unit) {
+    return new Promise((resolve) => {
+        execFile('systemctl', ['is-active', unit], { timeout: 15000 }, (err, stdout) => {
+            const text = String(stdout || '').trim();
+            if (!err) {
+                resolve({ active: text === 'active', state: text || 'unknown' });
+                return;
+            }
+            if (err.code === 3) {
+                resolve({ active: false, state: text || 'inactive' });
+                return;
+            }
+            resolve({
+                active: false,
+                state: 'error',
+                error: err.message || 'systemctl is-active failed',
+            });
+        });
+    });
+}
+
+/**
+ * sudo -n systemctl start を実行する（パスワードなし sudo が必要）
+ * @param {string} unit
+ * @returns {Promise<void>}
+ */
+function execSystemctlStart(unit) {
+    return new Promise((resolve, reject) => {
+        execFile(
+            'sudo',
+            ['-n', 'systemctl', 'start', unit],
+            { timeout: 120000 },
+            (err, _stdout, stderr) => {
+                if (err) {
+                    reject(new Error(String(stderr || err.message || 'systemctl start failed')));
+                    return;
+                }
+                resolve();
+            }
+        );
+    });
+}
+
+if (HOST_MONITOR_UNITS.length > 0) {
+    const hostMonitorHtmlPath = path.join(__dirname, 'public', 'host-monitor.html');
+    const hostMonitorRouter = express.Router();
+    hostMonitorRouter.use(basicAuth);
+
+    hostMonitorRouter.get('/api/status', async (_req, res) => {
+        try {
+            const services = await Promise.all(
+                HOST_MONITOR_UNITS.map(async (unit) => {
+                    const r = await execSystemctlIsActive(unit);
+                    return {
+                        unit,
+                        active: r.active,
+                        state: r.state,
+                        ...(r.error ? { error: r.error } : {}),
+                    };
+                })
+            );
+            res.json({ services });
+        } catch (e) {
+            res.status(500).json({ error: String(e.message || e) });
+        }
+    });
+
+    hostMonitorRouter.post('/api/start', async (req, res) => {
+        const unit = String(req.body?.unit || '').trim();
+        if (!HOST_MONITOR_UNITS.includes(unit)) {
+            return res.status(400).json({ error: 'unknown_or_disallowed_unit' });
+        }
+        try {
+            await execSystemctlStart(unit);
+            const r = await execSystemctlIsActive(unit);
+            res.json({ ok: true, unit, state: r.state, active: r.active });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: String(e.message || e) });
+        }
+    });
+
+    hostMonitorRouter.get('/', (_req, res) => {
+        res.sendFile(hostMonitorHtmlPath);
+    });
+
+    app.use('/host-monitor', hostMonitorRouter);
+    console.log(
+        `[Host monitor] enabled for units: ${HOST_MONITOR_UNITS.join(', ')} (Basic auth = ADMIN_*)`
+    );
+}
 
 // Serve admin.html with basic auth (before static files; admin.html is always in public)
 app.get('/admin.html', basicAuth, (req, res) => {

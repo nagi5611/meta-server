@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>サーバー起動状況</title>
+    <style>
+        :root { --bg: #1a1d23; --card: #252a33; --text: #e8eaed; --muted: #9aa0a6; --ok: #34a853; --bad: #ea4335; --btn: #3c4043; }
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 1.5rem; line-height: 1.5; }
+        h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.5rem; }
+        p.note { color: var(--muted); font-size: 0.875rem; margin: 0 0 1.25rem; }
+        table { width: 100%; max-width: 40rem; border-collapse: collapse; background: var(--card); border-radius: 8px; overflow: hidden; }
+        th, td { text-align: left; padding: 0.65rem 1rem; border-bottom: 1px solid var(--bg); }
+        th { color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        tr:last-child td { border-bottom: none; }
+        .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+        .badge.on { background: rgba(52, 168, 83, 0.2); color: var(--ok); }
+        .badge.off { background: rgba(234, 67, 53, 0.2); color: var(--bad); }
+        button { background: var(--btn); color: var(--text); border: 1px solid #5f6368; padding: 0.35rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.875rem; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button:hover:not(:disabled) { background: #45494e; }
+        .err { color: var(--bad); font-size: 0.875rem; margin-top: 1rem; }
+        #refresh { margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+    <h1>systemd ユニット状況</h1>
+    <p class="note">初回アクセス時にブラウザの Basic 認証（ADMIN_USERNAME / ADMIN_PASSWORD）が求められます。起動ボタンは <code>sudo -n systemctl start …</code> のため、サーバーで sudoers の設定が必要です（リポジトリ <code>nginx/README.md</code> の「ホスト監視ダッシュボード」）。</p>
+    <button type="button" id="refresh">再読み込み</button>
+    <table>
+        <thead>
+            <tr><th>ユニット</th><th>状態</th><th></th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+    </table>
+    <p class="err" id="msg" hidden></p>
+
+    <script>
+        const API = '/host-monitor/api';
+
+        function authHeaders() {
+            const h = sessionStorage.getItem('hm_basic');
+            return h ? { Authorization: h } : {};
+        }
+
+        function fetchOpts(extra = {}) {
+            const headers = { ...authHeaders(), ...(extra.headers || {}) };
+            return { credentials: 'same-origin', ...extra, headers };
+        }
+
+        function promptBasicOnce() {
+            const u = prompt('ユーザー名（ADMIN_USERNAME）');
+            if (u == null || u === '') return false;
+            const p = prompt('パスワード（ADMIN_PASSWORD）');
+            if (p == null) return false;
+            sessionStorage.setItem('hm_basic', 'Basic ' + btoa(unescape(encodeURIComponent(u + ':' + p))));
+            return true;
+        }
+
+        async function fetchStatus() {
+            const msg = document.getElementById('msg');
+            msg.hidden = true;
+            let res = await fetch(API + '/status', fetchOpts());
+            if (res.status === 401 && !sessionStorage.getItem('hm_basic')) {
+                if (promptBasicOnce()) res = await fetch(API + '/status', fetchOpts());
+            }
+            if (res.status === 401) {
+                msg.textContent = '認証に失敗しました。再読み込みするか、ユーザー名・パスワードを確認してください。';
+                msg.hidden = false;
+                return;
+            }
+            if (!res.ok) {
+                msg.textContent = '取得失敗: ' + res.status;
+                msg.hidden = false;
+                return;
+            }
+            const data = await res.json();
+            const tbody = document.getElementById('rows');
+            tbody.innerHTML = '';
+            for (const s of data.services || []) {
+                const tr = document.createElement('tr');
+                const active = !!s.active;
+                tr.innerHTML = '<td><code>' + escapeHtml(s.unit) + '</code></td>' +
+                    '<td><span class="badge ' + (active ? 'on' : 'off') + '">' + escapeHtml(s.state) + '</span>' +
+                    (s.error ? ' <small style="color:#ea4335">' + escapeHtml(s.error) + '</small>' : '') + '</td>' +
+                    '<td></td>';
+                const tdBtn = tr.querySelector('td:last-child');
+                if (!active) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.textContent = '起動';
+                    btn.addEventListener('click', () => startUnit(s.unit, btn));
+                    tdBtn.appendChild(btn);
+                }
+                tbody.appendChild(tr);
+            }
+        }
+
+        async function startUnit(unit, btn) {
+            const msg = document.getElementById('msg');
+            msg.hidden = true;
+            btn.disabled = true;
+            try {
+                const res = await fetch(API + '/start', fetchOpts({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ unit }),
+                }));
+                if (res.status === 401) {
+                    msg.textContent = '認証が切れました。ページを再読み込みしてください。';
+                    msg.hidden = false;
+                    return;
+                }
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    msg.textContent = data.error || ('起動失敗: ' + res.status);
+                    msg.hidden = false;
+                    return;
+                }
+                await fetchStatus();
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function escapeHtml(t) {
+            const d = document.createElement('div');
+            d.textContent = t;
+            return d.innerHTML;
+        }
+
+        document.getElementById('refresh').addEventListener('click', fetchStatus);
+        fetchStatus();
+    </script>
+</body>
+</html>
