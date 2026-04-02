@@ -217,12 +217,88 @@ function decodeLikelyMojibakeFilename(filename) {
 
 const app = express();
 
-/** HTTPS: SSL_CERT_PATH と SSL_KEY_PATH が両方設定されていれば HTTPS で待ち受ける */
+/**
+ * 環境変数を真として解釈する（1 / true / yes / on）
+ * @param {string | undefined} v
+ * @returns {boolean}
+ */
+function isTruthyEnv(v) {
+    const s = String(v ?? '').trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+}
+
+/**
+ * PROXY_DOMAIN_PORT_MAP をパースする。改行またはカンマ区切り、各項目は host=port
+ * @param {string | undefined} raw
+ * @returns {Map<string, number>}
+ */
+function parseProxyDomainPortMap(raw) {
+    const map = new Map();
+    if (!raw || typeof raw !== 'string') return map;
+    const parts = raw.split(/[\r\n,]+/).map((p) => p.trim()).filter(Boolean);
+    for (const part of parts) {
+        const eq = part.indexOf('=');
+        if (eq <= 0) continue;
+        const host = part.slice(0, eq).trim().toLowerCase();
+        const portStr = part.slice(eq + 1).trim();
+        const port = parseInt(portStr, 10);
+        if (!host || !Number.isFinite(port) || port < 1 || port > 65535) continue;
+        if (map.has(host) && map.get(host) !== port) {
+            throw new Error(`PROXY_DOMAIN_PORT_MAP: host "${host}" has conflicting ports`);
+        }
+        map.set(host, port);
+    }
+    return map;
+}
+
+const useReverseProxy = isTruthyEnv(process.env.USE_REVERSE_PROXY);
+const proxyDomainPortMap = parseProxyDomainPortMap(process.env.PROXY_DOMAIN_PORT_MAP);
+const PROXY_SERVICE_DOMAIN = String(process.env.PROXY_SERVICE_DOMAIN || '').trim().toLowerCase();
+
+let PORT = process.env.PORT !== undefined && process.env.PORT !== ''
+    ? parseInt(process.env.PORT, 10)
+    : 3000;
+if (Number.isNaN(PORT)) PORT = 3000;
+
+if (useReverseProxy && PROXY_SERVICE_DOMAIN) {
+    if (proxyDomainPortMap.size === 0) {
+        throw new Error('PROXY_SERVICE_DOMAIN is set but PROXY_DOMAIN_PORT_MAP is empty or invalid');
+    }
+    const mappedPort = proxyDomainPortMap.get(PROXY_SERVICE_DOMAIN);
+    if (mappedPort === undefined) {
+        throw new Error(
+            `PROXY_SERVICE_DOMAIN="${PROXY_SERVICE_DOMAIN}" not found in PROXY_DOMAIN_PORT_MAP`
+        );
+    }
+    if (process.env.PORT !== undefined && process.env.PORT !== '' && parseInt(process.env.PORT, 10) !== mappedPort) {
+        throw new Error(
+            `PORT (${process.env.PORT}) must match PROXY_DOMAIN_PORT_MAP for ${PROXY_SERVICE_DOMAIN} (${mappedPort})`
+        );
+    }
+    PORT = mappedPort;
+}
+
+if (useReverseProxy) {
+    const tpRaw = String(process.env.TRUST_PROXY ?? '').trim();
+    const tpLower = tpRaw.toLowerCase();
+    if (tpLower !== '0' && tpLower !== 'false' && tpLower !== 'off' && tpLower !== 'no') {
+        if (tpRaw === '' || tpLower === '1' || tpLower === 'true' || tpLower === 'yes' || tpLower === 'on') {
+            app.set('trust proxy', 1);
+        } else if (/^\d+$/.test(tpRaw)) {
+            app.set('trust proxy', parseInt(tpRaw, 10));
+        } else {
+            app.set('trust proxy', tpRaw);
+        }
+    }
+}
+
+/** HTTPS: SSL_CERT_PATH と SSL_KEY_PATH が両方設定されていれば HTTPS で待ち受ける（リバースプロキシ時は無効） */
 const SSL_CERT_PATH = process.env.SSL_CERT_PATH;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH;
 const PORT_HTTP_REDIRECT = process.env.PORT_HTTP_REDIRECT ? parseInt(process.env.PORT_HTTP_REDIRECT, 10) : 0;
 
 const hasSsl =
+    !useReverseProxy &&
     SSL_CERT_PATH && SSL_KEY_PATH &&
     fs.existsSync(SSL_CERT_PATH) && fs.existsSync(SSL_KEY_PATH);
 
@@ -243,7 +319,6 @@ const io = new Server(httpServer, {
     }
 });
 
-const PORT = process.env.PORT || 3000;
 /** Bind to 0.0.0.0 for LAN access; use 127.0.0.1 for localhost only */
 const HOST = process.env.HOST || '0.0.0.0';
 
@@ -3631,10 +3706,24 @@ const protocol = hasSsl ? 'https' : 'http';
 
 httpServer.listen(PORT, HOST, () => {
     console.log(`Server running on ${protocol}://localhost:${PORT}`);
+    if (useReverseProxy) {
+        console.log(
+            'USE_REVERSE_PROXY: Node serves HTTP only; terminate TLS at nginx/Caddy etc.'
+        );
+        if (proxyDomainPortMap.size > 0) {
+            const lines = [...proxyDomainPortMap.entries()]
+                .map(([h, p]) => `  ${h} -> ${p}`)
+                .join('\n');
+            console.log(`PROXY_DOMAIN_PORT_MAP:\n${lines}`);
+        }
+        if (PROXY_SERVICE_DOMAIN) {
+            console.log(`PROXY_SERVICE_DOMAIN (this process): ${PROXY_SERVICE_DOMAIN}`);
+        }
+    }
     const lanIps = getLanIps();
     if (lanIps.length > 0) {
         console.log(`LAN access: ${lanIps.map(ip => `${protocol}://${ip}:${PORT}`).join(', ')}`);
-        if (HOST === '0.0.0.0') {
+        if (HOST === '0.0.0.0' && !useReverseProxy) {
             console.log('External access: forward TCP port ' + PORT + ' on your router to this machine (see EXTERNAL_ACCESS.md).');
         }
         if (!MEDIASOUP_ANNOUNCED_IP && lanIps.length > 0) {
