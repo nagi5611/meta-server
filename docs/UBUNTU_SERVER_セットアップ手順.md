@@ -217,11 +217,19 @@ BANDWIDTH_LIMIT_MBPS=100
 
 - `ADMIN_PASSWORD` は必ず強めのパスワードに変更する。
 - 外部から WebRTC を使う場合は `MEDIASOUP_ANNOUNCED_IP` に **このサーバーの公衆 IP またはドメイン** を設定する。
-- HTTPS で運用する場合は、次の「証明書の用意」のあとで `SSL_CERT_PATH` / `SSL_KEY_PATH` / `PORT=443` / `PORT_HTTP_REDIRECT=80` を有効化する。
+- **HTTPS の取り方は2通りある**: (A) **nginx で TLS 終端**（推奨のことが多い）→ [nginx/README.md](../nginx/README.md)。`.env` は `USE_REVERSE_PROXY=1` とし、Node に `SSL_*` / `PORT=443` は原則不要。(B) **Node が 443 で直接 HTTPS** → 次節「5.」の Let's Encrypt と `.env` の `SSL_*` / `PORT=443` / `PORT_HTTP_REDIRECT=80`。
 
 ---
 
-## 5. 証明書の用意（HTTPS で運用する場合）
+### 4.4 推奨: nginx で TLS 終端（リバースプロキシ）
+
+同一サーバーで **443 は nginx**、Node は **HTTP（例: 127.0.0.1:3000）** にする場合の手順、Let's Encrypt、Socket.io 向けの `proxy_pass` 例は **[nginx/README.md](../nginx/README.md)** およびリポジトリの `nginx/sites-available/metaverse-proxy.conf.example` を参照する。
+
+---
+
+## 5. 証明書の用意（Node が 443 で直接 HTTPS する場合）
+
+以下は **Node が `SSL_CERT_PATH` / `SSL_KEY_PATH` で TLS を張る構成**向け。nginx で TLS 終端する場合は **4.4** を参照し、通常はここで証明書を Node に渡す必要はない。
 
 ### 5.1 Let's Encrypt（推奨）
 
@@ -313,11 +321,12 @@ openssl req -x509 -newkey rsa:4096 -keyout privkey.pem -out fullchain.pem -days 
 
 ```bash
 cd ~/meta-server
-c
+npm run start:prod
 ```
 
 - HTTP の場合: 同じマシンで `http://localhost:3000` を開く。
-- HTTPS で 443 を使う場合: `https://localhost` または `https://<このサーバーのIP>`。
+- nginx で TLS 終端する場合: ブラウザでは `https://<ドメイン>`（Node 単体では `http://127.0.0.1:3000` など）。
+- Node が 443 で直接 HTTPS する場合: `https://localhost` または `https://<このサーバーのIP>`。
 
 問題なければ Ctrl+C で止め、次で systemd サービス化する。
 

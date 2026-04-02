@@ -93,11 +93,9 @@ node server.js
 
 ## 4. リバースプロキシを使う場合
 
-本番では **nginx や Caddy** で SSL 終端し、Node は HTTP のまま動かす構成もよく使われる。
+本番では **nginx** などで TLS を終端し、Node は **HTTP のまま**（例: `127.0.0.1:3000`）待ち受ける構成がよく使われます。Node の `.env` では `USE_REVERSE_PROXY=1` とし、証明書はプロキシ側で管理します。
 
-- クライアント → HTTPS (443) → nginx/Caddy → HTTP (3000) → この Node サーバー
-
-その場合は **このサーバー側では SSL を設定しない**（PORT=3000 のまま）。SSL は nginx/Caddy の設定で行う。
+**手順・設定例・Let’s Encrypt・ファイアウォールの要点はリポジトリの [nginx/README.md](nginx/README.md) に集約しています。**（Caddy 等は別途設定が必要です。）
 
 ## 5. ルーター・ファイアウォール
 

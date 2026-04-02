@@ -31,7 +31,8 @@
 
 そのため、一般的には次のどちらかになります。
 
-- **方式A（推奨されることが多い）**: 443 は Nginx/Apache/Caddy 等で TLS 終端し、Node.js（`PORT=3000` など）へリバースプロキシする
+- **方式A（推奨されることが多い）**: 443 は Nginx/Apache/Caddy 等で TLS 終端し、Node.js（`PORT=3000` など）へリバースプロキシする  
+  - **nginx の具体例**: リポジトリの [nginx/README.md](nginx/README.md) と `nginx/sites-available/metaverse-proxy.conf.example` を参照
 - **方式B**: Node.js 自体が TLS を持って 443 で待ち受ける
 
 ※ このリポジトリの `server.js` は現状 **HTTP サーバー起動**です（方式A向き）。

@@ -1,0 +1,71 @@
+# metaverse-simple: nginx で TLS 終端 + ドメイン別 Node バックエンド
+#
+# 配置:
+#   sudo cp nginx/snippets/metaverse-proxy-headers.conf.example /etc/nginx/snippets/metaverse-proxy-headers.conf
+#   sudo cp nginx/sites-available/metaverse-proxy.conf.example /etc/nginx/sites-available/metaverse-proxy.conf
+#   sudo nano /etc/nginx/sites-available/metaverse-proxy.conf   # server_name / 証明書パス / proxy_pass ポートを環境に合わせる
+#   sudo ln -sf /etc/nginx/sites-available/metaverse-proxy.conf /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# $connection_upgrade は下記 map が必要。既に nginx.conf 等で同じ map がある場合は重複定義を削除すること。
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# HTTP → HTTPS（certbot の --nginx 利用時はこのブロックが書き換わることがある）
+server {
+    listen 80;
+    listen [::]:80;
+    server_name meta.mmh-virtual.jp metair.mmh-virtual.jp;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# meta 用 Node（例: 127.0.0.1:3000）
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name meta.mmh-virtual.jp;
+
+    # 単一ドメイン証明書の例（certbot のデフォルト配置）
+    ssl_certificate     /etc/letsencrypt/live/meta.mmh-virtual.jp/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/meta.mmh-virtual.jp/privkey.pem;
+    # 複数ドメインを1枚の証明書（SAN）にまとめた場合は、両 server ブロックで同じパスを指す
+
+    client_max_body_size 100m;
+
+    location / {
+        include /etc/nginx/snippets/metaverse-proxy-headers.conf;
+        proxy_pass http://127.0.0.1:3000;
+        # Socket.io 長輪詢・WebSocket 向け。必要に応じて調整
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}
+
+# metair 用 Node（例: 127.0.0.1:3001）
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name metair.mmh-virtual.jp;
+
+    ssl_certificate     /etc/letsencrypt/live/metair.mmh-virtual.jp/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/metair.mmh-virtual.jp/privkey.pem;
+
+    client_max_body_size 100m;
+
+    location / {
+        include /etc/nginx/snippets/metaverse-proxy-headers.conf;
+        proxy_pass http://127.0.0.1:3001;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}
