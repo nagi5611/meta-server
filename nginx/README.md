@@ -113,37 +113,117 @@ WebRTC（mediasoup）用の **UDP/TCP の VC ポート範囲**は別途開ける
 
 別ホスト名（例: `http://nagi-s1.f5.si/`）から **systemd のユニット状態を表示し、停止中なら Web から起動**できる機能があります。
 
-### Node 側（`.env`）
+### 全体のイメージ（先にこれだけ読む）
+
+- **ブラウザ** → **nginx**（例: `nagi-s1.f5.si`）→ **meta 用の Node**（例: ポート 3000）の **`/host-monitor/`** というページ。
+- そのページが **「どのサービスが動いてるか」** を表示し、止まっていれば **起動ボタン**で `systemctl start` を試す。
+- **metair 用の Node（3001）** にはこの画面は載っていない。**必ず meta 用 Node が動いているマシン・ポート**に nginx を向ける。
+
+---
+
+### ステップバイステップ（初めてのとき）
+
+**ステップ 0: ユニット名を調べる**
+
+ターミナルで次を実行し、**自分の PC で使っているサービス名**をメモする。
+
+```bash
+systemctl list-units --type=service --state=running | grep -E 'meta|nginx'
+# または
+systemctl status meta-server
+```
+
+例では `meta-server.service` と `nginx.service` と書く。metair を別サービスで動かしているなら `metair-server.service` のように **実際の名前**をメモする。
+
+---
+
+**ステップ 1: `.env` に 1 行足す（meta 用 Node のディレクトリで）**
+
+`~/meta-server/.env` など、**いつも `npm run start:prod` する meta 側**のファイルを開く。
+
+次の 1 行を追加する（カンマ区切りで、ステップ 0 でメモした名前を並べる）。
 
 ```env
-# カンマ区切り。表示・起動の対象にする systemd ユニット名（例）
 HOST_MONITOR_UNITS=meta-server.service,nginx.service
 ```
 
-未設定（空）のときは **ルートは出さない**（機能オフ）。
+- ここに書いた名前だけ、Web 画面に出て、起動ボタンも押せる。
+- この行が **無い／空**のとき、**ホスト監視機能は無効**（URL も出ない）。
 
-### sudo（起動ボタン用）
+---
 
-Node プロセスのユーザー（例: `nagi`）に、**パスワードなし**で `systemctl start` だけを許可します（`visudo` で編集）。
+**ステップ 2: 「起動」ボタン用に sudo を許可する**
+
+Web から起動するとき、Node は内部で **`sudo -n systemctl start ユニット名`** を実行する。  
+`-n` は **パスワードを聞かない**ので、**あらかじめ sudoers でだけ許可**する。
+
+1. サーバーで `sudo visudo` を実行する（エディタが開く）。
+2. **ファイルの末尾**に、次のような **1 行**を追加する（`nagi` は **Node を実行している Linux ユーザー名**に置き換える）。
 
 ```text
-# 例: 許可するユニットは HOST_MONITOR_UNITS と一致させる
 nagi ALL=(ALL) NOPASSWD: /bin/systemctl start meta-server.service, /bin/systemctl start nginx.service
 ```
 
-`is-active` は通常 **sudo なし**で読めることが多いです。読めない環境では別途権限を検討してください。
+- **`HOST_MONITOR_UNITS` に書いた各ユニット**について、上の行にも **`/bin/systemctl start その名前`** を **カンマ区切り**で足す。
+- 例: metair も足すなら  
+  `..., /bin/systemctl start metair-server.service`  
+  のように続ける。
 
-### nginx（専用ホスト名）
+保存して終了。ここを間違えると「起動」ボタンだけ失敗する（状態表示は動くことが多い）。
 
-[sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) を参照。`/` を **`302 /host-monitor/`** にし、以降は `proxy_pass` で Node のフルパスを渡します。
+---
 
-**注意**: このダッシュボードは **ADMIN Basic 認証**付きです。インターネットに晒す場合は強力な `ADMIN_PASSWORD` と、可能なら **VPN / IP 制限**を推奨します。
+**ステップ 3: nginx に「nagi-s1 用」の設定を入れる**
+
+目的: ブラウザで `http://nagi-s1.f5.si/` を開くと、**中身は meta 用 Node の `/host-monitor/`** につながるようにする。
+
+1. リポジトリの [sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) をサーバーにコピーする。例:
+
+   ```bash
+   sudo cp /home/nagi/meta-server/nginx/sites-available/nagi-s1-f5si.conf.example /etc/nginx/sites-available/nagi-s1-f5si.conf
+   ```
+
+2. `sudo nano /etc/nginx/sites-available/nagi-s1-f5si.conf` で **`proxy_pass http://127.0.0.1:3000;`** の **3000** を、**meta 用 Node が実際に listen しているポート**に合わせる（`.env` の `PORT` や `PROXY_SERVICE_DOMAIN` の結果と同じ）。
+
+3. 有効化して nginx を再読み込みする。
+
+   ```bash
+   sudo ln -sf /etc/nginx/sites-available/nagi-s1-f5si.conf /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+4. DNS で **`nagi-s1.f5.si` がこのサーバーの IP** を向いていることを確認する（さくらの DNS など）。
+
+---
+
+**ステップ 4: コードを反映して Node を再起動**
+
+1. サーバー上で **git pull** など、ホスト監視機能が入ったコードに更新する。
+2. 本番で `dist` を使っているなら、プロジェクト直下で **`npm run build`** を実行する。
+3. meta 用の Node を再起動する（例）。
+
+   ```bash
+   sudo systemctl restart meta-server
+   ```
+
+---
+
+**ステップ 5: 動作確認**
+
+1. ブラウザで `http://nagi-s1.f5.si/` を開く → **`/host-monitor/` にリダイレクト**される。
+2. **ADMIN のユーザー名・パスワード**（`.env` の `ADMIN_USERNAME` / `ADMIN_PASSWORD`）を聞かれたら入力する。
+3. 一覧に **active / inactive** が出るか見る。止まっているユニットで **起動**を試す。
+
+---
+
+**注意**: このダッシュボードは **ADMIN Basic 認証**付きですが、**インターネットに晒すとリスクが高い**ので、`ADMIN_PASSWORD` を強くし、可能なら **VPN や IP 制限**を検討してください。
 
 ## ファイル一覧（リポジトリ）
 
 | ファイル | 説明 |
 |----------|------|
 | [sites-available/metaverse-proxy.conf.example](sites-available/metaverse-proxy.conf.example) | `server_name` 別に `proxy_pass` する完全例 |
+| [sites-available/metaverse-proxy.ex01.conf.example](sites-available/metaverse-proxy.ex01.conf.example) | hub=`http://nagi-s1.f5.si/`→3000、meta/metair は HTTPS→3001/3002（ex01） |
 | [sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) | ホスト監視用ホスト名（HTTP）の例 |
 | [snippets/metaverse-proxy-headers.conf.example](snippets/metaverse-proxy-headers.conf.example) | WebSocket 向けヘッダ等（`location` 内で include） |
 

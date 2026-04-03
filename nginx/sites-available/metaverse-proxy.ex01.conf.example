@@ -1,0 +1,98 @@
+# metaverse-simple: TLS 終端 + hub/meta/metair を別ポートの Node へ振り分け（コピー用 ex01）
+#
+# ポート対応:
+#   http://nagi-s1.f5.si/  → 127.0.0.1:3000（hub・平文 HTTP のみ）
+#   https://meta.mmh-virtual.jp  → 127.0.0.1:3001
+#   https://metair.mmh-virtual.jp → 127.0.0.1:3002
+#
+# hub 用 Node の .env 例:
+#   USE_REVERSE_PROXY=1
+#   PROXY_DOMAIN_PORT_MAP=nagi-s1.f5.si=3000,meta.mmh-virtual.jp=3001,metair.mmh-virtual.jp=3002
+#   PROXY_SERVICE_DOMAIN=nagi-s1.f5.si
+#
+# 使い方（サーバー上）:
+#   sudo nano /etc/nginx/sites-available/metaverse-proxy.conf
+#   貼り付け後: sudo nginx -t && sudo systemctl reload nginx
+#
+# nagi-s1.f5.si 用の別ファイル（sites-available/nagi-s1-f5si.conf）と重複しないよう、
+# server_name が被るブロックはどちらか一方だけ有効にすること。
+#
+# $connection_upgrade 用 map。nginx.conf 等で既に同じ map がある場合はここから map ブロックを削除すること。
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# hub（nagi-s1.f5.si）: HTTP のみ → Node 3000
+server {
+    listen 80;
+    listen [::]:80;
+    server_name nagi-s1.f5.si;
+
+    client_max_body_size 100m;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        include /etc/nginx/snippets/metaverse-proxy-headers.conf;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}
+
+# meta / metair: HTTP → HTTPS（certbot が if ($host = ...) を挿入することがある）
+server {
+    listen 80;
+    listen [::]:80;
+    server_name meta.mmh-virtual.jp metair.mmh-virtual.jp;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# meta 用 Node → 3001
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name meta.mmh-virtual.jp;
+
+    ssl_certificate     /etc/letsencrypt/live/meta.mmh-virtual.jp/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/meta.mmh-virtual.jp/privkey.pem;
+
+    client_max_body_size 100m;
+
+    location / {
+        include /etc/nginx/snippets/metaverse-proxy-headers.conf;
+        proxy_pass http://127.0.0.1:3001;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}
+
+# metair 用 Node → 3002
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name metair.mmh-virtual.jp;
+
+    ssl_certificate     /etc/letsencrypt/live/meta.mmh-virtual.jp/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/meta.mmh-virtual.jp/privkey.pem;
+
+    client_max_body_size 200m;
+
+    location / {
+        include /etc/nginx/snippets/metaverse-proxy-headers.conf;
+        proxy_pass http://127.0.0.1:3002;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}

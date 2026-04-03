@@ -58,42 +58,52 @@
             return true;
         }
 
+        /** 1秒ごとに自動更新。前回の取得が終わる前に次が走らないよう直列化する */
+        const STATUS_POLL_MS = 1000;
+        let statusFetchInFlight = false;
+
         async function fetchStatus() {
-            const msg = document.getElementById('msg');
-            msg.hidden = true;
-            let res = await fetch(API + '/status', fetchOpts());
-            if (res.status === 401 && !sessionStorage.getItem('hm_basic')) {
-                if (promptBasicOnce()) res = await fetch(API + '/status', fetchOpts());
-            }
-            if (res.status === 401) {
-                msg.textContent = '認証に失敗しました。再読み込みするか、ユーザー名・パスワードを確認してください。';
-                msg.hidden = false;
-                return;
-            }
-            if (!res.ok) {
-                msg.textContent = '取得失敗: ' + res.status;
-                msg.hidden = false;
-                return;
-            }
-            const data = await res.json();
-            const tbody = document.getElementById('rows');
-            tbody.innerHTML = '';
-            for (const s of data.services || []) {
-                const tr = document.createElement('tr');
-                const active = !!s.active;
-                tr.innerHTML = '<td><code>' + escapeHtml(s.unit) + '</code></td>' +
-                    '<td><span class="badge ' + (active ? 'on' : 'off') + '">' + escapeHtml(s.state) + '</span>' +
-                    (s.error ? ' <small style="color:#ea4335">' + escapeHtml(s.error) + '</small>' : '') + '</td>' +
-                    '<td></td>';
-                const tdBtn = tr.querySelector('td:last-child');
-                if (!active) {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.textContent = '起動';
-                    btn.addEventListener('click', () => startUnit(s.unit, btn));
-                    tdBtn.appendChild(btn);
+            if (statusFetchInFlight) return;
+            statusFetchInFlight = true;
+            try {
+                const msg = document.getElementById('msg');
+                msg.hidden = true;
+                let res = await fetch(API + '/status', fetchOpts());
+                if (res.status === 401 && !sessionStorage.getItem('hm_basic')) {
+                    if (promptBasicOnce()) res = await fetch(API + '/status', fetchOpts());
                 }
-                tbody.appendChild(tr);
+                if (res.status === 401) {
+                    msg.textContent = '認証に失敗しました。再読み込みするか、ユーザー名・パスワードを確認してください。';
+                    msg.hidden = false;
+                    return;
+                }
+                if (!res.ok) {
+                    msg.textContent = '取得失敗: ' + res.status;
+                    msg.hidden = false;
+                    return;
+                }
+                const data = await res.json();
+                const tbody = document.getElementById('rows');
+                tbody.innerHTML = '';
+                for (const s of data.services || []) {
+                    const tr = document.createElement('tr');
+                    const active = !!s.active;
+                    tr.innerHTML = '<td><code>' + escapeHtml(s.unit) + '</code></td>' +
+                        '<td><span class="badge ' + (active ? 'on' : 'off') + '">' + escapeHtml(s.state) + '</span>' +
+                        (s.error ? ' <small style="color:#ea4335">' + escapeHtml(s.error) + '</small>' : '') + '</td>' +
+                        '<td></td>';
+                    const tdBtn = tr.querySelector('td:last-child');
+                    if (!active) {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.textContent = '起動';
+                        btn.addEventListener('click', () => startUnit(s.unit, btn));
+                        tdBtn.appendChild(btn);
+                    }
+                    tbody.appendChild(tr);
+                }
+            } finally {
+                statusFetchInFlight = false;
             }
         }
 
@@ -132,6 +142,7 @@
 
         document.getElementById('refresh').addEventListener('click', fetchStatus);
         fetchStatus();
+        setInterval(fetchStatus, STATUS_POLL_MS);
     </script>
 </body>
 </html>
