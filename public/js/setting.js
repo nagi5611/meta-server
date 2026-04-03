@@ -18,6 +18,7 @@ import {
     fetchModelContentLength,
     countTrianglesInObject
 } from './model-load-limits.js';
+import { encodeAssetPathToUrlPath, notifyServiceWorkerInvalidate } from './service-worker-register.js';
 
 // --- State ---
 let scene, camera, renderer, controls, transformControls;
@@ -1882,12 +1883,15 @@ function bindEvents() {
                 return;
             }
             if (!res.ok) throw new Error(await res.text());
+            const pdfData = await res.json();
+            if (!pdfData.success || !pdfData.filename) throw new Error('アップロード応答が不正です');
+            await notifyServiceWorkerInvalidate([encodeAssetPathToUrlPath('pdfs/' + pdfData.filename)]);
             await fetchPdfs();
             renderPdfList();
-            const newPath = 'pdfs/' + name;
+            const newPath = 'pdfs/' + pdfData.filename;
             selectedPdfPath = newPath;
             loadPdfPreview(newPath);
-            status.textContent = 'アップロードしました: ' + name;
+            status.textContent = 'アップロードしました: ' + pdfData.filename;
         } catch (err) {
             status.textContent = 'アップロード失敗: ' + err.message;
             status.className = 'error';
@@ -1965,6 +1969,9 @@ function bindEvents() {
                     }
                 }
                 if (!res.ok) throw new Error(await res.text());
+                const uploadData = await res.json();
+                if (!uploadData.success || !uploadData.filename) throw new Error('アップロード応答が不正です');
+                await notifyServiceWorkerInvalidate([encodeAssetPathToUrlPath('models/' + uploadData.filename)]);
                 await fetchModels();
                 if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
                 ok++;
@@ -1997,6 +2004,13 @@ function bindEvents() {
                             continue;
                         }
                         if (!res.ok) throw new Error(await res.text());
+                        const uploadDataRetry = await res.json();
+                        if (!uploadDataRetry.success || !uploadDataRetry.filename) {
+                            throw new Error('アップロード応答が不正です');
+                        }
+                        await notifyServiceWorkerInvalidate([
+                            encodeAssetPathToUrlPath('models/' + uploadDataRetry.filename)
+                        ]);
                         await fetchModels();
                         if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
                         ok++;

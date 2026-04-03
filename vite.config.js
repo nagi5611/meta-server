@@ -21,6 +21,11 @@ function copyPublicAssets() {
                     fs.copyFileSync(srcFile, path.join(dest, name));
                 }
             }
+            const swSrc = path.join(publicDir, 'sw.js');
+            const swDest = path.join(distDir, 'sw.js');
+            if (fs.existsSync(swSrc)) {
+                fs.copyFileSync(swSrc, swDest);
+            }
         }
     };
 }

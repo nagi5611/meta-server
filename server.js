@@ -218,6 +218,18 @@ function decodeLikelyMojibakeFilename(filename) {
     return hasJapanese && hasLatin1Noise ? decoded : source;
 }
 
+/**
+ * クライアントのキャッシュ無効化用に、静的配信と同じ URL パスを組み立てる
+ * @param {'models' | 'pdfs'} base
+ * @param {string} filename
+ * @returns {string}
+ */
+function publicAssetUrlForCache(base, filename) {
+    const prefix = base === 'pdfs' ? '/pdfs' : '/models';
+    const parts = String(filename || '').split(/[/\\]/).filter(Boolean);
+    return prefix + '/' + parts.map((p) => encodeURIComponent(p)).join('/');
+}
+
 const app = express();
 
 /**
@@ -3233,6 +3245,7 @@ app.post('/admin/upload', upload.single('model'), (req, res) => {
             fs.mkdirSync(MODELS_DIR, { recursive: true });
         }
         fs.writeFileSync(destPath, req.file.buffer);
+        io.emit('asset-invalidate', { urls: [publicAssetUrlForCache('models', filename)] });
         res.json({ success: true, filename });
     } catch (err) {
         console.error('POST /admin/upload error:', err);
@@ -3276,6 +3289,7 @@ app.post('/admin/upload-pdf', uploadPdf.single('pdf'), (req, res) => {
             fs.mkdirSync(PDFS_DIR, { recursive: true });
         }
         fs.writeFileSync(destPath, req.file.buffer);
+        io.emit('asset-invalidate', { urls: [publicAssetUrlForCache('pdfs', filename)] });
         res.json({ success: true, filename });
     } catch (err) {
         console.error('POST /admin/upload-pdf error:', err);

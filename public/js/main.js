@@ -19,6 +19,7 @@ import MobileJoystickManager from './mobile-joystick-manager.js';
 import MobileUIManager from './mobile-ui-manager.js';
 import { createMetaverseVRButton } from './vr-entry-button.js';
 import WebXRLocomotion from './webxr-locomotion.js';
+import { registerMetaverseServiceWorker } from './service-worker-register.js';
 
 const DEFAULT_ROOM = 'lobby';
 
@@ -72,6 +73,8 @@ class MetaverseApp {
 
     async init() {
         console.log('Initializing Metaverse Simple...');
+
+        registerMetaverseServiceWorker();
 
         // /admin セッション: Basic認証済みでトークン取得が必須
         if (window.location.pathname === '/admin') {

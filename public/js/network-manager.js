@@ -1,5 +1,6 @@
 import { io } from 'socket.io-client';
 import * as THREE from 'three';
+import { notifyServiceWorkerInvalidate } from './service-worker-register.js';
 
 class NetworkManager {
     constructor(playerManager) {
@@ -55,6 +56,11 @@ class NetworkManager {
             // Send username to server
             this.socket.emit('set-username', this.username);
             console.log(`Sent username to server: ${this.username}`);
+        });
+
+        this.socket.on('asset-invalidate', (payload) => {
+            const urls = payload && Array.isArray(payload.urls) ? payload.urls : [];
+            if (urls.length) notifyServiceWorkerInvalidate(urls);
         });
 
         // Handle current players (when joining)

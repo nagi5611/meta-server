@@ -2529,6 +2529,10 @@ function bindChartPanelEvents() {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    import('/js/service-worker-register.js')
+        .then((m) => m.registerMetaverseServiceWorker())
+        .catch(() => {});
+
     const savedTheme = localStorage.getItem(ADMIN_THEME_KEY);
     applyAdminTheme(savedTheme === 'dark');
 
