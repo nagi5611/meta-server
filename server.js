@@ -152,6 +152,7 @@ const MODELS_DIR = STORAGE_PATHS.MODELS_DIR;
 const PDFS_DIR = STORAGE_PATHS.PDFS_DIR;
 const IMAGES_DIR = STORAGE_PATHS.IMAGES_DIR;
 const CHART_BGM_DIR = STORAGE_PATHS.CHART_BGM_DIR;
+const ENV_DIR = STORAGE_PATHS.ENV_DIR;
 const uploadStorage = multer.memoryStorage();
 /** models 配下へアップロード可能な拡張子（GLB / OBJ / MTL / テクスチャ） */
 const MODEL_UPLOAD_EXTS = new Set(['.glb', '.obj', '.mtl', '.png', '.jpg', '.jpeg', '.webp']);
@@ -184,6 +185,15 @@ const uploadChartBgm = multer({
             file.mimetype === 'application/octet-stream'
         );
         cb(null, !!ok);
+    }
+});
+/** IBL 用 Radiance HDR（RGBE）。クライアントは /env/default.hdr を読む */
+const uploadHdr = multer({
+    storage: uploadStorage,
+    limits: { fileSize: 120 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        cb(null, ext === '.hdr');
     }
 });
 
@@ -221,12 +231,12 @@ function decodeLikelyMojibakeFilename(filename) {
 
 /**
  * クライアントのキャッシュ無効化用に、静的配信と同じ URL パスを組み立てる
- * @param {'models' | 'pdfs'} base
+ * @param {'models' | 'pdfs' | 'env'} base
  * @param {string} filename
  * @returns {string}
  */
 function publicAssetUrlForCache(base, filename) {
-    const prefix = base === 'pdfs' ? '/pdfs' : '/models';
+    const prefix = base === 'pdfs' ? '/pdfs' : base === 'env' ? '/env' : '/models';
     const parts = String(filename || '').split(/[/\\]/).filter(Boolean);
     return prefix + '/' + parts.map((p) => encodeURIComponent(p)).join('/');
 }
@@ -793,6 +803,7 @@ app.use('/vendor/bootstrap-icons', express.static(path.join(__dirname, 'node_mod
 app.use('/models', express.static(MODELS_DIR));
 app.use('/pdfs', express.static(PDFS_DIR));
 app.use('/images', express.static(IMAGES_DIR));
+app.use('/env', express.static(ENV_DIR));
 app.use('/chart-bgm', express.static(CHART_BGM_DIR, {
     setHeaders: (res, filePath) => {
         if (String(filePath).toLowerCase().endsWith('.mp3')) {
@@ -3319,6 +3330,39 @@ app.post('/admin/upload-pdf', uploadPdf.single('pdf'), (req, res) => {
     } catch (err) {
         console.error('POST /admin/upload-pdf error:', err);
         res.status(500).json({ error: 'Failed to save file' });
+    }
+});
+
+/**
+ * IBL 用 HDR を ENV_DIR に default.hdr として保存（クライアントは /env/default.hdr を参照）
+ */
+app.post('/admin/upload-hdr', uploadHdr.single('hdr'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file or invalid file (.hdr / RGBE のみ)' });
+    }
+    const ext = path.extname(req.file.originalname || '').toLowerCase();
+    if (ext !== '.hdr') {
+        return res.status(400).json({ error: 'Only .hdr (Radiance RGBE) files are allowed' });
+    }
+    const destName = 'default.hdr';
+    const destPath = path.join(ENV_DIR, destName);
+    if (fs.existsSync(destPath) && req.query.confirm !== '1') {
+        return res.status(409).json({ error: 'file_exists', filename: destName });
+    }
+    try {
+        if (!fs.existsSync(ENV_DIR)) {
+            fs.mkdirSync(ENV_DIR, { recursive: true });
+        }
+        fs.writeFileSync(destPath, req.file.buffer);
+        const url = publicAssetUrlForCache('env', destName);
+        io.emit('asset-invalidate', { urls: [url] });
+        res.json({ success: true, filename: destName, url });
+    } catch (err) {
+        console.error('POST /admin/upload-hdr error:', err);
+        res.status(500).json({
+            error: 'Failed to save HDR',
+            detail: err instanceof Error ? err.message : String(err),
+        });
     }
 });
 

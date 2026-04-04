@@ -1,6 +1,11 @@
 # 環境マップ（IBL）用 HDR
 
-メタバースとワールド編集プレビューは `scene.environment` 用に **このフォルダの HDR** を読み込みます。
+メタバースとワールド編集プレビューは `scene.environment` 用に **`/env/default.hdr`** を読み込みます。
+
+## 本番での配置
+
+- サーバは **`STORAGE_PATHS.ENV_DIR`**（`META_SRC_DIRECTORY` 利用時は `<SRC>/env`、個別パス運用時は `META_ENV_DIR` または `models` と同階層の `env`）を **`/env`** として配信します。
+- **管理画面（admin）のワールド編集 → ファイル** から `.hdr` をアップロードすると、同ディレクトリに **`default.hdr`** として保存されます（開発時の `public/env` への手置きも引き続き有効）。
 
 ## 必須ファイル名
 

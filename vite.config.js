@@ -10,7 +10,7 @@ function copyPublicAssets() {
             const cwd = process.cwd();
             const publicDir = path.join(cwd, 'public');
             const distDir = path.join(cwd, 'dist');
-            for (const dir of ['music', 'images']) {
+            for (const dir of ['music', 'images', 'env']) {
                 const src = path.join(publicDir, dir);
                 const dest = path.join(distDir, dir);
                 if (!fs.existsSync(src)) continue;

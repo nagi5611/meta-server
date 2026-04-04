@@ -419,6 +419,13 @@
                                     <span id="upload-pdf-status" class="status-text"></span>
                                 </section>
                                 <section class="section">
+                                    <h2 class="section-title">環境マップ（IBL）HDR</h2>
+                                    <p class="hint">Radiance の <code>.hdr</code> のみ。サーバの <code>ENV_DIR</code>（<code>META_SRC_DIRECTORY/env</code> 等）に <code>default.hdr</code> として保存され、メタバースは <code>/env/default.hdr</code> から読み込みます。</p>
+                                    <input type="file" id="upload-hdr-input" accept=".hdr" style="display:none">
+                                    <button type="button" id="btn-upload-hdr">HDR を選択してアップロード</button>
+                                    <span id="upload-hdr-status" class="status-text"></span>
+                                </section>
+                                <section class="section">
                                     <button type="button" id="btn-save" class="btn-primary">保存</button>
                                     <span id="save-status" class="status-text"></span>
                                 </section>

@@ -2256,6 +2256,65 @@ function bindEvents() {
         }
         e.target.value = '';
     });
+
+    document.getElementById('btn-upload-hdr')?.addEventListener('click', () => {
+        document.getElementById('upload-hdr-input')?.click();
+    });
+    document.getElementById('upload-hdr-input')?.addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const status = document.getElementById('upload-hdr-status');
+        if (status) {
+            status.textContent = '';
+            status.className = '';
+        }
+        const postHdr = async (confirmOverwrite) => {
+            const form = new FormData();
+            form.append('hdr', file);
+            form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+            let url = '/admin/upload-hdr';
+            if (confirmOverwrite) url += '?confirm=1';
+            return fetch(url, { method: 'POST', credentials: 'include', body: form });
+        };
+        try {
+            let res = await postHdr(false);
+            if (res.status === 409) {
+                if (!confirm('default.hdr が既にあります。上書きしますか？')) {
+                    e.target.value = '';
+                    return;
+                }
+                res = await postHdr(true);
+            }
+            if (res.status === 409) {
+                if (status) {
+                    status.textContent = '上書きには確認が必要です。';
+                    status.className = 'error';
+                }
+                e.target.value = '';
+                return;
+            }
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            if (!data.success) throw new Error('アップロード応答が不正です');
+            await notifyServiceWorkerInvalidate([encodeAssetPathToUrlPath('env/default.hdr')]);
+            if (scene && renderer) {
+                const bust = `${DEFAULT_HDR_PATH}?t=${Date.now()}`;
+                loadSceneIBL(THREE, { scene, renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator }, { hdrUrl: bust }).then((r) => {
+                    if (!r.ok) console.warn('[setting] IBL 再読み込みに失敗しました');
+                });
+            }
+            if (status) {
+                status.textContent = 'アップロードしました: default.hdr（プレビューに反映済み）';
+            }
+        } catch (err) {
+            if (status) {
+                status.textContent = 'アップロード失敗: ' + err.message;
+                status.className = 'error';
+            }
+        }
+        e.target.value = '';
+    });
+
     modelUploadInput?.addEventListener('change', async (e) => {
         const files = Array.from(e.target.files || []);
         e.target.value = '';
