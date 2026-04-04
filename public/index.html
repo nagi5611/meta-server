@@ -473,14 +473,18 @@
                         </div>
                         <div class="setting-description">1人称はアバターの頭部視点になります</div>
                         <div class="setting-item">
-                            <label for="fogFar">描画範囲:</label>
-                            <select id="fogFar">
-                                <option value="500">低</option>
-                                <option value="800">中</option>
-                                <option value="1500">高</option>
-                                <option value="2000">最高</option>
+                            <label for="graphicsTier">描画品質:</label>
+                            <select id="graphicsTier">
+                                <option value="high">高（シャドウ・AA 重視）</option>
+                                <option value="medium" selected>中</option>
+                                <option value="low">低（軽量）</option>
                             </select>
-                            <div class="setting-description">遠くまで描画するほど負荷が増えます</div>
+                            <div class="setting-description">WebXR 中は自動で軽量設定になります</div>
+                        </div>
+                        <div class="setting-item">
+                            <label for="toneMappingExposure">露出: <span id="toneMappingExposureValue">1.0</span></label>
+                            <input type="range" id="toneMappingExposure" min="0.3" max="2" step="0.05" value="1">
+                            <div class="setting-description">ACES Filmic の露出。HDR と直接光のバランス調整に使います</div>
                         </div>
                         <div class="setting-item">
                             <label for="pixelRatioCap">ピクセル比:</label>
@@ -489,7 +493,7 @@
                                 <option value="2">2</option>
                                 <option value="full">デバイスどおり</option>
                             </select>
-                            <div class="setting-description">低いほど軽くなります（Retina等は高負荷になりやすい）</div>
+                            <div class="setting-description">低いほど軽くなります（WebXR 中は最大 1 に制限）</div>
                         </div>
                     </div>
                 </div>

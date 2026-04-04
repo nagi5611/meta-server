@@ -1,3 +1,5 @@
+import { migrateLegacyGraphicsKeys } from './ibl-setup.js';
+
 /**
  * MenuManager - メニューバーと設定管理
  */
@@ -67,9 +69,8 @@ class MenuManager {
             speakerVolume: 50,
             micDevice: '',
             speakerDevice: '',
-            drawQualityLow: true,
-            shadowQuality: 'low',
-            fogFar: 800,
+            graphicsTier: 'medium',
+            toneMappingExposure: 1,
             pixelRatioCap: 1,
             viewMode: 'third'
         };
@@ -485,27 +486,26 @@ class MenuManager {
         });
 
         // Draw settings
-        document.getElementById('drawQualityLow')?.addEventListener('change', (e) => {
-            this.settings.drawQualityLow = e.target.checked;
-            this.updateDrawQualityDisabled();
+        document.getElementById('graphicsTier')?.addEventListener('change', (e) => {
+            const v = e.target.value;
+            if (v === 'high' || v === 'medium' || v === 'low') {
+                this.settings.graphicsTier = v;
+            }
             this.saveSettings();
-            this.sceneManager?.applyRenderQuality(this.settings);
+            this.sceneManager?.applyGraphicsSettings(this.settings);
         });
-        document.getElementById('shadowQuality')?.addEventListener('change', (e) => {
-            this.settings.shadowQuality = e.target.value;
+        document.getElementById('toneMappingExposure')?.addEventListener('input', (e) => {
+            this.settings.toneMappingExposure = parseFloat(e.target.value);
+            const span = document.getElementById('toneMappingExposureValue');
+            if (span) span.textContent = Number(this.settings.toneMappingExposure).toFixed(2);
             this.saveSettings();
-            this.sceneManager?.applyRenderQuality(this.settings);
-        });
-        document.getElementById('fogFar')?.addEventListener('change', (e) => {
-            this.settings.fogFar = parseInt(e.target.value, 10);
-            this.saveSettings();
-            this.sceneManager?.applyRenderQuality(this.settings);
+            this.sceneManager?.applyGraphicsSettings(this.settings);
         });
         document.getElementById('pixelRatioCap')?.addEventListener('change', (e) => {
             const v = e.target.value;
             this.settings.pixelRatioCap = v === 'full' ? 'full' : parseInt(v, 10);
             this.saveSettings();
-            this.sceneManager?.applyRenderQuality(this.settings);
+            this.sceneManager?.applyGraphicsSettings(this.settings);
         });
         document.getElementById('viewModeToggle')?.addEventListener('change', (e) => {
             this.settings.viewMode = e.target.checked ? 'first' : 'third';
@@ -689,7 +689,7 @@ class MenuManager {
         if (wasAudio && !willBeAudio) this.stopMicTest();
         if (willBeAudio) this.ensureMicAnalyzerSegments();
         if (sectionName === 'draw' && this.sceneManager) {
-            this.sceneManager.applyRenderQuality(this.settings);
+            this.sceneManager.applyGraphicsSettings(this.settings);
         }
     }
 
@@ -815,6 +815,10 @@ class MenuManager {
                 if (!['first', 'third'].includes(this.settings.viewMode)) {
                     this.settings.viewMode = 'third';
                 }
+                const g = migrateLegacyGraphicsKeys(this.settings);
+                this.settings.graphicsTier = g.graphicsTier;
+                this.settings.toneMappingExposure = g.toneMappingExposure;
+                this.settings.pixelRatioCap = g.pixelRatioCap;
             } catch (e) {
                 console.error('Failed to load settings:', e);
             }
@@ -839,22 +843,25 @@ class MenuManager {
             document.getElementById('speakerDevice').value = this.settings.speakerDevice;
         }
 
-        const drawQualityLowEl = document.getElementById('drawQualityLow');
-        const shadowQualityEl = document.getElementById('shadowQuality');
-        const fogFarEl = document.getElementById('fogFar');
+        const graphicsTierEl = document.getElementById('graphicsTier');
+        const toneExpEl = document.getElementById('toneMappingExposure');
+        const toneExpValEl = document.getElementById('toneMappingExposureValue');
         const pixelRatioCapEl = document.getElementById('pixelRatioCap');
-        if (drawQualityLowEl) drawQualityLowEl.checked = !!this.settings.drawQualityLow;
-        if (shadowQualityEl) {
-            const sq = this.settings.shadowQuality || 'low';
-            shadowQualityEl.value = (sq === 'normal') ? 'high' : sq;
+        if (graphicsTierEl) {
+            const gt = ['high', 'medium', 'low'].includes(this.settings.graphicsTier)
+                ? this.settings.graphicsTier
+                : 'medium';
+            graphicsTierEl.value = gt;
         }
-        if (fogFarEl) {
-            const far = Number(this.settings.fogFar) || 800;
-            const validFar = [500, 800, 1500, 2000].includes(far) ? far : 800;
-            fogFarEl.value = String(validFar);
+        if (toneExpEl) {
+            const te = Number(this.settings.toneMappingExposure);
+            toneExpEl.value = String(Number.isFinite(te) ? Math.min(2, Math.max(0.3, te)) : 1);
+        }
+        if (toneExpValEl) {
+            const te = Number(this.settings.toneMappingExposure);
+            toneExpValEl.textContent = (Number.isFinite(te) ? te : 1).toFixed(2);
         }
         if (pixelRatioCapEl) pixelRatioCapEl.value = this.settings.pixelRatioCap === 'full' ? 'full' : String(this.settings.pixelRatioCap ?? 1);
-        this.updateDrawQualityDisabled();
         this.updateViewModeButton();
     }
 
@@ -872,18 +879,6 @@ class MenuManager {
         }
     }
 
-    /**
-     * 低品質モード時に個別描画項目を無効化
-     */
-    updateDrawQualityDisabled() {
-        const low = !!this.settings.drawQualityLow;
-        const shadowEl = document.getElementById('shadowQuality');
-        const fogEl = document.getElementById('fogFar');
-        const pixelEl = document.getElementById('pixelRatioCap');
-        if (shadowEl) shadowEl.disabled = low;
-        if (fogEl) fogEl.disabled = low;
-        if (pixelEl) pixelEl.disabled = low;
-    }
     
     showDeviceChangeNotification(message) {
         // Create notification

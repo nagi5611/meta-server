@@ -12,7 +12,7 @@ let cacheWritesDisabled = false;
  */
 function isAssetUrl(url) {
     return url.origin === self.location.origin &&
-        (url.pathname.startsWith('/models/') || url.pathname.startsWith('/pdfs/'));
+        (url.pathname.startsWith('/models/') || url.pathname.startsWith('/pdfs/') || url.pathname.startsWith('/env/'));
 }
 
 /**

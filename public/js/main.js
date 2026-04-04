@@ -300,7 +300,7 @@ class MetaverseApp {
             if (world) this.worldManager.loadWorld('lobby', () => {});
         });
         this.menuManager.setSceneManager(this.sceneManager);
-        this.sceneManager.applyRenderQuality(this.menuManager.settings);
+        this.sceneManager.applyGraphicsSettings(this.menuManager.settings);
         this.characterController.setHeadPositionProvider((out) => this.playerManager.getLocalHeadWorldPosition(out));
         this.characterController.setViewMode(this.menuManager.settings.viewMode || 'third');
         this.playerManager.setLocalPlayerVisible((this.menuManager.settings.viewMode || 'third') !== 'first');

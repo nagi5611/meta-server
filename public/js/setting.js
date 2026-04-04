@@ -10,6 +10,19 @@ import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples
 import { DRACO_DECODER_PATH } from './draco-decoder-path.js';
 import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
 import { MTLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
+import { RGBELoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/RGBELoader.js';
+import {
+    loadSceneIBL,
+    applyToneMapping,
+    createGradientSkyDomeMesh,
+    migrateLegacyGraphicsKeys,
+    getAntialiasForTier,
+    normalizeGraphicsTier,
+    getShadowMapTypeConstant,
+    DEFAULT_HDR_PATH,
+    DEFAULT_WORLD_AMBIENT_INTENSITY,
+    DEFAULT_WORLD_DIRECTIONAL_INTENSITY
+} from './ibl-setup.js';
 import {
     MODEL_MAX_BYTES_OBJ,
     MODEL_MAX_BYTES_GLTF,
@@ -69,6 +82,31 @@ function buildEncodedModelUrl(assetPath) {
  */
 function isObjPath(path) {
     return typeof path === 'string' && path.toLowerCase().endsWith('.obj');
+}
+
+/**
+ * メタバースと同じ localStorage から描画オプションを読む（ワールド編集プレビュー用）
+ * @returns {{ graphicsTier: string, toneMappingExposure: number, pixelRatioCap: number|string }}
+ */
+function readEditorGraphicsOptions() {
+    try {
+        const raw = localStorage.getItem('metaverse-settings');
+        if (!raw) return migrateLegacyGraphicsKeys({});
+        return migrateLegacyGraphicsKeys(JSON.parse(raw));
+    } catch {
+        return migrateLegacyGraphicsKeys({});
+    }
+}
+
+/**
+ * @returns {number}
+ */
+function getEditorPixelRatio() {
+    const g = readEditorGraphicsOptions();
+    const dpr = window.devicePixelRatio || 1;
+    if (g.pixelRatioCap === 'full') return dpr;
+    const n = g.pixelRatioCap === 2 ? 2 : 1;
+    return Math.min(dpr, n);
 }
 
 /**
@@ -389,19 +427,22 @@ function redo() {
 
 // --- Three.js setup ---
 function initScene() {
+    const g = readEditorGraphicsOptions();
+    const tier = normalizeGraphicsTier(g.graphicsTier);
     const canvas = document.getElementById('canvas');
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87ceeb);
-    scene.fog = new THREE.Fog(0x87ceeb, 100, 2000);
+    scene.fog = null;
 
     camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 5000);
     camera.position.set(0, 10, 20);
 
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: getAntialiasForTier(tier) });
+    applyToneMapping(THREE, renderer, g.toneMappingExposure);
     renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(getEditorPixelRatio());
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = getShadowMapTypeConstant(THREE, tier);
 
     // Ground
     const groundGeom = new THREE.PlaneGeometry(1000, 1000);
@@ -418,14 +459,22 @@ function initScene() {
     editGroup = new THREE.Group();
     scene.add(editGroup);
 
-    // Editor-only preview lights (not saved to worlds.json)
-    const previewAmbient = new THREE.AmbientLight(0xffffff, 0.9);
+    scene.add(createGradientSkyDomeMesh(THREE));
+
+    // Editor-only preview lights（メタバース addWorldLights 既定と同スケール）
+    const previewAmbient = new THREE.AmbientLight(0xffffff, DEFAULT_WORLD_AMBIENT_INTENSITY);
     previewAmbient.userData.editorPreview = true;
     scene.add(previewAmbient);
-    const previewDir = new THREE.DirectionalLight(0xffffff, 0.8);
+    const previewDir = new THREE.DirectionalLight(0xffffff, DEFAULT_WORLD_DIRECTIONAL_INTENSITY);
     previewDir.position.set(30, 80, 20);
     previewDir.userData.editorPreview = true;
     scene.add(previewDir);
+
+    requestAnimationFrame(() => {
+        loadSceneIBL(THREE, { scene, renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator }, { hdrUrl: DEFAULT_HDR_PATH }).then((r) => {
+            if (!r.ok) console.warn('[setting] IBL load skipped; place HDR at', DEFAULT_HDR_PATH);
+        });
+    });
 
     controls = new OrbitControls(camera, canvas);
     controls.enablePan = true;
@@ -539,6 +588,7 @@ function onResize() {
     camera.aspect = canvas.clientWidth / canvas.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    renderer.setPixelRatio(getEditorPixelRatio());
 }
 
 function setPointerFromEvent(event) {

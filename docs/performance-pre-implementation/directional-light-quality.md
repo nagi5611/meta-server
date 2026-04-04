@@ -8,7 +8,7 @@
 
 ## スコープ
 
-- `DirectionalLight` + `shadow` の mapSize / type / bias 系、必要なら CSM（three.js addons）。[`lightweight-optimization-list.md`](../lightweight-optimization-list.md) 1.1 と統合し **設定 UI・永続化・自動検出**の方針だけ本書で固定する。
+- `DirectionalLight` + `shadow` の mapSize / type / bias 系、必要なら CSM（three.js addons）。**実装済み**: シャドウは設定メニューの **描画品質ティア**（高/中/低）と WebXR 時の低ティア強制で制御。詳細は [`lightweight-optimization-list.md`](../lightweight-optimization-list.md) 1.1。本書では CSM や bias 調整など **将来の追加分**の方針を書いてよい。
 
 ## 調査・決定タスク（実装前）
 

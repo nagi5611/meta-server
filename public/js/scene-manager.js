@@ -1,8 +1,21 @@
 import * as THREE from 'three';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { createGLTFLoaderWithDraco } from './gltf-loader-draco.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { MeshBVH, StaticGeometryGenerator } from 'three-mesh-bvh';
+import {
+    migrateLegacyGraphicsKeys,
+    normalizeGraphicsTier,
+    getShadowMapSize,
+    getShadowMapTypeConstant,
+    getAntialiasForTier,
+    loadSceneIBL,
+    disposeSceneIBL,
+    applyToneMapping,
+    createGradientSkyDomeMesh,
+    DEFAULT_HDR_PATH
+} from './ibl-setup.js';
 import {
     MODEL_MAX_BYTES_OBJ,
     MODEL_MAX_BYTES_GLTF,
@@ -29,41 +42,62 @@ class SceneManager {
         this.groundMesh = null;
         /** Grid helper. Visibility controlled by setFloorVisible. */
         this.gridHelper = null;
-        /** Render quality options (default: low for performance) */
-        this.renderQualityOptions = {
-            drawQualityLow: true,
-            shadowQuality: 'low',
-            fogFar: 800,
+        /** Graphics options (graphicsTier, toneMappingExposure, pixelRatioCap) */
+        this.graphicsOptions = {
+            graphicsTier: 'medium',
+            toneMappingExposure: 1,
             pixelRatioCap: 1
+        };
+        /** WebXR セッション中は true（FPS 優先のティア上書きに使用） */
+        this._xrSessionActive = false;
+        /** 直近の MenuManager 設定（XR 終了後の再適用用） */
+        this._lastGraphicsSettings = null;
+        /** 現在のレンダラの antialias フラグ（ティア変更時の再生成判定） */
+        this._rendererAntialias = true;
+
+        this._onXRSessionStart = () => {
+            this._xrSessionActive = true;
+            this.applyGraphicsSettings(this._lastGraphicsSettings || this.graphicsOptions);
+        };
+        this._onXRSessionEnd = () => {
+            this._xrSessionActive = false;
+            this.applyGraphicsSettings(this._lastGraphicsSettings || this.graphicsOptions);
         };
     }
 
     /**
-     * Get shadow map size and type from quality string (low | medium | high | highest; legacy 'normal' → high).
-     * @param {string} quality
-     * @returns {{ mapSize: number, type: number }}
+     * 実効グラフィックティア（WebXR 中は low 相当）
+     * @returns {'high'|'medium'|'low'}
      */
-    _getShadowConfig(quality) {
-        switch (quality) {
-            case 'low': return { mapSize: 512, type: THREE.BasicShadowMap };
-            case 'medium': return { mapSize: 1024, type: THREE.PCFSoftShadowMap };
-            case 'high':
-            case 'normal': return { mapSize: 2048, type: THREE.PCFSoftShadowMap };
-            case 'highest': return { mapSize: 4096, type: THREE.PCFSoftShadowMap };
-            default: return { mapSize: 1024, type: THREE.PCFSoftShadowMap };
-        }
+    _effectiveGraphicsTier() {
+        if (this._xrSessionActive) return 'low';
+        return normalizeGraphicsTier(this.graphicsOptions.graphicsTier);
     }
 
     /**
-     * Compute effective pixel ratio from options
+     * シャドウ map サイズとタイプ
+     * @returns {{ mapSize: number, type: number }}
+     */
+    _getShadowConfigForEffectiveTier() {
+        const tier = this._effectiveGraphicsTier();
+        return {
+            mapSize: getShadowMapSize(tier),
+            type: getShadowMapTypeConstant(THREE, tier)
+        };
+    }
+
+    /**
+     * Compute effective pixel ratio from options（WebXR 中は最大 1）
      * @returns {number}
      */
     _getPixelRatio() {
-        const cap = this.renderQualityOptions.pixelRatioCap;
+        const cap = this.graphicsOptions.pixelRatioCap;
         const dpr = window.devicePixelRatio || 1;
-        if (cap === 'full') return dpr;
-        const n = typeof cap === 'number' ? cap : 1;
-        return Math.min(dpr, n);
+        let v;
+        if (cap === 'full') v = dpr;
+        else v = Math.min(dpr, typeof cap === 'number' ? cap : 1);
+        if (this._xrSessionActive) return Math.min(1, v);
+        return v;
     }
 
     init() {
@@ -75,19 +109,17 @@ class SceneManager {
         if (saved) {
             try {
                 const s = JSON.parse(saved);
-                if (s.drawQualityLow === false) this.renderQualityOptions.drawQualityLow = false;
-                if (s.shadowQuality && ['low', 'medium', 'high', 'highest'].includes(s.shadowQuality)) this.renderQualityOptions.shadowQuality = s.shadowQuality;
-                else if (s.shadowQuality === 'normal') this.renderQualityOptions.shadowQuality = 'high';
-                if (s.fogFar != null) this.renderQualityOptions.fogFar = Number(s.fogFar) || 800;
-                if (s.pixelRatioCap !== undefined) this.renderQualityOptions.pixelRatioCap = s.pixelRatioCap;
+                const migrated = migrateLegacyGraphicsKeys(s);
+                this.graphicsOptions.graphicsTier = migrated.graphicsTier;
+                this.graphicsOptions.toneMappingExposure = migrated.toneMappingExposure;
+                this.graphicsOptions.pixelRatioCap = migrated.pixelRatioCap;
             } catch (e) { /* ignore */ }
         }
 
         // Create scene
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x87ceeb); // Sky blue (fallback when shader sky is not visible)
-        const fogFar = this.renderQualityOptions.fogFar ?? 800;
-        this.scene.fog = new THREE.Fog(0x87ceeb, 100, fogFar);
+        this.scene.background = new THREE.Color(0x87ceeb); // Sky blue（SkyDome 非表示時のフォールバック）
+        this.scene.fog = null;
 
         // Create camera
         this.camera = new THREE.PerspectiveCamera(
@@ -98,29 +130,102 @@ class SceneManager {
         );
         this.camera.position.set(0, 5, 10);
 
-        const antialias = !this.renderQualityOptions.drawQualityLow;
+        const initTier = normalizeGraphicsTier(this.graphicsOptions.graphicsTier);
+        const antialias = getAntialiasForTier(initTier);
+        this._rendererAntialias = antialias;
         const renderer = new THREE.WebGLRenderer({
             canvas: this.canvas,
             antialias
         });
         this.renderer = renderer;
         this.renderer.xr.enabled = true;
+        applyToneMapping(THREE, this.renderer, this.graphicsOptions.toneMappingExposure);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(this._getPixelRatio());
         this.renderer.shadowMap.enabled = true;
-        const shadowConfig = this._getShadowConfig(this.renderQualityOptions.shadowQuality);
+        const shadowConfig = this._getShadowConfigForEffectiveTier();
         this.renderer.shadowMap.type = shadowConfig.type;
+
+        this._wireXRGraphicsOverrides();
 
         // Base lights are added per-world via addWorldLights()
 
-        // Add shader-based sky dome (gradient sky)
+        // Add shader-based sky dome（環境反射には使わない）
         this.addSkyDome();
 
         // Add static environment
         this.addEnvironment();
 
+        requestAnimationFrame(() => {
+            this._loadIBLAsync();
+        });
+
         // Handle window resize
         window.addEventListener('resize', () => this.onWindowResize());
+    }
+
+    /**
+     * WebXR 中は FPS 優先でシャドウ・ピクセル比を下げる（レンダラ差し替え時は再登録）
+     */
+    _wireXRGraphicsOverrides() {
+        if (!this.renderer?.xr) return;
+        this.renderer.xr.removeEventListener('sessionstart', this._onXRSessionStart);
+        this.renderer.xr.removeEventListener('sessionend', this._onXRSessionEnd);
+        this.renderer.xr.addEventListener('sessionstart', this._onXRSessionStart);
+        this.renderer.xr.addEventListener('sessionend', this._onXRSessionEnd);
+    }
+
+    /**
+     * HDR を読み込み IBL を設定する（失敗時はログのみ）
+     */
+    async _loadIBLAsync() {
+        if (!this.scene || !this.renderer) return;
+        const result = await loadSceneIBL(
+            THREE,
+            { scene: this.scene, renderer: this.renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator },
+            { hdrUrl: DEFAULT_HDR_PATH }
+        );
+        if (!result.ok) {
+            console.warn('[SceneManager] IBL not available; PBR uses direct lights only until HDR is placed at', DEFAULT_HDR_PATH);
+        }
+    }
+
+    /**
+     * レンダラ再生成（antialias ティア変更時）。WebXR 中は呼ばないこと。
+     * @param {boolean} antialias
+     */
+    _recreateRenderer(antialias) {
+        if (this._xrSessionActive) return;
+        disposeSceneIBL(this.scene);
+        if (this.renderer) {
+            this.renderer.dispose();
+        }
+        this.renderer = new THREE.WebGLRenderer({
+            canvas: this.canvas,
+            antialias
+        });
+        this.renderer.xr.enabled = true;
+        this._rendererAntialias = antialias;
+        applyToneMapping(THREE, this.renderer, this.graphicsOptions.toneMappingExposure);
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setPixelRatio(this._getPixelRatio());
+        this.renderer.shadowMap.enabled = true;
+        const shadowConfig = this._getShadowConfigForEffectiveTier();
+        this.renderer.shadowMap.type = shadowConfig.type;
+        this._wireXRGraphicsOverrides();
+        const shadowMapSize = shadowConfig.mapSize;
+        this.worldLights.forEach((light) => {
+            if (light.castShadow && light.shadow) {
+                light.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+                if (light.shadow.map) {
+                    light.shadow.map.dispose();
+                    light.shadow.map = null;
+                }
+            }
+        });
+        requestAnimationFrame(() => {
+            this._loadIBLAsync();
+        });
     }
 
     /**
@@ -715,7 +820,7 @@ class SceneManager {
                         light.shadow.camera.bottom = -500;
                         light.shadow.camera.near = 0.1;
                         light.shadow.camera.far = 200;
-                        const mapSize = this._getShadowConfig(this.renderQualityOptions.shadowQuality).mapSize;
+                        const mapSize = this._getShadowConfigForEffectiveTier().mapSize;
                         light.shadow.mapSize.width = mapSize;
                         light.shadow.mapSize.height = mapSize;
                     }
@@ -769,65 +874,10 @@ class SceneManager {
     }
 
     /**
-     * Create a large sky dome with a vertical color gradient:
-     * near the horizon is whitish, higher is blue, and below the horizon is gray.
+     * グラデーション SkyDome（環境反射計算には使わない）
      */
     addSkyDome() {
-        const radius = 2000;
-        const geometry = new THREE.SphereGeometry(radius, 32, 16);
-
-        const vertexShader = `
-            varying vec3 vWorldPosition;
-            void main() {
-                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                vWorldPosition = worldPosition.xyz;
-                gl_Position = projectionMatrix * viewMatrix * worldPosition;
-            }
-        `;
-
-        const fragmentShader = `
-            precision mediump float;
-            varying vec3 vWorldPosition;
-            uniform vec3 zenithColor;
-            uniform vec3 horizonColor;
-            uniform vec3 groundColor;
-            uniform vec3 midSkyColor;
-
-            void main() {
-                float h = vWorldPosition.y;
-
-                // 地平線(0)〜高さ80までは「白 → 薄い青」のグラデーション
-                float tLow = clamp(h / 920.0, 0.0, 1.0);
-                vec3 skyLow = mix(horizonColor, midSkyColor, tLow);
-
-                // さらにかなり上空(400〜)でだけ濃い青を少し足す
-                float tHigh = smoothstep(400.0, 800.0, h);
-                vec3 sky = mix(skyLow, zenithColor, tHigh);
-
-                // y=-50 付近から下をグレーに寄せる
-                float blend = smoothstep(-80.0, 0.0, h);
-                vec3 color = mix(groundColor, sky, blend);
-
-                gl_FragColor = vec4(color, 1.0);
-            }
-        `;
-
-        const material = new THREE.ShaderMaterial({
-            uniforms: {
-                zenithColor: { value: new THREE.Color(0x1e90ff) },   // 一番上の濃い青
-                horizonColor: { value: new THREE.Color(0xf5f5f5) },  // 地平線付近の白っぽい色
-                groundColor: { value: new THREE.Color(0x666666) },   // 下側のグレー
-                midSkyColor: { value: new THREE.Color(0x9acbff) }    // 中間の薄い青
-            },
-            vertexShader,
-            fragmentShader,
-            side: THREE.BackSide,
-            depthWrite: false,
-            fog: false
-        });
-
-        const skyDome = new THREE.Mesh(geometry, material);
-        skyDome.name = 'SkyDome';
+        const skyDome = createGradientSkyDomeMesh(THREE);
         this.scene.add(skyDome);
     }
 
@@ -966,29 +1016,35 @@ class SceneManager {
     }
 
     /**
-     * Apply render quality from settings (from MenuManager).
-     * When drawQualityLow is true, effective values are: shadow low, fogFar 800, pixelRatioCap 1.
-     * @param {{ drawQualityLow?: boolean, shadowQuality?: string, fogFar?: number, pixelRatioCap?: number|string }} settings
+     * メニューからの描画設定を適用（graphicsTier / toneMappingExposure / pixelRatioCap）
+     * @param {Record<string, unknown>} [settings]
      */
-    applyRenderQuality(settings) {
-        const low = !!settings?.drawQualityLow;
-        this.renderQualityOptions = {
-            drawQualityLow: low,
-            shadowQuality: low ? 'low' : (settings?.shadowQuality || 'low'),
-            fogFar: low ? 800 : (Number(settings?.fogFar) || 800),
-            pixelRatioCap: low ? 1 : (settings?.pixelRatioCap ?? 1)
+    applyGraphicsSettings(settings) {
+        const raw = settings && typeof settings === 'object' ? settings : {};
+        this._lastGraphicsSettings = { ...this.graphicsOptions, ...raw };
+        const migrated = migrateLegacyGraphicsKeys(this._lastGraphicsSettings);
+        this.graphicsOptions = {
+            graphicsTier: migrated.graphicsTier,
+            toneMappingExposure: migrated.toneMappingExposure,
+            pixelRatioCap: migrated.pixelRatioCap
         };
 
-        if (this.scene?.fog) {
-            this.scene.fog.far = this.renderQualityOptions.fogFar;
+        const tier = this._effectiveGraphicsTier();
+        const needAA = getAntialiasForTier(tier);
+
+        if (this.renderer && !this._xrSessionActive && this._rendererAntialias !== needAA) {
+            this._recreateRenderer(needAA);
+            return;
         }
+
         if (this.renderer) {
+            applyToneMapping(THREE, this.renderer, this.graphicsOptions.toneMappingExposure);
             this.renderer.setPixelRatio(this._getPixelRatio());
-            const shadowConfig = this._getShadowConfig(this.renderQualityOptions.shadowQuality);
+            const shadowConfig = this._getShadowConfigForEffectiveTier();
             this.renderer.shadowMap.type = shadowConfig.type;
             this.renderer.setSize(window.innerWidth, window.innerHeight);
         }
-        const shadowMapSize = this._getShadowConfig(this.renderQualityOptions.shadowQuality).mapSize;
+        const shadowMapSize = this._getShadowConfigForEffectiveTier().mapSize;
         this.worldLights.forEach((light) => {
             if (light.castShadow && light.shadow) {
                 light.shadow.mapSize.set(shadowMapSize, shadowMapSize);
@@ -998,6 +1054,14 @@ class SceneManager {
                 }
             }
         });
+    }
+
+    /**
+     * @deprecated applyGraphicsSettings を使用
+     * @param {Record<string, unknown>} settings
+     */
+    applyRenderQuality(settings) {
+        this.applyGraphicsSettings(settings);
     }
 
     /**

@@ -8,12 +8,12 @@
 
 | # | 軽量化案 | 現状の負荷要因 | 実装工数 | 難易度 | 備考 |
 |---|----------|----------------|----------|--------|------|
-| 1.1 | **シャドウマップの軽量化** | `scene-manager.js`: DirectionalLight の shadow mapSize が 2048×2048、PCFSoftShadowMap。全メッシュで castShadow/receiveShadow 有効。 | 小（0.5〜1日） | 低 | 低品質モードで mapSize を 1024 または 512 に、type を BasicShadowMap に変更。設定UIまたは自動検出で切替。 |
-| 1.2 | **ピクセル比のキャップ** | `scene-manager.js`: `setPixelRatio(window.devicePixelRatio)` で Retina 等で 2〜3 倍負荷。 | 小（0.5日） | 低 | 低品質時は `Math.min(2, devicePixelRatio)` や固定 1 に。 |
-| 1.3 | **アンチエイリアス無効化オプション** | `WebGLRenderer({ antialias: true })` が常時有効。 | 小（0.5日） | 低 | 低品質モードで antialias: false。 |
-| 1.4 | **フォグ距離の短縮** | `scene-manager.js`: Fog(0x87ceeb, 100, 2000) で 2000 先まで描画。 | 小（0.5日） | 低 | 低品質時は far を 800〜1000 に短縮し描画対象を削減。 |
+| 1.1 | **シャドウマップの軽量化** | `scene-manager.js`: 描画品質ティアで mapSize / shadowMap.type が変わる（高=2048 PCFSoft、中=1024 PCFSoft、低=512 Basic）。WebXR 中は常に低ティア相当。 | 小（0.5〜1日） | 低 | 設定メニュー「描画品質」で切替。旧 shadowQuality UI は廃止済み。 |
+| 1.2 | **ピクセル比のキャップ** | `scene-manager.js`: `pixelRatioCap`（1 / 2 / デバイスどおり）。WebXR 中は最大 1。 | 小（0.5日） | 低 | 設定メニュー「ピクセル比」。 |
+| 1.3 | **アンチエイリアス** | ティア「低」では `antialias: false` の WebGLRenderer（ティア変更時はレンダラ再生成）。 | 小（0.5日） | 低 | 高/中は AA 有効。 |
+| 1.4 | **フォグ** | 当面オフ（`scene.fog = null`）。距離による負荷削減はフォグでは行わない。 | 小（0.5日） | 低 | 再導入する場合はワールド単位など別設計。 |
 | 1.5 | **GridHelper の軽量化** | `addEnvironment()`: GridHelper(1000, 100, ...) で 100×100 = 10000 本の線。 | 小（0.5日） | 低 | 低品質時は 50×50 や 20×20 に変更、または非表示オプション。 |
-| 1.6 | **低品質モードの一元化** | 上記 1.1〜1.5 を「低品質」フラグで一括適用。 | 中（1〜2日） | 中 | 設定画面または FPS/フレーム時間で自動切替。localStorage で永続化。 |
+| 1.6 | **IBL（HDR）** | `/env/default.hdr` を PMREM 化して `scene.environment` に設定。HDR が無い場合は直接光のみ。 | 中（1日） | 中 | 詳細は `public/env/README.md`。Blender Material Preview 近似用。 |
 
 ---
 
