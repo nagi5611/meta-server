@@ -1973,6 +1973,51 @@ function bindEvents() {
     const modelUploadOverallLabel = document.getElementById('model-upload-overall-label');
     const modelUploadFooterStatus = document.getElementById('model-upload-modal-footer-status');
 
+    /** アップロード種別に応じてモーダル内の説明と 3D 専用ブロックの表示を切り替える */
+    function syncModelUploadKindUI() {
+        const kind = document.querySelector('input[name="model-upload-kind"]:checked')?.value || 'model';
+        const block3d = document.getElementById('model-upload-3d-only');
+        const hModel = document.getElementById('model-upload-hint-model');
+        const hPdf = document.getElementById('model-upload-hint-pdf');
+        const hHdr = document.getElementById('model-upload-hint-hdr');
+        const show3d = kind === 'model';
+        if (block3d) block3d.hidden = !show3d;
+        if (hModel) hModel.hidden = kind !== 'model';
+        if (hPdf) hPdf.hidden = kind !== 'pdf';
+        if (hHdr) hHdr.hidden = kind !== 'hdr';
+    }
+
+    /** PDF アップロード結果をパネルと（モーダル表示中なら）モーダル下部にも出す */
+    function setDualPdfUploadStatus(msg, cls) {
+        const panelStatus = document.getElementById('upload-pdf-status');
+        if (panelStatus) {
+            panelStatus.textContent = msg;
+            panelStatus.className = cls || '';
+        }
+        if (modelUploadFooterStatus && modelUploadModal?.classList.contains('show')) {
+            modelUploadFooterStatus.textContent = msg;
+            modelUploadFooterStatus.className = cls || '';
+        }
+    }
+
+    /** HDR アップロード結果をパネルと（モーダル表示中なら）モーダル下部にも出す */
+    function setDualHdrUploadStatus(msg, cls) {
+        const panelStatus = document.getElementById('upload-hdr-status');
+        if (panelStatus) {
+            panelStatus.textContent = msg;
+            panelStatus.className = cls || '';
+        }
+        if (modelUploadFooterStatus && modelUploadModal?.classList.contains('show')) {
+            modelUploadFooterStatus.textContent = msg;
+            modelUploadFooterStatus.className = cls || '';
+        }
+    }
+
+    for (const el of document.querySelectorAll('input[name="model-upload-kind"]')) {
+        el.addEventListener('change', () => syncModelUploadKindUI());
+    }
+    syncModelUploadKindUI();
+
     /** サーバ側 GLB キュー表示のポーリングを止める */
     function stopModelUploadQueuePoll() {
         if (modelUploadQueuePollId) {
@@ -2121,10 +2166,18 @@ function bindEvents() {
         }
         if (modelUploadFileList) modelUploadFileList.innerHTML = '';
         applyServerQueueToLabel(null);
+        const modelKindRadio = document.querySelector('input[name="model-upload-kind"][value="model"]');
+        if (modelKindRadio) modelKindRadio.checked = true;
+        syncModelUploadKindUI();
         setModelUploadModalOpen(true);
     });
 
-    document.getElementById('model-upload-pick')?.addEventListener('click', () => modelUploadInput?.click());
+    document.getElementById('model-upload-pick')?.addEventListener('click', () => {
+        const kind = document.querySelector('input[name="model-upload-kind"]:checked')?.value || 'model';
+        if (kind === 'model') modelUploadInput?.click();
+        else if (kind === 'pdf') document.getElementById('upload-pdf-input')?.click();
+        else if (kind === 'hdr') document.getElementById('upload-hdr-input')?.click();
+    });
 
     document.getElementById('model-upload-close')?.addEventListener('click', () => {
         if (modelUploadModalBusy) {
@@ -2218,9 +2271,7 @@ function bindEvents() {
     document.getElementById('upload-pdf-input').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const status = document.getElementById('upload-pdf-status');
-        status.textContent = '';
-        status.className = '';
+        setDualPdfUploadStatus('', '');
         const name = file.name.toLowerCase().endsWith('.pdf') ? file.name : file.name + '.pdf';
         const exists = pdfList.some((n) => n.toLowerCase() === name.toLowerCase());
         let url = '/admin/upload-pdf';
@@ -2236,8 +2287,7 @@ function bindEvents() {
         try {
             const res = await fetch(url, { method: 'POST', credentials: 'include', body: form });
             if (res.status === 409) {
-                status.textContent = '同名ファイルがあります。上書きするには確認して再送信してください。';
-                status.className = 'error';
+                setDualPdfUploadStatus('同名ファイルがあります。上書きするには確認して再送信してください。', 'error');
                 return;
             }
             if (!res.ok) throw new Error(await res.text());
@@ -2249,10 +2299,9 @@ function bindEvents() {
             const newPath = 'pdfs/' + pdfData.filename;
             selectedPdfPath = newPath;
             loadPdfPreview(newPath);
-            status.textContent = 'アップロードしました: ' + pdfData.filename;
+            setDualPdfUploadStatus('アップロードしました: ' + pdfData.filename, '');
         } catch (err) {
-            status.textContent = 'アップロード失敗: ' + err.message;
-            status.className = 'error';
+            setDualPdfUploadStatus('アップロード失敗: ' + err.message, 'error');
         }
         e.target.value = '';
     });
@@ -2263,11 +2312,7 @@ function bindEvents() {
     document.getElementById('upload-hdr-input')?.addEventListener('change', async (e) => {
         const file = e.target.files && e.target.files[0];
         if (!file) return;
-        const status = document.getElementById('upload-hdr-status');
-        if (status) {
-            status.textContent = '';
-            status.className = '';
-        }
+        setDualHdrUploadStatus('', '');
         const postHdr = async (confirmOverwrite) => {
             const form = new FormData();
             form.append('hdr', file);
@@ -2286,10 +2331,7 @@ function bindEvents() {
                 res = await postHdr(true);
             }
             if (res.status === 409) {
-                if (status) {
-                    status.textContent = '上書きには確認が必要です。';
-                    status.className = 'error';
-                }
+                setDualHdrUploadStatus('上書きには確認が必要です。', 'error');
                 e.target.value = '';
                 return;
             }
@@ -2303,14 +2345,9 @@ function bindEvents() {
                     if (!r.ok) console.warn('[setting] IBL 再読み込みに失敗しました');
                 });
             }
-            if (status) {
-                status.textContent = 'アップロードしました: default.hdr（プレビューに反映済み）';
-            }
+            setDualHdrUploadStatus('アップロードしました: default.hdr（プレビューに反映済み）', '');
         } catch (err) {
-            if (status) {
-                status.textContent = 'アップロード失敗: ' + err.message;
-                status.className = 'error';
-            }
+            setDualHdrUploadStatus('アップロード失敗: ' + err.message, 'error');
         }
         e.target.value = '';
     });
