@@ -366,11 +366,36 @@ body {
     border-color: #0d47a1;
 }
 
-/* 重要ボタン（保存/エクスポート）は通常時も視認性を確保 */
+/* 重要ボタン（保存/エクスポート/JSON編集）は通常時も視認性を確保 */
 .admin-panel-world-edit #btn-save,
-.admin-panel-world-edit #btn-export-worlds {
+.admin-panel-world-edit #btn-export-worlds,
+.admin-panel-world-edit #btn-edit-worlds-json {
     color: #111;
     font-weight: 600;
+}
+
+.admin-panel-world-edit .world-json-btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.world-json-modal-content.modal-content {
+    max-width: min(960px, 96vw);
+    width: 96%;
+}
+
+.world-json-modal-hint {
+    margin-bottom: 12px;
+    font-size: 0.9rem;
+}
+
+.world-json-editor-textarea {
+    min-height: min(55vh, 520px);
+    font-family: ui-monospace, 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.45;
 }
 
 /* リスト */
@@ -2545,7 +2570,8 @@ body.admin-dark .admin-panel-world-edit .we-right-content button:hover:not(:disa
 }
 
 body.admin-dark .admin-panel-world-edit #btn-save,
-body.admin-dark .admin-panel-world-edit #btn-export-worlds {
+body.admin-dark .admin-panel-world-edit #btn-export-worlds,
+body.admin-dark .admin-panel-world-edit #btn-edit-worlds-json {
     color: #e6e4df;
 }
 body.admin-dark .admin-panel-world-edit .users-table th {

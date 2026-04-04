@@ -1119,6 +1119,32 @@ function buildWorldsFromScene() {
     return out;
 }
 
+/**
+ * 保存した worlds JSON をメモリと3Dシーンに反映する
+ * @param {Record<string, unknown>} parsed
+ */
+function applyWorldsStateFromJson(parsed) {
+    worlds = JSON.parse(JSON.stringify(parsed));
+    renderWorldList();
+    populateDestWorldSelect();
+    const ids = Object.keys(worlds);
+    if (!ids.length) {
+        selectedWorldId = null;
+        document.getElementById('btn-delete-world').disabled = true;
+        document.getElementById('world-name-row').style.display = 'none';
+        loadWorldIntoScene({
+            models: [],
+            lights: [],
+            pdfs: [],
+            spawnPoint: { x: 0, y: 10, z: 0 },
+            floorEnabled: true
+        });
+        return;
+    }
+    const nextId = (selectedWorldId && worlds[selectedWorldId]) ? selectedWorldId : ids[0];
+    selectWorld(nextId);
+}
+
 function loadWorldIntoScene(world) {
     while (editGroup.children.length) {
         const c = editGroup.children[0];
@@ -1764,6 +1790,105 @@ function bindEvents() {
             a.click();
             URL.revokeObjectURL(url);
             if (statusEl) statusEl.textContent = 'エクスポートしました';
+        });
+    }
+
+    const worldJsonModal = document.getElementById('world-json-modal');
+    const worldJsonTextarea = document.getElementById('world-json-editor-textarea');
+    const worldJsonModalStatus = document.getElementById('world-json-modal-status');
+    const btnEditWorldsJson = document.getElementById('btn-edit-worlds-json');
+    const worldJsonSaveBtn = document.getElementById('world-json-save-btn');
+    const worldJsonCancelBtn = document.getElementById('world-json-cancel-btn');
+
+    /** worlds.json モーダルを閉じる */
+    function closeWorldJsonModal() {
+        if (!worldJsonModal) return;
+        worldJsonModal.classList.remove('show');
+        worldJsonModal.setAttribute('aria-hidden', 'true');
+    }
+
+    /** エクスポートと同じソースでテキストを埋めてモーダルを開く */
+    function openWorldJsonModal() {
+        if (!worldJsonModal || !worldJsonTextarea) return;
+        if (worldJsonModalStatus) {
+            worldJsonModalStatus.textContent = '';
+            worldJsonModalStatus.className = '';
+        }
+        syncObjectFromPanel();
+        worldJsonTextarea.value = JSON.stringify(buildWorldsFromScene(), null, 2);
+        worldJsonModal.classList.add('show');
+        worldJsonModal.setAttribute('aria-hidden', 'false');
+        worldJsonTextarea.focus();
+    }
+
+    if (btnEditWorldsJson) {
+        btnEditWorldsJson.addEventListener('click', openWorldJsonModal);
+    }
+    if (worldJsonCancelBtn) {
+        worldJsonCancelBtn.addEventListener('click', closeWorldJsonModal);
+    }
+    if (worldJsonModal) {
+        worldJsonModal.addEventListener('click', (e) => {
+            if (e.target === worldJsonModal) closeWorldJsonModal();
+        });
+    }
+    if (worldJsonSaveBtn && worldJsonTextarea) {
+        worldJsonSaveBtn.addEventListener('click', async () => {
+            if (worldJsonModalStatus) {
+                worldJsonModalStatus.textContent = '';
+                worldJsonModalStatus.className = '';
+            }
+            let parsed;
+            try {
+                parsed = JSON.parse(worldJsonTextarea.value);
+            } catch (err) {
+                if (worldJsonModalStatus) {
+                    worldJsonModalStatus.textContent = 'JSONの解析に失敗しました: ' + (err.message || String(err));
+                    worldJsonModalStatus.className = 'error';
+                }
+                return;
+            }
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                if (worldJsonModalStatus) {
+                    worldJsonModalStatus.textContent = 'ルートはオブジェクト（ワールドID → 設定）である必要があります';
+                    worldJsonModalStatus.className = 'error';
+                }
+                return;
+            }
+            worldJsonSaveBtn.disabled = true;
+            try {
+                const res = await fetch('/admin/worlds', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(parsed)
+                });
+                const errText = await res.text();
+                if (!res.ok) {
+                    let msg = errText;
+                    try {
+                        const j = JSON.parse(errText);
+                        if (j && j.error) msg = typeof j.error === 'string' ? j.error : JSON.stringify(j.error);
+                    } catch {
+                        /* use errText */
+                    }
+                    throw new Error(msg || res.statusText);
+                }
+                applyWorldsStateFromJson(parsed);
+                const saveStatus = document.getElementById('save-status');
+                if (saveStatus) {
+                    saveStatus.textContent = '保存しました。反映にはサーバー再起動が必要です。';
+                    saveStatus.className = '';
+                }
+                closeWorldJsonModal();
+            } catch (e) {
+                if (worldJsonModalStatus) {
+                    worldJsonModalStatus.textContent = '保存に失敗: ' + e.message;
+                    worldJsonModalStatus.className = 'error';
+                }
+            } finally {
+                worldJsonSaveBtn.disabled = false;
+            }
         });
     }
 

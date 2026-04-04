@@ -423,7 +423,10 @@
                                     <span id="save-status" class="status-text"></span>
                                 </section>
                                 <section class="section">
-                                    <button type="button" id="btn-export-worlds" class="btn-secondary">ワールド設定をJSONでエクスポート</button>
+                                    <div class="world-json-btn-row">
+                                        <button type="button" id="btn-export-worlds" class="btn-secondary">ワールド設定をJSONでエクスポート</button>
+                                        <button type="button" id="btn-edit-worlds-json" class="btn-secondary">JSONで編集</button>
+                                    </div>
                                     <span id="export-status" class="status-text"></span>
                                 </section>
                             </div>
@@ -792,8 +795,22 @@
         </div>
     </main>
 
-    <!-- User session detail modal (click username in chat log) -->
-    <div id="user-session-modal" class="modal">
+            <!-- worlds.json 直編集（ワールド編集パネル） -->
+            <div id="world-json-modal" class="modal world-json-modal" aria-hidden="true">
+                <div class="modal-content world-json-modal-content">
+                    <h3>worlds.json を編集</h3>
+                    <p class="hint world-json-modal-hint">表示内容は「JSONでエクスポート」と同じく、現在の編集状態を反映します。保存でサーバーの worlds.json に書き込みます。</p>
+                    <textarea id="world-json-editor-textarea" class="world-json-editor-textarea" spellcheck="false" aria-label="worlds.json"></textarea>
+                    <div class="modal-buttons">
+                        <button type="button" id="world-json-save-btn" class="btn btn-primary">サーバーに保存</button>
+                        <button type="button" id="world-json-cancel-btn" class="btn btn-secondary">閉じる</button>
+                    </div>
+                    <span id="world-json-modal-status" class="status-text"></span>
+                </div>
+            </div>
+
+            <!-- User session detail modal (click username in chat log) -->
+            <div id="user-session-modal" class="modal">
         <div class="modal-content">
             <h3 id="user-session-modal-title">ユーザー情報</h3>
             <div id="user-session-modal-body">
