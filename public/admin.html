@@ -409,8 +409,7 @@
                             <div id="we-cat-file" class="we-category-pane">
                                 <section class="section">
                                     <h2 class="section-title">モデルをアップロード</h2>
-                                    <input type="file" id="upload-input" accept=".glb,.obj,.mtl,.png,.jpg,.jpeg,.webp" multiple style="display:none">
-                                    <button type="button" id="btn-upload">ファイルを選択</button>
+                                    <button type="button" id="btn-model-upload-open" class="btn-secondary">アップロード画面を開く</button>
                                     <span id="upload-status" class="status-text"></span>
                                 </section>
                                 <section class="section">
@@ -822,6 +821,27 @@
                 <button id="alert-send-btn" class="btn btn-primary">送信</button>
                 <button id="alert-cancel-btn" class="btn btn-secondary">キャンセル</button>
             </div>
+        </div>
+    </div>
+
+    <div id="model-upload-modal" class="modal">
+        <div class="modal-content model-upload-modal-panel">
+            <h3>モデルファイルのアップロード</h3>
+            <p class="hint model-upload-hint">GLB はサーバでテクスチャ長辺を最大 1536px に縮小してから保存します（複数アップロード時はサーバ側で順番に処理されます）。</p>
+            <div id="model-upload-server-queue" class="model-upload-server-queue" aria-live="polite"></div>
+            <div id="model-upload-overall-progress" class="model-upload-overall-progress" style="display:none;">
+                <div class="model-upload-progress-track">
+                    <div id="model-upload-overall-fill" class="model-upload-progress-fill"></div>
+                </div>
+                <span id="model-upload-overall-label" class="model-upload-overall-label"></span>
+            </div>
+            <div id="model-upload-file-list" class="model-upload-file-list"></div>
+            <input type="file" id="model-upload-input" accept=".glb,.obj,.mtl,.png,.jpg,.jpeg,.webp" multiple style="display:none">
+            <div class="modal-buttons model-upload-modal-actions">
+                <button type="button" id="model-upload-pick" class="btn-secondary">ファイルを選択</button>
+                <button type="button" id="model-upload-close" class="btn-secondary">閉じる</button>
+            </div>
+            <div id="model-upload-modal-footer-status" class="status-text"></div>
         </div>
     </div>
 

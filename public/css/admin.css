@@ -2798,3 +2798,150 @@ body.admin-dark .chart-panel .status-text {
         grid-template-columns: 1fr;
     }
 }
+
+/* public/css/admin.css — モデルアップロードモーダル */
+.model-upload-modal-panel {
+    max-width: 560px;
+    width: 92%;
+}
+
+.model-upload-hint {
+    margin-bottom: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.model-upload-server-queue {
+    font-size: 13px;
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: #f0f4f8;
+    border: 1px solid #dde4ec;
+    color: #34495e;
+}
+
+.model-upload-overall-progress {
+    margin-bottom: 14px;
+}
+
+.model-upload-progress-track {
+    height: 8px;
+    border-radius: 4px;
+    background: #e8ecf0;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+
+.model-upload-progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #42a5f5, #1976d2);
+    transition: width 0.15s ease-out;
+}
+
+.model-upload-overall-label {
+    font-size: 12px;
+    color: #666;
+}
+
+.model-upload-file-list {
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    margin-bottom: 14px;
+    background: #fafafa;
+}
+
+.model-upload-row {
+    padding: 10px 12px;
+    border-bottom: 1px solid #ececec;
+}
+
+.model-upload-row:last-child {
+    border-bottom: none;
+}
+
+.model-upload-row-name {
+    font-weight: 600;
+    font-size: 13px;
+    word-break: break-all;
+    margin-bottom: 4px;
+    color: #2c3e50;
+}
+
+.model-upload-row-status {
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+
+.model-upload-row-status.ok {
+    color: #2e7d32;
+}
+
+.model-upload-row-status.warn {
+    color: #c62828;
+}
+
+.model-upload-row-status.muted {
+    color: #757575;
+}
+
+.model-upload-row-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: #e8ecf0;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+
+.model-upload-row-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: #64b5f6;
+    transition: width 0.12s ease-out;
+}
+
+.model-upload-row-detail {
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.model-upload-row-detail summary {
+    cursor: pointer;
+    color: #1976d2;
+}
+
+.model-upload-modal-actions {
+    margin-top: 8px;
+}
+
+body.admin-dark .model-upload-server-queue {
+    background: #25231d;
+    border-color: #2d2a24;
+    color: #b0ada5;
+}
+
+body.admin-dark .model-upload-file-list {
+    background: #14120b;
+    border-color: #2d2a24;
+}
+
+body.admin-dark .model-upload-row {
+    border-bottom-color: #2d2a24;
+}
+
+body.admin-dark .model-upload-row-name {
+    color: #e6e4df;
+}
+
+body.admin-dark .model-upload-progress-track,
+body.admin-dark .model-upload-row-bar {
+    background: #2d2a24;
+}
+
+body.admin-dark .model-upload-overall-label {
+    color: #9c9992;
+}

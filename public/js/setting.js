@@ -1785,8 +1785,191 @@ function bindEvents() {
         else alert('PDFをアップロードするか、一覧から選択してください');
     });
 
-    document.getElementById('btn-upload').addEventListener('click', () => document.getElementById('upload-input').click());
     document.getElementById('btn-upload-pdf').addEventListener('click', () => document.getElementById('upload-pdf-input').click());
+
+    let modelUploadModalBusy = false;
+    let modelUploadQueuePollId = null;
+    const modelUploadModal = document.getElementById('model-upload-modal');
+    const modelUploadInput = document.getElementById('model-upload-input');
+    const modelUploadFileList = document.getElementById('model-upload-file-list');
+    const modelUploadServerQueueEl = document.getElementById('model-upload-server-queue');
+    const modelUploadOverallProgress = document.getElementById('model-upload-overall-progress');
+    const modelUploadOverallFill = document.getElementById('model-upload-overall-fill');
+    const modelUploadOverallLabel = document.getElementById('model-upload-overall-label');
+    const modelUploadFooterStatus = document.getElementById('model-upload-modal-footer-status');
+
+    /** サーバ側 GLB キュー表示のポーリングを止める */
+    function stopModelUploadQueuePoll() {
+        if (modelUploadQueuePollId) {
+            clearInterval(modelUploadQueuePollId);
+            modelUploadQueuePollId = null;
+        }
+    }
+
+    /** @param {{ waiting?: number, processing?: boolean }|null} q */
+    function applyServerQueueToLabel(q) {
+        if (!modelUploadServerQueueEl) return;
+        if (!q || typeof q.waiting !== 'number') {
+            modelUploadServerQueueEl.textContent = '';
+            return;
+        }
+        const proc = q.processing ? 'リサイズ処理を実行中' : 'リサイズ処理待ち';
+        modelUploadServerQueueEl.textContent = `サーバ側 GLB: 待ち ${q.waiting} 件、${proc}`;
+    }
+
+    function startModelUploadQueuePoll() {
+        stopModelUploadQueuePoll();
+        modelUploadQueuePollId = setInterval(async () => {
+            try {
+                const res = await fetch('/admin/model-upload-queue', { credentials: 'include' });
+                if (!res.ok) return;
+                const q = await res.json();
+                applyServerQueueToLabel(q);
+            } catch (_) {
+                /* ignore */
+            }
+        }, 500);
+    }
+
+    /**
+     * アップロード進捗付きで /admin/upload に POST する。
+     * @param {string} url
+     * @param {File} file
+     * @param {(ratio: number) => void} [onUploadProgress]
+     * @returns {Promise<{ status: number, text: string, json: object|null }>}
+     */
+    function postAdminModelUploadXHR(url, file, onUploadProgress) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', url);
+            xhr.withCredentials = true;
+            xhr.addEventListener('load', () => {
+                let json = null;
+                const text = xhr.responseText || '';
+                try {
+                    json = text ? JSON.parse(text) : null;
+                } catch (_) {
+                    json = null;
+                }
+                resolve({ status: xhr.status, text, json });
+            });
+            xhr.addEventListener('error', () => reject(new Error('ネットワークエラー（XHR）')));
+            xhr.upload.addEventListener('progress', (ev) => {
+                if (ev.lengthComputable && typeof onUploadProgress === 'function') {
+                    onUploadProgress(ev.loaded / ev.total);
+                }
+            });
+            const form = new FormData();
+            form.append('model', file);
+            form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+            xhr.send(form);
+        });
+    }
+
+    function setModelUploadModalOpen(open) {
+        if (!modelUploadModal) return;
+        if (open) modelUploadModal.classList.add('show');
+        else modelUploadModal.classList.remove('show');
+    }
+
+    /**
+     * @param {string} fileName
+     * @returns {{ row: HTMLElement, setStatus: (t: string, c?: string) => void, setProgress: (r: number) => void, setErrorDetail: (t: string) => void }}
+     */
+    function createModelUploadRow(fileName) {
+        const row = document.createElement('div');
+        row.className = 'model-upload-row';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'model-upload-row-name';
+        nameEl.textContent = fileName;
+        const statusEl = document.createElement('div');
+        statusEl.className = 'model-upload-row-status muted';
+        statusEl.textContent = '待機中';
+        const barWrap = document.createElement('div');
+        barWrap.className = 'model-upload-row-bar';
+        const barFill = document.createElement('div');
+        barFill.className = 'model-upload-row-bar-fill';
+        barWrap.appendChild(barFill);
+        let detailEl = null;
+        row.appendChild(nameEl);
+        row.appendChild(statusEl);
+        row.appendChild(barWrap);
+        return {
+            row,
+            setStatus(text, cls) {
+                statusEl.textContent = text;
+                statusEl.className = 'model-upload-row-status' + (cls ? ` ${cls}` : '');
+            },
+            setProgress(ratio) {
+                const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+                barFill.style.width = `${pct}%`;
+            },
+            setErrorDetail(text) {
+                if (!text) return;
+                if (!detailEl) {
+                    detailEl = document.createElement('details');
+                    detailEl.className = 'model-upload-row-detail';
+                    const sum = document.createElement('summary');
+                    sum.textContent = '技術詳細';
+                    detailEl.appendChild(sum);
+                    row.appendChild(detailEl);
+                }
+                detailEl.querySelectorAll('pre').forEach((n) => n.remove());
+                const pre = document.createElement('pre');
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.style.wordBreak = 'break-all';
+                pre.textContent = text;
+                detailEl.appendChild(pre);
+            },
+        };
+    }
+
+    function updateOverallProgress(doneCount, total, currentRatio) {
+        if (!modelUploadOverallProgress || !modelUploadOverallFill || !modelUploadOverallLabel) return;
+        if (total <= 0) {
+            modelUploadOverallProgress.style.display = 'none';
+            return;
+        }
+        modelUploadOverallProgress.style.display = 'block';
+        const base = doneCount / total;
+        const slice = currentRatio / total;
+        const pct = Math.round(Math.min(1, base + slice) * 100);
+        modelUploadOverallFill.style.width = `${pct}%`;
+        modelUploadOverallLabel.textContent = `全体 ${doneCount} / ${total} 件（${pct}%）`;
+    }
+
+    document.getElementById('btn-model-upload-open')?.addEventListener('click', () => {
+        if (!modelUploadModal) return;
+        if (modelUploadFooterStatus) {
+            modelUploadFooterStatus.textContent = '';
+            modelUploadFooterStatus.className = '';
+        }
+        if (modelUploadFileList) modelUploadFileList.innerHTML = '';
+        applyServerQueueToLabel(null);
+        setModelUploadModalOpen(true);
+    });
+
+    document.getElementById('model-upload-pick')?.addEventListener('click', () => modelUploadInput?.click());
+
+    document.getElementById('model-upload-close')?.addEventListener('click', () => {
+        if (modelUploadModalBusy) {
+            if (!confirm('アップロード処理中です。閉じてもよいですか？')) return;
+            stopModelUploadQueuePoll();
+        }
+        setModelUploadModalOpen(false);
+    });
+
+    if (modelUploadModal) {
+        modelUploadModal.addEventListener('click', (ev) => {
+            if (ev.target !== modelUploadModal) return;
+            if (modelUploadModalBusy) {
+                if (!confirm('アップロード処理中です。閉じてもよいですか？')) return;
+                stopModelUploadQueuePoll();
+            }
+            setModelUploadModalOpen(false);
+        });
+    }
+
     const showOverwriteSelectionCard = (targetNames) => new Promise((resolve) => {
         const modal = document.getElementById('overwrite-select-modal');
         const listEl = document.getElementById('overwrite-select-list');
@@ -1898,15 +2081,34 @@ function bindEvents() {
         }
         e.target.value = '';
     });
-    document.getElementById('upload-input').addEventListener('change', async (e) => {
+    modelUploadInput?.addEventListener('change', async (e) => {
         const files = Array.from(e.target.files || []);
         e.target.value = '';
         if (!files.length) return;
         const status = document.getElementById('upload-status');
-        status.textContent = '';
-        status.className = '';
+        if (status) {
+            status.textContent = '';
+            status.className = '';
+        }
+        if (modelUploadFooterStatus) {
+            modelUploadFooterStatus.textContent = '';
+            modelUploadFooterStatus.className = '';
+        }
+        if (!modelUploadFileList) return;
+
+        modelUploadModalBusy = true;
+        startModelUploadQueuePoll();
+
         const isMultipleUpload = files.length > 1;
         const entries = files.map((file) => ({ file, name: file.name.replace(/^.*[/\\]/, '') }));
+        const rowUi = entries.map((en) => {
+            const ui = createModelUploadRow(en.name);
+            modelUploadFileList.appendChild(ui.row);
+            return { ...en, ui };
+        });
+        const total = entries.length;
+        let completedFiles = 0;
+
         const lowerModelNames = new Set(modelList.map((n) => n.toLowerCase()));
         const overwriteTargets = entries
             .map((entry) => entry.name)
@@ -1916,69 +2118,129 @@ function bindEvents() {
         if (isMultipleUpload && overwriteTargets.length > 0) {
             const selectedNames = await showOverwriteSelectionCard(overwriteTargets);
             if (selectedNames === null) {
-                status.textContent = 'アップロードをキャンセルしました';
+                if (modelUploadFooterStatus) modelUploadFooterStatus.textContent = 'アップロードをキャンセルしました';
+                modelUploadModalBusy = false;
+                stopModelUploadQueuePoll();
                 return;
             }
             approvedOverwriteNames = selectedNames;
         }
+
         let ok = 0;
         let skipped = 0;
         let failed = 0;
         let lastErr = '';
         let needMtlRefresh = false;
         const conflictEntries = [];
-        for (const entry of entries) {
-            const { file, name } = entry;
+
+        /**
+         * @param {object} uploadData
+         * @param {{ setStatus: Function, setProgress: Function, setErrorDetail: Function }} ui
+         */
+        function applyTextureResizeStatus(uploadData, ui) {
+            if (uploadData.textureResize) {
+                const tr = uploadData.textureResize;
+                if (tr.applied) {
+                    ui.setStatus(tr.message || 'テクスチャを縮小して保存しました', 'ok');
+                } else if (tr.error) {
+                    ui.setStatus(tr.error, 'warn');
+                    if (tr.errorDetail) ui.setErrorDetail(tr.errorDetail);
+                } else {
+                    ui.setStatus('保存しました', 'ok');
+                }
+            } else {
+                ui.setStatus('保存しました', 'ok');
+            }
+            ui.setProgress(1);
+        }
+
+        for (const { file, name, ui } of rowUi) {
+            updateOverallProgress(completedFiles, total, 0);
             const exists = lowerModelNames.has(name.toLowerCase());
             let url = '/admin/upload';
             if (exists) {
                 if (isMultipleUpload) {
                     if (!approvedOverwriteNames.has(name)) {
+                        ui.setStatus('スキップ（上書き対象外）', 'muted');
+                        ui.setProgress(1);
                         skipped++;
+                        completedFiles++;
+                        updateOverallProgress(completedFiles, total, 0);
                         continue;
                     }
                     url += '?confirm=1';
+                } else if (!confirm(`「${name}」は既にあります。上書きしますか？`)) {
+                    ui.setStatus('スキップ', 'muted');
+                    ui.setProgress(1);
+                    skipped++;
+                    completedFiles++;
+                    updateOverallProgress(completedFiles, total, 0);
+                    continue;
                 } else {
-                    if (!confirm(`「${name}」は既にあります。上書きしますか？`)) {
-                        skipped++;
-                        continue;
-                    }
                     url += '?confirm=1';
                 }
             }
-            const form = new FormData();
-            form.append('model', file);
-            form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+
+            ui.setStatus('アップロード中…', 'muted');
+            ui.setProgress(0);
+
             try {
-                let res = await fetch(url, { method: 'POST', credentials: 'include', body: form });
-                if (res.status === 409) {
+                let xhrRes = await postAdminModelUploadXHR(url, file, (r) => {
+                    ui.setProgress(r);
+                    updateOverallProgress(completedFiles, total, r);
+                });
+
+                if (xhrRes.status === 409) {
                     if (isMultipleUpload) {
-                        conflictEntries.push(entry);
+                        conflictEntries.push({ file, name, ui });
+                        ui.setStatus('同名あり（確認待ち）', 'muted');
+                        ui.setProgress(0);
+                        completedFiles++;
+                        updateOverallProgress(completedFiles, total, 0);
                         continue;
                     }
                     const shouldConfirmConflictOverwrite = confirm(`「${name}」は既にあります。上書きしますか？`);
                     if (!shouldConfirmConflictOverwrite) {
+                        ui.setStatus('スキップ', 'muted');
+                        ui.setProgress(1);
                         skipped++;
+                        completedFiles++;
+                        updateOverallProgress(completedFiles, total, 0);
                         continue;
                     }
-                    res = await fetch('/admin/upload?confirm=1', { method: 'POST', credentials: 'include', body: form });
-                    if (res.status === 409) {
+                    xhrRes = await postAdminModelUploadXHR('/admin/upload?confirm=1', file, (r) => {
+                        ui.setProgress(r);
+                        updateOverallProgress(completedFiles, total, r);
+                    });
+                    if (xhrRes.status === 409) {
                         lastErr = '同名の上書き確認が必要: ' + name;
+                        ui.setStatus(lastErr, 'warn');
                         failed++;
+                        completedFiles++;
+                        updateOverallProgress(completedFiles, total, 0);
                         continue;
                     }
                 }
-                if (!res.ok) throw new Error(await res.text());
-                const uploadData = await res.json();
+
+                if (xhrRes.status !== 200 || !xhrRes.json) {
+                    throw new Error(xhrRes.text || `HTTP ${xhrRes.status}`);
+                }
+                const uploadData = xhrRes.json;
                 if (!uploadData.success || !uploadData.filename) throw new Error('アップロード応答が不正です');
                 await notifyServiceWorkerInvalidate([encodeAssetPathToUrlPath('models/' + uploadData.filename)]);
                 await fetchModels();
                 if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
+                applyTextureResizeStatus(uploadData, ui);
                 ok++;
             } catch (err) {
                 lastErr = err.message || String(err);
+                ui.setStatus('失敗: ' + lastErr, 'warn');
+                ui.setProgress(1);
                 failed++;
             }
+
+            completedFiles++;
+            updateOverallProgress(completedFiles, total, 0);
         }
 
         if (conflictEntries.length > 0) {
@@ -1986,41 +2248,56 @@ function bindEvents() {
             const selectedConflictNames = await showOverwriteSelectionCard(conflictNames);
             if (selectedConflictNames === null) {
                 skipped += conflictEntries.length;
+                for (const { ui } of conflictEntries) {
+                    ui.setStatus('キャンセル（同名未解決）', 'muted');
+                }
             } else {
-                for (const entry of conflictEntries) {
-                    const { file, name } = entry;
+                for (const { file, name, ui } of conflictEntries) {
                     if (!selectedConflictNames.has(name)) {
                         skipped++;
+                        ui.setStatus('スキップ', 'muted');
+                        ui.setProgress(1);
                         continue;
                     }
-                    const form = new FormData();
-                    form.append('model', file);
-                    form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+                    ui.setStatus('アップロード中…', 'muted');
+                    ui.setProgress(0);
                     try {
-                        const res = await fetch('/admin/upload?confirm=1', { method: 'POST', credentials: 'include', body: form });
-                        if (res.status === 409) {
+                        const xhrRes = await postAdminModelUploadXHR('/admin/upload?confirm=1', file, (r) => {
+                            ui.setProgress(r);
+                        });
+                        if (xhrRes.status === 409) {
                             lastErr = '同名の上書き確認が必要: ' + name;
+                            ui.setStatus(lastErr, 'warn');
                             failed++;
                             continue;
                         }
-                        if (!res.ok) throw new Error(await res.text());
-                        const uploadDataRetry = await res.json();
+                        if (xhrRes.status !== 200 || !xhrRes.json) {
+                            throw new Error(xhrRes.text || `HTTP ${xhrRes.status}`);
+                        }
+                        const uploadDataRetry = xhrRes.json;
                         if (!uploadDataRetry.success || !uploadDataRetry.filename) {
                             throw new Error('アップロード応答が不正です');
                         }
                         await notifyServiceWorkerInvalidate([
-                            encodeAssetPathToUrlPath('models/' + uploadDataRetry.filename)
+                            encodeAssetPathToUrlPath('models/' + uploadDataRetry.filename),
                         ]);
                         await fetchModels();
                         if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
+                        applyTextureResizeStatus(uploadDataRetry, ui);
                         ok++;
                     } catch (err) {
                         lastErr = err.message || String(err);
+                        ui.setStatus('失敗: ' + lastErr, 'warn');
+                        ui.setProgress(1);
                         failed++;
                     }
                 }
             }
         }
+
+        stopModelUploadQueuePoll();
+        applyServerQueueToLabel(null);
+        modelUploadModalBusy = false;
 
         if (needMtlRefresh) await fetchMtls();
         renderModelList();
@@ -2028,10 +2305,19 @@ function bindEvents() {
         if (ok) parts.push(`成功 ${ok} 件`);
         if (skipped) parts.push(`スキップ ${skipped} 件`);
         if (failed) parts.push(`失敗 ${failed} 件`);
-        status.textContent = parts.length ? parts.join('、') : 'ファイルがありませんでした';
+        const summary = parts.length ? parts.join('、') : 'ファイルがありませんでした';
+        if (status) status.textContent = summary;
+        if (modelUploadFooterStatus) {
+            modelUploadFooterStatus.textContent = summary;
+            if (failed || (skipped === files.length && !ok)) modelUploadFooterStatus.className = 'error';
+            else if (ok) modelUploadFooterStatus.className = 'success';
+        }
         if (failed || (skipped === files.length && !ok)) {
-            status.className = 'error';
-            if (lastErr && failed) status.textContent += ' — ' + lastErr;
+            if (status) status.className = 'error';
+            if (lastErr && failed && status) status.textContent += ' — ' + lastErr;
+            if (lastErr && failed && modelUploadFooterStatus && !modelUploadFooterStatus.textContent.includes(lastErr)) {
+                modelUploadFooterStatus.textContent += ' — ' + lastErr;
+            }
         }
     });
 

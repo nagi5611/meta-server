@@ -14,6 +14,7 @@ import * as mediasoup from 'mediasoup';
 import { initDb, verifyStudent, verifyTeacher, registerStudent, registerTeacher, listStudents, listTeachers, updateStudent, updateTeacher, deleteStudent, deleteTeacher } from './db/users.js';
 import { initUserSessionsDb, insertSession, getLatestSessionByUsername, getSessionsPaginated } from './db/user-sessions.js';
 import { STORAGE_PATHS, validateAndPrepareStoragePaths } from './config/storage-paths.js';
+import { runGlbTextureResizeQueued, getModelUploadQueueStats } from './lib/glb-texture-resize.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2867,6 +2868,7 @@ io.on('connection', (socket) => {
         }
     });
 
+
     socket.on('video-vc-leave', async (data, callback) => {
         try {
             await cleanupVideoVCPeer(socket.id);
@@ -3227,7 +3229,16 @@ app.get('/admin/model-mtls', (req, res) => {
     }
 });
 
-app.post('/admin/upload', upload.single('model'), (req, res) => {
+app.get('/admin/model-upload-queue', (req, res) => {
+    try {
+        res.json(getModelUploadQueueStats());
+    } catch (err) {
+        console.error('GET /admin/model-upload-queue error:', err);
+        res.status(500).json({ error: 'Failed to read queue state' });
+    }
+});
+
+app.post('/admin/upload', upload.single('model'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file or invalid file' });
     }
@@ -3244,9 +3255,20 @@ app.post('/admin/upload', upload.single('model'), (req, res) => {
         if (!fs.existsSync(MODELS_DIR)) {
             fs.mkdirSync(MODELS_DIR, { recursive: true });
         }
-        fs.writeFileSync(destPath, req.file.buffer);
+        let outBuffer = req.file.buffer;
+        let textureResize = null;
+        if (ext === '.glb') {
+            const pipelineResult = await runGlbTextureResizeQueued(req.file.buffer);
+            outBuffer = pipelineResult.buffer;
+            textureResize = pipelineResult.textureResize;
+        }
+        fs.writeFileSync(destPath, outBuffer);
         io.emit('asset-invalidate', { urls: [publicAssetUrlForCache('models', filename)] });
-        res.json({ success: true, filename });
+        const payload = { success: true, filename };
+        if (textureResize) {
+            payload.textureResize = textureResize;
+        }
+        res.json(payload);
     } catch (err) {
         console.error('POST /admin/upload error:', err);
         res.status(500).json({ error: 'Failed to save file' });
