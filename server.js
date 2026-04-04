@@ -3271,7 +3271,10 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         res.json(payload);
     } catch (err) {
         console.error('POST /admin/upload error:', err);
-        res.status(500).json({ error: 'Failed to save file' });
+        res.status(500).json({
+            error: 'Failed to save file',
+            detail: err instanceof Error ? err.message : String(err),
+        });
     }
 });
 
