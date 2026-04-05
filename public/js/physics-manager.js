@@ -145,8 +145,8 @@ class PhysicsManager {
 
         this._tunnelStart.copy(this.playerPosition);
 
-        // 接地時は縦速度をゼロにし、毎フレーム負の vy を与えて床へ沈み込むのを防ぐ
-        if (this.playerIsOnGround) {
+        // 接地かつ下向き／静止のときだけ vy を 0（上向きはジャンプ残り → 重力を積分する）
+        if (this.playerIsOnGround && this.playerVelocity.y <= 0.12) {
             this.playerVelocity.y = 0;
         } else {
             this.playerVelocity.y += delta * this.gravity;
@@ -162,7 +162,10 @@ class PhysicsManager {
             this.playerPosition.x - this._tunnelStart.x,
             this.playerPosition.z - this._tunnelStart.z
         );
-        if (horiz > 0.004) {
+        // ジャンプ・上昇中は線分検査しない（誤検知で XZ ロールバックされジャンプが潰れるのを防ぐ）
+        const allowWallTunnelCheck =
+            this.playerIsOnGround && this.playerVelocity.y <= 0.12;
+        if (allowWallTunnelCheck && horiz > 0.004) {
             const midY = (this._tunnelStart.y + this.playerPosition.y) * 0.5 + 0.4;
             this._segFrom.set(this._tunnelStart.x, midY, this._tunnelStart.z);
             this._segTo.set(this.playerPosition.x, midY, this.playerPosition.z);
@@ -232,8 +235,11 @@ class PhysicsManager {
         const deltaVector = this.tempVector2;
         deltaVector.subVectors(newPosition, this.playerPosition);
 
-        // Check if player is on ground
+        // Check if player is on ground（上向き速度があるときは誤接地扱いにしない → ジャンプが即座に潰れるのを防ぐ）
         this.playerIsOnGround = deltaVector.y > Math.abs(delta * this.playerVelocity.y * 0.25);
+        if (this.playerVelocity.y > 0.12) {
+            this.playerIsOnGround = false;
+        }
 
         const offset = Math.max(0.0, deltaVector.length() - 1e-5);
         deltaVector.normalize().multiplyScalar(offset);
@@ -265,7 +271,13 @@ class PhysicsManager {
             deltaVector.normalize();
             this.playerVelocity.addScaledVector(deltaVector, -deltaVector.dot(this.playerVelocity));
         } else {
-            this.playerVelocity.set(0, 0, 0);
+            // 接地でも上昇中は vy を残す（誤接地のフレームでジャンプ初速を消さない）
+            if (this.playerVelocity.y <= 0) {
+                this.playerVelocity.set(0, 0, 0);
+            } else {
+                this.playerVelocity.x = 0;
+                this.playerVelocity.z = 0;
+            }
         }
 
         // Reset if fallen too far
