@@ -195,7 +195,26 @@ class PlayerManager {
     setRemotePlayerVisible(playerId, visible) {
         const player = this.remotePlayers.get(playerId);
         if (!player) return;
-        player.visible = !!visible;
+        player.userData.networkVisible = !!visible;
+        const distOk = player.userData.distanceVisible !== false;
+        player.visible = !!visible && distOk;
+    }
+
+    /**
+     * 自プレイヤー足元からの距離でリモートアバターの表示を切り替える（networkVisible と AND）
+     * @param {{ x: number, y: number, z: number }} localFeetWorld
+     * @param {number} maxDist
+     */
+    updateRemoteDrawDistance(localFeetWorld, maxDist) {
+        if (!localFeetWorld || !Number.isFinite(maxDist)) return;
+        const p = new THREE.Vector3(localFeetWorld.x, localFeetWorld.y, localFeetWorld.z);
+        for (const player of this.remotePlayers.values()) {
+            const d = p.distanceTo(player.position);
+            const distOk = d <= maxDist;
+            player.userData.distanceVisible = distOk;
+            const netOk = player.userData.networkVisible !== false;
+            player.visible = netOk && distOk;
+        }
     }
 
     /**
@@ -220,6 +239,8 @@ class PlayerManager {
         // Add name tag to placeholder
         this.addNameTag(placeholder, displayName);
         
+        placeholder.userData.networkVisible = true;
+        placeholder.userData.distanceVisible = true;
         this.scene.add(placeholder);
         this.remotePlayers.set(playerId, placeholder);
         
@@ -245,6 +266,8 @@ class PlayerManager {
             remotePlayer.userData.username = displayName;
             remotePlayer.userData.isLoading = false;
             remotePlayer.userData.networkAnimState = 'idle';
+            remotePlayer.userData.networkVisible = placeholder.userData.networkVisible !== false;
+            remotePlayer.userData.distanceVisible = placeholder.userData.distanceVisible !== false;
             
             // Transfer name tag from placeholder to new avatar
             const nameTag = placeholder.children.find(child => child instanceof THREE.Sprite);
@@ -255,6 +278,9 @@ class PlayerManager {
             
             // Replace placeholder with GLB avatar
             this.scene.remove(placeholder);
+            remotePlayer.visible =
+                remotePlayer.userData.networkVisible !== false &&
+                remotePlayer.userData.distanceVisible !== false;
             this.scene.add(remotePlayer);
             this.remotePlayers.set(playerId, remotePlayer);
 

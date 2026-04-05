@@ -31,3 +31,35 @@
 ## 実装計画フェーズに渡す成果物
 
 - チャンクサイズ・ロード半径のたたき台数値と、**ワールド定義の拡張案**（後方互換をどう保つか含む）。
+
+---
+
+## 実装済み（メタバースランタイム）
+
+### 描画距離（球）
+
+- 設定の「描画」に **描画距離（m）**（既定 30、5〜500）。**足元**を中心に、ワールドメッシュ・PDF・床・グリッド・リモートアバターを `visible` で切り替え。グラデーション SkyDome（`scene` 直下）は常に表示。
+- クライアント: `SceneManager.updateDrawDistanceCulling`（4 フレームに 1 回）、`PlayerManager.updateRemoteDrawDistance`。
+
+### アップロード時チャンク（GLB）
+
+- `POST /admin/upload` でテクスチャ縮小後、**約 2MB 以上**かつ **デフォルトシーン直下に子ノードが 2 つ以上**かつ **空間セル（既定 32 単位）が 2 種類以上**のとき、[`lib/glb-spatial-chunk.js`](../../lib/glb-spatial-chunk.js) が `basename.chunk_N.glb` と `basename.chunks.json` を追加出力。**単体の `basename.glb` も従来どおり保存**（`path` のみのワールドはそのまま動く）。
+- チャンク表示を使うには `data/worlds.json` の該当モデルに **`chunkManifest`**（例: `"models/foo.chunks.json"`）を指定する。`path` は省略可（マニフェストのみのエントリ可）。
+
+```json
+{
+  "chunkManifest": "models/mybuilding.chunks.json",
+  "position": { "x": 0, "y": 0, "z": 0 },
+  "rotation": { "x": 0, "y": 0, "z": 0 },
+  "scale": { "x": 1, "y": 1, "z": 1 }
+}
+```
+
+### 制限・事故りうる点
+
+| 事象 | 内容 |
+|------|------|
+| 単一ルートの巨大 GLB | シーン直下が **1 ノードだけ**のエクスポートは **チャンク分割されない**（サーバーがスキップ）。効果が要る場合は DCC でトップレベルを複数ノードに分ける。 |
+| 物理 BVH | `generateBVH` は **非表示チャンクも含む全体**から生成。見えない壁に当たる／見えるのに当たらないの **不一致**が起こりうる。 |
+| メモリ・時間 | 巨大 GLB の `cloneDocument` は **重い**。Node の `NODE_OPTIONS=--max-old-space-size=...` を検討。 |
+| マニフェストとファイル | chunk GLB や JSON を手で消すとロード失敗。アップロード応答の `chunkManifest` を `worlds.json` に反映する運用を推奨。 |

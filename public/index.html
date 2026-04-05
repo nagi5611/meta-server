@@ -495,6 +495,11 @@
                             </select>
                             <div class="setting-description">低いほど軽くなります（WebXR 中は最大 1 に制限）</div>
                         </div>
+                        <div class="setting-item">
+                            <label for="viewDistanceM">描画距離: <span id="viewDistanceMValue">30</span> m</label>
+                            <input type="range" id="viewDistanceM" min="5" max="500" step="1" value="30">
+                            <div class="setting-description">足元を中心とした球。範囲外のワールド・PDF・他プレイヤーは非表示（スカイドームは常に表示）</div>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -30,8 +30,8 @@ class WorldManager {
         if (!Array.isArray(modelList)) return 0;
         let n = 0;
         for (const c of modelList) {
-            const p = typeof c === 'string' ? c : c?.path;
-            if (p) n++;
+            const o = typeof c === 'string' ? { path: c } : c;
+            if (o?.path || String(o?.chunkManifest || '').trim()) n++;
         }
         return n;
     }

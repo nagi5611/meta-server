@@ -15,6 +15,7 @@ import { initDb, verifyStudent, verifyTeacher, registerStudent, registerTeacher,
 import { initUserSessionsDb, insertSession, getLatestSessionByUsername, getSessionsPaginated } from './db/user-sessions.js';
 import { STORAGE_PATHS, validateAndPrepareStoragePaths } from './config/storage-paths.js';
 import { runGlbTextureResizeQueued, getModelUploadQueueStats } from './lib/glb-texture-resize.js';
+import { runGlbSpatialChunkIfNeeded } from './lib/glb-spatial-chunk.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3268,16 +3269,38 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         }
         let outBuffer = req.file.buffer;
         let textureResize = null;
+        let spatialChunk = null;
         if (ext === '.glb') {
             const pipelineResult = await runGlbTextureResizeQueued(req.file.buffer);
             outBuffer = pipelineResult.buffer;
             textureResize = pipelineResult.textureResize;
+            try {
+                spatialChunk = await runGlbSpatialChunkIfNeeded(outBuffer, {
+                    modelsDir: MODELS_DIR,
+                    baseFilename: filename,
+                });
+            } catch (e) {
+                console.warn('[upload] spatial chunk error:', e);
+                spatialChunk = { applied: false, reason: 'error', detail: String(e) };
+            }
         }
         fs.writeFileSync(destPath, outBuffer);
-        io.emit('asset-invalidate', { urls: [publicAssetUrlForCache('models', filename)] });
+        const invUrls = [publicAssetUrlForCache('models', filename)];
+        if (spatialChunk?.applied && Array.isArray(spatialChunk.chunkFiles)) {
+            for (const f of spatialChunk.chunkFiles) {
+                invUrls.push(publicAssetUrlForCache('models', f));
+            }
+        }
+        io.emit('asset-invalidate', { urls: invUrls });
         const payload = { success: true, filename };
         if (textureResize) {
             payload.textureResize = textureResize;
+        }
+        if (spatialChunk?.applied && spatialChunk.manifestRelativePath) {
+            payload.chunkManifest = spatialChunk.manifestRelativePath;
+            payload.spatialChunk = {
+                chunkFiles: spatialChunk.chunkFiles,
+            };
         }
         res.json(payload);
     } catch (err) {

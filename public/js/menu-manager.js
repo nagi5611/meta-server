@@ -1,4 +1,4 @@
-import { migrateLegacyGraphicsKeys } from './ibl-setup.js';
+import { migrateLegacyGraphicsKeys, clampViewDistanceM } from './ibl-setup.js';
 
 /**
  * MenuManager - メニューバーと設定管理
@@ -72,6 +72,7 @@ class MenuManager {
             graphicsTier: 'medium',
             toneMappingExposure: 1,
             pixelRatioCap: 1,
+            viewDistanceM: 30,
             viewMode: 'third'
         };
         
@@ -507,6 +508,14 @@ class MenuManager {
             this.saveSettings();
             this.sceneManager?.applyGraphicsSettings(this.settings);
         });
+        document.getElementById('viewDistanceM')?.addEventListener('input', (e) => {
+            const n = parseFloat(e.target.value);
+            this.settings.viewDistanceM = clampViewDistanceM(Number.isFinite(n) ? n : undefined);
+            const span = document.getElementById('viewDistanceMValue');
+            if (span) span.textContent = String(Math.round(this.settings.viewDistanceM));
+            this.saveSettings();
+            this.sceneManager?.applyGraphicsSettings(this.settings);
+        });
         document.getElementById('viewModeToggle')?.addEventListener('change', (e) => {
             this.settings.viewMode = e.target.checked ? 'first' : 'third';
             this.updateViewModeButton();
@@ -819,6 +828,7 @@ class MenuManager {
                 this.settings.graphicsTier = g.graphicsTier;
                 this.settings.toneMappingExposure = g.toneMappingExposure;
                 this.settings.pixelRatioCap = g.pixelRatioCap;
+                this.settings.viewDistanceM = g.viewDistanceM;
             } catch (e) {
                 console.error('Failed to load settings:', e);
             }
@@ -862,6 +872,12 @@ class MenuManager {
             toneExpValEl.textContent = (Number.isFinite(te) ? te : 1).toFixed(2);
         }
         if (pixelRatioCapEl) pixelRatioCapEl.value = this.settings.pixelRatioCap === 'full' ? 'full' : String(this.settings.pixelRatioCap ?? 1);
+        const viewDistEl = document.getElementById('viewDistanceM');
+        const viewDistValEl = document.getElementById('viewDistanceMValue');
+        const vd = clampViewDistanceM(this.settings.viewDistanceM);
+        this.settings.viewDistanceM = vd;
+        if (viewDistEl) viewDistEl.value = String(vd);
+        if (viewDistValEl) viewDistValEl.textContent = String(Math.round(vd));
         this.updateViewModeButton();
     }
 

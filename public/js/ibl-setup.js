@@ -11,6 +11,22 @@ export const DEFAULT_WORLD_DIRECTIONAL_INTENSITY = 0.8;
 
 /** @typedef {'high'|'medium'|'low'} GraphicsTier */
 
+/** メタバース描画距離（球半径・メートル相当）の既定・クランプ範囲 */
+export const VIEW_DISTANCE_M_DEFAULT = 30;
+export const VIEW_DISTANCE_M_MIN = 5;
+export const VIEW_DISTANCE_M_MAX = 500;
+
+/**
+ * 描画距離（m）を許容範囲に収める
+ * @param {unknown} v
+ * @returns {number}
+ */
+export function clampViewDistanceM(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return VIEW_DISTANCE_M_DEFAULT;
+    return Math.min(VIEW_DISTANCE_M_MAX, Math.max(VIEW_DISTANCE_M_MIN, n));
+}
+
 const TIER_PRESETS = {
     high: { mapSize: 2048, shadowMapType: 'PCFSoft', antialias: true },
     medium: { mapSize: 1024, shadowMapType: 'PCFSoft', antialias: true },
@@ -56,7 +72,7 @@ export function getAntialiasForTier(tier) {
 /**
  * localStorage 由来のオブジェクトを新スキーマに寄せる（旧 drawQualityLow / shadowQuality / fogFar を除去）
  * @param {Record<string, unknown>} raw
- * @returns {{ graphicsTier: GraphicsTier, toneMappingExposure: number, pixelRatioCap: number|'full' }}
+ * @returns {{ graphicsTier: GraphicsTier, toneMappingExposure: number, pixelRatioCap: number|'full', viewDistanceM: number }}
  */
 export function migrateLegacyGraphicsKeys(raw) {
     const s = { ...raw };
@@ -83,10 +99,13 @@ export function migrateLegacyGraphicsKeys(raw) {
         pixelRatioCap = 1;
     }
 
+    const viewDistanceM = clampViewDistanceM(s.viewDistanceM);
+
     return {
         graphicsTier: normalizeGraphicsTier(String(graphicsTier)),
         toneMappingExposure,
-        pixelRatioCap
+        pixelRatioCap,
+        viewDistanceM
     };
 }
 

@@ -656,6 +656,12 @@ class MetaverseApp {
             const movementState = this.characterController.getMovementState();
             this.playerManager.updateLocalPlayer(position, rotation, movementState);
 
+            this.sceneManager.updateDrawDistanceCulling(position);
+            this.playerManager.updateRemoteDrawDistance(
+                position,
+                this.sceneManager.graphicsOptions.viewDistanceM
+            );
+
             // Check teleport and PDF proximity
             if (this.teleportManager) {
                 this.teleportManager.update(position);

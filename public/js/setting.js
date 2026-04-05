@@ -2409,19 +2409,22 @@ function bindEvents() {
          * @param {{ setStatus: Function, setProgress: Function, setErrorDetail: Function }} ui
          */
         function applyTextureResizeStatus(uploadData, ui) {
+            let msg = '保存しました';
+            let cls = 'ok';
             if (uploadData.textureResize) {
                 const tr = uploadData.textureResize;
                 if (tr.applied) {
-                    ui.setStatus(tr.message || 'テクスチャを縮小して保存しました', 'ok');
+                    msg = tr.message || 'テクスチャを縮小して保存しました';
                 } else if (tr.error) {
-                    ui.setStatus(tr.error, 'warn');
+                    msg = tr.error;
+                    cls = 'warn';
                     if (tr.errorDetail) ui.setErrorDetail(tr.errorDetail);
-                } else {
-                    ui.setStatus('保存しました', 'ok');
                 }
-            } else {
-                ui.setStatus('保存しました', 'ok');
             }
+            if (uploadData.chunkManifest) {
+                msg += ` チャンク: worlds.json の models に chunkManifest「${uploadData.chunkManifest}」を追加してください（単体 GLB も保存済み）。`;
+            }
+            ui.setStatus(msg, cls);
             ui.setProgress(1);
         }
 
@@ -2498,7 +2501,16 @@ function bindEvents() {
                 }
                 const uploadData = xhrRes.json;
                 if (!uploadData.success || !uploadData.filename) throw new Error('アップロード応答が不正です');
-                await notifyServiceWorkerInvalidate([encodeAssetPathToUrlPath('models/' + uploadData.filename)]);
+                const inv = [encodeAssetPathToUrlPath('models/' + uploadData.filename)];
+                if (uploadData.chunkManifest) {
+                    inv.push(encodeAssetPathToUrlPath(uploadData.chunkManifest));
+                }
+                if (Array.isArray(uploadData.spatialChunk?.chunkFiles)) {
+                    for (const f of uploadData.spatialChunk.chunkFiles) {
+                        inv.push(encodeAssetPathToUrlPath(`models/${f}`));
+                    }
+                }
+                await notifyServiceWorkerInvalidate(inv);
                 await fetchModels();
                 if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
                 applyTextureResizeStatus(uploadData, ui);
@@ -2549,9 +2561,16 @@ function bindEvents() {
                         if (!uploadDataRetry.success || !uploadDataRetry.filename) {
                             throw new Error('アップロード応答が不正です');
                         }
-                        await notifyServiceWorkerInvalidate([
-                            encodeAssetPathToUrlPath('models/' + uploadDataRetry.filename),
-                        ]);
+                        const invR = [encodeAssetPathToUrlPath('models/' + uploadDataRetry.filename)];
+                        if (uploadDataRetry.chunkManifest) {
+                            invR.push(encodeAssetPathToUrlPath(uploadDataRetry.chunkManifest));
+                        }
+                        if (Array.isArray(uploadDataRetry.spatialChunk?.chunkFiles)) {
+                            for (const f of uploadDataRetry.spatialChunk.chunkFiles) {
+                                invR.push(encodeAssetPathToUrlPath(`models/${f}`));
+                            }
+                        }
+                        await notifyServiceWorkerInvalidate(invR);
                         await fetchModels();
                         if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
                         applyTextureResizeStatus(uploadDataRetry, ui);

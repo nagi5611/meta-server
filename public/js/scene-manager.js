@@ -6,6 +6,7 @@ import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { MeshBVH, StaticGeometryGenerator } from 'three-mesh-bvh';
 import {
     migrateLegacyGraphicsKeys,
+    clampViewDistanceM,
     normalizeGraphicsTier,
     getShadowMapSize,
     getShadowMapTypeConstant,
@@ -42,12 +43,19 @@ class SceneManager {
         this.groundMesh = null;
         /** Grid helper. Visibility controlled by setFloorVisible. */
         this.gridHelper = null;
-        /** Graphics options (graphicsTier, toneMappingExposure, pixelRatioCap) */
+        /** Graphics options (graphicsTier, toneMappingExposure, pixelRatioCap, viewDistanceM) */
         this.graphicsOptions = {
             graphicsTier: 'medium',
             toneMappingExposure: 1,
-            pixelRatioCap: 1
+            pixelRatioCap: 1,
+            viewDistanceM: 30
         };
+        /** 描画距離カリング用フレームカウンタ */
+        this._drawCullFrame = 0;
+        /** @type {import('three').Object3D[]} */
+        this._drawCullTargets = [];
+        /** ワールド設定の床表示希望（距離カリングと AND） */
+        this._floorWantedVisible = true;
         /** WebXR セッション中は true（FPS 優先のティア上書きに使用） */
         this._xrSessionActive = false;
         /** 直近の MenuManager 設定（XR 終了後の再適用用） */
@@ -113,6 +121,7 @@ class SceneManager {
                 this.graphicsOptions.graphicsTier = migrated.graphicsTier;
                 this.graphicsOptions.toneMappingExposure = migrated.toneMappingExposure;
                 this.graphicsOptions.pixelRatioCap = migrated.pixelRatioCap;
+                this.graphicsOptions.viewDistanceM = migrated.viewDistanceM;
             } catch (e) { /* ignore */ }
         }
 
@@ -265,6 +274,56 @@ class SceneManager {
     }
 
     /**
+     * 描画距離カリング対象に登録し、ワールド AABB から包絡球を userData に保存する
+     * @param {import('three').Object3D} obj
+     */
+    _registerDrawCullTarget(obj) {
+        if (!obj) return;
+        if (this._drawCullTargets.includes(obj)) return;
+        obj.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(obj);
+        if (box.isEmpty()) {
+            obj.userData.drawCullWorld = null;
+        } else {
+            const sp = new THREE.Sphere();
+            box.getBoundingSphere(sp);
+            obj.userData.drawCullWorld = {
+                center: sp.center.clone(),
+                radius: Math.max(sp.radius, 0.05)
+            };
+        }
+        this._drawCullTargets.push(obj);
+    }
+
+    /**
+     * 足元中心・描画距離（球）で environment の可視を更新する（4 フレームに 1 回）
+     * @param {import('three').Vector3} feetWorld
+     */
+    updateDrawDistanceCulling(feetWorld) {
+        if (!feetWorld) return;
+        this._drawCullFrame = (this._drawCullFrame + 1) % 4;
+        if (this._drawCullFrame !== 0) return;
+
+        const R = clampViewDistanceM(this.graphicsOptions.viewDistanceM);
+        const p = feetWorld;
+
+        for (const obj of this._drawCullTargets) {
+            if (!obj || !obj.parent) continue;
+            const c = obj.userData.drawCullWorld;
+            let inRange = true;
+            if (c && c.center && Number.isFinite(c.radius)) {
+                inRange = p.distanceTo(c.center) <= R + c.radius;
+            }
+            obj.userData._cullInRange = inRange;
+            if (obj === this.groundMesh || obj === this.gridHelper) {
+                obj.visible = this._floorWantedVisible && inRange;
+            } else {
+                obj.visible = inRange;
+            }
+        }
+    }
+
+    /**
      * 各アセットの Content-Length を集計し、進捗バー用の総バイト数を返す（HEAD 不可時は仮定値を混ぜる）
      * @param {Array<Object|string>} modelConfigs
      * @param {Array<Object>} [pdfConfigs]
@@ -278,6 +337,47 @@ class SceneManager {
         for (let idx = 0; idx < list.length; idx++) {
             const config = list[idx];
             const fullConfig = typeof config === 'string' ? { path: config } : config;
+            const chunkManifest = String(fullConfig.chunkManifest || '').trim();
+            if (chunkManifest) {
+                const mUrl = this._buildEncodedModelUrl(chunkManifest);
+                let manifest;
+                try {
+                    const mRes = await fetch(mUrl);
+                    if (!mRes.ok) throw new Error(`HTTP ${mRes.status}`);
+                    manifest = await mRes.json();
+                } catch (e) {
+                    console.warn('[SceneManager] chunk manifest fetch failed:', chunkManifest, e);
+                    modelByIndex.set(idx, {
+                        fileLabel: chunkManifest.split(/[/\\]/).pop() || chunkManifest,
+                        totalFileBytes: FALLBACK,
+                        chunkManifestPlan: null
+                    });
+                    totalBytes += FALLBACK;
+                    continue;
+                }
+                const chList = Array.isArray(manifest.chunks) ? manifest.chunks : [];
+                let sum = 0;
+                /** @type {{ url: string, weight: number, label: string }[]} */
+                const chunkPlan = [];
+                for (const ch of chList) {
+                    const fp = String(ch.file || '').replace(/^\//, '');
+                    if (!fp) continue;
+                    const u = this._buildEncodedModelUrl(fp);
+                    const len = await fetchModelContentLength(u);
+                    const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / Math.max(1, chList.length)));
+                    chunkPlan.push({ url: u, weight: w, label: fp.split(/[/\\]/).pop() || fp });
+                    sum += w;
+                }
+                if (sum <= 0) sum = FALLBACK;
+                modelByIndex.set(idx, {
+                    fileLabel: chunkManifest.split(/[/\\]/).pop() || chunkManifest,
+                    totalFileBytes: sum,
+                    chunkManifestPlan: { chunks: chunkPlan }
+                });
+                totalBytes += sum;
+                continue;
+            }
+
             const modelPath = fullConfig.path;
             if (!modelPath) continue;
             const url = this._buildEncodedModelUrl(modelPath);
@@ -401,6 +501,11 @@ class SceneManager {
 
             this.environmentGroup.add(model);
 
+            model.updateMatrixWorld(true);
+            if (!String(config.chunkManifest || '').trim()) {
+                this._registerDrawCullTarget(model);
+            }
+
             if (config.animate) {
                 this.animatedModels.push({
                     model: model,
@@ -444,11 +549,12 @@ class SceneManager {
 
         const loadOne = async (config, idx) => {
             const fullConfig = typeof config === 'string' ? { path: config } : config;
+            const manifestPath = String(fullConfig.chunkManifest || '').trim();
             const modelPath = fullConfig.path;
-            if (!modelPath) return;
 
             const plan = bytePlan?.modelByIndex?.get(idx);
-            const fileLabel = plan?.fileLabel || (modelPath.split(/[/\\]/).pop() || modelPath);
+            const fileLabel = plan?.fileLabel
+                || (modelPath ? (modelPath.split(/[/\\]/).pop() || modelPath) : manifestPath.split(/[/\\]/).pop() || manifestPath);
             const fileBudget = plan?.totalFileBytes ?? (5 * 1024 * 1024);
             const fileStart = loadState?.completedBytes ?? 0;
 
@@ -464,6 +570,71 @@ class SceneManager {
                     totalBytes: tb
                 });
             };
+
+            if (manifestPath) {
+                const chunkPlan = plan?.chunkManifestPlan?.chunks;
+                if (!chunkPlan || chunkPlan.length === 0) {
+                    console.error('[SceneManager] chunkManifest のプランがありません:', manifestPath);
+                    snapBudgetDone();
+                    return;
+                }
+                const totalW = chunkPlan.reduce((s, c) => s + c.weight, 0) || 1;
+                const anchor = new THREE.Group();
+                let totalTris = 0;
+                let subBase = fileStart;
+                const loader = createGLTFLoaderWithDraco();
+                try {
+                    for (let ci = 0; ci < chunkPlan.length; ci++) {
+                        const ent = chunkPlan[ci];
+                        const chunkBudget = fileBudget * (ent.weight / totalW);
+                        const chunkUrl = ent.url;
+                        const scene = await new Promise((resolve, reject) => {
+                            loader.load(
+                                chunkUrl,
+                                (gltf) => resolve(gltf.scene),
+                                (xhr) => emitFromBase(
+                                    ent.label,
+                                    xhr.loaded,
+                                    xhr.total || 0,
+                                    chunkBudget,
+                                    subBase
+                                ),
+                                reject
+                            );
+                        });
+                        const tris = countTrianglesInObject(scene);
+                        totalTris += tris;
+                        anchor.add(scene);
+                        scene.updateMatrixWorld(true);
+                        this._registerDrawCullTarget(scene);
+                        subBase += chunkBudget;
+                    }
+                    if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
+                        this._disposeModelObject(anchor);
+                        console.error(`[SceneManager] chunk manifest 合計ポリゴン過多 (約 ${totalTris} 三角): ${manifestPath}`);
+                        window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
+                            detail: {
+                                path: manifestPath,
+                                reason: 'too_many_triangles',
+                                triangles: totalTris,
+                                maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
+                            }
+                        }));
+                        snapBudgetDone();
+                        return;
+                    }
+                    finishAddModel(anchor, fullConfig, manifestPath, totalTris);
+                    if (loadState) {
+                        loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                    }
+                } catch (error) {
+                    console.error(`Error loading chunk manifest ${manifestPath}:`, error);
+                    snapBudgetDone();
+                }
+                return;
+            }
+
+            if (!modelPath) return;
 
             const url = this._buildEncodedModelUrl(modelPath);
             const maxBytes = this._isObjPath(modelPath) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
@@ -661,6 +832,8 @@ class SceneManager {
                     console.log(`  PDF Teleporter: ID=${config.teleporter.id}, Destination=${config.teleporter.destinationWorld}`);
                 }
                 this.environmentGroup.add(mesh);
+                mesh.updateMatrixWorld(true);
+                this._registerDrawCullTarget(mesh);
                 if (loadState) {
                     loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
                 }
@@ -740,6 +913,8 @@ class SceneManager {
             });
         }
         this.environmentGroup.add(mesh);
+        mesh.updateMatrixWorld(true);
+        this._registerDrawCullTarget(mesh);
     }
 
     /**
@@ -903,6 +1078,9 @@ class SceneManager {
         this.gridHelper = new THREE.GridHelper(1000, 100, 0x000000, 0x2a4a2a);
         this.gridHelper.position.y = 0.01;
         this.scene.add(this.gridHelper);
+
+        this._registerDrawCullTarget(this.groundMesh);
+        this._registerDrawCullTarget(this.gridHelper);
     }
 
     /**
@@ -910,8 +1088,15 @@ class SceneManager {
      * @param {boolean} visible
      */
     setFloorVisible(visible) {
-        if (this.groundMesh) this.groundMesh.visible = !!visible;
-        if (this.gridHelper) this.gridHelper.visible = !!visible;
+        this._floorWantedVisible = !!visible;
+        if (this.groundMesh) {
+            const inR = this.groundMesh.userData._cullInRange !== false;
+            this.groundMesh.visible = this._floorWantedVisible && inR;
+        }
+        if (this.gridHelper) {
+            const inR = this.gridHelper.userData._cullInRange !== false;
+            this.gridHelper.visible = this._floorWantedVisible && inR;
+        }
     }
 
     /**
@@ -958,6 +1143,8 @@ class SceneManager {
 
         this.clearWorldLights();
 
+        this._drawCullTargets = [];
+
         // Remove all children from environment group except ground plane
         const ground = this.environmentGroup.children[0]; // Ground is first child
         const childrenToRemove = [...this.environmentGroup.children];
@@ -976,6 +1163,9 @@ class SceneManager {
                 }
             }
         });
+
+        if (this.groundMesh) this._registerDrawCullTarget(this.groundMesh);
+        if (this.gridHelper) this._registerDrawCullTarget(this.gridHelper);
 
         // Remove old collider
         if (this.collider) {
@@ -1026,7 +1216,8 @@ class SceneManager {
         this.graphicsOptions = {
             graphicsTier: migrated.graphicsTier,
             toneMappingExposure: migrated.toneMappingExposure,
-            pixelRatioCap: migrated.pixelRatioCap
+            pixelRatioCap: migrated.pixelRatioCap,
+            viewDistanceM: migrated.viewDistanceM
         };
 
         const tier = this._effectiveGraphicsTier();
