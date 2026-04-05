@@ -61,6 +61,16 @@ class PhysicsManager {
         this._triNc = new THREE.Vector3();
         this._hitNormalWorld = new THREE.Vector3();
         this._rayDown = new THREE.Vector3(0, -1, 0);
+
+        /** 足元プローブ: 床との隙間（m）許容。スポーン高め・レイずれ対策で上限を広げる */
+        this.groundProbeGapMin = -0.15;
+        this.groundProbeGapMax = 1.0;
+        /** 地面を離れた直後もジャンプ可能な時間（ms）。低 FPS・接地フラグの一瞬 false 対策 */
+        this.coyoteJumpMs = 130;
+        /** 接地判定で delta×vy 項の上限（m）。大きい delta で閾値が膨らみすぎないようにする */
+        this.groundDeltaVyPushbackCap = 0.06;
+        /** コヨーテ終了時刻（performance.now） */
+        this._coyoteJumpUntilMs = 0;
     }
 
     async init() {
@@ -142,6 +152,8 @@ class PhysicsManager {
             console.warn('No collider or BVH available');
             return;
         }
+
+        const wasGroundedAtStart = this.playerIsOnGround;
 
         this._tunnelStart.copy(this.playerPosition);
 
@@ -236,7 +248,9 @@ class PhysicsManager {
         deltaVector.subVectors(newPosition, this.playerPosition);
 
         // Check if player is on ground（上向き速度があるときは誤接地扱いにしない → ジャンプが即座に潰れるのを防ぐ）
-        this.playerIsOnGround = deltaVector.y > Math.abs(delta * this.playerVelocity.y * 0.25);
+        const vyPushback = Math.abs(delta * this.playerVelocity.y * 0.25);
+        const cappedVyPushback = Math.min(vyPushback, this.groundDeltaVyPushbackCap);
+        this.playerIsOnGround = deltaVector.y > cappedVyPushback;
         if (this.playerVelocity.y > 0.12) {
             this.playerIsOnGround = false;
         }
@@ -280,6 +294,14 @@ class PhysicsManager {
             }
         }
 
+        const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        if (wasGroundedAtStart && !this.playerIsOnGround && this.playerVelocity.y <= 0.12) {
+            this._coyoteJumpUntilMs = nowMs + this.coyoteJumpMs;
+        }
+        if (this.playerIsOnGround) {
+            this._coyoteJumpUntilMs = 0;
+        }
+
         // Reset if fallen too far
         if (this.playerPosition.y < -100) {
             this.reset();
@@ -287,10 +309,14 @@ class PhysicsManager {
     }
 
     jump(force = 10.0) {
-        if (this.playerIsOnGround) {
-            this.playerVelocity.y = force;
-            this.playerIsOnGround = false;
+        const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const coyoteOk = nowMs < this._coyoteJumpUntilMs;
+        if (!this.playerIsOnGround && !coyoteOk) {
+            return;
         }
+        this._coyoteJumpUntilMs = 0;
+        this.playerVelocity.y = force;
+        this.playerIsOnGround = false;
     }
 
     /**
@@ -301,6 +327,7 @@ class PhysicsManager {
             this.playerIsOnGround = false;
             return;
         }
+        this.collider.updateMatrixWorld(true);
         const origin = this.tempVector.set(
             this.playerPosition.x,
             this.playerPosition.y + 0.28,
@@ -313,7 +340,7 @@ class PhysicsManager {
         }
         const feetY = this.playerPosition.y - this.capsuleInfo.radius;
         const gap = hit.point.y - feetY;
-        this.playerIsOnGround = gap > -0.12 && gap < 0.65;
+        this.playerIsOnGround = gap > this.groundProbeGapMin && gap < this.groundProbeGapMax;
     }
 
     /**
@@ -337,6 +364,7 @@ class PhysicsManager {
     resetVelocity() {
         this.playerVelocity.set(0, 0, 0);
         this.playerIsOnGround = false;
+        this._coyoteJumpUntilMs = 0;
     }
 
     isGrounded() {
@@ -357,6 +385,7 @@ class PhysicsManager {
         }
         this.playerVelocity.set(0, 0, 0);
         this.playerIsOnGround = false;
+        this._coyoteJumpUntilMs = 0;
         console.log('Player reset');
     }
 
