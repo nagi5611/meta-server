@@ -90,7 +90,7 @@ function isObjPath(path) {
 
 const CHUNKS_JSON_SUFFIX = '.chunks.json';
 
-/** 普通の3Dモデル（チャンク分割なし）— 単体シルエット（八面体風） */
+/** 単体 GLB/OBJ 等（チャンクマニフェストなし）— 八面体風シルエット */
 const MODEL_ICON_3D_ASSET =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 20.5 12 12 21.5 3.5 12 12 2.5z"/><path d="M12 2.5v19M3.5 12h17"/></svg>';
 
@@ -1795,8 +1795,10 @@ function renderModelList() {
         div.className = 'item model-prefab-item' + (isSel ? ' selected' : '');
         div.setAttribute('role', 'button');
         div.setAttribute('tabindex', '0');
-        const kindLabel = ent.prefabKind === 'prefab' ? 'プレハブ' : '普通の3Dモデル';
-        div.setAttribute('aria-label', `${kindLabel}、${ent.displayLabel}`);
+        div.setAttribute(
+            'aria-label',
+            ent.prefabKind === 'prefab' ? `プレハブ ${ent.displayLabel}` : ent.displayLabel
+        );
         div.dataset.path = path;
         if (ent.chunkManifest) {
             div.dataset.chunkManifest = ent.chunkManifest;
@@ -1807,18 +1809,11 @@ function renderModelList() {
             (ent.prefabKind === 'prefab' ? ' model-prefab-icon--prefab' : ' model-prefab-icon--model3d');
         icon.setAttribute('aria-hidden', 'true');
         icon.innerHTML = ent.prefabKind === 'prefab' ? MODEL_ICON_PREFAB_CHUNKED : MODEL_ICON_3D_ASSET;
-        const textWrap = document.createElement('div');
-        textWrap.className = 'model-prefab-text';
-        const kindEl = document.createElement('span');
-        kindEl.className = 'model-prefab-kind';
-        kindEl.textContent = kindLabel;
         const label = document.createElement('span');
         label.className = 'model-prefab-label';
         label.textContent = ent.displayLabel;
-        textWrap.appendChild(kindEl);
-        textWrap.appendChild(label);
         div.appendChild(icon);
-        div.appendChild(textWrap);
+        div.appendChild(label);
         const activate = () => {
             selectedModelPath = path;
             selectedModelChunkManifest = ent.chunkManifest || null;

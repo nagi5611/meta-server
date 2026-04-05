@@ -3280,7 +3280,7 @@ app.get('/admin/models', (req, res) => {
         const names = fs.readdirSync(MODELS_DIR)
             .filter((n) => {
                 const low = n.toLowerCase();
-                return low.endsWith('.glb') || low.endsWith('.obj');
+                return low.endsWith('.glb') || low.endsWith('.obj') || low.endsWith('.chunks.json');
             })
             .map((n) => decodeLikelyMojibakeFilename(n))
             .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));

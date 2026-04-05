@@ -1003,13 +1003,6 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     color: #fff;
 }
 
-.admin-panel-world-edit .we-prefab-hint {
-    font-size: 12px;
-    line-height: 1.45;
-    color: #666;
-    margin: 0 0 8px;
-}
-
 .admin-panel-world-edit .model-list .model-prefab-item.item {
     display: flex;
     align-items: center;
@@ -1053,33 +1046,14 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     display: block;
 }
 
-.admin-panel-world-edit .model-prefab-text {
+.admin-panel-world-edit .model-prefab-label {
     flex: 1;
     min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    line-height: 1.25;
-}
-
-.admin-panel-world-edit .model-prefab-kind {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    color: #6b6b6b;
-    text-transform: none;
-}
-
-.admin-panel-world-edit .model-prefab-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 13px;
     line-height: 1.35;
-}
-
-.admin-panel-world-edit .model-list .item.selected .model-prefab-kind {
-    color: rgba(255, 255, 255, 0.85);
 }
 
 .admin-panel-world-edit .object-list-slider .item-type {
@@ -3213,10 +3187,6 @@ body.admin-dark .admin-panel-world-edit .object-list-slider .item.selected {
     color: #1b1a15;
 }
 
-body.admin-dark .admin-panel-world-edit .we-prefab-hint {
-    color: #9ca3af;
-}
-
 body.admin-dark .admin-panel-world-edit .model-prefab-icon {
     background: rgba(255, 255, 255, 0.08);
     color: #c4c1ba;
@@ -3230,14 +3200,6 @@ body.admin-dark .admin-panel-world-edit .model-prefab-icon--prefab {
 body.admin-dark .admin-panel-world-edit .model-prefab-icon--model3d {
     background: linear-gradient(135deg, rgba(130, 190, 140, 0.2), rgba(255, 255, 255, 0.06));
     color: #a8d4b0;
-}
-
-body.admin-dark .admin-panel-world-edit .model-prefab-kind {
-    color: #9ca3af;
-}
-
-body.admin-dark .admin-panel-world-edit .model-list .item.selected .model-prefab-kind {
-    color: rgba(27, 26, 21, 0.75);
 }
 
 body.admin-dark .admin-panel-world-edit .we-left-area button,
