@@ -294,6 +294,29 @@ class PhysicsManager {
     }
 
     /**
+     * 物理停止から再開する直前用: 足元直下に床があれば playerIsOnGround を true にする（初回ジャンプ用）
+     */
+    probeGroundedAtFeet() {
+        if (!this.collider || !this.collider.geometry?.boundsTree) {
+            this.playerIsOnGround = false;
+            return;
+        }
+        const origin = this.tempVector.set(
+            this.playerPosition.x,
+            this.playerPosition.y + 0.28,
+            this.playerPosition.z
+        );
+        const hit = this.raycastStaticWorld(origin, this._rayDown, 2.5);
+        if (!hit || hit.point == null) {
+            this.playerIsOnGround = false;
+            return;
+        }
+        const feetY = this.playerPosition.y - this.capsuleInfo.radius;
+        const gap = hit.point.y - feetY;
+        this.playerIsOnGround = gap > -0.12 && gap < 0.65;
+    }
+
+    /**
      * Returns feet position (bottom of capsule) so avatar touches ground.
      * Internal playerPosition is bottom sphere center; subtract radius for feet.
      */

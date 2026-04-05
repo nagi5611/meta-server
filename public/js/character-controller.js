@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 
+/** 初回入力で物理再開する対象キー（ロード完了〜操作まで落下させない） */
+const GAMEPLAY_KEY_CODES = new Set([
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyC', 'KeyE'
+]);
+
 class CharacterController {
     constructor(camera, physicsManager, options = {}) {
         this.camera = camera;
@@ -62,7 +67,31 @@ class CharacterController {
         this._xrMoveRight = new THREE.Vector3();
         this._xrRigQuat = new THREE.Quaternion();
 
+        /** true の間は歩行物理（重力・BVH 移動）を回さない。初回ゲーム入力で false に戻す */
+        this._suspendPhysicsUntilGameplayInput = false;
+
         this.setupControls();
+    }
+
+    /**
+     * メタバース入室直後など: 初回の移動系入力まで落下・歩行物理を止める
+     * @param {boolean} suspended
+     */
+    setSuspendPhysicsUntilGameplayInput(suspended) {
+        this._suspendPhysicsUntilGameplayInput = !!suspended;
+        if (suspended) {
+            this.physicsManager.resetVelocity();
+        }
+    }
+
+    /**
+     * 移動・ジャンプ・クリック等で物理再開（複数回呼んでも一度だけ有効）
+     */
+    notifyGameplayInputIntent() {
+        if (!this._suspendPhysicsUntilGameplayInput) return;
+        this._suspendPhysicsUntilGameplayInput = false;
+        this.physicsManager.playerVelocity.set(0, 0, 0);
+        this.physicsManager.probeGroundedAtFeet();
     }
 
     /**
@@ -127,6 +156,7 @@ class CharacterController {
 
     trigger() {
         if (this.isInputActive()) return;
+        this.notifyGameplayInputIntent();
         this.physicsManager.jump(10.0);
     }
 
@@ -134,6 +164,7 @@ class CharacterController {
      * ジャンプ実行（モバイルジャンプボタン用・入力欄チェックなし・移動中も可）
      */
     triggerJump() {
+        this.notifyGameplayInputIntent();
         this.physicsManager.jump(10.0);
     }
 
@@ -147,6 +178,7 @@ class CharacterController {
         if (canvas) {
             canvas.addEventListener('click', () => {
                 if (this.isMobileMode || this.xrPresenting) return;
+                this.notifyGameplayInputIntent();
                 if (!this.isPointerLocked) {
                     document.body.requestPointerLock();
                 }
@@ -173,6 +205,10 @@ class CharacterController {
             return;
         }
         if (this.xrPresenting) return;
+
+        if (!event.repeat && GAMEPLAY_KEY_CODES.has(event.code)) {
+            this.notifyGameplayInputIntent();
+        }
 
         switch (event.code) {
             case 'KeyU':
@@ -408,6 +444,8 @@ class CharacterController {
             if (this.flyDown) pos.y -= flySpeed * deltaTime;
             this.physicsManager.setCharacterPosition(pos.x, pos.y, pos.z);
             this.physicsManager.resetVelocity();
+        } else if (this._suspendPhysicsUntilGameplayInput) {
+            this.physicsManager.playerVelocity.set(0, 0, 0);
         } else {
             // 通常モード: 物理エンジンで移動
             this.physicsManager.updatePlayer(deltaTime, moveDirection);
@@ -506,6 +544,8 @@ class CharacterController {
             if (this.flyDown) pos.y -= flySpeed * deltaTime;
             this.physicsManager.setCharacterPosition(pos.x, pos.y, pos.z);
             this.physicsManager.resetVelocity();
+        } else if (this._suspendPhysicsUntilGameplayInput) {
+            this.physicsManager.playerVelocity.set(0, 0, 0);
         } else {
             this.physicsManager.updatePlayer(deltaTime, moveDirection);
         }

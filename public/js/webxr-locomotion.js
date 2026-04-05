@@ -200,6 +200,7 @@ export default class WebXRLocomotion {
         const sign = snapX > 0 ? -1 : 1;
         this.characterController.applyXrSnapTurn(sign * SNAP_RAD);
         this._snapCooldown = SNAP_COOLDOWN_SEC;
+        this.characterController.notifyGameplayInputIntent();
     }
 
     /**
@@ -240,6 +241,7 @@ export default class WebXRLocomotion {
         }
 
         const feetY = land.y + 0.02;
+        this.characterController.notifyGameplayInputIntent();
         this.characterController.setPosition(land.x, feetY, land.z);
         this.characterController.resetVelocity();
         this._teleportCooldown = TELEPORT_COOLDOWN_SEC;

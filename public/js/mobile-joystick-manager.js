@@ -53,6 +53,7 @@ class MobileJoystickManager {
 
         this.leftManager.on('move', (evt, data) => {
             if (data.vector) {
+                characterController.notifyGameplayInputIntent();
                 characterController.setMobileMove({
                     x: data.vector.x,
                     y: data.vector.y,
@@ -108,6 +109,9 @@ class MobileJoystickManager {
         this.isCameraDragging = true;
         this.lastTouchX = touch.clientX;
         this.lastTouchY = touch.clientY;
+        if (this.characterController) {
+            this.characterController.notifyGameplayInputIntent();
+        }
     }
 
     onCameraTouchMove(e) {

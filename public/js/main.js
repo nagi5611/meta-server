@@ -396,6 +396,9 @@ class MetaverseApp {
             }
         });
 
+        // 初回操作まで歩行・落下物理を止める（低スペックでロード後に沈むのを防ぐ）
+        this.characterController.setSuspendPhysicsUntilGameplayInput(true);
+
         // Start game loop (WebXR 対応の setAnimationLoop)
         this.clock = performance.now();
         this._frameCallback = (time, frame) => this.frameUpdate(time, frame);
