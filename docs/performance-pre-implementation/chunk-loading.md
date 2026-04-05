@@ -38,7 +38,7 @@
 
 ### 描画距離（球）
 
-- 設定の「描画」に **描画距離（m）**（既定 30、5〜500）。**足元**を中心に、ワールドメッシュ・PDF・床・グリッド・リモートアバターを `visible` で切り替え。グラデーション SkyDome（`scene` 直下）は常に表示。
+- 設定の「描画」に **描画距離（m）**（既定 50、50〜500）。**足元**を中心に、ワールドメッシュ・PDF・床・グリッド・リモートアバターを `visible` で切り替え。グラデーション SkyDome（`scene` 直下）は常に表示。
 - クライアント: `SceneManager.updateDrawDistanceCulling`（4 フレームに 1 回）、`PlayerManager.updateRemoteDrawDistance`。
 
 ### アップロード時チャンク（GLB）

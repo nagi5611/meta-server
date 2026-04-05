@@ -1030,13 +1030,19 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     color: #444;
 }
 
-.admin-panel-world-edit .model-prefab-icon--chunked {
-    background: linear-gradient(135deg, rgba(45, 90, 138, 0.18), rgba(45, 90, 138, 0.06));
+.admin-panel-world-edit .model-prefab-icon--prefab {
+    background: linear-gradient(135deg, rgba(45, 90, 138, 0.2), rgba(45, 90, 138, 0.07));
     color: #2d5a8a;
 }
 
+.admin-panel-world-edit .model-prefab-icon--model3d {
+    background: linear-gradient(135deg, rgba(80, 120, 90, 0.18), rgba(60, 90, 70, 0.06));
+    color: #3d6b4a;
+}
+
 .admin-panel-world-edit .model-list .item.selected .model-prefab-icon,
-.admin-panel-world-edit .model-list .item.selected .model-prefab-icon--chunked {
+.admin-panel-world-edit .model-list .item.selected .model-prefab-icon--prefab,
+.admin-panel-world-edit .model-list .item.selected .model-prefab-icon--model3d {
     background: rgba(255, 255, 255, 0.22);
     color: inherit;
 }
@@ -1047,14 +1053,33 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     display: block;
 }
 
-.admin-panel-world-edit .model-prefab-label {
+.admin-panel-world-edit .model-prefab-text {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.25;
+}
+
+.admin-panel-world-edit .model-prefab-kind {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #6b6b6b;
+    text-transform: none;
+}
+
+.admin-panel-world-edit .model-prefab-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 13px;
     line-height: 1.35;
+}
+
+.admin-panel-world-edit .model-list .item.selected .model-prefab-kind {
+    color: rgba(255, 255, 255, 0.85);
 }
 
 .admin-panel-world-edit .object-list-slider .item-type {
@@ -3197,9 +3222,22 @@ body.admin-dark .admin-panel-world-edit .model-prefab-icon {
     color: #c4c1ba;
 }
 
-body.admin-dark .admin-panel-world-edit .model-prefab-icon--chunked {
-    background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(255, 255, 255, 0.06));
-    color: #e6c96a;
+body.admin-dark .admin-panel-world-edit .model-prefab-icon--prefab {
+    background: linear-gradient(135deg, rgba(120, 170, 220, 0.22), rgba(255, 255, 255, 0.06));
+    color: #9ec8f0;
+}
+
+body.admin-dark .admin-panel-world-edit .model-prefab-icon--model3d {
+    background: linear-gradient(135deg, rgba(130, 190, 140, 0.2), rgba(255, 255, 255, 0.06));
+    color: #a8d4b0;
+}
+
+body.admin-dark .admin-panel-world-edit .model-prefab-kind {
+    color: #9ca3af;
+}
+
+body.admin-dark .admin-panel-world-edit .model-list .item.selected .model-prefab-kind {
+    color: rgba(27, 26, 21, 0.75);
 }
 
 body.admin-dark .admin-panel-world-edit .we-left-area button,

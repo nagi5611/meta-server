@@ -45,10 +45,10 @@ class SceneManager {
         this.gridHelper = null;
         /** Graphics options (graphicsTier, toneMappingExposure, pixelRatioCap, viewDistanceM) */
         this.graphicsOptions = {
-            graphicsTier: 'medium',
+            graphicsTier: 'low',
             toneMappingExposure: 1,
             pixelRatioCap: 1,
-            viewDistanceM: 30
+            viewDistanceM: 50
         };
         /** 描画距離カリング用フレームカウンタ */
         this._drawCullFrame = 0;

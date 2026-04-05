@@ -90,20 +90,20 @@ function isObjPath(path) {
 
 const CHUNKS_JSON_SUFFIX = '.chunks.json';
 
-/** 単体プレハブ用アイコン（左パネル、currentColor） */
-const MODEL_PREFAB_ICON_SVG_SIMPLE =
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 6v12l8 4 8-4V6l-8-4z"/><path d="M4 6l8 4 8-4M12 10v10"/></svg>';
+/** 普通の3Dモデル（チャンク分割なし）— 単体シルエット（八面体風） */
+const MODEL_ICON_3D_ASSET =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 20.5 12 12 21.5 3.5 12 12 2.5z"/><path d="M12 2.5v19M3.5 12h17"/></svg>';
 
-/** チャンク分割プレハブ（複数パーツ） */
-const MODEL_PREFAB_ICON_SVG_CHUNKED =
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2 2 5v7l6 3 6-3V5l-6-3z"/><path d="M2 5l6 3 6-3"/><path d="M16 7l6 3v7l-6 3-6-3v-5"/><path d="M16 7v6"/></svg>';
+/** プレハブ（チャンク分割済み）— タイル状の複数パーツ */
+const MODEL_ICON_PREFAB_CHUNKED =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7.5" height="6.5" rx="1"/><rect x="13.5" y="4" width="7.5" height="6.5" rx="1"/><rect x="3" y="13.5" width="7.5" height="6.5" rx="1"/><rect x="13.5" y="13.5" width="7.5" height="6.5" rx="1"/><path stroke-width="1.25" d="M10.5 7.25h3M10.5 16.75h3M7.25 10.5v3M16.75 10.5v3"/></svg>';
 
 /**
- * admin/models の生ファイル名一覧から、左パネル「モデルプレハブ」用エントリを作る。
+ * admin/models の生ファイル名一覧から、左パネル用エントリを作る。
  * チャンク GLB（*.chunk_*.glb）とマニフェスト（*.chunks.json）は一覧に出さない。
  * エクスプローラーは生一覧のまま。
  * @param {string[]} fileNames
- * @returns {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'chunked'|'file' }[]}
+ * @returns {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'prefab'|'model3d' }[]}
  */
 function buildModelPrefabEntries(fileNames) {
     const names = Array.isArray(fileNames) ? fileNames : [];
@@ -116,7 +116,7 @@ function buildModelPrefabEntries(fileNames) {
             basesWithManifest.add(n.slice(0, -CHUNKS_JSON_SUFFIX.length));
         }
     }
-    /** @type {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'chunked'|'file' }[]} */
+    /** @type {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'prefab'|'model3d' }[]} */
     const out = [];
     /** @type {Set<string>} チャンク付きプレハブとして既に出した basename */
     const usedChunkGroup = new Set();
@@ -141,7 +141,7 @@ function buildModelPrefabEntries(fileNames) {
                     displayLabel,
                     path: 'models/' + name,
                     chunkManifest: 'models/' + manifestName,
-                    prefabKind: 'chunked'
+                    prefabKind: 'prefab'
                 });
                 continue;
             }
@@ -149,7 +149,7 @@ function buildModelPrefabEntries(fileNames) {
         out.push({
             displayLabel: name,
             path: 'models/' + name,
-            prefabKind: 'file'
+            prefabKind: 'model3d'
         });
     }
     out.sort((a, b) => a.displayLabel.localeCompare(b.displayLabel, 'ja'));
@@ -1795,7 +1795,8 @@ function renderModelList() {
         div.className = 'item model-prefab-item' + (isSel ? ' selected' : '');
         div.setAttribute('role', 'button');
         div.setAttribute('tabindex', '0');
-        div.setAttribute('aria-label', `プレハブ ${ent.displayLabel}`);
+        const kindLabel = ent.prefabKind === 'prefab' ? 'プレハブ' : '普通の3Dモデル';
+        div.setAttribute('aria-label', `${kindLabel}、${ent.displayLabel}`);
         div.dataset.path = path;
         if (ent.chunkManifest) {
             div.dataset.chunkManifest = ent.chunkManifest;
@@ -1803,13 +1804,21 @@ function renderModelList() {
         const icon = document.createElement('span');
         icon.className =
             'model-prefab-icon' +
-            (ent.prefabKind === 'chunked' ? ' model-prefab-icon--chunked' : '');
-        icon.innerHTML = ent.prefabKind === 'chunked' ? MODEL_PREFAB_ICON_SVG_CHUNKED : MODEL_PREFAB_ICON_SVG_SIMPLE;
+            (ent.prefabKind === 'prefab' ? ' model-prefab-icon--prefab' : ' model-prefab-icon--model3d');
+        icon.setAttribute('aria-hidden', 'true');
+        icon.innerHTML = ent.prefabKind === 'prefab' ? MODEL_ICON_PREFAB_CHUNKED : MODEL_ICON_3D_ASSET;
+        const textWrap = document.createElement('div');
+        textWrap.className = 'model-prefab-text';
+        const kindEl = document.createElement('span');
+        kindEl.className = 'model-prefab-kind';
+        kindEl.textContent = kindLabel;
         const label = document.createElement('span');
         label.className = 'model-prefab-label';
         label.textContent = ent.displayLabel;
+        textWrap.appendChild(kindEl);
+        textWrap.appendChild(label);
         div.appendChild(icon);
-        div.appendChild(label);
+        div.appendChild(textWrap);
         const activate = () => {
             selectedModelPath = path;
             selectedModelChunkManifest = ent.chunkManifest || null;

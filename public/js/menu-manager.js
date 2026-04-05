@@ -69,10 +69,10 @@ class MenuManager {
             speakerVolume: 50,
             micDevice: '',
             speakerDevice: '',
-            graphicsTier: 'medium',
+            graphicsTier: 'low',
             toneMappingExposure: 1,
             pixelRatioCap: 1,
-            viewDistanceM: 30,
+            viewDistanceM: 50,
             viewMode: 'third'
         };
         
@@ -860,7 +860,7 @@ class MenuManager {
         if (graphicsTierEl) {
             const gt = ['high', 'medium', 'low'].includes(this.settings.graphicsTier)
                 ? this.settings.graphicsTier
-                : 'medium';
+                : 'low';
             graphicsTierEl.value = gt;
         }
         if (toneExpEl) {

@@ -12,8 +12,8 @@ export const DEFAULT_WORLD_DIRECTIONAL_INTENSITY = 0.8;
 /** @typedef {'high'|'medium'|'low'} GraphicsTier */
 
 /** メタバース描画距離（球半径・メートル相当）の既定・クランプ範囲 */
-export const VIEW_DISTANCE_M_DEFAULT = 30;
-export const VIEW_DISTANCE_M_MIN = 5;
+export const VIEW_DISTANCE_M_DEFAULT = 50;
+export const VIEW_DISTANCE_M_MIN = 50;
 export const VIEW_DISTANCE_M_MAX = 500;
 
 /**
@@ -40,7 +40,7 @@ const TIER_PRESETS = {
  */
 export function normalizeGraphicsTier(tier) {
     if (tier === 'high' || tier === 'medium' || tier === 'low') return tier;
-    return 'medium';
+    return 'low';
 }
 
 /**
@@ -87,7 +87,7 @@ export function migrateLegacyGraphicsKeys(raw) {
         } else if (s.shadowQuality === 'low') {
             graphicsTier = 'low';
         } else {
-            graphicsTier = 'medium';
+            graphicsTier = 'low';
         }
     }
     let toneMappingExposure = Number(s.toneMappingExposure);
