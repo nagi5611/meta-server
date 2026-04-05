@@ -42,6 +42,8 @@ let selectedObject = null;
 let modelList = [];
 let mtlList = []; // MTL ファイル名（models/ 配下、ファイル名のみ）
 let selectedModelPath = null; // 左パネル「モデル一覧」で選択中のモデル（models/xxx.glb または .obj）
+/** チャンク分割済み GLB 用。単体モデル時は null */
+let selectedModelChunkManifest = null;
 let pdfList = [];
 let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（pdfs/xxx.pdf）
 let lightHelpers = []; // { light, mesh? } for point/spot position drag
@@ -86,6 +88,93 @@ function isObjPath(path) {
     return typeof path === 'string' && path.toLowerCase().endsWith('.obj');
 }
 
+const CHUNKS_JSON_SUFFIX = '.chunks.json';
+
+/**
+ * admin/models の生ファイル名一覧から、左パネル用にチャンク群を1行にまとめたエントリを作る（エクスプローラーは生一覧のまま）
+ * @param {string[]} fileNames
+ * @returns {{ label: string, path: string, chunkManifest?: string }[]}
+ */
+function buildModelPaletteEntries(fileNames) {
+    const names = Array.isArray(fileNames) ? fileNames : [];
+    const set = new Set(names);
+    /** @type {Set<string>} basename（拡張子なし）で .chunks.json が存在するもの */
+    const basesWithManifest = new Set();
+    for (const n of names) {
+        const low = n.toLowerCase();
+        if (low.endsWith(CHUNKS_JSON_SUFFIX.toLowerCase())) {
+            basesWithManifest.add(n.slice(0, -CHUNKS_JSON_SUFFIX.length));
+        }
+    }
+    /** @type {{ label: string, path: string, chunkManifest?: string }[]} */
+    const out = [];
+    /** @type {Set<string>} パレットで既にマニフェスト付きとして出した basename */
+    const usedChunkGroup = new Set();
+    for (const name of names) {
+        const low = name.toLowerCase();
+        if (low.endsWith(CHUNKS_JSON_SUFFIX.toLowerCase())) {
+            continue;
+        }
+        const chunkMatch = name.match(/^(.+)\.chunk_(\d+)\.glb$/i);
+        if (chunkMatch) {
+            const base = chunkMatch[1];
+            if (basesWithManifest.has(base)) {
+                continue;
+            }
+            out.push({ label: name, path: 'models/' + name });
+            continue;
+        }
+        if (low.endsWith('.glb')) {
+            const base = name.slice(0, -4);
+            const manifestName = base + CHUNKS_JSON_SUFFIX;
+            if (basesWithManifest.has(base) && set.has(manifestName)) {
+                if (usedChunkGroup.has(base)) {
+                    continue;
+                }
+                usedChunkGroup.add(base);
+                out.push({
+                    label: name,
+                    path: 'models/' + name,
+                    chunkManifest: 'models/' + manifestName
+                });
+                continue;
+            }
+        }
+        out.push({ label: name, path: 'models/' + name });
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label, 'ja'));
+    return out;
+}
+
+/**
+ * パレット選択キー（path + 任意の chunkManifest）
+ * @param {string} path
+ * @param {string|null|undefined} chunkManifest
+ * @returns {string}
+ */
+function modelPaletteSelectionKey(path, chunkManifest) {
+    return String(path || '') + '\0' + String(chunkManifest || '').trim();
+}
+
+/**
+ * 現在の選択がパレットに存在するか確認し、無ければ先頭へ寄せる
+ */
+function syncModelPaletteSelectionAfterListChange() {
+    const pal = buildModelPaletteEntries(modelList);
+    const key = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
+    const ok = pal.some(
+        (e) => modelPaletteSelectionKey(e.path, e.chunkManifest) === key && selectedModelPath
+    );
+    if (!ok && pal.length) {
+        selectedModelPath = pal[0].path;
+        selectedModelChunkManifest = pal[0].chunkManifest || null;
+    }
+    if (!pal.length) {
+        selectedModelPath = null;
+        selectedModelChunkManifest = null;
+    }
+}
+
 /**
  * メタバースと同じ localStorage から描画オプションを読む（ワールド編集プレビュー用）
  * @returns {{ graphicsTier: string, toneMappingExposure: number, pixelRatioCap: number|string }}
@@ -113,11 +202,61 @@ function getEditorPixelRatio() {
 
 /**
  * ワールド用モデル 1 件を読み込み（サイズ・ポリゴン上限あり）
- * @param {{ path: string, mtlPath?: string }} config
+ * @param {{ path: string, mtlPath?: string, chunkManifest?: string }} config
  * @returns {Promise<{ model: THREE.Object3D, triangleCount: number }>}
  */
 async function loadModelFromConfig(config) {
     const path = config.path || '';
+    const chunkManifest = String(config.chunkManifest || '').trim();
+    if (chunkManifest) {
+        if (!path) {
+            throw new Error('チャンクモデルには代表 path（通常は単体 GLB）が必要です');
+        }
+        const mUrl = buildEncodedModelUrl(chunkManifest);
+        const mRes = await fetch(mUrl);
+        if (!mRes.ok) {
+            throw new Error(`チャンク一覧の取得に失敗しました: ${chunkManifest}（HTTP ${mRes.status}）`);
+        }
+        /** @type {{ chunks?: { file?: string }[] }} */
+        const manifest = await mRes.json();
+        const chList = Array.isArray(manifest.chunks) ? manifest.chunks : [];
+        if (!chList.length) {
+            throw new Error(`チャンクがありません: ${chunkManifest}`);
+        }
+        const gltfLoader = new GLTFLoader();
+        gltfLoader.setDRACOLoader(getEditorDracoLoader());
+        const anchor = new THREE.Group();
+        let totalTris = 0;
+        for (const ch of chList) {
+            const fp = String(ch.file || '').replace(/^\//, '');
+            if (!fp) continue;
+            const chunkUrl = buildEncodedModelUrl(fp);
+            const len = await fetchModelContentLength(chunkUrl);
+            if (len != null && len > MODEL_MAX_BYTES_GLTF) {
+                disposeObjectTree(anchor);
+                throw new Error(
+                    `チャンク「${fp.split('/').pop()}」が大きすぎます（約 ${Math.round(len / 1024 / 1024)}MB）。上限約 ${Math.round(MODEL_MAX_BYTES_GLTF / 1024 / 1024)}MB です。`
+                );
+            }
+            const scene = await new Promise((resolve, reject) => {
+                gltfLoader.load(chunkUrl, (gltf) => resolve(gltf.scene), undefined, reject);
+            });
+            totalTris += countTrianglesInObject(scene);
+            anchor.add(scene);
+        }
+        if (!anchor.children.length) {
+            disposeObjectTree(anchor);
+            throw new Error(`有効なチャンクファイルがありません: ${chunkManifest}`);
+        }
+        if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
+            disposeObjectTree(anchor);
+            throw new Error(
+                `ポリゴンが多すぎます（約 ${totalTris.toLocaleString()} 三角）。上限約 ${MODEL_MAX_TRIANGLES_TOTAL.toLocaleString()} 三角です。`
+            );
+        }
+        return { model: anchor, triangleCount: totalTris };
+    }
+
     const url = buildEncodedModelUrl(path);
     const maxB = isObjPath(path) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
     const len = await fetchModelContentLength(url);
@@ -1300,13 +1439,18 @@ async function loadWorldIntoScene(world) {
             teleporter: config.teleporter ? { ...config.teleporter } : undefined,
             taiko: config.taiko ? { ...config.taiko } : undefined
         };
+        const cm = String(config.chunkManifest || '').trim();
+        if (cm) {
+            cfgBase.chunkManifest = cm;
+        }
         if (isObjPath(path) && config.mtlPath) {
             cfgBase.mtlPath = config.mtlPath;
         }
         try {
             const { model, triangleCount } = await loadModelFromConfig({
                 path,
-                mtlPath: isObjPath(path) ? (config.mtlPath || '') : ''
+                mtlPath: isObjPath(path) ? (config.mtlPath || '') : '',
+                chunkManifest: cm || undefined
             });
             model.position.set(pos.x, pos.y, pos.z);
             model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
@@ -1628,16 +1772,25 @@ function renderWorldList() {
 }
 
 function renderModelList() {
+    syncModelPaletteSelectionAfterListChange();
     const el = document.getElementById('model-list');
     el.innerHTML = '';
-    modelList.forEach((name) => {
-        const path = 'models/' + name;
+    const pal = buildModelPaletteEntries(modelList);
+    const selKey = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
+    pal.forEach((ent) => {
+        const path = ent.path;
+        const isSel =
+            modelPaletteSelectionKey(path, ent.chunkManifest) === selKey && selectedModelPath === path;
         const div = document.createElement('div');
-        div.className = 'item' + (selectedModelPath === path ? ' selected' : '');
-        div.textContent = name;
+        div.className = 'item' + (isSel ? ' selected' : '');
+        div.textContent = ent.label;
         div.dataset.path = path;
+        if (ent.chunkManifest) {
+            div.dataset.chunkManifest = ent.chunkManifest;
+        }
         div.addEventListener('click', () => {
             selectedModelPath = path;
+            selectedModelChunkManifest = ent.chunkManifest || null;
             renderModelList();
         });
         el.appendChild(div);
@@ -1668,10 +1821,12 @@ async function selectWorld(id) {
  * シーンにモデルを追加（path は models/...）
  * @param {string} path
  * @param {string} [mtlPath] - OBJ 時のみ models/...mtl
+ * @param {string} [chunkManifest] - チャンク分割済み時 models/...chunks.json
  */
-function addModel(path, mtlPath) {
+function addModel(path, mtlPath, chunkManifest) {
     if (!selectedWorldId) return;
     const mtl = isObjPath(path) ? (mtlPath || '').trim() : '';
+    const cm = String(chunkManifest || '').trim();
     const cfg = {
         path,
         position: { x: 0, y: 2, z: -5 },
@@ -1679,9 +1834,14 @@ function addModel(path, mtlPath) {
         scale: { x: 1, y: 1, z: 1 }
     };
     if (mtl) cfg.mtlPath = mtl;
+    if (cm) cfg.chunkManifest = cm;
     void (async () => {
         try {
-            const { model, triangleCount } = await loadModelFromConfig({ path, mtlPath: mtl });
+            const { model, triangleCount } = await loadModelFromConfig({
+                path,
+                mtlPath: mtl,
+                chunkManifest: cm || undefined
+            });
             pushUndo();
             model.position.set(0, 2, -5);
             model.rotation.set(0, 0, 0);
@@ -2479,7 +2639,11 @@ function bindEvents() {
     });
 
     document.getElementById('btn-add-model').addEventListener('click', () => {
-        const path = selectedModelPath || (modelList.length ? 'models/' + modelList[0] : null);
+        const pal = buildModelPaletteEntries(modelList);
+        const first = pal[0];
+        const path = selectedModelPath || (first ? first.path : null);
+        const match = path ? pal.find((e) => e.path === path) : null;
+        const chunkManifest = (match && match.chunkManifest) || '';
         if (!path) {
             alert('モデルをアップロードするか、一覧から選択してください');
             return;
@@ -2489,7 +2653,7 @@ function bindEvents() {
             const mtlSel = document.getElementById('add-obj-mtl');
             mtlPath = mtlSel && mtlSel.value ? mtlSel.value.trim() : '';
         }
-        addModel(path, mtlPath);
+        addModel(path, mtlPath, chunkManifest);
     });
 
     document.getElementById('btn-add-pdf').addEventListener('click', () => {
