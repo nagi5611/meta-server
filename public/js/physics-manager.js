@@ -49,6 +49,18 @@ class PhysicsManager {
         this._camDirWorld = new THREE.Vector3();
         this._camHitWorld = new THREE.Vector3();
         this._camAlongScratch = new THREE.Vector3();
+
+        /** updatePlayer: フレーム開始時の位置（メッシュ貫通ロールバック用） */
+        this._tunnelStart = new THREE.Vector3();
+        /** 胴体高さでの移動線分（壁検出） */
+        this._segFrom = new THREE.Vector3();
+        this._segTo = new THREE.Vector3();
+        this._segDir = new THREE.Vector3();
+        this._triNa = new THREE.Vector3();
+        this._triNb = new THREE.Vector3();
+        this._triNc = new THREE.Vector3();
+        this._hitNormalWorld = new THREE.Vector3();
+        this._rayDown = new THREE.Vector3(0, -1, 0);
     }
 
     async init() {
@@ -131,9 +143,11 @@ class PhysicsManager {
             return;
         }
 
-        // Apply gravity
+        this._tunnelStart.copy(this.playerPosition);
+
+        // 接地時は縦速度をゼロにし、毎フレーム負の vy を与えて床へ沈み込むのを防ぐ
         if (this.playerIsOnGround) {
-            this.playerVelocity.y = delta * this.gravity;
+            this.playerVelocity.y = 0;
         } else {
             this.playerVelocity.y += delta * this.gravity;
         }
@@ -143,6 +157,24 @@ class PhysicsManager {
 
         // Apply horizontal movement
         this.playerPosition.add(moveDirection);
+
+        const horiz = Math.hypot(
+            this.playerPosition.x - this._tunnelStart.x,
+            this.playerPosition.z - this._tunnelStart.z
+        );
+        if (horiz > 0.004) {
+            const midY = (this._tunnelStart.y + this.playerPosition.y) * 0.5 + 0.4;
+            this._segFrom.set(this._tunnelStart.x, midY, this._tunnelStart.z);
+            this._segTo.set(this.playerPosition.x, midY, this.playerPosition.z);
+            if (this.segmentBlockedByWallMesh(this._segFrom, this._segTo)) {
+                const keepY = this.playerPosition.y;
+                this.playerPosition.x = this._tunnelStart.x;
+                this.playerPosition.z = this._tunnelStart.z;
+                this.playerPosition.y = keepY;
+                this.playerVelocity.x = 0;
+                this.playerVelocity.z = 0;
+            }
+        }
 
         // Now perform collision detection
         // Copy capsule segment
@@ -208,6 +240,10 @@ class PhysicsManager {
 
         // Apply position adjustment
         this.playerPosition.add(deltaVector);
+
+        if (this.playerIsOnGround) {
+            this.unburyFeetFromFloor();
+        }
 
         // 床・メッシュ挟み込み: 大きな補正が短時間に繰り返されたら Y を持ち上げて抜ける（スポーン TP はしない）
         if (offset >= this.STUCK_MIN_OFFSET) {
@@ -302,7 +338,7 @@ class PhysicsManager {
      * @param {THREE.Vector3} originWorld
      * @param {THREE.Vector3} directionWorld 正規化済み推奨
      * @param {number} maxDistance
-     * @returns {{ point: THREE.Vector3, distance: number } | null}
+     * @returns {{ point: THREE.Vector3, distance: number, faceIndex?: number } | null}
      */
     raycastStaticWorld(originWorld, directionWorld, maxDistance) {
         if (!this.collider || !this.collider.geometry?.boundsTree) return null;
@@ -327,7 +363,97 @@ class PhysicsManager {
 
         const pointWorld = hit.point.clone().applyMatrix4(this.collider.matrixWorld);
         const dist = originWorld.distanceTo(pointWorld);
-        return { point: pointWorld, distance: dist };
+        return { point: pointWorld, distance: dist, faceIndex: hit.faceIndex };
+    }
+
+    /**
+     * レイキャストヒットの三角形法線をワールドへ（壁判定用）
+     * @param {number} faceIndex
+     * @param {THREE.Vector3} outWorld
+     */
+    _triangleNormalWorld(faceIndex, outWorld) {
+        const geom = this.collider.geometry;
+        const pos = geom.attributes.position;
+        const idx = geom.index;
+        let a;
+        let b;
+        let c;
+        if (idx) {
+            const i3 = faceIndex * 3;
+            a = idx.getX(i3);
+            b = idx.getX(i3 + 1);
+            c = idx.getX(i3 + 2);
+        } else {
+            const base = faceIndex * 3;
+            a = base;
+            b = base + 1;
+            c = base + 2;
+        }
+        this._triNa.fromBufferAttribute(pos, a);
+        this._triNb.fromBufferAttribute(pos, b);
+        this._triNc.fromBufferAttribute(pos, c);
+        THREE.Triangle.getNormal(this._triNa, this._triNb, this._triNc, outWorld);
+        outWorld.transformDirection(this.collider.matrixWorld).normalize();
+    }
+
+    /**
+     * ワールド空間の線分が壁向きの静的メッシュと交差するか（薄い壁貫通のロールバック用）
+     * @param {THREE.Vector3} fromWorld
+     * @param {THREE.Vector3} toWorld
+     * @returns {boolean}
+     */
+    segmentBlockedByWallMesh(fromWorld, toWorld) {
+        if (!this.collider || !this.collider.geometry?.boundsTree) return false;
+
+        const inv = this.tempMat.copy(this.collider.matrixWorld).invert();
+        const oL = this._segFrom.copy(fromWorld).applyMatrix4(inv);
+        const tL = this._segTo.copy(toWorld).applyMatrix4(inv);
+        this._segDir.subVectors(tL, oL);
+        const segLen = this._segDir.length();
+        if (segLen < 1e-4) return false;
+
+        this._segDir.multiplyScalar(1 / segLen);
+
+        this._camRay.set(oL, this._segDir);
+        const hit = this.collider.geometry.boundsTree.raycastFirst(
+            this._camRay,
+            THREE.DoubleSide,
+            0.04,
+            segLen - 0.06
+        );
+
+        if (!hit || hit.faceIndex == null) return false;
+
+        const distLocal = hit.distance;
+        if (distLocal < 0.05 || distLocal > segLen - 0.08) return false;
+
+        this._triangleNormalWorld(hit.faceIndex, this._hitNormalWorld);
+        if (Math.abs(this._hitNormalWorld.y) >= 0.52) return false;
+
+        return true;
+    }
+
+    /**
+     * 接地時に足元が床面よりわずかに下なら持ち上げる（めり込み緩和）
+     */
+    unburyFeetFromFloor() {
+        if (!this.collider || !this.collider.geometry?.boundsTree || !this.playerIsOnGround) return;
+
+        const origin = this._segTo.set(
+            this.playerPosition.x,
+            this.playerPosition.y + 0.38,
+            this.playerPosition.z
+        );
+        const hit = this.raycastStaticWorld(origin, this._rayDown, 2.2);
+        if (!hit || hit.point == null) return;
+
+        const feetY = this.playerPosition.y - this.capsuleInfo.radius;
+        const surfaceY = hit.point.y;
+        const buried = surfaceY - feetY;
+        if (buried > 0.012 && buried < 0.55) {
+            const targetFeet = surfaceY + 0.038;
+            this.playerPosition.y = targetFeet + this.capsuleInfo.radius;
+        }
     }
 }
 
