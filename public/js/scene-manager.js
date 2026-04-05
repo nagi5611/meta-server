@@ -62,6 +62,12 @@ class SceneManager {
         this._lastGraphicsSettings = null;
         /** 現在のレンダラの antialias フラグ（ティア変更時の再生成判定） */
         this._rendererAntialias = true;
+        /** チャンク距離ストリーミング用ジョブ（clearWorld で破棄） */
+        this._chunkStreamJobs = [];
+        /** チャンク増減後の BVH 再生成デバウンス（ms） */
+        this._bvhRegenDebounceMs = 400;
+        /** @type {ReturnType<typeof setTimeout>|null} */
+        this._bvhRegenTimeoutId = null;
 
         this._onXRSessionStart = () => {
             this._xrSessionActive = true;
@@ -296,6 +302,226 @@ class SceneManager {
     }
 
     /**
+     * 描画距離カリング対象から外す（チャンクアンロード時）
+     * @param {import('three').Object3D} obj
+     */
+    _unregisterDrawCullTarget(obj) {
+        if (!obj) return;
+        const i = this._drawCullTargets.indexOf(obj);
+        if (i >= 0) {
+            this._drawCullTargets.splice(i, 1);
+        }
+        delete obj.userData.drawCullWorld;
+        delete obj.userData._cullInRange;
+    }
+
+    /**
+     * models/foo.glb から暗黙の models/foo.chunks.json パス（存在は未検証）
+     * @param {string} modelPath
+     * @returns {string|null}
+     */
+    _implicitChunksManifestPathFromModelPath(modelPath) {
+        const p = String(modelPath || '').trim();
+        if (!p.toLowerCase().endsWith('.glb')) return null;
+        return `${p.slice(0, -4)}.chunks.json`;
+    }
+
+    /**
+     * マニフェストを fetch し chunkManifestPlan 相当のエントリを作る（planWorldLoadBytes 用・await 内で長さ取得）
+     * @param {string} manifestPath - models/...chunks.json
+     * @param {number} FALLBACK
+     * @returns {Promise<{ chunks: { url: string, weight: number, label: string, center: number[], radius: number, filePath: string }[], sum: number }|null>}
+     */
+    async _fetchAndBuildChunkPlanEntries(manifestPath, FALLBACK) {
+        const mUrl = this._buildEncodedModelUrl(manifestPath);
+        let manifest;
+        try {
+            const mRes = await fetch(mUrl);
+            if (!mRes.ok) throw new Error(`HTTP ${mRes.status}`);
+            manifest = await mRes.json();
+        } catch {
+            return null;
+        }
+        const chList = Array.isArray(manifest.chunks) ? manifest.chunks : [];
+        if (!chList.length) return null;
+        /** @type {{ url: string, weight: number, label: string, center: number[], radius: number, filePath: string }[]} */
+        const chunkPlan = [];
+        let sum = 0;
+        for (const ch of chList) {
+            const fp = String(ch.file || '').replace(/^\//, '');
+            if (!fp) continue;
+            const u = this._buildEncodedModelUrl(fp);
+            const len = await fetchModelContentLength(u);
+            const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / Math.max(1, chList.length)));
+            const cx = Array.isArray(ch.center) && ch.center.length >= 3 ? ch.center[0] : 0;
+            const cy = Array.isArray(ch.center) && ch.center.length >= 3 ? ch.center[1] : 0;
+            const cz = Array.isArray(ch.center) && ch.center.length >= 3 ? ch.center[2] : 0;
+            const rad = Number.isFinite(ch.radius) ? Math.max(ch.radius, 0.01) : 0.01;
+            chunkPlan.push({
+                url: u,
+                weight: w,
+                label: fp.split(/[/\\]/).pop() || fp,
+                center: [cx, cy, cz],
+                radius: rad,
+                filePath: fp
+            });
+            sum += w;
+        }
+        if (!chunkPlan.length || sum <= 0) return null;
+        return { chunks: chunkPlan, sum };
+    }
+
+    /**
+     * loadOne でプラン欠落時のフォールバック用
+     * @param {string} manifestPath
+     * @returns {Promise<{ url: string, weight: number, label: string, center: number[], radius: number, filePath: string }[]|null>}
+     */
+    async _fetchChunkPlanChunksOnly(manifestPath) {
+        const built = await this._fetchAndBuildChunkPlanEntries(manifestPath, 5 * 1024 * 1024);
+        return built ? built.chunks : null;
+    }
+
+    /**
+     * マニフェストのチャンク球をアンカー変換後のワールド座標へ（近似）
+     * @param {import('three').Object3D} anchor
+     * @param {number[]} center
+     * @param {number} radius
+     * @returns {{ center: THREE.Vector3, radius: number }}
+     */
+    _worldSpaceChunkSphere(anchor, center, radius) {
+        const v = new THREE.Vector3(center[0], center[1], center[2]);
+        anchor.updateMatrixWorld(true);
+        v.applyMatrix4(anchor.matrixWorld);
+        const sx = Math.abs(anchor.scale.x);
+        const sy = Math.abs(anchor.scale.y);
+        const sz = Math.abs(anchor.scale.z);
+        const maxS = Math.max(sx, sy, sz, 1e-6);
+        return { center: v, radius: Math.max(radius * maxS, 0.05) };
+    }
+
+    /**
+     * チャンク GLB の距離ベースロード／アンロード（毎フレーム呼び出し可）
+     * @param {{ x: number, y: number, z: number }} feetWorld
+     */
+    updateChunkStreaming(feetWorld) {
+        if (!feetWorld || !this._chunkStreamJobs.length) return;
+        const p = new THREE.Vector3(feetWorld.x, feetWorld.y, feetWorld.z);
+        const R = clampViewDistanceM(this.graphicsOptions.viewDistanceM);
+        const loadDist = R + 24;
+        const unloadExtra = Math.max(32, R * 0.45);
+
+        for (const job of this._chunkStreamJobs) {
+            const { anchor, chunks, loader } = job;
+            if (!anchor.parent) continue;
+
+            for (const ch of chunks) {
+                const ws = this._worldSpaceChunkSphere(anchor, ch.center, ch.radius);
+                const dist = p.distanceTo(ws.center);
+                const wantLoad = dist <= loadDist + ws.radius;
+                const wantUnload = dist > loadDist + ws.radius + unloadExtra;
+
+                if (ch.loadedRoot && wantUnload) {
+                    this._unregisterDrawCullTarget(ch.loadedRoot);
+                    anchor.remove(ch.loadedRoot);
+                    this._disposeModelObject(ch.loadedRoot);
+                    ch.loadedRoot = null;
+                    ch.loading = false;
+                    job.loadedTris -= ch.lastTris || 0;
+                    ch.lastTris = 0;
+                    this._scheduleBVHRegen();
+                } else if (!ch.loadedRoot && !ch.loading && wantLoad) {
+                    ch.loading = true;
+                    loader.load(
+                        ch.url,
+                        (gltf) => {
+                            ch.loading = false;
+                            if (!anchor.parent) {
+                                this._disposeModelObject(gltf.scene);
+                                return;
+                            }
+                            const scene = gltf.scene;
+                            const tris = countTrianglesInObject(scene);
+                            if (job.loadedTris + tris > MODEL_MAX_TRIANGLES_TOTAL) {
+                                this._disposeModelObject(scene);
+                                console.error('[SceneManager] ストリーミングチャンクで合計ポリゴン上限:', job.manifestPath);
+                                window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
+                                    detail: {
+                                        path: job.manifestPath,
+                                        reason: 'too_many_triangles',
+                                        triangles: job.loadedTris + tris,
+                                        maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
+                                    }
+                                }));
+                                return;
+                            }
+                            job.loadedTris += tris;
+                            ch.lastTris = tris;
+                            const disableSh = tris > MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD;
+                            scene.traverse((child) => {
+                                if (child.isMesh) {
+                                    child.castShadow = !disableSh;
+                                    child.receiveShadow = !disableSh;
+                                }
+                            });
+                            anchor.add(scene);
+                            scene.updateMatrixWorld(true);
+                            this._registerDrawCullTarget(scene);
+                            ch.loadedRoot = scene;
+                            this._scheduleBVHRegen();
+                        },
+                        undefined,
+                        (err) => {
+                            ch.loading = false;
+                            console.error('[SceneManager] chunk stream load failed:', ch.url, err);
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * チャンクストリーミング後の BVH をデバウンス付きで再生成
+     */
+    _scheduleBVHRegen() {
+        if (this._bvhRegenTimeoutId != null) {
+            clearTimeout(this._bvhRegenTimeoutId);
+        }
+        this._bvhRegenTimeoutId = setTimeout(() => {
+            this._bvhRegenTimeoutId = null;
+            try {
+                this.generateBVH();
+            } catch (e) {
+                console.warn('[SceneManager] BVH regen failed:', e);
+            }
+        }, this._bvhRegenDebounceMs);
+    }
+
+    /**
+     * ストリーミングジョブを破棄（clearWorld 前に呼ぶ）
+     */
+    _disposeChunkStreamJobs() {
+        for (const job of this._chunkStreamJobs) {
+            for (const ch of job.chunks) {
+                if (ch.loadedRoot) {
+                    this._unregisterDrawCullTarget(ch.loadedRoot);
+                    if (job.anchor && ch.loadedRoot.parent === job.anchor) {
+                        job.anchor.remove(ch.loadedRoot);
+                    }
+                    this._disposeModelObject(ch.loadedRoot);
+                    ch.loadedRoot = null;
+                }
+                ch.loading = false;
+            }
+        }
+        this._chunkStreamJobs = [];
+        if (this._bvhRegenTimeoutId != null) {
+            clearTimeout(this._bvhRegenTimeoutId);
+            this._bvhRegenTimeoutId = null;
+        }
+    }
+
+    /**
      * 足元中心・描画距離（球）で environment の可視を更新する（4 フレームに 1 回）
      * @param {import('three').Vector3} feetWorld
      */
@@ -337,48 +563,34 @@ class SceneManager {
         for (let idx = 0; idx < list.length; idx++) {
             const config = list[idx];
             const fullConfig = typeof config === 'string' ? { path: config } : config;
-            const chunkManifest = String(fullConfig.chunkManifest || '').trim();
-            if (chunkManifest) {
-                const mUrl = this._buildEncodedModelUrl(chunkManifest);
-                let manifest;
-                try {
-                    const mRes = await fetch(mUrl);
-                    if (!mRes.ok) throw new Error(`HTTP ${mRes.status}`);
-                    manifest = await mRes.json();
-                } catch (e) {
-                    console.warn('[SceneManager] chunk manifest fetch failed:', chunkManifest, e);
+            let resolvedManifest = String(fullConfig.chunkManifest || '').trim();
+            const modelPath = fullConfig.path;
+            if (!resolvedManifest && modelPath && modelPath.toLowerCase().endsWith('.glb') && !this._isObjPath(modelPath)) {
+                resolvedManifest = String(this._implicitChunksManifestPathFromModelPath(modelPath) || '').trim();
+            }
+            if (resolvedManifest) {
+                const built = await this._fetchAndBuildChunkPlanEntries(resolvedManifest, FALLBACK);
+                if (!built) {
+                    console.warn('[SceneManager] chunk manifest missing or invalid:', resolvedManifest);
                     modelByIndex.set(idx, {
-                        fileLabel: chunkManifest.split(/[/\\]/).pop() || chunkManifest,
+                        fileLabel: resolvedManifest.split(/[/\\]/).pop() || resolvedManifest,
                         totalFileBytes: FALLBACK,
+                        resolvedChunkManifest: resolvedManifest,
                         chunkManifestPlan: null
                     });
                     totalBytes += FALLBACK;
                     continue;
                 }
-                const chList = Array.isArray(manifest.chunks) ? manifest.chunks : [];
-                let sum = 0;
-                /** @type {{ url: string, weight: number, label: string }[]} */
-                const chunkPlan = [];
-                for (const ch of chList) {
-                    const fp = String(ch.file || '').replace(/^\//, '');
-                    if (!fp) continue;
-                    const u = this._buildEncodedModelUrl(fp);
-                    const len = await fetchModelContentLength(u);
-                    const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / Math.max(1, chList.length)));
-                    chunkPlan.push({ url: u, weight: w, label: fp.split(/[/\\]/).pop() || fp });
-                    sum += w;
-                }
-                if (sum <= 0) sum = FALLBACK;
                 modelByIndex.set(idx, {
-                    fileLabel: chunkManifest.split(/[/\\]/).pop() || chunkManifest,
-                    totalFileBytes: sum,
-                    chunkManifestPlan: { chunks: chunkPlan }
+                    fileLabel: resolvedManifest.split(/[/\\]/).pop() || resolvedManifest,
+                    totalFileBytes: built.sum,
+                    resolvedChunkManifest: resolvedManifest,
+                    chunkManifestPlan: { chunks: built.chunks }
                 });
-                totalBytes += sum;
+                totalBytes += built.sum;
                 continue;
             }
 
-            const modelPath = fullConfig.path;
             if (!modelPath) continue;
             const url = this._buildEncodedModelUrl(modelPath);
             const fileLabel = modelPath.split(/[/\\]/).pop() || modelPath;
@@ -549,12 +761,17 @@ class SceneManager {
 
         const loadOne = async (config, idx) => {
             const fullConfig = typeof config === 'string' ? { path: config } : config;
-            const manifestPath = String(fullConfig.chunkManifest || '').trim();
-            const modelPath = fullConfig.path;
-
             const plan = bytePlan?.modelByIndex?.get(idx);
+            let manifestPath = String(plan?.resolvedChunkManifest || fullConfig.chunkManifest || '').trim();
+            const modelPath = fullConfig.path;
+            if (!manifestPath && modelPath && modelPath.toLowerCase().endsWith('.glb') && !this._isObjPath(modelPath)) {
+                manifestPath = String(this._implicitChunksManifestPathFromModelPath(modelPath) || '').trim();
+            }
+
             const fileLabel = plan?.fileLabel
-                || (modelPath ? (modelPath.split(/[/\\]/).pop() || modelPath) : manifestPath.split(/[/\\]/).pop() || manifestPath);
+                || (modelPath
+                    ? (modelPath.split(/[/\\]/).pop() || modelPath)
+                    : (manifestPath ? manifestPath.split(/[/\\]/).pop() || manifestPath : 'model'));
             const fileBudget = plan?.totalFileBytes ?? (5 * 1024 * 1024);
             const fileStart = loadState?.completedBytes ?? 0;
 
@@ -571,70 +788,68 @@ class SceneManager {
                 });
             };
 
-            if (manifestPath) {
-                const chunkPlan = plan?.chunkManifestPlan?.chunks;
-                if (!chunkPlan || chunkPlan.length === 0) {
-                    console.error('[SceneManager] chunkManifest のプランがありません:', manifestPath);
-                    snapBudgetDone();
-                    return;
-                }
+            let chunkPlan = plan?.chunkManifestPlan?.chunks;
+            if (manifestPath && (!chunkPlan || chunkPlan.length === 0)) {
+                chunkPlan = await this._fetchChunkPlanChunksOnly(manifestPath);
+            }
+
+            if (manifestPath && chunkPlan && chunkPlan.length > 0) {
                 const totalW = chunkPlan.reduce((s, c) => s + c.weight, 0) || 1;
                 const anchor = new THREE.Group();
-                let totalTris = 0;
-                let subBase = fileStart;
+                const cfgForFinish = { ...fullConfig, chunkManifest: manifestPath };
+                finishAddModel(anchor, cfgForFinish, manifestPath, 0);
+
                 const loader = createGLTFLoaderWithDraco();
-                try {
-                    for (let ci = 0; ci < chunkPlan.length; ci++) {
-                        const ent = chunkPlan[ci];
-                        const chunkBudget = fileBudget * (ent.weight / totalW);
-                        const chunkUrl = ent.url;
-                        const scene = await new Promise((resolve, reject) => {
-                            loader.load(
-                                chunkUrl,
-                                (gltf) => resolve(gltf.scene),
-                                (xhr) => emitFromBase(
-                                    ent.label,
-                                    xhr.loaded,
-                                    xhr.total || 0,
-                                    chunkBudget,
-                                    subBase
-                                ),
-                                reject
-                            );
-                        });
-                        const tris = countTrianglesInObject(scene);
-                        totalTris += tris;
-                        anchor.add(scene);
-                        scene.updateMatrixWorld(true);
-                        this._registerDrawCullTarget(scene);
-                        subBase += chunkBudget;
-                    }
-                    if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
-                        this._disposeModelObject(anchor);
-                        console.error(`[SceneManager] chunk manifest 合計ポリゴン過多 (約 ${totalTris} 三角): ${manifestPath}`);
-                        window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
-                            detail: {
-                                path: manifestPath,
-                                reason: 'too_many_triangles',
-                                triangles: totalTris,
-                                maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
-                            }
-                        }));
-                        snapBudgetDone();
-                        return;
-                    }
-                    finishAddModel(anchor, fullConfig, manifestPath, totalTris);
-                    if (loadState) {
-                        loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
-                    }
-                } catch (error) {
-                    console.error(`Error loading chunk manifest ${manifestPath}:`, error);
-                    snapBudgetDone();
+                let subAccum = fileStart;
+                const streamChunks = [];
+                for (let ci = 0; ci < chunkPlan.length; ci++) {
+                    const ent = chunkPlan[ci];
+                    const chunkBudget = fileBudget * (ent.weight / totalW);
+                    const cx = Array.isArray(ent.center) && ent.center.length >= 3 ? ent.center[0] : 0;
+                    const cy = Array.isArray(ent.center) && ent.center.length >= 3 ? ent.center[1] : 0;
+                    const cz = Array.isArray(ent.center) && ent.center.length >= 3 ? ent.center[2] : 0;
+                    streamChunks.push({
+                        url: ent.url,
+                        label: ent.label,
+                        weight: ent.weight,
+                        center: [cx, cy, cz],
+                        radius: Number.isFinite(ent.radius) ? Math.max(ent.radius, 0.01) : 0.01,
+                        chunkBudget,
+                        subBase: subAccum,
+                        loadedRoot: null,
+                        loading: false,
+                        lastTris: 0
+                    });
+                    subAccum += chunkBudget;
                 }
+
+                this._chunkStreamJobs.push({
+                    anchor,
+                    manifestPath,
+                    chunks: streamChunks,
+                    loader,
+                    loadedTris: 0
+                });
+
+                if (loadState) {
+                    loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                }
+                onByteProgress?.({
+                    fileName: fileLabel,
+                    loadedBytes: loadState?.completedBytes ?? 0,
+                    totalBytes: tb
+                });
                 return;
             }
 
-            if (!modelPath) return;
+            if (manifestPath) {
+                console.warn('[SceneManager] チャンクプランが無いため単体 path にフォールバックします:', manifestPath);
+            }
+
+            if (!modelPath) {
+                if (manifestPath) snapBudgetDone();
+                return;
+            }
 
             const url = this._buildEncodedModelUrl(modelPath);
             const maxBytes = this._isObjPath(modelPath) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
@@ -737,7 +952,11 @@ class SceneManager {
             this.environmentGroup.updateMatrixWorld(true);
             console.log('All models loaded, generating BVH...');
 
-            this.generateBVH();
+            try {
+                this.generateBVH();
+            } catch (e) {
+                console.warn('[SceneManager] Initial BVH generation failed:', e);
+            }
 
             if (onComplete) {
                 const result = onComplete();
@@ -1142,6 +1361,8 @@ class SceneManager {
         console.log('Clearing current world...');
 
         this.clearWorldLights();
+
+        this._disposeChunkStreamJobs();
 
         this._drawCullTargets = [];
 

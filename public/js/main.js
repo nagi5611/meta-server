@@ -657,6 +657,7 @@ class MetaverseApp {
             this.playerManager.updateLocalPlayer(position, rotation, movementState);
 
             this.sceneManager.updateDrawDistanceCulling(position);
+            this.sceneManager.updateChunkStreaming(position);
             this.playerManager.updateRemoteDrawDistance(
                 position,
                 this.sceneManager.graphicsOptions.viewDistanceM
