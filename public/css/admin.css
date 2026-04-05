@@ -869,7 +869,7 @@ body.admin-dark .world-json-find-hit-status {
 
 .storage-files-list li {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 28px 1fr auto auto;
     gap: 10px;
     align-items: center;
     padding: 8px 12px;
@@ -877,6 +877,20 @@ body.admin-dark .world-json-find-hit-status {
     border-bottom: 1px solid #eee;
     cursor: pointer;
     color: #333;
+}
+
+.storage-files-cb-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+}
+
+.storage-files-row-cb {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
 }
 
 .storage-files-list li:last-child {
@@ -887,9 +901,13 @@ body.admin-dark .world-json-find-hit-status {
     background: var(--we-accent-light, #e3f2fd);
 }
 
-.storage-files-list li.selected {
-    background: var(--we-accent, #1565c0);
-    color: #fff;
+.storage-files-list li.storage-files-row-checked {
+    background: var(--we-accent-light, #e3f2fd);
+}
+
+.storage-files-list li.storage-files-row-checked .storage-files-meta,
+.storage-files-list li.storage-files-row-checked .storage-files-kind {
+    color: #374151;
 }
 
 .storage-files-list li .storage-files-meta {
@@ -898,17 +916,9 @@ body.admin-dark .world-json-find-hit-status {
     white-space: nowrap;
 }
 
-.storage-files-list li.selected .storage-files-meta {
-    color: rgba(255, 255, 255, 0.9);
-}
-
 .storage-files-list li .storage-files-kind {
     font-size: 11px;
     color: #888;
-}
-
-.storage-files-list li.selected .storage-files-kind {
-    color: rgba(255, 255, 255, 0.85);
 }
 
 .storage-files-modal-content .modal-buttons {
@@ -951,9 +961,8 @@ body.admin-dark .storage-files-list li:hover {
     background: #252420;
 }
 
-body.admin-dark .storage-files-list li.selected {
-    background: #1e3a5f;
-    color: #fff;
+body.admin-dark .storage-files-list li.storage-files-row-checked {
+    background: #252420;
 }
 
 body.admin-dark .storage-files-list li .storage-files-meta,
@@ -961,9 +970,9 @@ body.admin-dark .storage-files-list li .storage-files-kind {
     color: #9ca3af;
 }
 
-body.admin-dark .storage-files-list li.selected .storage-files-meta,
-body.admin-dark .storage-files-list li.selected .storage-files-kind {
-    color: rgba(255, 255, 255, 0.88);
+body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-meta,
+body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-kind {
+    color: #d1d5db;
 }
 
 /* リスト */
@@ -992,6 +1001,60 @@ body.admin-dark .storage-files-list li.selected .storage-files-kind {
 .admin-panel-world-edit .object-list-slider .item.selected {
     background: var(--we-accent);
     color: #fff;
+}
+
+.admin-panel-world-edit .we-prefab-hint {
+    font-size: 12px;
+    line-height: 1.45;
+    color: #666;
+    margin: 0 0 8px;
+}
+
+.admin-panel-world-edit .model-list .model-prefab-item.item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    text-align: left;
+}
+
+.admin-panel-world-edit .model-prefab-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.06);
+    color: #444;
+}
+
+.admin-panel-world-edit .model-prefab-icon--chunked {
+    background: linear-gradient(135deg, rgba(45, 90, 138, 0.18), rgba(45, 90, 138, 0.06));
+    color: #2d5a8a;
+}
+
+.admin-panel-world-edit .model-list .item.selected .model-prefab-icon,
+.admin-panel-world-edit .model-list .item.selected .model-prefab-icon--chunked {
+    background: rgba(255, 255, 255, 0.22);
+    color: inherit;
+}
+
+.admin-panel-world-edit .model-prefab-icon svg {
+    width: 22px;
+    height: 22px;
+    display: block;
+}
+
+.admin-panel-world-edit .model-prefab-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    line-height: 1.35;
 }
 
 .admin-panel-world-edit .object-list-slider .item-type {
@@ -3124,6 +3187,21 @@ body.admin-dark .admin-panel-world-edit .object-list-slider .item.selected {
     background: var(--we-accent);
     color: #1b1a15;
 }
+
+body.admin-dark .admin-panel-world-edit .we-prefab-hint {
+    color: #9ca3af;
+}
+
+body.admin-dark .admin-panel-world-edit .model-prefab-icon {
+    background: rgba(255, 255, 255, 0.08);
+    color: #c4c1ba;
+}
+
+body.admin-dark .admin-panel-world-edit .model-prefab-icon--chunked {
+    background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(255, 255, 255, 0.06));
+    color: #e6c96a;
+}
+
 body.admin-dark .admin-panel-world-edit .we-left-area button,
 body.admin-dark .admin-panel-world-edit .we-right-content button {
     background: #25231d;

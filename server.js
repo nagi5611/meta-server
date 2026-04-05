@@ -3370,25 +3370,32 @@ app.get('/admin/storage-files', (req, res) => {
     }
 });
 
-app.delete('/admin/storage-files', (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const store = typeof body.store === 'string' ? body.store.trim() : '';
-    const storeRoot = STORAGE_FILE_STORE_ROOTS[/** @type {keyof typeof STORAGE_FILE_STORE_ROOTS} */ (store)];
-    if (!storeRoot) {
-        return res.status(400).json({ error: 'Invalid or missing store' });
-    }
-    const relPath = typeof body.relativePath === 'string' ? body.relativePath : '';
+const STORAGE_BULK_DELETE_MAX = 500;
+
+/**
+ * ストア内の1ファイルを削除し、キャッシュ無効化用 URL を返す
+ * @param {string} store
+ * @param {string} storeRoot
+ * @param {string} relPath
+ * @param {{ missingOk?: boolean }} [options]
+ * @returns {{ success: true, invUrls: string[], skipped?: boolean } | { success: false, error: string, invUrls: [] }}
+ */
+function performStorageFileDelete(store, storeRoot, relPath, options) {
+    const missingOk = !!(options && options.missingOk);
     const fileAbs = resolvePathUnderStorageRoot(storeRoot, relPath);
     if (!fileAbs) {
-        return res.status(400).json({ error: 'Invalid path' });
+        return { success: false, error: 'Invalid path', invUrls: [] };
+    }
+    if (!fs.existsSync(fileAbs)) {
+        if (missingOk) {
+            return { success: true, invUrls: [], skipped: true };
+        }
+        return { success: false, error: 'File not found', invUrls: [] };
     }
     try {
-        if (!fs.existsSync(fileAbs)) {
-            return res.status(404).json({ error: 'File not found' });
-        }
         const st = fs.statSync(fileAbs);
         if (!st.isFile()) {
-            return res.status(400).json({ error: 'Only files can be deleted' });
+            return { success: false, error: 'Only files can be deleted', invUrls: [] };
         }
         /** @type {string[]} */
         const invUrls = [];
@@ -3411,14 +3418,78 @@ app.delete('/admin/storage-files', (req, res) => {
         fs.unlinkSync(fileAbs);
         const mainRel = path.relative(storeRoot, fileAbs).split(path.sep).join('/');
         invUrls.push(publicAssetUrlForCache(/** @type {'models' | 'pdfs' | 'env' | 'images' | 'chart-bgm'} */ (store), mainRel));
-        if (invUrls.length) {
-            io.emit('asset-invalidate', { urls: invUrls });
-        }
-        res.json({ success: true, deletedUrls: invUrls });
+        return { success: true, invUrls, skipped: false };
     } catch (err) {
-        console.error('DELETE /admin/storage-files error:', err);
-        res.status(500).json({ error: 'Failed to delete file' });
+        const msg = err instanceof Error ? err.message : String(err);
+        return { success: false, error: msg || 'Failed to delete file', invUrls: [] };
     }
+}
+
+app.delete('/admin/storage-files', (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const store = typeof body.store === 'string' ? body.store.trim() : '';
+    const storeRoot = STORAGE_FILE_STORE_ROOTS[/** @type {keyof typeof STORAGE_FILE_STORE_ROOTS} */ (store)];
+    if (!storeRoot) {
+        return res.status(400).json({ error: 'Invalid or missing store' });
+    }
+    const relPath = typeof body.relativePath === 'string' ? body.relativePath : '';
+    const result = performStorageFileDelete(store, storeRoot, relPath, { missingOk: false });
+    if (!result.success) {
+        if (result.error === 'File not found') {
+            return res.status(404).json({ error: result.error });
+        }
+        if (result.error === 'Invalid path' || result.error === 'Only files can be deleted') {
+            return res.status(400).json({ error: result.error });
+        }
+        console.error('DELETE /admin/storage-files error:', result.error);
+        return res.status(500).json({ error: 'Failed to delete file' });
+    }
+    if (result.invUrls.length) {
+        io.emit('asset-invalidate', { urls: result.invUrls });
+    }
+    res.json({ success: true, deletedUrls: result.invUrls });
+});
+
+app.post('/admin/storage-files/bulk-delete', (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const store = typeof body.store === 'string' ? body.store.trim() : '';
+    const storeRoot = STORAGE_FILE_STORE_ROOTS[/** @type {keyof typeof STORAGE_FILE_STORE_ROOTS} */ (store)];
+    if (!storeRoot) {
+        return res.status(400).json({ error: 'Invalid or missing store' });
+    }
+    const raw = body.relativePaths;
+    if (!Array.isArray(raw)) {
+        return res.status(400).json({ error: 'relativePaths must be an array' });
+    }
+    const paths = [...new Set(raw.map((p) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean))];
+    if (paths.length === 0) {
+        return res.status(400).json({ error: 'No paths to delete' });
+    }
+    if (paths.length > STORAGE_BULK_DELETE_MAX) {
+        return res.status(400).json({ error: `Too many paths (max ${STORAGE_BULK_DELETE_MAX})` });
+    }
+    /** @type {string[]} */
+    const allInvUrls = [];
+    /** @type {{ relativePath: string, error: string }[]} */
+    const errors = [];
+    let deletedCount = 0;
+    for (const relPath of paths) {
+        const result = performStorageFileDelete(store, storeRoot, relPath, { missingOk: true });
+        if (result.success) {
+            allInvUrls.push(...result.invUrls);
+            if (!result.skipped) deletedCount++;
+        } else {
+            errors.push({ relativePath: relPath, error: result.error });
+        }
+    }
+    if (allInvUrls.length) {
+        io.emit('asset-invalidate', { urls: allInvUrls });
+    }
+    res.json({
+        success: errors.length === 0,
+        deletedCount,
+        errors,
+    });
 });
 
 app.post('/admin/upload', upload.single('model'), async (req, res) => {

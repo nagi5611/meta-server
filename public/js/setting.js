@@ -90,15 +90,25 @@ function isObjPath(path) {
 
 const CHUNKS_JSON_SUFFIX = '.chunks.json';
 
+/** 単体プレハブ用アイコン（左パネル、currentColor） */
+const MODEL_PREFAB_ICON_SVG_SIMPLE =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 6v12l8 4 8-4V6l-8-4z"/><path d="M4 6l8 4 8-4M12 10v10"/></svg>';
+
+/** チャンク分割プレハブ（複数パーツ） */
+const MODEL_PREFAB_ICON_SVG_CHUNKED =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2 2 5v7l6 3 6-3V5l-6-3z"/><path d="M2 5l6 3 6-3"/><path d="M16 7l6 3v7l-6 3-6-3v-5"/><path d="M16 7v6"/></svg>';
+
 /**
- * admin/models の生ファイル名一覧から、左パネル用にチャンク群を1行にまとめたエントリを作る（エクスプローラーは生一覧のまま）
+ * admin/models の生ファイル名一覧から、左パネル「モデルプレハブ」用エントリを作る。
+ * チャンク GLB（*.chunk_*.glb）とマニフェスト（*.chunks.json）は一覧に出さない。
+ * エクスプローラーは生一覧のまま。
  * @param {string[]} fileNames
- * @returns {{ label: string, path: string, chunkManifest?: string }[]}
+ * @returns {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'chunked'|'file' }[]}
  */
-function buildModelPaletteEntries(fileNames) {
+function buildModelPrefabEntries(fileNames) {
     const names = Array.isArray(fileNames) ? fileNames : [];
     const set = new Set(names);
-    /** @type {Set<string>} basename（拡張子なし）で .chunks.json が存在するもの */
+    /** @type {Set<string>} basename（拡張子なしパス）で .chunks.json が存在 */
     const basesWithManifest = new Set();
     for (const n of names) {
         const low = n.toLowerCase();
@@ -106,22 +116,16 @@ function buildModelPaletteEntries(fileNames) {
             basesWithManifest.add(n.slice(0, -CHUNKS_JSON_SUFFIX.length));
         }
     }
-    /** @type {{ label: string, path: string, chunkManifest?: string }[]} */
+    /** @type {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'chunked'|'file' }[]} */
     const out = [];
-    /** @type {Set<string>} パレットで既にマニフェスト付きとして出した basename */
+    /** @type {Set<string>} チャンク付きプレハブとして既に出した basename */
     const usedChunkGroup = new Set();
     for (const name of names) {
         const low = name.toLowerCase();
         if (low.endsWith(CHUNKS_JSON_SUFFIX.toLowerCase())) {
             continue;
         }
-        const chunkMatch = name.match(/^(.+)\.chunk_(\d+)\.glb$/i);
-        if (chunkMatch) {
-            const base = chunkMatch[1];
-            if (basesWithManifest.has(base)) {
-                continue;
-            }
-            out.push({ label: name, path: 'models/' + name });
+        if (/\.chunk_\d+\.glb$/i.test(name)) {
             continue;
         }
         if (low.endsWith('.glb')) {
@@ -132,17 +136,23 @@ function buildModelPaletteEntries(fileNames) {
                     continue;
                 }
                 usedChunkGroup.add(base);
+                const displayLabel = name.replace(/\.glb$/i, '');
                 out.push({
-                    label: name,
+                    displayLabel,
                     path: 'models/' + name,
-                    chunkManifest: 'models/' + manifestName
+                    chunkManifest: 'models/' + manifestName,
+                    prefabKind: 'chunked'
                 });
                 continue;
             }
         }
-        out.push({ label: name, path: 'models/' + name });
+        out.push({
+            displayLabel: name,
+            path: 'models/' + name,
+            prefabKind: 'file'
+        });
     }
-    out.sort((a, b) => a.label.localeCompare(b.label, 'ja'));
+    out.sort((a, b) => a.displayLabel.localeCompare(b.displayLabel, 'ja'));
     return out;
 }
 
@@ -160,7 +170,7 @@ function modelPaletteSelectionKey(path, chunkManifest) {
  * 現在の選択がパレットに存在するか確認し、無ければ先頭へ寄せる
  */
 function syncModelPaletteSelectionAfterListChange() {
-    const pal = buildModelPaletteEntries(modelList);
+    const pal = buildModelPrefabEntries(modelList);
     const key = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
     const ok = pal.some(
         (e) => modelPaletteSelectionKey(e.path, e.chunkManifest) === key && selectedModelPath
@@ -1775,23 +1785,42 @@ function renderModelList() {
     syncModelPaletteSelectionAfterListChange();
     const el = document.getElementById('model-list');
     el.innerHTML = '';
-    const pal = buildModelPaletteEntries(modelList);
+    const pal = buildModelPrefabEntries(modelList);
     const selKey = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
     pal.forEach((ent) => {
         const path = ent.path;
         const isSel =
             modelPaletteSelectionKey(path, ent.chunkManifest) === selKey && selectedModelPath === path;
         const div = document.createElement('div');
-        div.className = 'item' + (isSel ? ' selected' : '');
-        div.textContent = ent.label;
+        div.className = 'item model-prefab-item' + (isSel ? ' selected' : '');
+        div.setAttribute('role', 'button');
+        div.setAttribute('tabindex', '0');
+        div.setAttribute('aria-label', `プレハブ ${ent.displayLabel}`);
         div.dataset.path = path;
         if (ent.chunkManifest) {
             div.dataset.chunkManifest = ent.chunkManifest;
         }
-        div.addEventListener('click', () => {
+        const icon = document.createElement('span');
+        icon.className =
+            'model-prefab-icon' +
+            (ent.prefabKind === 'chunked' ? ' model-prefab-icon--chunked' : '');
+        icon.innerHTML = ent.prefabKind === 'chunked' ? MODEL_PREFAB_ICON_SVG_CHUNKED : MODEL_PREFAB_ICON_SVG_SIMPLE;
+        const label = document.createElement('span');
+        label.className = 'model-prefab-label';
+        label.textContent = ent.displayLabel;
+        div.appendChild(icon);
+        div.appendChild(label);
+        const activate = () => {
             selectedModelPath = path;
             selectedModelChunkManifest = ent.chunkManifest || null;
             renderModelList();
+        };
+        div.addEventListener('click', activate);
+        div.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                activate();
+            }
         });
         el.appendChild(div);
     });
@@ -1945,16 +1974,70 @@ function formatStorageBytes(n) {
 const storageFilesUi = {
     store: 'models',
     currentRelative: '',
-    selectedFileRelative: null,
+    /** @type {Set<string>} */
+    selectedFileRelatives: new Set(),
+    /** Shift 範囲選択の基準となる entries 内のインデックス（ファイル行でもフォルダ行でも可） */
+    anchorListIndex: -1,
     entries: [],
 };
+
+/**
+ * 削除ボタンの有効・表示を選択件数に合わせる
+ */
+function syncStorageFilesDeleteButton() {
+    const delBtn = document.getElementById('storage-files-delete-btn');
+    if (!delBtn) return;
+    const n = storageFilesUi.selectedFileRelatives.size;
+    delBtn.disabled = n === 0;
+    delBtn.textContent = n > 1 ? `削除 (${n})` : '削除';
+}
+
+/**
+ * ストア移動・フォルダ移動時に選択状態を消す
+ */
+function clearStorageFilesSelection() {
+    storageFilesUi.selectedFileRelatives.clear();
+    storageFilesUi.anchorListIndex = -1;
+    syncStorageFilesDeleteButton();
+}
+
+/**
+ * チェックボックスまたはファイル行クリックで選択を更新する（Shift で範囲）
+ * @param {MouseEvent} e
+ * @param {number} rowIndex
+ * @param {string} rel
+ */
+function applyStorageFileSelectionClick(e, rowIndex, rel) {
+    const ent = storageFilesUi.entries[rowIndex];
+    if (!ent || ent.isDirectory) return;
+    if (e.shiftKey && storageFilesUi.anchorListIndex >= 0) {
+        const lo = Math.min(storageFilesUi.anchorListIndex, rowIndex);
+        const hi = Math.max(storageFilesUi.anchorListIndex, rowIndex);
+        storageFilesUi.selectedFileRelatives.clear();
+        for (let k = lo; k <= hi; k++) {
+            const row = storageFilesUi.entries[k];
+            if (row && !row.isDirectory) {
+                const r = joinStorageRelativePath(storageFilesUi.currentRelative, row.name);
+                storageFilesUi.selectedFileRelatives.add(r);
+            }
+        }
+    } else {
+        if (storageFilesUi.selectedFileRelatives.has(rel)) {
+            storageFilesUi.selectedFileRelatives.delete(rel);
+        } else {
+            storageFilesUi.selectedFileRelatives.add(rel);
+        }
+        storageFilesUi.anchorListIndex = rowIndex;
+    }
+    syncStorageFilesDeleteButton();
+    renderStorageFilesList();
+}
 
 /**
  * パンくずを描画する
  */
 function renderStorageFilesBreadcrumb() {
     const nav = document.getElementById('storage-files-breadcrumb');
-    const delBtn = document.getElementById('storage-files-delete-btn');
     if (!nav) return;
     nav.innerHTML = '';
     const rootBtn = document.createElement('button');
@@ -1962,8 +2045,7 @@ function renderStorageFilesBreadcrumb() {
     rootBtn.textContent = 'ルート';
     rootBtn.addEventListener('click', () => {
         storageFilesUi.currentRelative = '';
-        storageFilesUi.selectedFileRelative = null;
-        if (delBtn) delBtn.disabled = true;
+        clearStorageFilesSelection();
         void loadStorageFilesFromServer();
     });
     nav.appendChild(rootBtn);
@@ -1981,8 +2063,7 @@ function renderStorageFilesBreadcrumb() {
         const pathUpTo = acc;
         btn.addEventListener('click', () => {
             storageFilesUi.currentRelative = pathUpTo;
-            storageFilesUi.selectedFileRelative = null;
-            if (delBtn) delBtn.disabled = true;
+            clearStorageFilesSelection();
             void loadStorageFilesFromServer();
         });
         nav.appendChild(btn);
@@ -1994,15 +2075,28 @@ function renderStorageFilesBreadcrumb() {
  */
 function renderStorageFilesList() {
     const listEl = document.getElementById('storage-files-list');
-    const delBtn = document.getElementById('storage-files-delete-btn');
     if (!listEl) return;
     listEl.innerHTML = '';
-    for (const ent of storageFilesUi.entries) {
+    storageFilesUi.entries.forEach((ent, rowIndex) => {
         const li = document.createElement('li');
-        li.setAttribute('role', 'option');
+        li.dataset.rowIndex = String(rowIndex);
         const rel = joinStorageRelativePath(storageFilesUi.currentRelative, ent.name);
-        const isSel = !ent.isDirectory && storageFilesUi.selectedFileRelative === rel;
-        if (isSel) li.classList.add('selected');
+        const cbCell = document.createElement('span');
+        cbCell.className = 'storage-files-cb-cell';
+        if (!ent.isDirectory) {
+            const checked = storageFilesUi.selectedFileRelatives.has(rel);
+            if (checked) li.classList.add('storage-files-row-checked');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'storage-files-row-cb';
+            cb.checked = checked;
+            cb.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                applyStorageFileSelectionClick(e, rowIndex, rel);
+            });
+            cbCell.appendChild(cb);
+        }
         const nameSpan = document.createElement('span');
         nameSpan.textContent = ent.name;
         const kindSpan = document.createElement('span');
@@ -2016,21 +2110,19 @@ function renderStorageFilesList() {
             const dateStr = ent.mtimeMs != null ? new Date(ent.mtimeMs).toLocaleString() : '—';
             metaSpan.textContent = `${formatStorageBytes(ent.size)} · ${dateStr}`;
         }
-        li.append(nameSpan, kindSpan, metaSpan);
-        li.addEventListener('click', () => {
+        li.append(cbCell, nameSpan, kindSpan, metaSpan);
+        li.addEventListener('click', (e) => {
+            if (e.target.closest('.storage-files-cb-cell')) return;
             if (ent.isDirectory) {
                 storageFilesUi.currentRelative = rel;
-                storageFilesUi.selectedFileRelative = null;
-                if (delBtn) delBtn.disabled = true;
+                clearStorageFilesSelection();
                 void loadStorageFilesFromServer();
             } else {
-                storageFilesUi.selectedFileRelative = rel;
-                if (delBtn) delBtn.disabled = false;
-                renderStorageFilesList();
+                applyStorageFileSelectionClick(e, rowIndex, rel);
             }
         });
         listEl.appendChild(li);
-    }
+    });
 }
 
 /**
@@ -2058,6 +2150,15 @@ async function loadStorageFilesFromServer() {
         if (typeof data.currentRelative === 'string') {
             storageFilesUi.currentRelative = data.currentRelative;
         }
+        const stillHere = new Set(
+            storageFilesUi.entries
+                .filter((row) => !row.isDirectory)
+                .map((row) => joinStorageRelativePath(storageFilesUi.currentRelative, row.name))
+        );
+        for (const r of [...storageFilesUi.selectedFileRelatives]) {
+            if (!stillHere.has(r)) storageFilesUi.selectedFileRelatives.delete(r);
+        }
+        syncStorageFilesDeleteButton();
         renderStorageFilesBreadcrumb();
         renderStorageFilesList();
         if (statusEl) statusEl.textContent = '';
@@ -2067,6 +2168,7 @@ async function loadStorageFilesFromServer() {
             statusEl.className = 'error';
         }
         storageFilesUi.entries = [];
+        syncStorageFilesDeleteButton();
         renderStorageFilesBreadcrumb();
         renderStorageFilesList();
     }
@@ -2516,12 +2618,13 @@ function bindEvents() {
         }
         storageFilesUi.store = 'models';
         storageFilesUi.currentRelative = '';
-        storageFilesUi.selectedFileRelative = null;
+        storageFilesUi.selectedFileRelatives.clear();
+        storageFilesUi.anchorListIndex = -1;
         storageFilesUi.entries = [];
         document.querySelectorAll('.storage-files-store-btn').forEach((b) => {
             b.classList.toggle('active', b.getAttribute('data-storage-store') === 'models');
         });
-        if (storageFilesDeleteBtn) storageFilesDeleteBtn.disabled = true;
+        syncStorageFilesDeleteButton();
         storageFilesModal.classList.add('show');
         storageFilesModal.setAttribute('aria-hidden', 'false');
         void loadStorageFilesFromServer();
@@ -2540,38 +2643,55 @@ function bindEvents() {
         if (!store) return;
         storageFilesUi.store = store;
         storageFilesUi.currentRelative = '';
-        storageFilesUi.selectedFileRelative = null;
-        if (storageFilesDeleteBtn) storageFilesDeleteBtn.disabled = true;
+        storageFilesUi.selectedFileRelatives.clear();
+        storageFilesUi.anchorListIndex = -1;
+        syncStorageFilesDeleteButton();
         document.querySelectorAll('.storage-files-store-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         void loadStorageFilesFromServer();
     });
 
     storageFilesDeleteBtn?.addEventListener('click', async () => {
-        const rel = storageFilesUi.selectedFileRelative;
-        if (!rel) return;
-        const baseName = rel.split('/').pop();
-        if (!confirm(`次のファイルを削除しますか？\n${baseName}`)) return;
-        const statusEl = document.getElementById('storage-files-modal-status');
+        const relativePaths = [...storageFilesUi.selectedFileRelatives];
+        if (relativePaths.length === 0) return;
         const store = storageFilesUi.store;
+        const msg =
+            relativePaths.length === 1
+                ? `次のファイルを削除しますか？\n${relativePaths[0].split('/').pop()}`
+                : `${relativePaths.length} 件のファイルを削除しますか？`;
+        if (!confirm(msg)) return;
+        const statusEl = document.getElementById('storage-files-modal-status');
         if (statusEl) {
             statusEl.textContent = '削除中…';
             statusEl.className = '';
         }
         try {
-            const res = await fetch('/admin/storage-files', {
-                method: 'DELETE',
+            const res = await fetch('/admin/storage-files/bulk-delete', {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: JSON.stringify({ store, relativePath: rel }),
+                body: JSON.stringify({ store, relativePaths }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
                 throw new Error(data.error || res.statusText || 'delete failed');
             }
-            storageFilesUi.selectedFileRelative = null;
-            if (storageFilesDeleteBtn) storageFilesDeleteBtn.disabled = true;
-            if (statusEl) statusEl.textContent = '削除しました';
+            storageFilesUi.selectedFileRelatives.clear();
+            storageFilesUi.anchorListIndex = -1;
+            syncStorageFilesDeleteButton();
+            if (statusEl) {
+                if (Array.isArray(data.errors) && data.errors.length > 0) {
+                    const detail = data.errors
+                        .map((x) => `${x.relativePath || '?'}: ${x.error || 'error'}`)
+                        .join(' / ');
+                    statusEl.textContent = `一部失敗（${data.deletedCount ?? 0} 件削除）: ${detail}`;
+                    statusEl.className = 'error';
+                } else {
+                    statusEl.textContent =
+                        relativePaths.length === 1 ? '削除しました' : `${data.deletedCount ?? relativePaths.length} 件削除しました`;
+                    statusEl.className = '';
+                }
+            }
             await loadStorageFilesFromServer();
             await refreshWorldEditListsAfterStorageDelete(store);
         } catch (err) {
@@ -2639,7 +2759,7 @@ function bindEvents() {
     });
 
     document.getElementById('btn-add-model').addEventListener('click', () => {
-        const pal = buildModelPaletteEntries(modelList);
+        const pal = buildModelPrefabEntries(modelList);
         const first = pal[0];
         const path = selectedModelPath || (first ? first.path : null);
         const match = path ? pal.find((e) => e.path === path) : null;
@@ -2664,6 +2784,8 @@ function bindEvents() {
 
     let modelUploadModalBusy = false;
     let modelUploadQueuePollId = null;
+    /** GLB: ボディ送信後、キューポーリングでステータス文言を合わせる行 UI */
+    let activeGlbServerPhaseUi = null;
     const modelUploadModal = document.getElementById('model-upload-modal');
     const modelUploadInput = document.getElementById('model-upload-input');
     const modelUploadFileList = document.getElementById('model-upload-file-list');
@@ -2731,17 +2853,32 @@ function bindEvents() {
             clearInterval(modelUploadQueuePollId);
             modelUploadQueuePollId = null;
         }
+        activeGlbServerPhaseUi = null;
     }
 
-    /** @param {{ waiting?: number, processing?: boolean }|null} q */
+    /** @param {{ waiting?: number, processing?: boolean, spatialChunking?: boolean }|null} q */
     function applyServerQueueToLabel(q) {
         if (!modelUploadServerQueueEl) return;
         if (!q || typeof q.waiting !== 'number') {
             modelUploadServerQueueEl.textContent = '';
             return;
         }
-        const proc = q.processing ? 'リサイズ処理を実行中' : 'リサイズ処理待ち';
+        let proc = 'リサイズ処理待ち';
+        if (q.processing) proc = 'リサイズ処理を実行中';
+        if (q.spatialChunking) proc = 'チャンク分割処理を実行中';
         modelUploadServerQueueEl.textContent = `サーバ側 GLB: 待ち ${q.waiting} 件、${proc}`;
+    }
+
+    /** @param {{ waiting?: number, processing?: boolean, spatialChunking?: boolean }|null} q */
+    function applyActiveGlbRowFromQueue(q) {
+        if (!activeGlbServerPhaseUi || !q || typeof q.waiting !== 'number') return;
+        if (q.processing) {
+            activeGlbServerPhaseUi.setStatus('リサイズ中…', 'muted');
+        } else if (q.spatialChunking) {
+            activeGlbServerPhaseUi.setStatus('チャンク分割中…', 'muted');
+        } else {
+            activeGlbServerPhaseUi.setStatus('サーバで処理中…', 'muted');
+        }
     }
 
     function startModelUploadQueuePoll() {
@@ -2752,6 +2889,7 @@ function bindEvents() {
                 if (!res.ok) return;
                 const q = await res.json();
                 applyServerQueueToLabel(q);
+                applyActiveGlbRowFromQueue(q);
             } catch (_) {
                 /* ignore */
             }
@@ -2797,10 +2935,38 @@ function bindEvents() {
         });
     }
 
-    /** GLB はボディ送信後にサーバでテクスチャリサイズするため、その待ち時間は「リサイズ中」と表示する */
+    /**
+     * GLB はボディ送信後にサーバでリサイズ→条件によりチャンク分割する。キュー API と行表示を同期する。
+     * @param {{ setStatus: (t: string, c?: string) => void }} ui
+     * @param {string} fileName
+     */
     function onModelUploadBytesSentIfGlb(ui, fileName) {
         if (!fileName.toLowerCase().endsWith('.glb')) return undefined;
-        return () => ui.setStatus('リサイズ中…', 'muted');
+        return () => {
+            activeGlbServerPhaseUi = ui;
+            ui.setStatus('リサイズ中…', 'muted');
+        };
+    }
+
+    /**
+     * アップロード完了時に activeGlbServerPhaseUi を外すラッパー。
+     * @param {string} url
+     * @param {File} file
+     * @param {(ratio: number) => void} [onUploadProgress]
+     * @param {{ setStatus: (t: string, c?: string) => void }} ui
+     * @param {string} fileName
+     */
+    async function postAdminModelUploadWithPhaseCleanup(url, file, onUploadProgress, ui, fileName) {
+        try {
+            return await postAdminModelUploadXHR(
+                url,
+                file,
+                onUploadProgress,
+                onModelUploadBytesSentIfGlb(ui, fileName)
+            );
+        } finally {
+            if (activeGlbServerPhaseUi === ui) activeGlbServerPhaseUi = null;
+        }
     }
 
     function setModelUploadModalOpen(open) {
@@ -3194,14 +3360,15 @@ function bindEvents() {
             ui.setProgress(0);
 
             try {
-                let xhrRes = await postAdminModelUploadXHR(
+                let xhrRes = await postAdminModelUploadWithPhaseCleanup(
                     url,
                     file,
                     (r) => {
                         ui.setProgress(r);
                         updateOverallProgress(completedFiles, total, r);
                     },
-                    onModelUploadBytesSentIfGlb(ui, name)
+                    ui,
+                    name
                 );
 
                 if (xhrRes.status === 409) {
@@ -3222,14 +3389,15 @@ function bindEvents() {
                         updateOverallProgress(completedFiles, total, 0);
                         continue;
                     }
-                    xhrRes = await postAdminModelUploadXHR(
+                    xhrRes = await postAdminModelUploadWithPhaseCleanup(
                         '/admin/upload?confirm=1',
                         file,
                         (r) => {
                             ui.setProgress(r);
                             updateOverallProgress(completedFiles, total, r);
                         },
-                        onModelUploadBytesSentIfGlb(ui, name)
+                        ui,
+                        name
                     );
                     if (xhrRes.status === 409) {
                         lastErr = '同名の上書き確認が必要: ' + name;
@@ -3290,13 +3458,14 @@ function bindEvents() {
                     ui.setStatus('アップロード中…', 'muted');
                     ui.setProgress(0);
                     try {
-                        const xhrRes = await postAdminModelUploadXHR(
+                        const xhrRes = await postAdminModelUploadWithPhaseCleanup(
                             '/admin/upload?confirm=1',
                             file,
                             (r) => {
                                 ui.setProgress(r);
                             },
-                            onModelUploadBytesSentIfGlb(ui, name)
+                            ui,
+                            name
                         );
                         if (xhrRes.status === 409) {
                             lastErr = '同名の上書き確認が必要: ' + name;
