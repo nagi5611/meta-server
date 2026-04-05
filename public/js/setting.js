@@ -1799,6 +1799,145 @@ function bindEvents() {
     const btnEditWorldsJson = document.getElementById('btn-edit-worlds-json');
     const worldJsonSaveBtn = document.getElementById('world-json-save-btn');
     const worldJsonCancelBtn = document.getElementById('world-json-cancel-btn');
+    const worldJsonFindInput = document.getElementById('world-json-find-input');
+    const worldJsonReplaceInput = document.getElementById('world-json-replace-input');
+    const worldJsonFindNextBtn = document.getElementById('world-json-find-next');
+    const worldJsonReplaceOneBtn = document.getElementById('world-json-replace-one');
+    const worldJsonReplaceAllBtn = document.getElementById('world-json-replace-all');
+    const worldJsonFindCase = document.getElementById('world-json-find-case');
+    const worldJsonFindHitStatus = document.getElementById('world-json-find-hit-status');
+
+    /** 正規表現メタ文字をエスケープ（リテラル検索・置換用） */
+    function escapeRegExpWorldJson(s) {
+        return s.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+    }
+
+    /** worlds.json モーダル内の検索コンテキスト（needle 空なら null） */
+    function worldJsonFindContext() {
+        if (!worldJsonTextarea || !worldJsonFindInput) return null;
+        const needle = worldJsonFindInput.value;
+        if (!needle) return null;
+        const caseSens = !!(worldJsonFindCase && worldJsonFindCase.checked);
+        const text = worldJsonTextarea.value;
+        const hay = caseSens ? text : text.toLowerCase();
+        const sub = caseSens ? needle : needle.toLowerCase();
+        return { needle, caseSens, text, hay, sub };
+    }
+
+    /** hay 内の sub の出現回数 */
+    function worldJsonCountSubstr(hay, sub) {
+        let n = 0;
+        let p = 0;
+        while (p < hay.length) {
+            const i = hay.indexOf(sub, p);
+            if (i === -1) break;
+            n++;
+            p = i + Math.max(1, sub.length);
+        }
+        return n;
+    }
+
+    /** idx 位置で始まる一致が hay 内で何番目か（1-based） */
+    function worldJsonMatchOrdinalAt(hay, sub, idx) {
+        let n = 0;
+        let p = 0;
+        while (p < hay.length) {
+            const i = hay.indexOf(sub, p);
+            if (i === -1) break;
+            n++;
+            if (i === idx) return n;
+            p = i + Math.max(1, sub.length);
+        }
+        return n;
+    }
+
+    /** 次の一致を選択。見つからなければメッセージのみ */
+    function findWorldJsonNext() {
+        const ctx = worldJsonFindContext();
+        if (!ctx || !worldJsonTextarea) {
+            if (worldJsonFindHitStatus) worldJsonFindHitStatus.textContent = '検索文字列を入力してください';
+            return;
+        }
+        const { needle, hay, sub } = ctx;
+        const ta = worldJsonTextarea;
+        let from = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : 0;
+        if (from < 0) from = 0;
+        let idx = hay.indexOf(sub, from);
+        let wrapped = false;
+        if (idx === -1) {
+            idx = hay.indexOf(sub, 0);
+            wrapped = idx !== -1;
+        }
+        if (idx === -1) {
+            if (worldJsonFindHitStatus) worldJsonFindHitStatus.textContent = '見つかりません';
+            return;
+        }
+        const total = worldJsonCountSubstr(hay, sub);
+        const ord = worldJsonMatchOrdinalAt(hay, sub, idx);
+        ta.focus();
+        ta.setSelectionRange(idx, idx + needle.length);
+        if (worldJsonFindHitStatus) {
+            const wrapNote = wrapped ? ' · 先頭から再検索' : '';
+            worldJsonFindHitStatus.textContent = `一致 ${total} 件 · ${ord} 件目${wrapNote}`;
+        }
+    }
+
+    /** 選択範囲が検索文字列と一致すれば 1 件だけ置換。しなければ次を検索して一致すれば置換 */
+    function replaceWorldJsonOne() {
+        const ctx = worldJsonFindContext();
+        if (!ctx || !worldJsonTextarea) {
+            if (worldJsonFindHitStatus) worldJsonFindHitStatus.textContent = '検索文字列を入力してください';
+            return;
+        }
+        const { needle, caseSens, text } = ctx;
+        const ta = worldJsonTextarea;
+        const rep = worldJsonReplaceInput ? worldJsonReplaceInput.value : '';
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        const sel = text.slice(start, end);
+        const matches = caseSens ? sel === needle : sel.toLowerCase() === needle.toLowerCase();
+        if (matches) {
+            ta.setRangeText(rep, start, end, 'end');
+            ta.setSelectionRange(start + rep.length, start + rep.length);
+            findWorldJsonNext();
+            return;
+        }
+        findWorldJsonNext();
+        const nstart = ta.selectionStart;
+        const nend = ta.selectionEnd;
+        const nsel = ta.value.slice(nstart, nend);
+        const nmatches = caseSens ? nsel === needle : nsel.toLowerCase() === needle.toLowerCase();
+        if (nmatches) {
+            ta.setRangeText(rep, nstart, nend, 'end');
+            ta.setSelectionRange(nstart + rep.length, nstart + rep.length);
+            const ctx2 = worldJsonFindContext();
+            if (ctx2 && worldJsonFindHitStatus) {
+                const rest = worldJsonCountSubstr(ctx2.hay, ctx2.sub);
+                worldJsonFindHitStatus.textContent = `置換しました · 残り一致 ${rest} 件`;
+            }
+        }
+    }
+
+    /** すべて置換（リテラル文字列、オプションで大文字小文字無視） */
+    function replaceWorldJsonAll() {
+        const ctx = worldJsonFindContext();
+        if (!ctx || !worldJsonTextarea) {
+            if (worldJsonFindHitStatus) worldJsonFindHitStatus.textContent = '検索文字列を入力してください';
+            return;
+        }
+        const { needle, caseSens, text } = ctx;
+        const rep = worldJsonReplaceInput ? worldJsonReplaceInput.value : '';
+        const re = new RegExp(escapeRegExpWorldJson(needle), caseSens ? 'g' : 'gi');
+        const matches = text.match(re);
+        const count = matches ? matches.length : 0;
+        if (!count) {
+            if (worldJsonFindHitStatus) worldJsonFindHitStatus.textContent = '見つかりません';
+            return;
+        }
+        worldJsonTextarea.value = text.replace(re, rep);
+        worldJsonTextarea.setSelectionRange(0, 0);
+        if (worldJsonFindHitStatus) worldJsonFindHitStatus.textContent = `${count} 件を置換しました`;
+    }
 
     /** worlds.json モーダルを閉じる */
     function closeWorldJsonModal() {
@@ -1814,6 +1953,10 @@ function bindEvents() {
             worldJsonModalStatus.textContent = '';
             worldJsonModalStatus.className = '';
         }
+        if (worldJsonFindInput) worldJsonFindInput.value = '';
+        if (worldJsonReplaceInput) worldJsonReplaceInput.value = '';
+        if (worldJsonFindCase) worldJsonFindCase.checked = false;
+        if (worldJsonFindHitStatus) worldJsonFindHitStatus.textContent = '';
         syncObjectFromPanel();
         worldJsonTextarea.value = JSON.stringify(buildWorldsFromScene(), null, 2);
         worldJsonModal.classList.add('show');
@@ -1831,7 +1974,24 @@ function bindEvents() {
         worldJsonModal.addEventListener('click', (e) => {
             if (e.target === worldJsonModal) closeWorldJsonModal();
         });
+        worldJsonModal.addEventListener('keydown', (e) => {
+            if (!worldJsonModal.classList.contains('show')) return;
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+                e.preventDefault();
+                worldJsonFindInput?.focus();
+                worldJsonFindInput?.select();
+            }
+        });
     }
+    worldJsonFindNextBtn?.addEventListener('click', () => findWorldJsonNext());
+    worldJsonReplaceOneBtn?.addEventListener('click', () => replaceWorldJsonOne());
+    worldJsonReplaceAllBtn?.addEventListener('click', () => replaceWorldJsonAll());
+    worldJsonFindInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            findWorldJsonNext();
+        }
+    });
     if (worldJsonSaveBtn && worldJsonTextarea) {
         worldJsonSaveBtn.addEventListener('click', async () => {
             if (worldJsonModalStatus) {
@@ -1960,8 +2120,6 @@ function bindEvents() {
         else alert('PDFをアップロードするか、一覧から選択してください');
     });
 
-    document.getElementById('btn-upload-pdf').addEventListener('click', () => document.getElementById('upload-pdf-input').click());
-
     let modelUploadModalBusy = false;
     let modelUploadQueuePollId = null;
     const modelUploadModal = document.getElementById('model-upload-modal');
@@ -1972,6 +2130,13 @@ function bindEvents() {
     const modelUploadOverallFill = document.getElementById('model-upload-overall-fill');
     const modelUploadOverallLabel = document.getElementById('model-upload-overall-label');
     const modelUploadFooterStatus = document.getElementById('model-upload-modal-footer-status');
+    const modelUploadCloseBtn = document.getElementById('model-upload-close');
+
+    /** 処理中は閉じるボタンを非表示にする */
+    function syncModelUploadCloseButtonVisibility() {
+        if (!modelUploadCloseBtn) return;
+        modelUploadCloseBtn.style.display = modelUploadModalBusy ? 'none' : '';
+    }
 
     /** アップロード種別に応じてモーダル内の説明と 3D 専用ブロックの表示を切り替える */
     function syncModelUploadKindUI() {
@@ -2056,9 +2221,10 @@ function bindEvents() {
      * @param {string} url
      * @param {File} file
      * @param {(ratio: number) => void} [onUploadProgress]
+     * @param {() => void} [onUploadBytesSent] リクエストボディの送信完了後（サーバ処理待ち）。GLB のテクスチャリサイズ中など。
      * @returns {Promise<{ status: number, text: string, json: object|null }>}
      */
-    function postAdminModelUploadXHR(url, file, onUploadProgress) {
+    function postAdminModelUploadXHR(url, file, onUploadProgress, onUploadBytesSent) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', url);
@@ -2079,11 +2245,20 @@ function bindEvents() {
                     onUploadProgress(ev.loaded / ev.total);
                 }
             });
+            xhr.upload.addEventListener('load', () => {
+                if (typeof onUploadBytesSent === 'function') onUploadBytesSent();
+            });
             const form = new FormData();
             form.append('model', file);
             form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
             xhr.send(form);
         });
+    }
+
+    /** GLB はボディ送信後にサーバでテクスチャリサイズするため、その待ち時間は「リサイズ中」と表示する */
+    function onModelUploadBytesSentIfGlb(ui, fileName) {
+        if (!fileName.toLowerCase().endsWith('.glb')) return undefined;
+        return () => ui.setStatus('リサイズ中…', 'muted');
     }
 
     function setModelUploadModalOpen(open) {
@@ -2169,6 +2344,8 @@ function bindEvents() {
         const modelKindRadio = document.querySelector('input[name="model-upload-kind"][value="model"]');
         if (modelKindRadio) modelKindRadio.checked = true;
         syncModelUploadKindUI();
+        modelUploadModalBusy = false;
+        syncModelUploadCloseButtonVisibility();
         setModelUploadModalOpen(true);
     });
 
@@ -2180,20 +2357,14 @@ function bindEvents() {
     });
 
     document.getElementById('model-upload-close')?.addEventListener('click', () => {
-        if (modelUploadModalBusy) {
-            if (!confirm('アップロード処理中です。閉じてもよいですか？')) return;
-            stopModelUploadQueuePoll();
-        }
+        if (modelUploadModalBusy) return;
         setModelUploadModalOpen(false);
     });
 
     if (modelUploadModal) {
         modelUploadModal.addEventListener('click', (ev) => {
             if (ev.target !== modelUploadModal) return;
-            if (modelUploadModalBusy) {
-                if (!confirm('アップロード処理中です。閉じてもよいですか？')) return;
-                stopModelUploadQueuePoll();
-            }
+            if (modelUploadModalBusy) return;
             setModelUploadModalOpen(false);
         });
     }
@@ -2268,23 +2439,29 @@ function bindEvents() {
         modal.addEventListener('click', handleBackdropClick);
         modal.classList.add('show');
     });
-    document.getElementById('upload-pdf-input').addEventListener('change', async (e) => {
+    document.getElementById('upload-pdf-input')?.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        setDualPdfUploadStatus('', '');
-        const name = file.name.toLowerCase().endsWith('.pdf') ? file.name : file.name + '.pdf';
-        const exists = pdfList.some((n) => n.toLowerCase() === name.toLowerCase());
-        let url = '/admin/upload-pdf';
-        if (exists && !confirm('同名ファイルがあります。上書きしますか？')) {
-            e.target.value = '';
-            return;
-        }
-        if (exists) url += '?confirm=1';
-        const form = new FormData();
-        form.append('pdf', file);
-        // サーバー側の文字化けを防ぐためファイル名を UTF-8 → base64 で送る
-        form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+        const inModal = modelUploadModal?.classList.contains('show');
+        let didSetBusy = false;
         try {
+            if (inModal) {
+                modelUploadModalBusy = true;
+                didSetBusy = true;
+                syncModelUploadCloseButtonVisibility();
+            }
+            setDualPdfUploadStatus('', '');
+            const name = file.name.toLowerCase().endsWith('.pdf') ? file.name : file.name + '.pdf';
+            const exists = pdfList.some((n) => n.toLowerCase() === name.toLowerCase());
+            let url = '/admin/upload-pdf';
+            if (exists && !confirm('同名ファイルがあります。上書きしますか？')) {
+                return;
+            }
+            if (exists) url += '?confirm=1';
+            const form = new FormData();
+            form.append('pdf', file);
+            // サーバー側の文字化けを防ぐためファイル名を UTF-8 → base64 で送る
+            form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
             const res = await fetch(url, { method: 'POST', credentials: 'include', body: form });
             if (res.status === 409) {
                 setDualPdfUploadStatus('同名ファイルがあります。上書きするには確認して再送信してください。', 'error');
@@ -2299,40 +2476,48 @@ function bindEvents() {
             const newPath = 'pdfs/' + pdfData.filename;
             selectedPdfPath = newPath;
             loadPdfPreview(newPath);
-            setDualPdfUploadStatus('アップロードしました: ' + pdfData.filename, '');
+            setDualPdfUploadStatus('アップロードしました: ' + pdfData.filename, 'success');
+            if (inModal) setModelUploadModalOpen(false);
         } catch (err) {
             setDualPdfUploadStatus('アップロード失敗: ' + err.message, 'error');
+        } finally {
+            if (didSetBusy) {
+                modelUploadModalBusy = false;
+                syncModelUploadCloseButtonVisibility();
+            }
+            e.target.value = '';
         }
-        e.target.value = '';
     });
 
-    document.getElementById('btn-upload-hdr')?.addEventListener('click', () => {
-        document.getElementById('upload-hdr-input')?.click();
-    });
     document.getElementById('upload-hdr-input')?.addEventListener('change', async (e) => {
         const file = e.target.files && e.target.files[0];
         if (!file) return;
-        setDualHdrUploadStatus('', '');
-        const postHdr = async (confirmOverwrite) => {
-            const form = new FormData();
-            form.append('hdr', file);
-            form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
-            let url = '/admin/upload-hdr';
-            if (confirmOverwrite) url += '?confirm=1';
-            return fetch(url, { method: 'POST', credentials: 'include', body: form });
-        };
+        const inModal = modelUploadModal?.classList.contains('show');
+        let didSetBusy = false;
         try {
+            if (inModal) {
+                modelUploadModalBusy = true;
+                didSetBusy = true;
+                syncModelUploadCloseButtonVisibility();
+            }
+            setDualHdrUploadStatus('', '');
+            const postHdr = async (confirmOverwrite) => {
+                const form = new FormData();
+                form.append('hdr', file);
+                form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+                let url = '/admin/upload-hdr';
+                if (confirmOverwrite) url += '?confirm=1';
+                return fetch(url, { method: 'POST', credentials: 'include', body: form });
+            };
             let res = await postHdr(false);
             if (res.status === 409) {
                 if (!confirm('default.hdr が既にあります。上書きしますか？')) {
-                    e.target.value = '';
                     return;
                 }
                 res = await postHdr(true);
             }
             if (res.status === 409) {
                 setDualHdrUploadStatus('上書きには確認が必要です。', 'error');
-                e.target.value = '';
                 return;
             }
             if (!res.ok) throw new Error(await res.text());
@@ -2345,11 +2530,17 @@ function bindEvents() {
                     if (!r.ok) console.warn('[setting] IBL 再読み込みに失敗しました');
                 });
             }
-            setDualHdrUploadStatus('アップロードしました: default.hdr（プレビューに反映済み）', '');
+            setDualHdrUploadStatus('アップロードしました: default.hdr（プレビューに反映済み）', 'success');
+            if (inModal) setModelUploadModalOpen(false);
         } catch (err) {
             setDualHdrUploadStatus('アップロード失敗: ' + err.message, 'error');
+        } finally {
+            if (didSetBusy) {
+                modelUploadModalBusy = false;
+                syncModelUploadCloseButtonVisibility();
+            }
+            e.target.value = '';
         }
-        e.target.value = '';
     });
 
     modelUploadInput?.addEventListener('change', async (e) => {
@@ -2368,6 +2559,7 @@ function bindEvents() {
         if (!modelUploadFileList) return;
 
         modelUploadModalBusy = true;
+        syncModelUploadCloseButtonVisibility();
         startModelUploadQueuePoll();
 
         const isMultipleUpload = files.length > 1;
@@ -2391,6 +2583,7 @@ function bindEvents() {
             if (selectedNames === null) {
                 if (modelUploadFooterStatus) modelUploadFooterStatus.textContent = 'アップロードをキャンセルしました';
                 modelUploadModalBusy = false;
+                syncModelUploadCloseButtonVisibility();
                 stopModelUploadQueuePoll();
                 return;
             }
@@ -2459,10 +2652,15 @@ function bindEvents() {
             ui.setProgress(0);
 
             try {
-                let xhrRes = await postAdminModelUploadXHR(url, file, (r) => {
-                    ui.setProgress(r);
-                    updateOverallProgress(completedFiles, total, r);
-                });
+                let xhrRes = await postAdminModelUploadXHR(
+                    url,
+                    file,
+                    (r) => {
+                        ui.setProgress(r);
+                        updateOverallProgress(completedFiles, total, r);
+                    },
+                    onModelUploadBytesSentIfGlb(ui, name)
+                );
 
                 if (xhrRes.status === 409) {
                     if (isMultipleUpload) {
@@ -2482,10 +2680,15 @@ function bindEvents() {
                         updateOverallProgress(completedFiles, total, 0);
                         continue;
                     }
-                    xhrRes = await postAdminModelUploadXHR('/admin/upload?confirm=1', file, (r) => {
-                        ui.setProgress(r);
-                        updateOverallProgress(completedFiles, total, r);
-                    });
+                    xhrRes = await postAdminModelUploadXHR(
+                        '/admin/upload?confirm=1',
+                        file,
+                        (r) => {
+                            ui.setProgress(r);
+                            updateOverallProgress(completedFiles, total, r);
+                        },
+                        onModelUploadBytesSentIfGlb(ui, name)
+                    );
                     if (xhrRes.status === 409) {
                         lastErr = '同名の上書き確認が必要: ' + name;
                         ui.setStatus(lastErr, 'warn');
@@ -2545,9 +2748,14 @@ function bindEvents() {
                     ui.setStatus('アップロード中…', 'muted');
                     ui.setProgress(0);
                     try {
-                        const xhrRes = await postAdminModelUploadXHR('/admin/upload?confirm=1', file, (r) => {
-                            ui.setProgress(r);
-                        });
+                        const xhrRes = await postAdminModelUploadXHR(
+                            '/admin/upload?confirm=1',
+                            file,
+                            (r) => {
+                                ui.setProgress(r);
+                            },
+                            onModelUploadBytesSentIfGlb(ui, name)
+                        );
                         if (xhrRes.status === 409) {
                             lastErr = '同名の上書き確認が必要: ' + name;
                             ui.setStatus(lastErr, 'warn');
@@ -2588,6 +2796,9 @@ function bindEvents() {
         stopModelUploadQueuePoll();
         applyServerQueueToLabel(null);
         modelUploadModalBusy = false;
+        const autoCloseModelUpload =
+            ok > 0 && failed === 0 && modelUploadModal?.classList.contains('show');
+        if (!autoCloseModelUpload) syncModelUploadCloseButtonVisibility();
 
         if (needMtlRefresh) await fetchMtls();
         renderModelList();
@@ -2609,6 +2820,7 @@ function bindEvents() {
                 modelUploadFooterStatus.textContent += ' — ' + lastErr;
             }
         }
+        if (autoCloseModelUpload) setModelUploadModalOpen(false);
     });
 
     document.getElementById('btn-add-light').addEventListener('click', () => {

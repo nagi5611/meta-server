@@ -413,19 +413,6 @@
                                     <span id="upload-status" class="status-text"></span>
                                 </section>
                                 <section class="section">
-                                    <h2 class="section-title">PDFをアップロード</h2>
-                                    <input type="file" id="upload-pdf-input" accept=".pdf" style="display:none">
-                                    <button type="button" id="btn-upload-pdf">ファイルを選択</button>
-                                    <span id="upload-pdf-status" class="status-text"></span>
-                                </section>
-                                <section class="section">
-                                    <h2 class="section-title">環境マップ（IBL）HDR</h2>
-                                    <p class="hint">Radiance の <code>.hdr</code> のみ。サーバの <code>ENV_DIR</code>（<code>META_SRC_DIRECTORY/env</code> 等）に <code>default.hdr</code> として保存され、メタバースは <code>/env/default.hdr</code> から読み込みます。</p>
-                                    <input type="file" id="upload-hdr-input" accept=".hdr" style="display:none">
-                                    <button type="button" id="btn-upload-hdr">HDR を選択してアップロード</button>
-                                    <span id="upload-hdr-status" class="status-text"></span>
-                                </section>
-                                <section class="section">
                                     <button type="button" id="btn-save" class="btn-primary">保存</button>
                                     <span id="save-status" class="status-text"></span>
                                 </section>
@@ -807,6 +794,21 @@
                 <div class="modal-content world-json-modal-content">
                     <h3>worlds.json を編集</h3>
                     <p class="hint world-json-modal-hint">表示内容は「JSONでエクスポート」と同じく、現在の編集状態を反映します。保存でサーバーの worlds.json に書き込みます。</p>
+                    <div class="world-json-find-bar" role="search" aria-label="検索と置換">
+                        <div class="world-json-find-row">
+                            <label class="world-json-find-label" for="world-json-find-input">検索</label>
+                            <input type="text" id="world-json-find-input" class="world-json-find-input prop-input" placeholder="検索文字列" autocomplete="off">
+                            <button type="button" id="world-json-find-next" class="btn-secondary">次へ</button>
+                            <label class="world-json-find-label" for="world-json-replace-input">置換</label>
+                            <input type="text" id="world-json-replace-input" class="world-json-find-input prop-input" placeholder="置換後" autocomplete="off">
+                            <button type="button" id="world-json-replace-one" class="btn-secondary">置換</button>
+                            <button type="button" id="world-json-replace-all" class="btn-secondary">すべて置換</button>
+                        </div>
+                        <div class="world-json-find-options">
+                            <label class="world-json-find-case-label"><input type="checkbox" id="world-json-find-case"> 大文字小文字を区別</label>
+                            <span id="world-json-find-hit-status" class="world-json-find-hit-status" aria-live="polite"></span>
+                        </div>
+                    </div>
                     <textarea id="world-json-editor-textarea" class="world-json-editor-textarea" spellcheck="false" aria-label="worlds.json"></textarea>
                     <div class="modal-buttons">
                         <button type="button" id="world-json-save-btn" class="btn btn-primary">サーバーに保存</button>
@@ -853,10 +855,19 @@
             <h3>ファイルのアップロード</h3>
             <fieldset class="model-upload-kind-fieldset">
                 <legend class="model-upload-kind-legend">種類</legend>
-                <div class="model-upload-kind-row">
-                    <label class="model-upload-kind-label"><input type="radio" name="model-upload-kind" value="model" checked> 3Dモデル（GLB など）</label>
-                    <label class="model-upload-kind-label"><input type="radio" name="model-upload-kind" value="pdf"> PDF</label>
-                    <label class="model-upload-kind-label"><input type="radio" name="model-upload-kind" value="hdr"> HDR（環境マップ）</label>
+                <div class="model-upload-kind-segmented" role="radiogroup" aria-label="アップロード種類">
+                    <label class="model-upload-kind-segment">
+                        <input type="radio" name="model-upload-kind" value="model" checked>
+                        <span class="model-upload-kind-segment-ui">3Dモデル（GLB など）</span>
+                    </label>
+                    <label class="model-upload-kind-segment">
+                        <input type="radio" name="model-upload-kind" value="pdf">
+                        <span class="model-upload-kind-segment-ui">PDF</span>
+                    </label>
+                    <label class="model-upload-kind-segment">
+                        <input type="radio" name="model-upload-kind" value="hdr">
+                        <span class="model-upload-kind-segment-ui">HDR</span>
+                    </label>
                 </div>
             </fieldset>
             <p id="model-upload-hint-model" class="hint model-upload-hint">GLB はサーバでテクスチャ長辺を最大 1536px に縮小してから保存します（複数アップロード時はサーバ側で順番に処理されます）。</p>
@@ -878,6 +889,8 @@
                 <button type="button" id="model-upload-close" class="btn-secondary">閉じる</button>
             </div>
             <div id="model-upload-modal-footer-status" class="status-text"></div>
+            <input type="file" id="upload-pdf-input" accept=".pdf" hidden aria-hidden="true">
+            <input type="file" id="upload-hdr-input" accept=".hdr" hidden aria-hidden="true">
         </div>
     </div>
 
