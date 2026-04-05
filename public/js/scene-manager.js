@@ -62,12 +62,6 @@ class SceneManager {
         this._lastGraphicsSettings = null;
         /** 現在のレンダラの antialias フラグ（ティア変更時の再生成判定） */
         this._rendererAntialias = true;
-        /** チャンク距離ストリーミング用ジョブ（clearWorld で破棄） */
-        this._chunkStreamJobs = [];
-        /** チャンク増減後の BVH 再生成デバウンス（ms） */
-        this._bvhRegenDebounceMs = 400;
-        /** @type {ReturnType<typeof setTimeout>|null} */
-        this._bvhRegenTimeoutId = null;
 
         this._onXRSessionStart = () => {
             this._xrSessionActive = true;
@@ -302,20 +296,6 @@ class SceneManager {
     }
 
     /**
-     * 描画距離カリング対象から外す（チャンクアンロード時）
-     * @param {import('three').Object3D} obj
-     */
-    _unregisterDrawCullTarget(obj) {
-        if (!obj) return;
-        const i = this._drawCullTargets.indexOf(obj);
-        if (i >= 0) {
-            this._drawCullTargets.splice(i, 1);
-        }
-        delete obj.userData.drawCullWorld;
-        delete obj.userData._cullInRange;
-    }
-
-    /**
      * models/foo.glb から暗黙の models/foo.chunks.json パス（存在は未検証）
      * @param {string} modelPath
      * @returns {string|null}
@@ -379,146 +359,6 @@ class SceneManager {
     async _fetchChunkPlanChunksOnly(manifestPath) {
         const built = await this._fetchAndBuildChunkPlanEntries(manifestPath, 5 * 1024 * 1024);
         return built ? built.chunks : null;
-    }
-
-    /**
-     * マニフェストのチャンク球をアンカー変換後のワールド座標へ（近似）
-     * @param {import('three').Object3D} anchor
-     * @param {number[]} center
-     * @param {number} radius
-     * @returns {{ center: THREE.Vector3, radius: number }}
-     */
-    _worldSpaceChunkSphere(anchor, center, radius) {
-        const v = new THREE.Vector3(center[0], center[1], center[2]);
-        anchor.updateMatrixWorld(true);
-        v.applyMatrix4(anchor.matrixWorld);
-        const sx = Math.abs(anchor.scale.x);
-        const sy = Math.abs(anchor.scale.y);
-        const sz = Math.abs(anchor.scale.z);
-        const maxS = Math.max(sx, sy, sz, 1e-6);
-        return { center: v, radius: Math.max(radius * maxS, 0.05) };
-    }
-
-    /**
-     * チャンク GLB の距離ベースロード／アンロード（毎フレーム呼び出し可）
-     * @param {{ x: number, y: number, z: number }} feetWorld
-     */
-    updateChunkStreaming(feetWorld) {
-        if (!feetWorld || !this._chunkStreamJobs.length) return;
-        const p = new THREE.Vector3(feetWorld.x, feetWorld.y, feetWorld.z);
-        const R = clampViewDistanceM(this.graphicsOptions.viewDistanceM);
-        const loadDist = R + 24;
-        const unloadExtra = Math.max(32, R * 0.45);
-
-        for (const job of this._chunkStreamJobs) {
-            const { anchor, chunks, loader } = job;
-            if (!anchor.parent) continue;
-
-            for (const ch of chunks) {
-                const ws = this._worldSpaceChunkSphere(anchor, ch.center, ch.radius);
-                const dist = p.distanceTo(ws.center);
-                const wantLoad = dist <= loadDist + ws.radius;
-                const wantUnload = dist > loadDist + ws.radius + unloadExtra;
-
-                if (ch.loadedRoot && wantUnload) {
-                    this._unregisterDrawCullTarget(ch.loadedRoot);
-                    anchor.remove(ch.loadedRoot);
-                    this._disposeModelObject(ch.loadedRoot);
-                    ch.loadedRoot = null;
-                    ch.loading = false;
-                    job.loadedTris -= ch.lastTris || 0;
-                    ch.lastTris = 0;
-                    this._scheduleBVHRegen();
-                } else if (!ch.loadedRoot && !ch.loading && wantLoad) {
-                    ch.loading = true;
-                    loader.load(
-                        ch.url,
-                        (gltf) => {
-                            ch.loading = false;
-                            if (!anchor.parent) {
-                                this._disposeModelObject(gltf.scene);
-                                return;
-                            }
-                            const scene = gltf.scene;
-                            const tris = countTrianglesInObject(scene);
-                            if (job.loadedTris + tris > MODEL_MAX_TRIANGLES_TOTAL) {
-                                this._disposeModelObject(scene);
-                                console.error('[SceneManager] ストリーミングチャンクで合計ポリゴン上限:', job.manifestPath);
-                                window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
-                                    detail: {
-                                        path: job.manifestPath,
-                                        reason: 'too_many_triangles',
-                                        triangles: job.loadedTris + tris,
-                                        maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
-                                    }
-                                }));
-                                return;
-                            }
-                            job.loadedTris += tris;
-                            ch.lastTris = tris;
-                            const disableSh = tris > MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD;
-                            scene.traverse((child) => {
-                                if (child.isMesh) {
-                                    child.castShadow = !disableSh;
-                                    child.receiveShadow = !disableSh;
-                                }
-                            });
-                            anchor.add(scene);
-                            scene.updateMatrixWorld(true);
-                            this._registerDrawCullTarget(scene);
-                            ch.loadedRoot = scene;
-                            this._scheduleBVHRegen();
-                        },
-                        undefined,
-                        (err) => {
-                            ch.loading = false;
-                            console.error('[SceneManager] chunk stream load failed:', ch.url, err);
-                        }
-                    );
-                }
-            }
-        }
-    }
-
-    /**
-     * チャンクストリーミング後の BVH をデバウンス付きで再生成
-     */
-    _scheduleBVHRegen() {
-        if (this._bvhRegenTimeoutId != null) {
-            clearTimeout(this._bvhRegenTimeoutId);
-        }
-        this._bvhRegenTimeoutId = setTimeout(() => {
-            this._bvhRegenTimeoutId = null;
-            try {
-                this.generateBVH();
-            } catch (e) {
-                console.warn('[SceneManager] BVH regen failed:', e);
-            }
-        }, this._bvhRegenDebounceMs);
-    }
-
-    /**
-     * ストリーミングジョブを破棄（clearWorld 前に呼ぶ）
-     */
-    _disposeChunkStreamJobs() {
-        for (const job of this._chunkStreamJobs) {
-            for (const ch of job.chunks) {
-                if (ch.loadedRoot) {
-                    this._unregisterDrawCullTarget(ch.loadedRoot);
-                    if (job.anchor && ch.loadedRoot.parent === job.anchor) {
-                        job.anchor.remove(ch.loadedRoot);
-                    }
-                    this._disposeModelObject(ch.loadedRoot);
-                    ch.loadedRoot = null;
-                }
-                ch.loading = false;
-            }
-        }
-        this._chunkStreamJobs = [];
-        if (this._bvhRegenTimeoutId != null) {
-            clearTimeout(this._bvhRegenTimeoutId);
-            this._bvhRegenTimeoutId = null;
-        }
     }
 
     /**
@@ -797,48 +637,56 @@ class SceneManager {
                 const totalW = chunkPlan.reduce((s, c) => s + c.weight, 0) || 1;
                 const anchor = new THREE.Group();
                 const cfgForFinish = { ...fullConfig, chunkManifest: manifestPath };
-                finishAddModel(anchor, cfgForFinish, manifestPath, 0);
-
+                let totalTris = 0;
+                let subBase = fileStart;
                 const loader = createGLTFLoaderWithDraco();
-                let subAccum = fileStart;
-                const streamChunks = [];
-                for (let ci = 0; ci < chunkPlan.length; ci++) {
-                    const ent = chunkPlan[ci];
-                    const chunkBudget = fileBudget * (ent.weight / totalW);
-                    const cx = Array.isArray(ent.center) && ent.center.length >= 3 ? ent.center[0] : 0;
-                    const cy = Array.isArray(ent.center) && ent.center.length >= 3 ? ent.center[1] : 0;
-                    const cz = Array.isArray(ent.center) && ent.center.length >= 3 ? ent.center[2] : 0;
-                    streamChunks.push({
-                        url: ent.url,
-                        label: ent.label,
-                        weight: ent.weight,
-                        center: [cx, cy, cz],
-                        radius: Number.isFinite(ent.radius) ? Math.max(ent.radius, 0.01) : 0.01,
-                        chunkBudget,
-                        subBase: subAccum,
-                        loadedRoot: null,
-                        loading: false,
-                        lastTris: 0
-                    });
-                    subAccum += chunkBudget;
+                try {
+                    for (let ci = 0; ci < chunkPlan.length; ci++) {
+                        const ent = chunkPlan[ci];
+                        const chunkBudget = fileBudget * (ent.weight / totalW);
+                        const scene = await new Promise((resolve, reject) => {
+                            loader.load(
+                                ent.url,
+                                (gltf) => resolve(gltf.scene),
+                                (xhr) => emitFromBase(
+                                    ent.label,
+                                    xhr.loaded,
+                                    xhr.total || 0,
+                                    chunkBudget,
+                                    subBase
+                                ),
+                                reject
+                            );
+                        });
+                        const tris = countTrianglesInObject(scene);
+                        totalTris += tris;
+                        anchor.add(scene);
+                        scene.updateMatrixWorld(true);
+                        this._registerDrawCullTarget(scene);
+                        subBase += chunkBudget;
+                    }
+                    if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
+                        this._disposeModelObject(anchor);
+                        console.error(`[SceneManager] chunk manifest 合計ポリゴン過多 (約 ${totalTris} 三角): ${manifestPath}`);
+                        window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
+                            detail: {
+                                path: manifestPath,
+                                reason: 'too_many_triangles',
+                                triangles: totalTris,
+                                maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
+                            }
+                        }));
+                        snapBudgetDone();
+                        return;
+                    }
+                    finishAddModel(anchor, cfgForFinish, manifestPath, totalTris);
+                    if (loadState) {
+                        loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                    }
+                } catch (error) {
+                    console.error(`Error loading chunk manifest ${manifestPath}:`, error);
+                    snapBudgetDone();
                 }
-
-                this._chunkStreamJobs.push({
-                    anchor,
-                    manifestPath,
-                    chunks: streamChunks,
-                    loader,
-                    loadedTris: 0
-                });
-
-                if (loadState) {
-                    loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
-                }
-                onByteProgress?.({
-                    fileName: fileLabel,
-                    loadedBytes: loadState?.completedBytes ?? 0,
-                    totalBytes: tb
-                });
                 return;
             }
 
@@ -1361,8 +1209,6 @@ class SceneManager {
         console.log('Clearing current world...');
 
         this.clearWorldLights();
-
-        this._disposeChunkStreamJobs();
 
         this._drawCullTargets = [];
 
