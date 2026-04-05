@@ -756,6 +756,216 @@ body.admin-dark .world-json-find-hit-status {
     flex-shrink: 0;
 }
 
+/* ファイル管理モーダル（ストレージエクスプローラ） */
+.storage-files-modal-content.modal-content {
+    width: min(720px, 96vw);
+    max-width: min(720px, 96vw);
+    max-height: 92vh;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.storage-files-modal-hint {
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.storage-files-layout {
+    display: flex;
+    gap: 12px;
+    min-height: 280px;
+    max-height: min(52vh, 420px);
+    flex: 1 1 auto;
+    overflow: hidden;
+}
+
+.storage-files-stores {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 0 0 132px;
+    overflow-y: auto;
+}
+
+.storage-files-store-btn {
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid var(--we-border, #e0e0e0);
+    border-radius: 6px;
+    background: #fff;
+    font-size: 13px;
+    cursor: pointer;
+    color: #333;
+}
+
+.storage-files-store-btn:hover {
+    border-color: var(--we-accent, #1565c0);
+    background: var(--we-accent-light, #e3f2fd);
+}
+
+.storage-files-store-btn.active {
+    border-color: var(--we-accent, #1565c0);
+    background: var(--we-accent, #1565c0);
+    color: #fff;
+}
+
+.storage-files-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.storage-files-breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    font-size: 12px;
+    min-height: 1.5em;
+}
+
+.storage-files-breadcrumb button {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    color: var(--we-accent, #1565c0);
+    font-size: inherit;
+    text-decoration: underline;
+}
+
+.storage-files-breadcrumb button:hover {
+    color: #0d47a1;
+}
+
+.storage-files-breadcrumb .storage-files-bc-sep {
+    color: #888;
+    user-select: none;
+}
+
+.storage-files-toolbar {
+    flex-shrink: 0;
+}
+
+.storage-files-list-wrap {
+    flex: 1 1 auto;
+    overflow: auto;
+    border: 1px solid var(--we-border, #e0e0e0);
+    border-radius: 6px;
+    background: #fff;
+}
+
+.storage-files-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.storage-files-list li {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+    color: #333;
+}
+
+.storage-files-list li:last-child {
+    border-bottom: none;
+}
+
+.storage-files-list li:hover {
+    background: var(--we-accent-light, #e3f2fd);
+}
+
+.storage-files-list li.selected {
+    background: var(--we-accent, #1565c0);
+    color: #fff;
+}
+
+.storage-files-list li .storage-files-meta {
+    font-size: 11px;
+    color: #666;
+    white-space: nowrap;
+}
+
+.storage-files-list li.selected .storage-files-meta {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.storage-files-list li .storage-files-kind {
+    font-size: 11px;
+    color: #888;
+}
+
+.storage-files-list li.selected .storage-files-kind {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.storage-files-modal-content .modal-buttons {
+    flex-shrink: 0;
+    margin-top: 12px;
+}
+
+.storage-files-modal-content #storage-files-modal-status {
+    flex-shrink: 0;
+}
+
+body.admin-dark .storage-files-store-btn {
+    background: #1f1e1a;
+    border-color: #3d3a34;
+    color: #e5e7eb;
+}
+
+body.admin-dark .storage-files-store-btn:hover {
+    border-color: #60a5fa;
+    background: #252420;
+}
+
+body.admin-dark .storage-files-store-btn.active {
+    background: #1e3a5f;
+    border-color: #3b82f6;
+    color: #fff;
+}
+
+body.admin-dark .storage-files-list-wrap {
+    background: #141311;
+    border-color: #3d3a34;
+}
+
+body.admin-dark .storage-files-list li {
+    border-bottom-color: #2d2a24;
+    color: #e5e7eb;
+}
+
+body.admin-dark .storage-files-list li:hover {
+    background: #252420;
+}
+
+body.admin-dark .storage-files-list li.selected {
+    background: #1e3a5f;
+    color: #fff;
+}
+
+body.admin-dark .storage-files-list li .storage-files-meta,
+body.admin-dark .storage-files-list li .storage-files-kind {
+    color: #9ca3af;
+}
+
+body.admin-dark .storage-files-list li.selected .storage-files-meta,
+body.admin-dark .storage-files-list li.selected .storage-files-kind {
+    color: rgba(255, 255, 255, 0.88);
+}
+
 /* リスト */
 .admin-panel-world-edit .world-list,
 .admin-panel-world-edit .model-list,

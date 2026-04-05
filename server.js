@@ -232,14 +232,80 @@ function decodeLikelyMojibakeFilename(filename) {
 
 /**
  * クライアントのキャッシュ無効化用に、静的配信と同じ URL パスを組み立てる
- * @param {'models' | 'pdfs' | 'env'} base
+ * @param {'models' | 'pdfs' | 'env' | 'images' | 'chart-bgm'} base
  * @param {string} filename
  * @returns {string}
  */
 function publicAssetUrlForCache(base, filename) {
-    const prefix = base === 'pdfs' ? '/pdfs' : base === 'env' ? '/env' : '/models';
     const parts = String(filename || '').split(/[/\\]/).filter(Boolean);
-    return prefix + '/' + parts.map((p) => encodeURIComponent(p)).join('/');
+    const tail = parts.map((p) => encodeURIComponent(p)).join('/');
+    switch (base) {
+        case 'pdfs':
+            return '/pdfs/' + tail;
+        case 'env':
+            return '/env/' + tail;
+        case 'images':
+            return '/images/' + tail;
+        case 'chart-bgm':
+            return '/chart-bgm/' + tail;
+        default:
+            return '/models/' + tail;
+    }
+}
+
+/** ファイル管理 UI 用・許可されたストアキー → 絶対パス */
+const STORAGE_FILE_STORE_ROOTS = {
+    models: MODELS_DIR,
+    pdfs: PDFS_DIR,
+    images: IMAGES_DIR,
+    env: ENV_DIR,
+    'chart-bgm': CHART_BGM_DIR,
+};
+
+/**
+ * ストアルート配下に解決する。パストラバーサルやヌルバイトは拒否する。
+ * @param {string} storeRoot
+ * @param {string} relativePath
+ * @returns {string | null}
+ */
+function resolvePathUnderStorageRoot(storeRoot, relativePath) {
+    const rel = String(relativePath ?? '').replace(/\\/g, '/').trim();
+    if (rel.includes('\0')) return null;
+    const segments = rel.split('/').filter(Boolean);
+    if (segments.some((p) => p === '..')) return null;
+    const joined = segments.length ? path.join(storeRoot, ...segments) : storeRoot;
+    const resolved = path.resolve(joined);
+    const rootResolved = path.resolve(storeRoot);
+    const sep = path.sep;
+    if (resolved === rootResolved) return resolved;
+    if (!resolved.startsWith(rootResolved + sep)) return null;
+    return resolved;
+}
+
+/**
+ * models ストアで .glb を消すとき、空間チャンクの manifest と chunk GLB を列挙する
+ * @param {string} glbAbsolutePath
+ * @returns {string[]}
+ */
+function collectSpatialChunkSiblingPaths(glbAbsolutePath) {
+    const low = String(glbAbsolutePath || '').toLowerCase();
+    if (!low.endsWith('.glb')) return [];
+    const dir = path.dirname(glbAbsolutePath);
+    const base = path.basename(glbAbsolutePath, path.extname(glbAbsolutePath));
+    const out = [];
+    const manifest = path.join(dir, `${base}.chunks.json`);
+    if (fs.existsSync(manifest)) out.push(manifest);
+    try {
+        if (!fs.existsSync(dir)) return out;
+        for (const name of fs.readdirSync(dir)) {
+            if (name.startsWith(`${base}.chunk_`) && name.toLowerCase().endsWith('.glb')) {
+                out.push(path.join(dir, name));
+            }
+        }
+    } catch (_) {
+        /* ignore */
+    }
+    return out;
 }
 
 const app = express();
@@ -3247,6 +3313,111 @@ app.get('/admin/model-upload-queue', (req, res) => {
     } catch (err) {
         console.error('GET /admin/model-upload-queue error:', err);
         res.status(500).json({ error: 'Failed to read queue state' });
+    }
+});
+
+app.get('/admin/storage-files', (req, res) => {
+    const store = typeof req.query.store === 'string' ? req.query.store.trim() : '';
+    const storeRoot = STORAGE_FILE_STORE_ROOTS[/** @type {keyof typeof STORAGE_FILE_STORE_ROOTS} */ (store)];
+    if (!storeRoot) {
+        return res.status(400).json({ error: 'Invalid or missing store' });
+    }
+    const relQuery = typeof req.query.path === 'string' ? req.query.path : '';
+    const dirAbs = resolvePathUnderStorageRoot(storeRoot, relQuery);
+    if (!dirAbs) {
+        return res.status(400).json({ error: 'Invalid path' });
+    }
+    try {
+        if (!fs.existsSync(dirAbs)) {
+            return res.status(404).json({ error: 'Path not found' });
+        }
+        const st = fs.statSync(dirAbs);
+        if (!st.isDirectory()) {
+            return res.status(400).json({ error: 'Not a directory' });
+        }
+        const rootResolved = path.resolve(storeRoot);
+        const names = fs.readdirSync(dirAbs, { withFileTypes: true });
+        /** @type {{ name: string, isDirectory: boolean, size: number | null, mtimeMs: number | null }[]} */
+        const entries = [];
+        for (const d of names) {
+            const abs = path.join(dirAbs, d.name);
+            let size = null;
+            let mtimeMs = null;
+            try {
+                const fst = fs.statSync(abs);
+                mtimeMs = fst.mtimeMs;
+                if (fst.isFile()) size = fst.size;
+            } catch (_) {
+                /* skip stat errors for single entry */
+            }
+            entries.push({
+                name: decodeLikelyMojibakeFilename(d.name),
+                isDirectory: d.isDirectory(),
+                size,
+                mtimeMs,
+            });
+        }
+        entries.sort((a, b) => {
+            if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+            return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+        });
+        const prefix = path.relative(rootResolved, dirAbs);
+        const currentRelative = prefix ? prefix.split(path.sep).join('/') : '';
+        res.json({ store, currentRelative, entries });
+    } catch (err) {
+        console.error('GET /admin/storage-files error:', err);
+        res.status(500).json({ error: 'Failed to list directory' });
+    }
+});
+
+app.delete('/admin/storage-files', (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const store = typeof body.store === 'string' ? body.store.trim() : '';
+    const storeRoot = STORAGE_FILE_STORE_ROOTS[/** @type {keyof typeof STORAGE_FILE_STORE_ROOTS} */ (store)];
+    if (!storeRoot) {
+        return res.status(400).json({ error: 'Invalid or missing store' });
+    }
+    const relPath = typeof body.relativePath === 'string' ? body.relativePath : '';
+    const fileAbs = resolvePathUnderStorageRoot(storeRoot, relPath);
+    if (!fileAbs) {
+        return res.status(400).json({ error: 'Invalid path' });
+    }
+    try {
+        if (!fs.existsSync(fileAbs)) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+        const st = fs.statSync(fileAbs);
+        if (!st.isFile()) {
+            return res.status(400).json({ error: 'Only files can be deleted' });
+        }
+        /** @type {string[]} */
+        const invUrls = [];
+        /** @type {string[]} */
+        const unlinkFirst = [];
+        if (store === 'models' && fileAbs.toLowerCase().endsWith('.glb')) {
+            unlinkFirst.push(...collectSpatialChunkSiblingPaths(fileAbs));
+        }
+        for (const p of unlinkFirst) {
+            try {
+                if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+                    fs.unlinkSync(p);
+                    const rel = path.relative(storeRoot, p).split(path.sep).join('/');
+                    invUrls.push(publicAssetUrlForCache('models', rel));
+                }
+            } catch (e) {
+                console.error('[storage-files] chunk sidecar delete:', e);
+            }
+        }
+        fs.unlinkSync(fileAbs);
+        const mainRel = path.relative(storeRoot, fileAbs).split(path.sep).join('/');
+        invUrls.push(publicAssetUrlForCache(/** @type {'models' | 'pdfs' | 'env' | 'images' | 'chart-bgm'} */ (store), mainRel));
+        if (invUrls.length) {
+            io.emit('asset-invalidate', { urls: invUrls });
+        }
+        res.json({ success: true, deletedUrls: invUrls });
+    } catch (err) {
+        console.error('DELETE /admin/storage-files error:', err);
+        res.status(500).json({ error: 'Failed to delete file' });
     }
 });
 

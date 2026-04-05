@@ -1756,6 +1756,180 @@ function populateDestWorldSelect() {
     });
 }
 
+/**
+ * ストレージ相対パスを結合する（/ 区切り、先頭スラッシュなし）
+ * @param {string} prefix
+ * @param {string} name
+ * @returns {string}
+ */
+function joinStorageRelativePath(prefix, name) {
+    const p = String(prefix || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    const n = String(name || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (!n) return p;
+    return p ? `${p}/${n}` : n;
+}
+
+/**
+ * ファイルサイズ表示用
+ * @param {number | null | undefined} n
+ * @returns {string}
+ */
+function formatStorageBytes(n) {
+    if (n == null || Number.isNaN(n)) return '—';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** ファイル管理モーダル用 UI 状態 */
+const storageFilesUi = {
+    store: 'models',
+    currentRelative: '',
+    selectedFileRelative: null,
+    entries: [],
+};
+
+/**
+ * パンくずを描画する
+ */
+function renderStorageFilesBreadcrumb() {
+    const nav = document.getElementById('storage-files-breadcrumb');
+    const delBtn = document.getElementById('storage-files-delete-btn');
+    if (!nav) return;
+    nav.innerHTML = '';
+    const rootBtn = document.createElement('button');
+    rootBtn.type = 'button';
+    rootBtn.textContent = 'ルート';
+    rootBtn.addEventListener('click', () => {
+        storageFilesUi.currentRelative = '';
+        storageFilesUi.selectedFileRelative = null;
+        if (delBtn) delBtn.disabled = true;
+        void loadStorageFilesFromServer();
+    });
+    nav.appendChild(rootBtn);
+    const parts = storageFilesUi.currentRelative.split('/').filter(Boolean);
+    let acc = '';
+    for (let i = 0; i < parts.length; i++) {
+        acc = acc ? `${acc}/${parts[i]}` : parts[i];
+        const sep = document.createElement('span');
+        sep.className = 'storage-files-bc-sep';
+        sep.textContent = '/';
+        nav.appendChild(sep);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = parts[i];
+        const pathUpTo = acc;
+        btn.addEventListener('click', () => {
+            storageFilesUi.currentRelative = pathUpTo;
+            storageFilesUi.selectedFileRelative = null;
+            if (delBtn) delBtn.disabled = true;
+            void loadStorageFilesFromServer();
+        });
+        nav.appendChild(btn);
+    }
+}
+
+/**
+ * 一覧行を描画する（storageFilesUi.entries を参照）
+ */
+function renderStorageFilesList() {
+    const listEl = document.getElementById('storage-files-list');
+    const delBtn = document.getElementById('storage-files-delete-btn');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    for (const ent of storageFilesUi.entries) {
+        const li = document.createElement('li');
+        li.setAttribute('role', 'option');
+        const rel = joinStorageRelativePath(storageFilesUi.currentRelative, ent.name);
+        const isSel = !ent.isDirectory && storageFilesUi.selectedFileRelative === rel;
+        if (isSel) li.classList.add('selected');
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = ent.name;
+        const kindSpan = document.createElement('span');
+        kindSpan.className = 'storage-files-kind';
+        kindSpan.textContent = ent.isDirectory ? 'フォルダ' : 'ファイル';
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'storage-files-meta';
+        if (ent.isDirectory) {
+            metaSpan.textContent = '—';
+        } else {
+            const dateStr = ent.mtimeMs != null ? new Date(ent.mtimeMs).toLocaleString() : '—';
+            metaSpan.textContent = `${formatStorageBytes(ent.size)} · ${dateStr}`;
+        }
+        li.append(nameSpan, kindSpan, metaSpan);
+        li.addEventListener('click', () => {
+            if (ent.isDirectory) {
+                storageFilesUi.currentRelative = rel;
+                storageFilesUi.selectedFileRelative = null;
+                if (delBtn) delBtn.disabled = true;
+                void loadStorageFilesFromServer();
+            } else {
+                storageFilesUi.selectedFileRelative = rel;
+                if (delBtn) delBtn.disabled = false;
+                renderStorageFilesList();
+            }
+        });
+        listEl.appendChild(li);
+    }
+}
+
+/**
+ * GET /admin/storage-files で一覧を読み込み UI を更新する
+ */
+async function loadStorageFilesFromServer() {
+    const statusEl = document.getElementById('storage-files-modal-status');
+    const listEl = document.getElementById('storage-files-list');
+    if (!listEl) return;
+    if (statusEl) {
+        statusEl.textContent = '読み込み中…';
+        statusEl.className = '';
+    }
+    try {
+        const params = new URLSearchParams({
+            store: storageFilesUi.store,
+            path: storageFilesUi.currentRelative,
+        });
+        const res = await fetch('/admin/storage-files?' + params.toString(), { credentials: 'include' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.error || res.statusText || 'list failed');
+        }
+        storageFilesUi.entries = Array.isArray(data.entries) ? data.entries : [];
+        if (typeof data.currentRelative === 'string') {
+            storageFilesUi.currentRelative = data.currentRelative;
+        }
+        renderStorageFilesBreadcrumb();
+        renderStorageFilesList();
+        if (statusEl) statusEl.textContent = '';
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = '一覧の取得に失敗: ' + (e.message || String(e));
+            statusEl.className = 'error';
+        }
+        storageFilesUi.entries = [];
+        renderStorageFilesBreadcrumb();
+        renderStorageFilesList();
+    }
+}
+
+/**
+ * 削除後にモデル・PDF など左パネル一覧を再取得する
+ */
+async function refreshWorldEditListsAfterStorageDelete(store) {
+    try {
+        if (store === 'models') {
+            await fetchModels();
+            await fetchMtls();
+            renderModelList();
+        } else if (store === 'pdfs') {
+            await fetchPdfs();
+            renderPdfList();
+        }
+    } catch (err) {
+        console.warn('[storage-files] list refresh:', err);
+    }
+}
+
 // --- Event bindings ---
 function bindEvents() {
     // 左パネル: ワールド/モデル/PDF/ファイル カテゴリ切り替え（admin 統合時）。カテゴリクリックで展開もする
@@ -2159,6 +2333,94 @@ function bindEvents() {
             }
         });
     }
+
+    const storageFilesModal = document.getElementById('storage-files-modal');
+    const btnStorageFilesOpen = document.getElementById('btn-storage-files-open');
+    const storageFilesCloseBtn = document.getElementById('storage-files-close-btn');
+    const storageFilesDeleteBtn = document.getElementById('storage-files-delete-btn');
+
+    /** ファイル管理モーダルを閉じる */
+    function closeStorageFilesModal() {
+        if (!storageFilesModal) return;
+        storageFilesModal.classList.remove('show');
+        storageFilesModal.setAttribute('aria-hidden', 'true');
+    }
+
+    /** ファイル管理モーダルを開き一覧を読み込む */
+    function openStorageFilesModal() {
+        if (!storageFilesModal) return;
+        const statusEl = document.getElementById('storage-files-modal-status');
+        if (statusEl) {
+            statusEl.textContent = '';
+            statusEl.className = '';
+        }
+        storageFilesUi.store = 'models';
+        storageFilesUi.currentRelative = '';
+        storageFilesUi.selectedFileRelative = null;
+        storageFilesUi.entries = [];
+        document.querySelectorAll('.storage-files-store-btn').forEach((b) => {
+            b.classList.toggle('active', b.getAttribute('data-storage-store') === 'models');
+        });
+        if (storageFilesDeleteBtn) storageFilesDeleteBtn.disabled = true;
+        storageFilesModal.classList.add('show');
+        storageFilesModal.setAttribute('aria-hidden', 'false');
+        void loadStorageFilesFromServer();
+    }
+
+    btnStorageFilesOpen?.addEventListener('click', openStorageFilesModal);
+    storageFilesCloseBtn?.addEventListener('click', closeStorageFilesModal);
+    storageFilesModal?.addEventListener('click', (e) => {
+        if (e.target === storageFilesModal) closeStorageFilesModal();
+    });
+
+    document.querySelector('.storage-files-stores')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.storage-files-store-btn');
+        if (!btn) return;
+        const store = btn.getAttribute('data-storage-store');
+        if (!store) return;
+        storageFilesUi.store = store;
+        storageFilesUi.currentRelative = '';
+        storageFilesUi.selectedFileRelative = null;
+        if (storageFilesDeleteBtn) storageFilesDeleteBtn.disabled = true;
+        document.querySelectorAll('.storage-files-store-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        void loadStorageFilesFromServer();
+    });
+
+    storageFilesDeleteBtn?.addEventListener('click', async () => {
+        const rel = storageFilesUi.selectedFileRelative;
+        if (!rel) return;
+        const baseName = rel.split('/').pop();
+        if (!confirm(`次のファイルを削除しますか？\n${baseName}`)) return;
+        const statusEl = document.getElementById('storage-files-modal-status');
+        const store = storageFilesUi.store;
+        if (statusEl) {
+            statusEl.textContent = '削除中…';
+            statusEl.className = '';
+        }
+        try {
+            const res = await fetch('/admin/storage-files', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ store, relativePath: rel }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || res.statusText || 'delete failed');
+            }
+            storageFilesUi.selectedFileRelative = null;
+            if (storageFilesDeleteBtn) storageFilesDeleteBtn.disabled = true;
+            if (statusEl) statusEl.textContent = '削除しました';
+            await loadStorageFilesFromServer();
+            await refreshWorldEditListsAfterStorageDelete(store);
+        } catch (err) {
+            if (statusEl) {
+                statusEl.textContent = '削除に失敗: ' + (err.message || String(err));
+                statusEl.className = 'error';
+            }
+        }
+    });
 
     document.getElementById('btn-add-world').addEventListener('click', () => {
         const id = prompt('ワールドID（英数字・アンダースコア）', 'world_' + Date.now());

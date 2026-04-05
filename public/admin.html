@@ -408,6 +408,10 @@
                             </div>
                             <div id="we-cat-file" class="we-category-pane">
                                 <section class="section">
+                                    <h2 class="section-title">ファイル</h2>
+                                    <button type="button" id="btn-storage-files-open" class="btn-secondary">ファイルを管理</button>
+                                </section>
+                                <section class="section">
                                     <h2 class="section-title">モデルをアップロード</h2>
                                     <button type="button" id="btn-model-upload-open" class="btn-secondary">アップロード画面を開く</button>
                                     <span id="upload-status" class="status-text"></span>
@@ -833,6 +837,36 @@
                         <button type="button" id="world-json-cancel-btn" class="btn btn-secondary">閉じる</button>
                     </div>
                     <span id="world-json-modal-status" class="status-text"></span>
+                </div>
+            </div>
+
+            <!-- ストレージ内ファイルの一覧・削除（ワールド編集） -->
+            <div id="storage-files-modal" class="modal storage-files-modal" aria-hidden="true">
+                <div class="modal-content storage-files-modal-content">
+                    <h3>ファイルを管理</h3>
+                    <p class="hint storage-files-modal-hint">サーバー上のアセットフォルダを参照します。ファイルを選んで削除できます（フォルダは削除できません）。</p>
+                    <div class="storage-files-layout">
+                        <nav class="storage-files-stores" aria-label="ストレージの種類">
+                            <button type="button" class="storage-files-store-btn active" data-storage-store="models">モデル</button>
+                            <button type="button" class="storage-files-store-btn" data-storage-store="pdfs">PDF</button>
+                            <button type="button" class="storage-files-store-btn" data-storage-store="images">画像</button>
+                            <button type="button" class="storage-files-store-btn" data-storage-store="env">環境 (HDR)</button>
+                            <button type="button" class="storage-files-store-btn" data-storage-store="chart-bgm">譜面BGM</button>
+                        </nav>
+                        <div class="storage-files-main">
+                            <nav id="storage-files-breadcrumb" class="storage-files-breadcrumb" aria-label="現在のパス"></nav>
+                            <div class="storage-files-toolbar">
+                                <button type="button" id="storage-files-delete-btn" class="btn-secondary" disabled>削除</button>
+                            </div>
+                            <div class="storage-files-list-wrap">
+                                <ul id="storage-files-list" class="storage-files-list" role="listbox" aria-label="ファイル一覧"></ul>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-buttons">
+                        <button type="button" id="storage-files-close-btn" class="btn btn-secondary">閉じる</button>
+                    </div>
+                    <span id="storage-files-modal-status" class="status-text"></span>
                 </div>
             </div>
 
