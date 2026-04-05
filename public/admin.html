@@ -679,6 +679,25 @@
                                             </div>
                                         </div>
                                     </details>
+                                    <details class="block">
+                                        <summary class="block-header">サーバ物理補助（足元Y）</summary>
+                                        <div class="block-content">
+                                            <p class="hint">プレイヤー位置のYはスポーンと同じく<strong>足元</strong>基準。床抜け時にサーバがこの範囲へクランプします（多層マップではvoid用の下限のみ想定）。</p>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="physics-assist-enabled">有効</label>
+                                                <input type="checkbox" id="physics-assist-enabled" class="prop-input">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="physics-assist-min-y">足元Y 下限</label>
+                                                <input type="number" id="physics-assist-min-y" class="prop-input num" step="0.1" placeholder="未設定で無制限">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="physics-assist-max-y">足元Y 上限</label>
+                                                <input type="number" id="physics-assist-max-y" class="prop-input num" step="0.1" placeholder="任意">
+                                            </div>
+                                            <p class="hint" id="physics-assist-spawn-hint" hidden>スポーンYと下限が大きく離れています。意図を確認してください。</p>
+                                        </div>
+                                    </details>
                                 </section>
                             </div>
                         </div>

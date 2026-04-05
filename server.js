@@ -30,6 +30,8 @@ const STATIC_DIR = path.join(__dirname, isProductionBuild ? 'dist' : 'public');
 
 // Worlds config file (setting.html)
 const WORLDS_PATH = STORAGE_PATHS.WORLDS_PATH;
+/** 接続直後・change-world・admin-tp 後に Y クランプを抑止する時間（ms） */
+const PHYSICS_ASSIST_GRACE_MS = Number(process.env.PHYSICS_ASSIST_GRACE_MS) || 3000;
 const DEFAULT_WORLDS = {
     'lobby': {
         id: 'lobby',
@@ -63,14 +65,18 @@ const DEFAULT_WORLDS = {
     }
 };
 
+/** メモリキャッシュ（writeWorlds で更新。外部が worlds.json を直接編集した場合は再起動が必要） */
+let worldsRuntimeCache = null;
+
 function ensureWorldsFile() {
     if (!fs.existsSync(WORLDS_PATH)) {
         fs.writeFileSync(WORLDS_PATH, JSON.stringify(DEFAULT_WORLDS, null, 2), 'utf8');
         console.log('Created worlds.json from default');
+        worldsRuntimeCache = null;
     }
 }
 
-function readWorlds() {
+function readWorldsFromFile() {
     try {
         const data = fs.readFileSync(WORLDS_PATH, 'utf8');
         return JSON.parse(data);
@@ -80,10 +86,18 @@ function readWorlds() {
     }
 }
 
+function readWorlds() {
+    if (worldsRuntimeCache == null) {
+        worldsRuntimeCache = readWorldsFromFile();
+    }
+    return worldsRuntimeCache;
+}
+
 function writeWorlds(worlds) {
     const tmpPath = WORLDS_PATH + '.tmp.' + Date.now();
     fs.writeFileSync(tmpPath, JSON.stringify(worlds, null, 2), 'utf8');
     fs.renameSync(tmpPath, WORLDS_PATH);
+    worldsRuntimeCache = JSON.parse(JSON.stringify(worlds));
 }
 
 /**
@@ -121,6 +135,63 @@ function validateWorldsTaikoMultiplayer(worlds) {
         }
     }
     return errors;
+}
+
+/**
+ * physicsAssist の min/max 整合性（POST /admin/worlds 用）
+ * @param {Record<string, unknown>} worlds
+ * @returns {string[]}
+ */
+function validateWorldsPhysicsAssist(worlds) {
+    const errors = [];
+    if (!worlds || typeof worlds !== 'object') return errors;
+    for (const [wid, w] of Object.entries(worlds)) {
+        if (!w || typeof w !== 'object') continue;
+        const pa = w.physicsAssist;
+        if (!pa || typeof pa !== 'object') continue;
+        const min = pa.minFeetY;
+        const max = pa.maxFeetY;
+        const hasMin = typeof min === 'number' && Number.isFinite(min);
+        const hasMax = typeof max === 'number' && Number.isFinite(max);
+        if (hasMin && hasMax && min > max) {
+            errors.push(`ワールド「${wid}」: physicsAssist の minFeetY は maxFeetY 以下にしてください`);
+        }
+    }
+    return errors;
+}
+
+/**
+ * クライアント足元Yを worlds.physicsAssist でクランプする（段階A）
+ * @param {unknown} worldConfig
+ * @param {number} feetY
+ * @returns {{ y: number, changed: boolean }}
+ */
+function clampPlayerFeetYForWorld(worldConfig, feetY) {
+    if (typeof feetY !== 'number' || !Number.isFinite(feetY)) {
+        return { y: feetY, changed: false };
+    }
+    const pa = worldConfig && typeof worldConfig === 'object' && worldConfig.physicsAssist;
+    if (!pa || typeof pa !== 'object' || pa.enabled !== true) {
+        return { y: feetY, changed: false };
+    }
+    let next = feetY;
+    let changed = false;
+    if (typeof pa.minFeetY === 'number' && Number.isFinite(pa.minFeetY) && next < pa.minFeetY) {
+        next = pa.minFeetY;
+        changed = true;
+    }
+    if (typeof pa.maxFeetY === 'number' && Number.isFinite(pa.maxFeetY) && next > pa.maxFeetY) {
+        next = pa.maxFeetY;
+        changed = true;
+    }
+    return { y: next, changed };
+}
+
+/**
+ * @param {import('socket.io').Socket} socket
+ */
+function setPhysicsAssistGrace(socket) {
+    socket.data.physicsAssistGraceUntil = Date.now() + PHYSICS_ASSIST_GRACE_MS;
 }
 
 const CHARTS_PATH = STORAGE_PATHS.CHARTS_PATH;
@@ -1614,6 +1685,7 @@ io.on('connection', (socket) => {
         animState: 'idle'
     };
     roomState.players.set(socket.id, initialPlayerState);
+    setPhysicsAssistGrace(socket);
 
     // Send current players in this room to the new player (with displayName for admin)
     const currentPlayers = Array.from(roomState.players.values()).map(p => ({
@@ -1961,7 +2033,19 @@ io.on('connection', (socket) => {
 
         // Update player state with latest data
         if (data.position) {
-            player.position = data.position;
+            const pos = { ...data.position };
+            const graceUntil = socket.data.physicsAssistGraceUntil;
+            const inGrace = typeof graceUntil === 'number' && Date.now() < graceUntil;
+            if (!player.isAdmin && !inGrace) {
+                const worldsData = readWorlds();
+                const wcfg = worldsData[currentRoom];
+                const clamped = clampPlayerFeetYForWorld(wcfg, pos.y);
+                if (clamped.changed) {
+                    pos.y = clamped.y;
+                    socket.emit('physics-y-correction', { y: pos.y });
+                }
+            }
+            player.position = pos;
         }
         if (data.rotation) {
             player.rotation = data.rotation;
@@ -2037,6 +2121,7 @@ io.on('connection', (socket) => {
             animState: normalizePlayerAnimState(oldPlayerState?.animState) || 'idle'
         };
         newRoomState.players.set(socket.id, playerState);
+        setPhysicsAssistGrace(socket);
 
         // Notify new room
         socket.to(newRoom).emit('player-joined', playerState);
@@ -3132,6 +3217,10 @@ app.post('/admin/worlds', (req, res) => {
     if (taikoErrs.length > 0) {
         return res.status(400).json({ error: taikoErrs.join(' ') });
     }
+    const physicsErrs = validateWorldsPhysicsAssist(worlds);
+    if (physicsErrs.length > 0) {
+        return res.status(400).json({ error: physicsErrs.join(' ') });
+    }
     try {
         writeWorlds(worlds);
         res.json({ success: true });
@@ -3926,6 +4015,7 @@ app.post('/admin/command', async (req, res) => {
                 const player = roomState.players.get(targetSocketId);
                 if (player) player.position = position;
             }
+            setPhysicsAssistGrace(targetSocket);
             targetSocket.emit('admin-tp', { world: worldId, position });
             const roomState = getRoomState(targetSocket.data.currentRoom);
             const name = roomState?.players.get(targetSocketId)?.username || targetSocketId;

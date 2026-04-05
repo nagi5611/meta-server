@@ -1225,6 +1225,14 @@ function buildWorldsFromScene() {
             vdbs: [],
             floorEnabled: wid === selectedWorldId ? document.getElementById('floor-enabled').checked : (w.floorEnabled !== false)
         };
+        if (wid !== selectedWorldId && w.physicsAssist && typeof w.physicsAssist === 'object') {
+            const src = w.physicsAssist;
+            out[wid].physicsAssist = {
+                enabled: src.enabled === true,
+                ...(Number.isFinite(src.minFeetY) ? { minFeetY: src.minFeetY } : {}),
+                ...(Number.isFinite(src.maxFeetY) ? { maxFeetY: src.maxFeetY } : {})
+            };
+        }
     }
     if (selectedWorldId) {
         const w = out[selectedWorldId];
@@ -1272,6 +1280,22 @@ function buildWorldsFromScene() {
                 z: parseFloat(document.getElementById('spawn-z').value) || 0
             };
             w.floorEnabled = document.getElementById('floor-enabled').checked;
+            const paEn = document.getElementById('physics-assist-enabled')?.checked;
+            const minRaw = document.getElementById('physics-assist-min-y')?.value?.trim() ?? '';
+            const maxRaw = document.getElementById('physics-assist-max-y')?.value?.trim() ?? '';
+            if (paEn) {
+                w.physicsAssist = { enabled: true };
+                if (minRaw !== '') {
+                    const n = parseFloat(minRaw);
+                    if (Number.isFinite(n)) w.physicsAssist.minFeetY = n;
+                }
+                if (maxRaw !== '') {
+                    const n = parseFloat(maxRaw);
+                    if (Number.isFinite(n)) w.physicsAssist.maxFeetY = n;
+                }
+            } else {
+                delete w.physicsAssist;
+            }
         }
     }
     return out;
@@ -1318,6 +1342,25 @@ function syncSelectWorldChrome(id) {
     }
     document.getElementById('btn-delete-world').disabled = !id;
     populateDestWorldSelect();
+}
+
+/**
+ * スポーンYと物理補助下限の乖離が大きいときだけヒントを表示する
+ */
+function updatePhysicsAssistSpawnHint() {
+    const hint = document.getElementById('physics-assist-spawn-hint');
+    if (!hint) return;
+    const spawnEl = document.getElementById('spawn-y');
+    const minEl = document.getElementById('physics-assist-min-y');
+    const enEl = document.getElementById('physics-assist-enabled');
+    if (!spawnEl || !minEl || !enEl) return;
+    const spawnY = parseFloat(spawnEl.value);
+    const minY = parseFloat(minEl.value);
+    if (!enEl.checked || !Number.isFinite(minY) || !Number.isFinite(spawnY)) {
+        hint.hidden = true;
+        return;
+    }
+    hint.hidden = Math.abs(spawnY - minY) <= 20;
 }
 
 /**
@@ -1431,6 +1474,23 @@ async function loadWorldIntoScene(world) {
     if (floorEl) floorEl.checked = world.floorEnabled !== false;
     if (editorGround) editorGround.visible = world.floorEnabled !== false;
     if (editorGrid) editorGrid.visible = world.floorEnabled !== false;
+
+    const paEn = document.getElementById('physics-assist-enabled');
+    const paMin = document.getElementById('physics-assist-min-y');
+    const paMax = document.getElementById('physics-assist-max-y');
+    const pa = world.physicsAssist;
+    if (paEn && paMin && paMax) {
+        if (pa && pa.enabled === true) {
+            paEn.checked = true;
+            paMin.value = Number.isFinite(pa.minFeetY) ? String(pa.minFeetY) : '';
+            paMax.value = Number.isFinite(pa.maxFeetY) ? String(pa.maxFeetY) : '';
+        } else {
+            paEn.checked = false;
+            paMin.value = '';
+            paMax.value = '';
+        }
+    }
+    updatePhysicsAssistSpawnHint();
 
     const models = world.models || [];
     const errs = [];
@@ -3566,7 +3626,7 @@ function bindEvents() {
     });
 
     document.getElementById('spawn-x').addEventListener('change', () => { if (selectedWorldId && worlds[selectedWorldId]) { pushUndo(); worlds[selectedWorldId].spawnPoint = worlds[selectedWorldId].spawnPoint || {}; worlds[selectedWorldId].spawnPoint.x = parseFloat(document.getElementById('spawn-x').value) || 0; } });
-    document.getElementById('spawn-y').addEventListener('change', () => { if (selectedWorldId && worlds[selectedWorldId]) { pushUndo(); worlds[selectedWorldId].spawnPoint = worlds[selectedWorldId].spawnPoint || {}; worlds[selectedWorldId].spawnPoint.y = parseFloat(document.getElementById('spawn-y').value) || 10; } });
+    document.getElementById('spawn-y').addEventListener('change', () => { if (selectedWorldId && worlds[selectedWorldId]) { pushUndo(); worlds[selectedWorldId].spawnPoint = worlds[selectedWorldId].spawnPoint || {}; worlds[selectedWorldId].spawnPoint.y = parseFloat(document.getElementById('spawn-y').value) || 10; updatePhysicsAssistSpawnHint(); } });
     document.getElementById('spawn-z').addEventListener('change', () => { if (selectedWorldId && worlds[selectedWorldId]) { pushUndo(); worlds[selectedWorldId].spawnPoint = worlds[selectedWorldId].spawnPoint || {}; worlds[selectedWorldId].spawnPoint.z = parseFloat(document.getElementById('spawn-z').value) || 0; } });
     document.getElementById('floor-enabled').addEventListener('change', () => {
         if (!selectedWorldId || !worlds[selectedWorldId]) return;
@@ -3574,6 +3634,44 @@ function bindEvents() {
         worlds[selectedWorldId].floorEnabled = document.getElementById('floor-enabled').checked;
         if (editorGround) editorGround.visible = worlds[selectedWorldId].floorEnabled;
         if (editorGrid) editorGrid.visible = worlds[selectedWorldId].floorEnabled;
+    });
+
+    function applyPhysicsAssistPanelToSelectedWorld() {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        const w = worlds[selectedWorldId];
+        const paEn = document.getElementById('physics-assist-enabled')?.checked;
+        const minRaw = document.getElementById('physics-assist-min-y')?.value?.trim() ?? '';
+        const maxRaw = document.getElementById('physics-assist-max-y')?.value?.trim() ?? '';
+        if (paEn) {
+            w.physicsAssist = { enabled: true };
+            if (minRaw !== '') {
+                const n = parseFloat(minRaw);
+                if (Number.isFinite(n)) w.physicsAssist.minFeetY = n;
+            }
+            if (maxRaw !== '') {
+                const n = parseFloat(maxRaw);
+                if (Number.isFinite(n)) w.physicsAssist.maxFeetY = n;
+            }
+        } else {
+            delete w.physicsAssist;
+        }
+        updatePhysicsAssistSpawnHint();
+    }
+
+    document.getElementById('physics-assist-enabled')?.addEventListener('change', () => {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        pushUndo();
+        applyPhysicsAssistPanelToSelectedWorld();
+    });
+    document.getElementById('physics-assist-min-y')?.addEventListener('change', () => {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        pushUndo();
+        applyPhysicsAssistPanelToSelectedWorld();
+    });
+    document.getElementById('physics-assist-max-y')?.addEventListener('change', () => {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        pushUndo();
+        applyPhysicsAssistPanelToSelectedWorld();
     });
 
     document.getElementById('light-pos-x').addEventListener('change', syncLightFromPanel);

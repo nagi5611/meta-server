@@ -220,6 +220,17 @@ class MetaverseApp {
         // Initialize network
         this.networkManager = new NetworkManager(this.playerManager);
         this.networkManager.onAdminTp = (data) => this.onAdminTp(data);
+        this.networkManager.onPhysicsYCorrection = (data) => {
+            const p = this.characterController.getPosition();
+            const x = p.x;
+            const z = p.z;
+            this.characterController.setPosition(x, data.y, z);
+            this.characterController.resetVelocity();
+            this.playerManager.updateLocalPlayer(
+                { x, y: data.y, z },
+                this.characterController.getRotation()
+            );
+        };
         this.networkManager.connect();
         this.networkManager.startSendingUpdates(this.characterController);
         if (this.pdfViewerManager) this.pdfViewerManager.setSocket(this.networkManager.socket);

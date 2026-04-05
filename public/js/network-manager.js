@@ -224,6 +224,12 @@ class NetworkManager {
                 this.onAdminTp(data);
             }
         });
+
+        this.socket.on('physics-y-correction', (data) => {
+            if (this.onPhysicsYCorrection && data && typeof data.y === 'number' && Number.isFinite(data.y)) {
+                this.onPhysicsYCorrection(data);
+            }
+        });
     }
 
     /**
