@@ -1,7 +1,10 @@
 # metaverse-simple: nginx で TLS 終端 + ドメイン別 Node バックエンド
 #
 # 配置:
+#   sudo mkdir -p /var/www/metaverse-nginx-errors
+#   sudo cp nginx/html/metaverse-proxy-error.html /var/www/metaverse-nginx-errors/
 #   sudo cp nginx/snippets/metaverse-proxy-headers.conf.example /etc/nginx/snippets/metaverse-proxy-headers.conf
+#   sudo cp nginx/snippets/metaverse-proxy-error-pages.conf.example /etc/nginx/snippets/metaverse-proxy-error-pages.conf
 #   sudo cp nginx/sites-available/metaverse-proxy.conf.example /etc/nginx/sites-available/metaverse-proxy.conf
 #   sudo nano /etc/nginx/sites-available/metaverse-proxy.conf   # server_name / 証明書パス / proxy_pass ポートを環境に合わせる
 #   sudo ln -sf /etc/nginx/sites-available/metaverse-proxy.conf /etc/nginx/sites-enabled/
@@ -42,6 +45,8 @@ server {
 
     client_max_body_size 200m;
 
+    include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
+
     location / {
         include /etc/nginx/snippets/metaverse-proxy-headers.conf;
         proxy_pass http://127.0.0.1:3000;
@@ -61,6 +66,8 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/metair.mmh-virtual.jp/privkey.pem;
 
     client_max_body_size 200m;
+
+    include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
 
     location / {
         include /etc/nginx/snippets/metaverse-proxy-headers.conf;

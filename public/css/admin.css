@@ -118,6 +118,84 @@ body {
     background: var(--we-bg);
 }
 
+/* ワールド編集: モデル読み込み中は操作をブロック */
+.world-edit-loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.78);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    pointer-events: auto;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+
+.world-edit-loading-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.world-edit-loading-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 28px 36px;
+    border-radius: 12px;
+    background: #fff;
+    border: 1px solid var(--we-border, #e0e0e0);
+    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.1);
+    max-width: min(360px, 90vw);
+    text-align: center;
+}
+
+.world-edit-loading-spinner {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 3px solid var(--we-accent-light, #e3f2fd);
+    border-top-color: var(--we-accent, #1565c0);
+    animation: world-edit-spin 0.75s linear infinite;
+}
+
+@keyframes world-edit-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.world-edit-loading-message {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    line-height: 1.45;
+}
+
+body.admin-dark .world-edit-loading-overlay {
+    background: rgba(15, 14, 12, 0.82);
+}
+
+body.admin-dark .world-edit-loading-panel {
+    background: #1f1e1a;
+    border-color: #3d3a34;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+body.admin-dark .world-edit-loading-spinner {
+    border-color: #2d2a24;
+    border-top-color: var(--we-accent, #7eb8da);
+}
+
+body.admin-dark .world-edit-loading-message {
+    color: #e6e4df;
+}
+
 .admin-panel-world-edit .viewer {
     position: absolute;
     inset: 0;

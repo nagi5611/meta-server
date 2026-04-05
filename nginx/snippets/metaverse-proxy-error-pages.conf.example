@@ -1,0 +1,16 @@
+# metaverse-simple: バックエンド不通時（502 / 503 / 504）にステータス URL への案内 HTML を返す
+#
+# 初回のみサーバー上で静的ファイルを配置する:
+#   sudo mkdir -p /var/www/metaverse-nginx-errors
+#   sudo cp /path/to/metaverse-simple/nginx/html/metaverse-proxy-error.html /var/www/metaverse-nginx-errors/
+#   sudo cp nginx/snippets/metaverse-proxy-error-pages.conf.example /etc/nginx/snippets/metaverse-proxy-error-pages.conf
+#
+# proxy_pass がある server { } 内に次の 1 行を置く（例では各ブロックに記載済み）:
+#   include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
+
+error_page 502 503 504 /metaverse-proxy-error.html;
+
+location = /metaverse-proxy-error.html {
+    root /var/www/metaverse-nginx-errors;
+    internal;
+}

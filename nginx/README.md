@@ -54,7 +54,10 @@ sudo apt install -y nginx
 ```bash
 cd /path/to/metaverse-simple   # クローン先
 
+sudo mkdir -p /var/www/metaverse-nginx-errors
+sudo cp nginx/html/metaverse-proxy-error.html /var/www/metaverse-nginx-errors/
 sudo cp nginx/snippets/metaverse-proxy-headers.conf.example /etc/nginx/snippets/metaverse-proxy-headers.conf
+sudo cp nginx/snippets/metaverse-proxy-error-pages.conf.example /etc/nginx/snippets/metaverse-proxy-error-pages.conf
 sudo cp nginx/sites-available/metaverse-proxy.conf.example /etc/nginx/sites-available/metaverse-proxy.conf
 sudo nano /etc/nginx/sites-available/metaverse-proxy.conf
 ```
@@ -65,6 +68,15 @@ sudo nano /etc/nginx/sites-available/metaverse-proxy.conf
 sudo ln -sf /etc/nginx/sites-available/metaverse-proxy.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+## 502 / 503 / 504 のときの案内（稼働状況 URL）
+
+バックエンド（Node）に接続できないと nginx は **502 Bad Gateway** などを返します。設定例では **`error_page`** で静的 HTML を返し、その中から [松山南高校ばーちゃるず提供サービス稼働状況](https://status.mmh-virtual.jp/) へ誘導します。
+
+- 静的ファイル: リポジトリの [html/metaverse-proxy-error.html](html/metaverse-proxy-error.html) をサーバー上 `/var/www/metaverse-nginx-errors/metaverse-proxy-error.html` に配置する（上記「設定ファイルの配置」の `cp` に含む）。
+- スニペット: [snippets/metaverse-proxy-error-pages.conf.example](snippets/metaverse-proxy-error-pages.conf.example) を `/etc/nginx/snippets/metaverse-proxy-error-pages.conf` にコピーする。各 `proxy_pass` 付きの `server` で `include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;` する（例ファイルに記載済み）。
+
+反映後は `sudo nginx -t && sudo systemctl reload nginx`。**既存サーバー**では HTML・スニペットのコピーと `include` の追加だけでもよい。
 
 デフォルトサイトが干渉する場合は `sites-enabled/default` を無効化します。
 
@@ -226,6 +238,8 @@ nagi ALL=(ALL) NOPASSWD: /bin/systemctl start meta-server.service, /bin/systemct
 | [sites-available/metaverse-proxy.ex01.conf.example](sites-available/metaverse-proxy.ex01.conf.example) | hub=`http://nagi-s1.f5.si/`→3000、meta/metair は HTTPS→3001/3002（ex01） |
 | [sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) | ホスト監視用ホスト名（HTTP）の例 |
 | [snippets/metaverse-proxy-headers.conf.example](snippets/metaverse-proxy-headers.conf.example) | WebSocket 向けヘッダ等（`location` 内で include） |
+| [snippets/metaverse-proxy-error-pages.conf.example](snippets/metaverse-proxy-error-pages.conf.example) | 502/503/504 時に稼働状況 URL へ誘導する `error_page`（`server` 内で include） |
+| [html/metaverse-proxy-error.html](html/metaverse-proxy-error.html) | 上記用の静的 HTML（`/var/www/metaverse-nginx-errors/` に配置） |
 
 ## 動作確認
 

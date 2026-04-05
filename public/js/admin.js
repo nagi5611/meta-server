@@ -188,7 +188,22 @@ function switchPanel(panelId) {
 
     if (panelId === 'panel-world-edit' && !worldEditInitialized) {
         worldEditInitialized = true;
-        import('/js/setting.js').then((m) => m.initSettingEditor()).catch((e) => console.error('Setting editor init failed:', e));
+        const weOverlay = document.getElementById('world-edit-loading-overlay');
+        const weMsg = weOverlay?.querySelector('.world-edit-loading-message');
+        if (weOverlay) {
+            weOverlay.classList.add('show');
+            weOverlay.setAttribute('aria-hidden', 'false');
+            if (weMsg) weMsg.textContent = 'ワールド編集を起動しています…';
+        }
+        import('/js/setting.js')
+            .then((m) => m.initSettingEditor())
+            .catch((e) => {
+                console.error('Setting editor init failed:', e);
+                if (weOverlay) {
+                    weOverlay.classList.remove('show');
+                    weOverlay.setAttribute('aria-hidden', 'true');
+                }
+            });
     }
     if (panelId === 'panel-user-register') {
         loadUsers();

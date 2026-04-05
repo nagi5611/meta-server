@@ -11,6 +11,9 @@
 #   PROXY_SERVICE_DOMAIN=nagi-s1.f5.si
 #
 # 使い方（サーバー上）:
+#   sudo mkdir -p /var/www/metaverse-nginx-errors
+#   sudo cp nginx/html/metaverse-proxy-error.html /var/www/metaverse-nginx-errors/
+#   sudo cp nginx/snippets/metaverse-proxy-error-pages.conf.example /etc/nginx/snippets/metaverse-proxy-error-pages.conf
 #   sudo nano /etc/nginx/sites-available/metaverse-proxy.conf
 #   貼り付け後: sudo nginx -t && sudo systemctl reload nginx
 #
@@ -31,6 +34,8 @@ server {
     server_name nagi-s1.f5.si;
 
     client_max_body_size 100m;
+
+    include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
 
     location /.well-known/acme-challenge/ {
         root /var/www/html;
@@ -70,6 +75,8 @@ server {
 
     client_max_body_size 100m;
 
+    include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
+
     location / {
         include /etc/nginx/snippets/metaverse-proxy-headers.conf;
         proxy_pass http://127.0.0.1:3001;
@@ -88,6 +95,8 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/meta.mmh-virtual.jp/privkey.pem;
 
     client_max_body_size 200m;
+
+    include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
 
     location / {
         include /etc/nginx/snippets/metaverse-proxy-headers.conf;

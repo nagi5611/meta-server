@@ -47,6 +47,8 @@ let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（p
 let lightHelpers = []; // { light, mesh? } for point/spot position drag
 let worldObjectList = []; // 右パネル「オブジェクト一覧」の並び（クリックで選択用）
 let objectListExpanded = { lights: false, models: false, pdfs: false }; // オブジェクト一覧の階層展開状態
+/** ワールド切り替えの非同期競合を防ぐ（新しい選択だけ UI を確定させる） */
+let worldSelectLoadGen = 0;
 let editorGround = null; // 編集プレビュー用の床メッシュ（表示切替用）
 let editorGrid = null;   // 編集プレビュー用のグリッド（表示切替用）
 let editorDracoLoader = null;
@@ -389,15 +391,22 @@ function getState() {
     return { worlds: JSON.parse(JSON.stringify(built)), selectedWorldId };
 }
 
-function setState(state) {
+async function setState(state) {
     isRestoring = true;
     worlds = JSON.parse(JSON.stringify(state.worlds));
     selectedWorldId = state.selectedWorldId;
     const w = worlds[selectedWorldId];
     if (w) {
-        loadWorldIntoScene(w);
         document.getElementById('world-name-row').style.display = '';
         document.getElementById('world-name').value = w.name || selectedWorldId;
+        setWorldEditLoader(true, '編集履歴を復元しています…');
+        try {
+            await loadWorldIntoScene(w);
+        } finally {
+            setWorldEditLoader(false);
+        }
+    } else {
+        document.getElementById('world-name-row').style.display = 'none';
     }
     renderWorldList();
     populateDestWorldSelect();
@@ -416,13 +425,13 @@ function pushUndo() {
 function undo() {
     if (undoStack.length === 0) return;
     redoStack.push(getState());
-    setState(undoStack.pop());
+    void setState(undoStack.pop());
 }
 
 function redo() {
     if (redoStack.length === 0) return;
     undoStack.push(getState());
-    setState(redoStack.pop());
+    void setState(redoStack.pop());
 }
 
 // --- Three.js setup ---
@@ -1123,29 +1132,51 @@ function buildWorldsFromScene() {
  * 保存した worlds JSON をメモリと3Dシーンに反映する
  * @param {Record<string, unknown>} parsed
  */
-function applyWorldsStateFromJson(parsed) {
+async function applyWorldsStateFromJson(parsed) {
     worlds = JSON.parse(JSON.stringify(parsed));
     renderWorldList();
     populateDestWorldSelect();
     const ids = Object.keys(worlds);
     if (!ids.length) {
-        selectedWorldId = null;
-        document.getElementById('btn-delete-world').disabled = true;
-        document.getElementById('world-name-row').style.display = 'none';
-        loadWorldIntoScene({
-            models: [],
-            lights: [],
-            pdfs: [],
-            spawnPoint: { x: 0, y: 10, z: 0 },
-            floorEnabled: true
-        });
+        syncSelectWorldChrome(null);
+        setWorldEditLoader(true, 'JSONを反映しています…');
+        try {
+            await loadWorldIntoScene(EMPTY_EDITOR_WORLD);
+        } finally {
+            setWorldEditLoader(false);
+        }
+        writeWorldEditCache();
         return;
     }
     const nextId = (selectedWorldId && worlds[selectedWorldId]) ? selectedWorldId : ids[0];
-    selectWorld(nextId);
+    await selectWorld(nextId);
+    writeWorldEditCache();
 }
 
-function loadWorldIntoScene(world) {
+/**
+ * 選択ワールドのリスト・名前行のみ更新（シーン読み込みは別途 await loadWorldIntoScene）
+ * @param {string|null} id
+ */
+function syncSelectWorldChrome(id) {
+    selectedWorldId = id;
+    renderWorldList();
+    const w = id ? worlds[id] : null;
+    if (w) {
+        document.getElementById('world-name-row').style.display = '';
+        document.getElementById('world-name').value = w.name || id;
+    } else {
+        document.getElementById('world-name-row').style.display = 'none';
+    }
+    document.getElementById('btn-delete-world').disabled = !id;
+    populateDestWorldSelect();
+}
+
+/**
+ * ワールド設定をシーンに適用する（3D モデルは順次 await で読み込み）
+ * @param {object} world
+ * @returns {Promise<void>}
+ */
+async function loadWorldIntoScene(world) {
     while (editGroup.children.length) {
         const c = editGroup.children[0];
         editGroup.remove(c);
@@ -1160,53 +1191,6 @@ function loadWorldIntoScene(world) {
     transformControls.detach();
     document.getElementById('object-hint').style.display = 'block';
     document.getElementById('object-props').style.display = 'none';
-
-    const models = world.models || [];
-    void (async () => {
-        const errs = [];
-        for (let idx = 0; idx < models.length; idx++) {
-            const config = models[idx];
-            const path = config.path || '';
-            const pos = config.position || { x: 0, y: 0, z: 0 };
-            const rot = config.rotation || { x: 0, y: 0, z: 0 };
-            const scale = config.scale || { x: 1, y: 1, z: 1 };
-            const cfgBase = {
-                path,
-                position: { ...pos },
-                rotation: { ...rot },
-                scale: { ...scale },
-                animate: config.animate ? { ...config.animate } : undefined,
-                teleporter: config.teleporter ? { ...config.teleporter } : undefined,
-                taiko: config.taiko ? { ...config.taiko } : undefined
-            };
-            if (isObjPath(path) && config.mtlPath) {
-                cfgBase.mtlPath = config.mtlPath;
-            }
-            try {
-                const { model, triangleCount } = await loadModelFromConfig({
-                    path,
-                    mtlPath: isObjPath(path) ? (config.mtlPath || '') : ''
-                });
-                model.position.set(pos.x, pos.y, pos.z);
-                model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
-                model.scale.set(scale.x, scale.y, scale.z);
-                applyModelShadowByTriangleCount(model, triangleCount);
-                model.userData.editId = 'm' + idx;
-                model.userData.config = cfgBase;
-                editGroup.add(model);
-            } catch (err) {
-                console.error('Load model failed:', path, err);
-                errs.push(err.message || String(err));
-            }
-        }
-        if (errs.length) {
-            const el = document.getElementById('save-status');
-            if (el) {
-                el.textContent = errs.join(' ');
-                el.className = 'error';
-            }
-        }
-    })();
 
     const lights = world.lights || [];
     lights.forEach((cfg, idx) => {
@@ -1298,6 +1282,51 @@ function loadWorldIntoScene(world) {
     if (floorEl) floorEl.checked = world.floorEnabled !== false;
     if (editorGround) editorGround.visible = world.floorEnabled !== false;
     if (editorGrid) editorGrid.visible = world.floorEnabled !== false;
+
+    const models = world.models || [];
+    const errs = [];
+    for (let idx = 0; idx < models.length; idx++) {
+        const config = models[idx];
+        const path = config.path || '';
+        const pos = config.position || { x: 0, y: 0, z: 0 };
+        const rot = config.rotation || { x: 0, y: 0, z: 0 };
+        const scale = config.scale || { x: 1, y: 1, z: 1 };
+        const cfgBase = {
+            path,
+            position: { ...pos },
+            rotation: { ...rot },
+            scale: { ...scale },
+            animate: config.animate ? { ...config.animate } : undefined,
+            teleporter: config.teleporter ? { ...config.teleporter } : undefined,
+            taiko: config.taiko ? { ...config.taiko } : undefined
+        };
+        if (isObjPath(path) && config.mtlPath) {
+            cfgBase.mtlPath = config.mtlPath;
+        }
+        try {
+            const { model, triangleCount } = await loadModelFromConfig({
+                path,
+                mtlPath: isObjPath(path) ? (config.mtlPath || '') : ''
+            });
+            model.position.set(pos.x, pos.y, pos.z);
+            model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
+            model.scale.set(scale.x, scale.y, scale.z);
+            applyModelShadowByTriangleCount(model, triangleCount);
+            model.userData.editId = 'm' + idx;
+            model.userData.config = cfgBase;
+            editGroup.add(model);
+        } catch (err) {
+            console.error('Load model failed:', path, err);
+            errs.push(err.message || String(err));
+        }
+    }
+    if (errs.length) {
+        const el = document.getElementById('save-status');
+        if (el) {
+            el.textContent = errs.join(' ');
+            el.className = 'error';
+        }
+    }
     renderWorldObjectList();
 }
 
@@ -1323,6 +1352,85 @@ function animate() {
 }
 
 // --- API ---
+
+/** ワールド編集パネル用 localStorage キャッシュ（一覧の速い再表示・オフライン時のフォールバック用） */
+const WORLD_EDIT_CACHE_STORAGE_KEY = 'metaverse-admin-world-edit-cache-v1';
+
+/** シーンを空にするときのワールド断片 */
+const EMPTY_EDITOR_WORLD = {
+    models: [],
+    lights: [],
+    pdfs: [],
+    spawnPoint: { x: 0, y: 10, z: 0 },
+    floorEnabled: true
+};
+
+/**
+ * モデル読み込みなどの間、ワールド編集 UI 全体をブロックするオーバーレイ
+ * @param {boolean} show
+ * @param {string} [message]
+ */
+function setWorldEditLoader(show, message) {
+    const ov = document.getElementById('world-edit-loading-overlay');
+    if (!ov) return;
+    const msgEl = ov.querySelector('.world-edit-loading-message');
+    if (message != null && msgEl) msgEl.textContent = message;
+    if (show) {
+        ov.classList.add('show');
+        ov.setAttribute('aria-hidden', 'false');
+    } else {
+        ov.classList.remove('show');
+        ov.setAttribute('aria-hidden', 'true');
+    }
+}
+
+/** @returns {{ v: number, savedAt: number, worlds: object, modelList: string[], mtlList: string[], pdfList: string[] }|null} */
+function readWorldEditCache() {
+    try {
+        const raw = localStorage.getItem(WORLD_EDIT_CACHE_STORAGE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data || data.v !== 1 || typeof data.worlds !== 'object' || data.worlds === null || Array.isArray(data.worlds)) {
+            return null;
+        }
+        return data;
+    } catch {
+        return null;
+    }
+}
+
+/** 現在の worlds / 一覧をストレージに保存する */
+function writeWorldEditCache() {
+    try {
+        const payload = {
+            v: 1,
+            savedAt: Date.now(),
+            worlds: JSON.parse(JSON.stringify(worlds)),
+            modelList: modelList.slice(),
+            mtlList: mtlList.slice(),
+            pdfList: pdfList.slice()
+        };
+        localStorage.setItem(WORLD_EDIT_CACHE_STORAGE_KEY, JSON.stringify(payload));
+    } catch (e) {
+        console.warn('[world-edit] cache write failed:', e);
+    }
+}
+
+/**
+ * キャッシュをメモリに適用する
+ * @param {{ v?: number, worlds?: object, modelList?: string[], mtlList?: string[], pdfList?: string[] }} data
+ * @returns {boolean}
+ */
+function applyWorldEditCacheToState(data) {
+    if (!data || data.v !== 1) return false;
+    if (typeof data.worlds !== 'object' || data.worlds === null || Array.isArray(data.worlds)) return false;
+    worlds = JSON.parse(JSON.stringify(data.worlds));
+    modelList = Array.isArray(data.modelList) ? data.modelList.slice() : [];
+    mtlList = Array.isArray(data.mtlList) ? data.mtlList.slice() : [];
+    pdfList = Array.isArray(data.pdfList) ? data.pdfList.slice() : [];
+    return true;
+}
+
 async function fetchWorlds() {
     const res = await fetch('/admin/worlds', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load worlds');
@@ -1514,7 +1622,7 @@ function renderWorldList() {
         div.className = 'item' + (id === selectedWorldId ? ' selected' : '');
         div.textContent = w.name || id;
         div.dataset.id = id;
-        div.addEventListener('click', () => selectWorld(id));
+        div.addEventListener('click', () => void selectWorld(id));
         el.appendChild(div);
     });
 }
@@ -1537,24 +1645,23 @@ function renderModelList() {
     updateAddObjMtlRowVisibility();
 }
 
-function selectWorld(id) {
-    selectedWorldId = id;
-    renderWorldList();
+async function selectWorld(id) {
+    const gen = ++worldSelectLoadGen;
+    syncSelectWorldChrome(id);
     const w = worlds[id];
-    if (w) {
-        loadWorldIntoScene(w);
-        const taiko = selectedObject && selectedObject.userData.config && selectedObject.userData.config.taiko;
-        const cid = taiko && taiko.multiplayerChartId;
-        refreshTaikoChartSelect(cid).then(() => {
-            if (selectedObject && selectedObject.userData.config) updateObjectPanel(selectedObject);
-        });
-        document.getElementById('world-name-row').style.display = '';
-        document.getElementById('world-name').value = w.name || id;
-    } else {
-        document.getElementById('world-name-row').style.display = 'none';
+    if (!w) return;
+    setWorldEditLoader(true, '3Dモデルを読み込んでいます…');
+    try {
+        await loadWorldIntoScene(w);
+    } finally {
+        if (gen === worldSelectLoadGen) setWorldEditLoader(false);
     }
-    document.getElementById('btn-delete-world').disabled = !id;
-    populateDestWorldSelect();
+    if (gen !== worldSelectLoadGen) return;
+    const taiko = selectedObject && selectedObject.userData.config && selectedObject.userData.config.taiko;
+    const cid = taiko && taiko.multiplayerChartId;
+    await refreshTaikoChartSelect(cid);
+    if (gen !== worldSelectLoadGen) return;
+    if (selectedObject && selectedObject.userData.config) updateObjectPanel(selectedObject);
 }
 
 /**
@@ -1765,6 +1872,7 @@ function bindEvents() {
             });
             if (!res.ok) throw new Error(await res.text());
             status.textContent = '保存しました。反映にはサーバー再起動が必要です。';
+            writeWorldEditCache();
         } catch (e) {
             status.textContent = '保存に失敗: ' + e.message;
             status.className = 'error';
@@ -2034,7 +2142,7 @@ function bindEvents() {
                     }
                     throw new Error(msg || res.statusText);
                 }
-                applyWorldsStateFromJson(parsed);
+                await applyWorldsStateFromJson(parsed);
                 const saveStatus = document.getElementById('save-status');
                 if (saveStatus) {
                     saveStatus.textContent = '保存しました。反映にはサーバー再起動が必要です。';
@@ -2059,7 +2167,7 @@ function bindEvents() {
         const name = prompt('表示名', id);
         worlds[id] = { id, name: name || id, models: [], spawnPoint: { x: 0, y: 10, z: 0 }, lights: [], pdfs: [], vdbs: [], floorEnabled: true };
         renderWorldList();
-        selectWorld(id);
+        void selectWorld(id);
     });
 
     document.getElementById('btn-delete-world').addEventListener('click', () => {
@@ -2074,10 +2182,18 @@ function bindEvents() {
         const next = Object.keys(worlds)[0] || null;
         selectedWorldId = next;
         renderWorldList();
-        if (next) selectWorld(next);
-        else {
-            while (editGroup.children.length) editGroup.remove(editGroup.children[0]);
-            document.getElementById('btn-delete-world').disabled = true;
+        if (next) {
+            void selectWorld(next);
+        } else {
+            syncSelectWorldChrome(null);
+            void (async () => {
+                setWorldEditLoader(true, 'シーンを空にしています…');
+                try {
+                    await loadWorldIntoScene(EMPTY_EDITOR_WORLD);
+                } finally {
+                    setWorldEditLoader(false);
+                }
+            })();
         }
     });
 
@@ -2834,7 +2950,14 @@ function bindEvents() {
         if (type !== 'ambient') cfg.position = { x: 0, y: 5, z: 5 };
         if (type === 'point' || type === 'spot') cfg.distance = 50;
         world.lights.push(cfg);
-        loadWorldIntoScene(world);
+        void (async () => {
+            setWorldEditLoader(true, 'ライトを反映しています…');
+            try {
+                await loadWorldIntoScene(world);
+            } finally {
+                setWorldEditLoader(false);
+            }
+        })();
     });
 
     document.getElementById('world-name').addEventListener('change', () => {
@@ -2923,24 +3046,63 @@ function setTransformAxisAll() {
 // --- Init (export して admin から初回表示時に呼び出す) ---
 async function init() {
     const canvas = document.getElementById('canvas');
-    if (!canvas) return;
-    initScene();
-    bindEvents();
-    try {
-        await fetchWorlds();
-        await fetchModels();
-        await fetchMtls();
-        await fetchPdfs();
-    } catch (e) {
-        console.error('Init fetch error:', e);
-        document.getElementById('save-status').textContent = 'ワールド読み込み失敗: ' + e.message;
-        document.getElementById('save-status').className = 'error';
+    if (!canvas) {
+        setWorldEditLoader(false);
+        return;
     }
-    renderWorldList();
-    renderModelList();
-    renderPdfList();
-    populateDestWorldSelect();
-    if (Object.keys(worlds).length) selectWorld(Object.keys(worlds)[0]);
+    setWorldEditLoader(true, 'ワールド編集を初期化しています…');
+    try {
+        initScene();
+        bindEvents();
+        const cached = readWorldEditCache();
+        if (cached && applyWorldEditCacheToState(cached)) {
+            renderWorldList();
+            renderModelList();
+            renderPdfList();
+            populateDestWorldSelect();
+        }
+        setWorldEditLoader(true, 'サーバーからデータを取得しています…');
+        try {
+            await fetchWorlds();
+            await fetchModels();
+            await fetchMtls();
+            await fetchPdfs();
+            writeWorldEditCache();
+        } catch (e) {
+            console.error('Init fetch error:', e);
+            const statusEl = document.getElementById('save-status');
+            if (cached) {
+                applyWorldEditCacheToState(cached);
+                renderWorldList();
+                renderModelList();
+                renderPdfList();
+                populateDestWorldSelect();
+                if (statusEl) {
+                    statusEl.textContent = 'サーバー取得に失敗しました。キャッシュを表示しています。';
+                    statusEl.className = '';
+                }
+            } else if (statusEl) {
+                statusEl.textContent = 'ワールド読み込み失敗: ' + e.message;
+                statusEl.className = 'error';
+            }
+        }
+        renderWorldList();
+        renderModelList();
+        renderPdfList();
+        populateDestWorldSelect();
+        setWorldEditLoader(true, '3Dモデルを読み込んでいます…');
+        const ids = Object.keys(worlds);
+        if (ids.length) {
+            syncSelectWorldChrome(ids[0]);
+            await loadWorldIntoScene(worlds[ids[0]]);
+            await refreshTaikoChartSelect(null);
+        } else {
+            syncSelectWorldChrome(null);
+            await loadWorldIntoScene(EMPTY_EDITOR_WORLD);
+        }
+    } finally {
+        setWorldEditLoader(false);
+    }
     animate();
 }
 
