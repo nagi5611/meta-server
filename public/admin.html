@@ -795,17 +795,29 @@
                     <h3>worlds.json を編集</h3>
                     <p class="hint world-json-modal-hint">表示内容は「JSONでエクスポート」と同じく、現在の編集状態を反映します。保存でサーバーの worlds.json に書き込みます。</p>
                     <div class="world-json-find-bar" role="search" aria-label="検索と置換">
-                        <div class="world-json-find-row">
-                            <label class="world-json-find-label" for="world-json-find-input">検索</label>
-                            <input type="text" id="world-json-find-input" class="world-json-find-input prop-input" placeholder="検索文字列" autocomplete="off">
-                            <button type="button" id="world-json-find-next" class="btn-secondary">次へ</button>
-                            <label class="world-json-find-label" for="world-json-replace-input">置換</label>
-                            <input type="text" id="world-json-replace-input" class="world-json-find-input prop-input" placeholder="置換後" autocomplete="off">
-                            <button type="button" id="world-json-replace-one" class="btn-secondary">置換</button>
-                            <button type="button" id="world-json-replace-all" class="btn-secondary">すべて置換</button>
+                        <div class="world-json-find-stack">
+                            <div class="world-json-find-line">
+                                <label class="world-json-find-line-label" for="world-json-find-input">検索</label>
+                                <div class="world-json-find-line-controls">
+                                    <input type="text" id="world-json-find-input" class="world-json-find-field" placeholder="検索文字列" autocomplete="off">
+                                    <button type="button" id="world-json-find-next" class="world-json-find-btn">次へ</button>
+                                </div>
+                            </div>
+                            <div class="world-json-find-line">
+                                <label class="world-json-find-line-label" for="world-json-replace-input">置換</label>
+                                <div class="world-json-find-line-controls">
+                                    <input type="text" id="world-json-replace-input" class="world-json-find-field" placeholder="置換後" autocomplete="off">
+                                    <button type="button" id="world-json-replace-one" class="world-json-find-btn">置換</button>
+                                    <button type="button" id="world-json-replace-all" class="world-json-find-btn world-json-find-btn-quiet">すべて置換</button>
+                                </div>
+                            </div>
                         </div>
-                        <div class="world-json-find-options">
-                            <label class="world-json-find-case-label"><input type="checkbox" id="world-json-find-case"> 大文字小文字を区別</label>
+                        <div class="world-json-find-footer">
+                            <label class="world-json-find-toggle">
+                                <input type="checkbox" id="world-json-find-case" class="world-json-find-toggle-input">
+                                <span class="world-json-find-toggle-track" aria-hidden="true"></span>
+                                <span class="world-json-find-toggle-text">大文字小文字を区別</span>
+                            </label>
                             <span id="world-json-find-hit-status" class="world-json-find-hit-status" aria-live="polite"></span>
                         </div>
                     </div>
