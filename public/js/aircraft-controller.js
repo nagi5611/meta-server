@@ -139,7 +139,7 @@ export default class AircraftController {
     }
 
     /**
-     * アバター同期用の足元相当（ヒット時は地面）
+     * 操縦中アバター・ネットワーク同期用の足元（機体ローカル：コックピット付近を基準に機体に追従）
      * @param {THREE.Vector3} [out]
      * @returns {THREE.Vector3|null}
      */
@@ -147,17 +147,11 @@ export default class AircraftController {
         const root = this.slot?.root;
         if (!root) return null;
         root.updateMatrixWorld(true);
+        const ck = this.slot.cockpitOffset || { x: 0, y: 1.2, z: 0 };
         const o = out || new THREE.Vector3();
-        root.getWorldPosition(o);
-        const collider = this.physicsManager?.collider;
-        if (collider?.geometry?.boundsTree) {
-            const hit = this.physicsManager.raycastStaticWorld(o, new THREE.Vector3(0, -1, 0), LANDING_RAY_MAX);
-            if (hit) {
-                o.set(hit.point.x, hit.point.y, hit.point.z);
-                return o;
-            }
-        }
-        o.y -= 1;
+        const localFeetY = Math.max(0, ck.y - 1.0);
+        o.set(ck.x, localFeetY, ck.z);
+        root.localToWorld(o);
         return o;
     }
 

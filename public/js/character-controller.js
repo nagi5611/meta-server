@@ -391,6 +391,11 @@ class CharacterController {
 
     update(deltaTime) {
         if (this._aircraftPoseProvider) {
+            const p = this._aircraftPoseProvider.getPosition(this._aircraftFeetScratch);
+            if (p) {
+                this.physicsManager.setCharacterPosition(p.x, p.y, p.z);
+                this.physicsManager.resetVelocity();
+            }
             return;
         }
         if (this.xrPresenting) {

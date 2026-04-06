@@ -831,11 +831,11 @@ class MetaverseApp {
         const xrActive = this.sceneManager.getRenderer().xr.isPresenting;
         // WebXR 中はタブがバックグラウンド扱いでも物理を回す（ヘッドセット表示を維持）
         if (this.isPageVisible || xrActive) {
-            // Update character controller (includes physics). 操縦中は内部で早期 return
-            this.characterController.update(deltaTime);
+            // 操縦中は機体を先に進めてから、キャラ（物理・非表示アバター）を機体位置へ同期
             if (this.aircraftManager?.isPiloting && this.aircraftController) {
                 this.aircraftController.update(deltaTime);
             }
+            this.characterController.update(deltaTime);
 
             // Update local player visual and animation state
             const position = this.characterController.getPosition();
