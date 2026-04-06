@@ -382,23 +382,32 @@ class MetaverseApp {
         this.menuManager.setSceneManager(this.sceneManager);
         this.sceneManager.applyGraphicsSettings(this.menuManager.settings);
         this.characterController.setHeadPositionProvider((out) => this.playerManager.getLocalHeadWorldPosition(out));
+
+        this.refreshLocalAvatarVisibility = () => {
+            if (!this.playerManager) return;
+            const mode = this.menuManager?.settings?.viewMode || 'third';
+            const hideForFirst = mode === 'first';
+            const hideForAdmin = !!(this.networkManager && this.networkManager.adminInvisible);
+            const hideForAircraft = !!(this.aircraftManager && this.aircraftManager.isPiloting);
+            this.playerManager.setLocalPlayerVisible(!hideForFirst && !hideForAdmin && !hideForAircraft);
+        };
+        this.aircraftManager.setOnPilotingChange(() => this.refreshLocalAvatarVisibility());
+
         this.characterController.setViewMode(this.menuManager.settings.viewMode || 'third');
-        this.playerManager.setLocalPlayerVisible((this.menuManager.settings.viewMode || 'third') !== 'first');
+        this.refreshLocalAvatarVisibility();
         this.menuManager.setViewModeChangeHandler((mode) => {
             this.characterController.setViewMode(mode);
-            this.playerManager.setLocalPlayerVisible(mode !== 'first');
+            this.refreshLocalAvatarVisibility();
         });
 
         // Admin quick controls (透明化 / 飛行 / 高速移動)
         if (this.userRole === 'admin' && this.menuManager) {
             this.menuManager.setAdminMenuHandlers({
                 onInvisibleChange: (enabled) => {
-                    if (this.playerManager) {
-                        this.playerManager.setLocalPlayerVisible(!enabled);
-                    }
                     if (this.networkManager) {
                         this.networkManager.setAdminInvisible(enabled);
                     }
+                    this.refreshLocalAvatarVisibility();
                 },
                 onFlyChange: (enabled) => {
                     if (this.characterController) {
@@ -639,6 +648,10 @@ class MetaverseApp {
 
     async onWorldChanged(world) {
         console.log(`World changed to: ${world.id}`);
+
+        if (this.aircraftController && world) {
+            this.aircraftController.applyWorldPhysics(world.aircraftPhysics);
+        }
 
         if (this.aircraftManager) {
             this.aircraftManager.forceLocalPilotingReset();

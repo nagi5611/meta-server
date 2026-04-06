@@ -179,6 +179,45 @@ function validateWorldsPhysicsAssist(worlds) {
 }
 
 /**
+ * aircraftPhysics（飛行機操縦の数値）検証（POST /admin/worlds 用）
+ * @param {Record<string, unknown>} worlds
+ * @returns {string[]}
+ */
+function validateWorldsAircraftPhysics(worlds) {
+    const errors = [];
+    if (!worlds || typeof worlds !== 'object') return errors;
+    const limits = {
+        maxSpeed: [1, 500],
+        thrustAccel: [0.1, 200],
+        drag: [0.5, 0.99999],
+        yawRate: [0.01, 20],
+        pitchRate: [0.01, 20],
+        rollRate: [0.01, 20]
+    };
+    for (const [wid, w] of Object.entries(worlds)) {
+        if (!w || typeof w !== 'object') continue;
+        const ap = w.aircraftPhysics;
+        if (ap == null) continue;
+        if (typeof ap !== 'object' || Array.isArray(ap)) {
+            errors.push(`ワールド「${wid}」: aircraftPhysics はオブジェクトである必要があります`);
+            continue;
+        }
+        for (const [key, [lo, hi]] of Object.entries(limits)) {
+            if (!(key in ap)) continue;
+            const v = ap[key];
+            if (typeof v !== 'number' || !Number.isFinite(v)) {
+                errors.push(`ワールド「${wid}」: aircraftPhysics.${key} は有限の数値にしてください`);
+                continue;
+            }
+            if (v < lo || v > hi) {
+                errors.push(`ワールド「${wid}」: aircraftPhysics.${key} は ${lo}〜${hi} にしてください`);
+            }
+        }
+    }
+    return errors;
+}
+
+/**
  * playBounds / serverColliders の形を検証（POST /admin/worlds 用）
  * @param {Record<string, unknown>} worlds
  * @returns {string[]}
@@ -3629,6 +3668,7 @@ setInterval(() => {
                 quaternion: player.quaternion,
                 world: player.world,
                 adminInvisible: !!player.adminInvisible,
+                pilotingAircraftId: player.pilotingAircraftId || null,
                 animState: normalizePlayerAnimState(player.animState),
                 vcMicOn,
                 vcSpeakerOn,
@@ -3688,9 +3728,13 @@ app.post('/admin/worlds', (req, res) => {
             return res.status(400).json({ error: aircraftErrs.join(' ') });
         }
         const physicsErrs = validateWorldsPhysicsAssist(worlds);
-    if (physicsErrs.length > 0) {
-        return res.status(400).json({ error: physicsErrs.join(' ') });
-    }
+        if (physicsErrs.length > 0) {
+            return res.status(400).json({ error: physicsErrs.join(' ') });
+        }
+        const aircraftPhysErrs = validateWorldsAircraftPhysics(worlds);
+        if (aircraftPhysErrs.length > 0) {
+            return res.status(400).json({ error: aircraftPhysErrs.join(' ') });
+        }
     const boundsErrs = validateWorldsPlayBoundsAndColliders(worlds);
     if (boundsErrs.length > 0) {
         return res.status(400).json({ error: boundsErrs.join(' ') });

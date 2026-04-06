@@ -32,6 +32,7 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { encodeAssetPathToUrlPath, notifyServiceWorkerInvalidate } from './service-worker-register.js';
+import { mergeAircraftPhysicsFromWorld, DEFAULT_AIRCRAFT_PHYSICS } from './aircraft-physics-defaults.js';
 
 // --- State ---
 let scene, camera, renderer, controls, transformControls;
@@ -1291,6 +1292,9 @@ function buildWorldsFromScene() {
                 ...(Number.isFinite(src.maxFeetY) ? { maxFeetY: src.maxFeetY } : {})
             };
         }
+        if (wid !== selectedWorldId && w.aircraftPhysics && typeof w.aircraftPhysics === 'object' && !Array.isArray(w.aircraftPhysics)) {
+            out[wid].aircraftPhysics = { ...mergeAircraftPhysicsFromWorld(w.aircraftPhysics) };
+        }
     }
     if (selectedWorldId) {
         const w = out[selectedWorldId];
@@ -1366,6 +1370,7 @@ function buildWorldsFromScene() {
             } else {
                 delete w.physicsAssist;
             }
+            w.aircraftPhysics = readWorldAircraftPhysicsFromForm();
         }
     }
     return out;
@@ -1431,6 +1436,55 @@ function updatePhysicsAssistSpawnHint() {
         return;
     }
     hint.hidden = Math.abs(spawnY - minY) <= 20;
+}
+
+/**
+ * 飛行機ワールド共通パラメータのフォームを埋める
+ * @param {object} [world]
+ */
+function fillWorldAircraftPhysicsForm(world) {
+    const m = mergeAircraftPhysicsFromWorld(world && world.aircraftPhysics);
+    const ids = [
+        ['world-aircraft-max-speed', m.maxSpeed],
+        ['world-aircraft-thrust-accel', m.thrustAccel],
+        ['world-aircraft-drag', m.drag],
+        ['world-aircraft-yaw-rate', m.yawRate],
+        ['world-aircraft-pitch-rate', m.pitchRate],
+        ['world-aircraft-roll-rate', m.rollRate]
+    ];
+    for (const [id, v] of ids) {
+        const el = document.getElementById(id);
+        if (el) el.value = String(v);
+    }
+}
+
+/**
+ * @returns {{ maxSpeed: number, thrustAccel: number, drag: number, yawRate: number, pitchRate: number, rollRate: number }}
+ */
+function readWorldAircraftPhysicsFromForm() {
+    const parse = (id, fallback) => {
+        const el = document.getElementById(id);
+        const n = el ? parseFloat(el.value) : NaN;
+        return Number.isFinite(n) ? n : fallback;
+    };
+    const raw = {
+        maxSpeed: parse('world-aircraft-max-speed', DEFAULT_AIRCRAFT_PHYSICS.maxSpeed),
+        thrustAccel: parse('world-aircraft-thrust-accel', DEFAULT_AIRCRAFT_PHYSICS.thrustAccel),
+        drag: parse('world-aircraft-drag', DEFAULT_AIRCRAFT_PHYSICS.drag),
+        yawRate: parse('world-aircraft-yaw-rate', DEFAULT_AIRCRAFT_PHYSICS.yawRate),
+        pitchRate: parse('world-aircraft-pitch-rate', DEFAULT_AIRCRAFT_PHYSICS.pitchRate),
+        rollRate: parse('world-aircraft-roll-rate', DEFAULT_AIRCRAFT_PHYSICS.rollRate)
+    };
+    return mergeAircraftPhysicsFromWorld(raw);
+}
+
+/**
+ * 選択中ワールドの aircraftPhysics をフォームから worlds に反映
+ */
+function syncWorldAircraftPhysicsFromForm() {
+    if (!selectedWorldId || !worlds[selectedWorldId]) return;
+    pushUndo();
+    worlds[selectedWorldId].aircraftPhysics = readWorldAircraftPhysicsFromForm();
 }
 
 /**
@@ -1561,6 +1615,7 @@ async function loadWorldIntoScene(world) {
         }
     }
     updatePhysicsAssistSpawnHint();
+    fillWorldAircraftPhysicsForm(world);
 
     const models = world.models || [];
     const errs = [];
@@ -3793,6 +3848,17 @@ function bindEvents() {
         pushUndo();
         applyPhysicsAssistPanelToSelectedWorld();
     });
+
+    for (const aircraftInputId of [
+        'world-aircraft-max-speed',
+        'world-aircraft-thrust-accel',
+        'world-aircraft-drag',
+        'world-aircraft-yaw-rate',
+        'world-aircraft-pitch-rate',
+        'world-aircraft-roll-rate'
+    ]) {
+        document.getElementById(aircraftInputId)?.addEventListener('change', syncWorldAircraftPhysicsFromForm);
+    }
 
     document.getElementById('light-pos-x').addEventListener('change', syncLightFromPanel);
     document.getElementById('light-pos-y').addEventListener('change', syncLightFromPanel);

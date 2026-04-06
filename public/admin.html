@@ -750,6 +750,36 @@
                                             <p class="hint" id="physics-assist-spawn-hint" hidden>スポーンYと下限が大きく離れています。意図を確認してください。</p>
                                         </div>
                                     </details>
+                                    <details class="block">
+                                        <summary class="block-header">飛行機操縦（ワールド共通）</summary>
+                                        <div class="block-content">
+                                            <p class="hint">このワールド内の飛行機スロットすべてに適用されます。1 に近い drag は空気抵抗が弱い（滑らかに加速）です。</p>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-max-speed">最高速度</label>
+                                                <input type="number" id="world-aircraft-max-speed" class="prop-input num" step="0.5" min="1"><span class="prop-unit">m/s</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-thrust-accel">推力加速度</label>
+                                                <input type="number" id="world-aircraft-thrust-accel" class="prop-input num" step="0.5" min="0.1"><span class="prop-unit">m/s²</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-drag">速度維持率（毎フレーム乗算）</label>
+                                                <input type="number" id="world-aircraft-drag" class="prop-input num" step="0.001" min="0.5" max="0.99999">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-yaw-rate">ヨー角速度</label>
+                                                <input type="number" id="world-aircraft-yaw-rate" class="prop-input num" step="0.05" min="0.01"><span class="prop-unit">rad/s</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-pitch-rate">ピッチ角速度</label>
+                                                <input type="number" id="world-aircraft-pitch-rate" class="prop-input num" step="0.05" min="0.01"><span class="prop-unit">rad/s</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-roll-rate">ロール角速度</label>
+                                                <input type="number" id="world-aircraft-roll-rate" class="prop-input num" step="0.05" min="0.01"><span class="prop-unit">rad/s</span>
+                                            </div>
+                                        </div>
+                                    </details>
                                 </section>
                             </div>
                         </div>

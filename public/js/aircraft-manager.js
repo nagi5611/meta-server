@@ -43,7 +43,22 @@ export default class AircraftManager {
         this._tmpPlayerPos = new THREE.Vector3();
         /** @type {((e: KeyboardEvent) => void)|null} */
         this._pilotKeyHandler = null;
+        /** @type {(() => void)|null} 操縦開始/終了時にローカルアバター表示を更新する */
+        this._onPilotingChange = null;
         this._loadCameraModeFromStorage();
+    }
+
+    /**
+     * @param {(() => void)|null} fn
+     */
+    setOnPilotingChange(fn) {
+        this._onPilotingChange = typeof fn === 'function' ? fn : null;
+    }
+
+    _notifyPilotingChange() {
+        try {
+            this._onPilotingChange?.();
+        } catch (_) { /* ignore */ }
     }
 
     setMobileMode(mobile) {
@@ -162,6 +177,7 @@ export default class AircraftManager {
             }
         };
         document.addEventListener('keydown', this._pilotKeyHandler);
+        this._notifyPilotingChange();
     }
 
     /**
@@ -196,6 +212,7 @@ export default class AircraftManager {
         this.isPiloting = false;
         this.activeSlot = null;
         this.uiManager.hideAircraftHud();
+        this._notifyPilotingChange();
     }
 
     /**
@@ -290,6 +307,10 @@ export default class AircraftManager {
      */
     forceLocalPilotingReset() {
         if (!this.isPiloting) return;
+        if (this._pilotKeyHandler) {
+            document.removeEventListener('keydown', this._pilotKeyHandler);
+            this._pilotKeyHandler = null;
+        }
         const sid = this.activeSlot?.id;
         this.aircraftController.unbind();
         this.characterController.setAircraftPoseProvider(null);
@@ -298,6 +319,7 @@ export default class AircraftManager {
         this.uiManager.hideAircraftHud();
         this.uiManager.hideAircraftBoardPrompt();
         if (sid) this.resetSlotToParked(sid);
+        this._notifyPilotingChange();
     }
 
     /**

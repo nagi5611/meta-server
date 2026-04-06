@@ -106,7 +106,10 @@ class NetworkManager {
                             name,
                             player.animState || 'idle'
                         );
-                        this.playerManager.setRemotePlayerVisible(player.id, !player.adminInvisible);
+                        this.playerManager.setRemotePlayerVisible(
+                            player.id,
+                            !player.adminInvisible && !player.pilotingAircraftId
+                        );
                     } catch (error) {
                         console.error(`Failed to create remote player ${player.id}:`, error);
                     }
@@ -131,7 +134,10 @@ class NetworkManager {
                         name,
                         player.animState || 'idle'
                     );
-                    this.playerManager.setRemotePlayerVisible(player.id, !player.adminInvisible);
+                    this.playerManager.setRemotePlayerVisible(
+                        player.id,
+                        !player.adminInvisible && !player.pilotingAircraftId
+                    );
                     this.updatePlayerCount();
                 } catch (error) {
                     console.error(`Failed to create joining player ${player.id}:`, error);
@@ -205,7 +211,10 @@ class NetworkManager {
                                 player.animState || 'idle'
                             );
                         }
-                        this.playerManager.setRemotePlayerVisible(player.id, !player.adminInvisible);
+                        this.playerManager.setRemotePlayerVisible(
+                            player.id,
+                            !player.adminInvisible && !player.pilotingAircraftId
+                        );
                     } else {
                         // Hide players in different worlds
                         this.playerManager.removeRemotePlayer(player.id);

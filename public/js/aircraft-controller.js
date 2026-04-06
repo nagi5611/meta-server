@@ -1,13 +1,8 @@
 // public/js/aircraft-controller.js — キネマティック飛行（四元数・-Z 前進・BVH 下向きレイ接地）
 
 import * as THREE from 'three';
+import { mergeAircraftPhysicsFromWorld } from './aircraft-physics-defaults.js';
 
-const MAX_SPEED = 45;
-const THRUST_ACCEL = 18;
-const DRAG = 0.985;
-const YAW_RATE = 1.1;
-const PITCH_RATE = 0.9;
-const ROLL_RATE = 1.2;
 const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
 
@@ -44,6 +39,16 @@ export default class AircraftController {
         this._onKeyDown = (e) => this._handleKey(e, true);
         this._onKeyUp = (e) => this._handleKey(e, false);
         this._bound = false;
+        /** @type {{ maxSpeed: number, thrustAccel: number, drag: number, yawRate: number, pitchRate: number, rollRate: number }} */
+        this.physics = mergeAircraftPhysicsFromWorld(null);
+    }
+
+    /**
+     * ワールドの aircraftPhysics（worlds.json）を反映。未指定キーは既定値。
+     * @param {Record<string, unknown>|null|undefined} raw
+     */
+    applyWorldPhysics(raw) {
+        this.physics = mergeAircraftPhysicsFromWorld(raw);
     }
 
     /**
@@ -199,18 +204,19 @@ export default class AircraftController {
         const pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
         const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
 
-        root.rotateOnAxis(new THREE.Vector3(0, 1, 0), -yawIn * YAW_RATE * dt);
-        root.rotateOnAxis(new THREE.Vector3(1, 0, 0), pitchIn * PITCH_RATE * dt);
-        root.rotateOnAxis(new THREE.Vector3(0, 0, 1), -rollIn * ROLL_RATE * dt);
+        const ph = this.physics;
+        root.rotateOnAxis(new THREE.Vector3(0, 1, 0), -yawIn * ph.yawRate * dt);
+        root.rotateOnAxis(new THREE.Vector3(1, 0, 0), pitchIn * ph.pitchRate * dt);
+        root.rotateOnAxis(new THREE.Vector3(0, 0, 1), -rollIn * ph.rollRate * dt);
         root.updateMatrixWorld(true);
 
         const thrust = (this.keys.forward ? 1 : 0) - (this.keys.back ? 1 : 0);
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
-        this.velocity.addScaledVector(this._fwd, thrust * THRUST_ACCEL * dt);
-        this.velocity.multiplyScalar(DRAG);
+        this.velocity.addScaledVector(this._fwd, thrust * ph.thrustAccel * dt);
+        this.velocity.multiplyScalar(ph.drag);
         const sp = this.velocity.length();
-        if (sp > MAX_SPEED) this.velocity.multiplyScalar(MAX_SPEED / sp);
+        if (sp > ph.maxSpeed) this.velocity.multiplyScalar(ph.maxSpeed / sp);
 
         root.getWorldPosition(this._worldPos);
         this._worldPos.addScaledVector(this.velocity, dt);
