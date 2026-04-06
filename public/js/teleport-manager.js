@@ -32,6 +32,8 @@ class TeleportManager {
         this.userRole = 'guest';
         /** テレポート実行時のコールバック (destinationWorld, teleporterId) => void。未設定時は従来どおり worldManager.switchWorld */
         this.teleportCallback = null;
+        /** @type {(() => boolean)|null} E キー時に true を返すとテレポート等を行わない（飛行機搭乗用） */
+        this._tryAircraftBoard = null;
 
         // Listen for E key
         this.setupKeyListener();
@@ -79,6 +81,14 @@ class TeleportManager {
 
     setTaikoCallback(openTaikoGame) {
         this.openTaikoGame = typeof openTaikoGame === 'function' ? openTaikoGame : null;
+    }
+
+    /**
+     * E キー処理の先頭で呼ぶ。true なら他アクション（太鼓・PDF・テレポート）をスキップ
+     * @param {(() => boolean)|null} fn
+     */
+    setAircraftBoardHandler(fn) {
+        this._tryAircraftBoard = typeof fn === 'function' ? fn : null;
     }
 
     addTaikoZone(zone) {
@@ -226,6 +236,9 @@ class TeleportManager {
      * Handle teleport action when E is pressed (PDF viewer takes priority over teleport)
      */
     handleTeleport() {
+        if (this._tryAircraftBoard && this._tryAircraftBoard()) {
+            return;
+        }
         // 優先度: 太鼓 > PDF > テレポート
         if (this.nearestTaikoZone && this.openTaikoGame) {
             this.uiManager.hideTeleportPrompt();

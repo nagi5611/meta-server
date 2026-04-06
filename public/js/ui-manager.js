@@ -315,7 +315,8 @@ class UIManager {
      */
     showAircraftBoardPrompt(label) {
         if (!this.aircraftBoardPrompt) return;
-        this.aircraftBoardPrompt.textContent = label || '操縦する（クリック）';
+        const t = (label || '操縦する').trim();
+        this.aircraftBoardPrompt.textContent = `${t}（クリック / E）`;
         this.aircraftBoardPrompt.style.display = 'block';
     }
 

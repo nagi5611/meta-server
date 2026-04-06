@@ -285,6 +285,12 @@ class MetaverseApp {
         this.uiManager.setAircraftBoardHandler(() => {
             this.aircraftManager.tryBoardNearest();
         });
+        this.teleportManager.setAircraftBoardHandler(() => {
+            if (this.characterController.isInputActive()) return false;
+            if (!this.aircraftManager?.nearestSlot || !this.aircraftManager.canBoard()) return false;
+            void this.aircraftManager.tryBoardNearest();
+            return true;
+        });
         this.uiManager.setAircraftHudHandlers({
             onExit: () => this.aircraftManager.exitPiloting(),
             onToggleCamera: () => this.aircraftManager.toggleCameraMode()
