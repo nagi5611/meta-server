@@ -5,6 +5,8 @@ import { mergeAircraftPhysicsFromWorld } from './aircraft-physics-defaults.js';
 
 const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
+/** 地上判定の Y 余裕（この範囲なら接地扱いで横滑り停止） */
+const GROUNDED_Y_TOLERANCE = 0.15;
 
 /**
  * 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -247,6 +249,12 @@ export default class AircraftController {
                     }
                     if (this.velocity.y < 0) this.velocity.y *= 0.3;
                     root.updateMatrixWorld(true);
+                }
+                root.getWorldPosition(this._worldPos);
+                const onGround = this._worldPos.y <= minY + GROUNDED_Y_TOLERANCE;
+                if (onGround && thrust === 0) {
+                    this.velocity.x = 0;
+                    this.velocity.z = 0;
                 }
             }
         }
