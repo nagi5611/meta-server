@@ -736,7 +736,7 @@ class MetaverseApp {
                 const fps = this._perfFpsFrames;
                 this._perfLastFpsSample = fps;
                 this._perfFpsSampleAtMs = Date.now();
-                this._lastPerfTier = fps <= 15 ? 'low' : fps <= 30 ? 'medium' : 'high';
+                this._lastPerfTier = fps <= 25 ? 'low' : fps <= 45 ? 'medium' : 'high';
                 this._perfFpsSamplingActive = false;
                 this._perfNextFpsWindowAt = now + 9000;
             }

@@ -1900,7 +1900,7 @@ io.on('connection', (socket) => {
         let perfTier = payload.perfTier;
         if (perfTier !== 'low' && perfTier !== 'medium' && perfTier !== 'high') {
             perfTier = fpsSample != null
-                ? (fpsSample <= 15 ? 'low' : fpsSample <= 30 ? 'medium' : 'high')
+                ? (fpsSample <= 25 ? 'low' : fpsSample <= 45 ? 'medium' : 'high')
                 : 'high';
         }
         const loafCount = payload.loafCount != null && typeof payload.loafCount === 'number' && Number.isFinite(payload.loafCount)
