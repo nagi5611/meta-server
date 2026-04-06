@@ -1029,6 +1029,13 @@ function syncLightFromPanel() {
     }
 }
 
+function updateVehicleAircraftFieldsVisibility() {
+    const sel = document.getElementById('obj-vehicle-type');
+    const wrap = document.getElementById('obj-aircraft-fields');
+    if (!sel || !wrap) return;
+    wrap.style.display = sel.value === 'airplane' ? 'block' : 'none';
+}
+
 function updateObjectPanel(obj) {
     if (!obj) return;
     const c = obj.userData.config || obj.userData.pdfConfig;
@@ -1080,6 +1087,35 @@ function updateObjectPanel(obj) {
         else if (chartSel && chartSel.options.length) chartSel.selectedIndex = 0;
         const mpRows = document.getElementById('obj-taiko-multiplayer-rows');
         if (mpRows) mpRows.style.display = taiko && mp ? '' : 'none';
+        const ac = c.aircraft;
+        const vTypeSel = document.getElementById('obj-vehicle-type');
+        if (vTypeSel) {
+            vTypeSel.value = ac && ac.id ? 'airplane' : '';
+        }
+        if (ac && ac.id) {
+            document.getElementById('obj-ac-id').value = ac.id || '';
+            document.getElementById('obj-ac-radius').value = ac.radius != null ? ac.radius : 4;
+            document.getElementById('obj-ac-label').value = ac.label || '操縦する';
+            const ck = ac.cockpitOffset || {};
+            const ch = ac.chaseOffset || {};
+            document.getElementById('obj-ac-cockpit-x').value = ck.x ?? 0;
+            document.getElementById('obj-ac-cockpit-y').value = ck.y ?? 1.2;
+            document.getElementById('obj-ac-cockpit-z').value = ck.z ?? 0;
+            document.getElementById('obj-ac-chase-x').value = ch.x ?? 0;
+            document.getElementById('obj-ac-chase-y').value = ch.y ?? 3;
+            document.getElementById('obj-ac-chase-z').value = ch.z ?? 12;
+        } else {
+            document.getElementById('obj-ac-id').value = '';
+            document.getElementById('obj-ac-radius').value = 4;
+            document.getElementById('obj-ac-label').value = '操縦する';
+            document.getElementById('obj-ac-cockpit-x').value = 0;
+            document.getElementById('obj-ac-cockpit-y').value = 1.2;
+            document.getElementById('obj-ac-cockpit-z').value = 0;
+            document.getElementById('obj-ac-chase-x').value = 0;
+            document.getElementById('obj-ac-chase-y').value = 3;
+            document.getElementById('obj-ac-chase-z').value = 12;
+        }
+        updateVehicleAircraftFieldsVisibility();
     } else if (obj.userData.pdfConfig) {
         const tp = c.teleporter;
         document.getElementById('obj-teleporter').checked = !!tp;
@@ -1188,6 +1224,28 @@ function syncObjectFromPanel() {
         } else {
             delete c.taiko;
         }
+        const vType = document.getElementById('obj-vehicle-type')?.value || '';
+        if (vType === 'airplane') {
+            const idRaw = document.getElementById('obj-ac-id').value.trim();
+            const rad = parseFloat(document.getElementById('obj-ac-radius').value);
+            c.aircraft = {
+                id: idRaw || 'plane-1',
+                radius: Number.isFinite(rad) && rad > 0 ? rad : 4,
+                label: (document.getElementById('obj-ac-label').value || '').trim() || '操縦する',
+                cockpitOffset: {
+                    x: parseFloat(document.getElementById('obj-ac-cockpit-x').value) || 0,
+                    y: parseFloat(document.getElementById('obj-ac-cockpit-y').value) || 0,
+                    z: parseFloat(document.getElementById('obj-ac-cockpit-z').value) || 0
+                },
+                chaseOffset: {
+                    x: parseFloat(document.getElementById('obj-ac-chase-x').value) || 0,
+                    y: parseFloat(document.getElementById('obj-ac-chase-y').value) || 0,
+                    z: parseFloat(document.getElementById('obj-ac-chase-z').value) || 0
+                }
+            };
+        } else {
+            delete c.aircraft;
+        }
     } else if (selectedObject.userData.pdfConfig) {
         if (document.getElementById('obj-teleporter').checked) {
             const accessEl = document.getElementById('obj-tp-access');
@@ -1253,6 +1311,18 @@ function buildWorldsFromScene() {
                     if (c.animate) c.animate = { ...c.animate, rotation: c.animate.rotation ? { ...c.animate.rotation } : {} };
                     if (c.teleporter) c.teleporter = { ...c.teleporter };
                     if (c.taiko) c.taiko = { ...c.taiko };
+                    if (c.aircraft) {
+                        const a = c.aircraft;
+                        const ck = a.cockpitOffset || {};
+                        const ch = a.chaseOffset || {};
+                        c.aircraft = {
+                            id: a.id,
+                            radius: a.radius,
+                            label: a.label,
+                            cockpitOffset: { x: ck.x, y: ck.y, z: ck.z },
+                            chaseOffset: { x: ch.x, y: ch.y, z: ch.z }
+                        };
+                    }
                     if (!isObjPath(c.path || '')) delete c.mtlPath;
                     w.models.push(c);
                 }
@@ -1509,6 +1579,26 @@ async function loadWorldIntoScene(world) {
             teleporter: config.teleporter ? { ...config.teleporter } : undefined,
             taiko: config.taiko ? { ...config.taiko } : undefined
         };
+        if (config.aircraft && config.aircraft.id) {
+            const a = config.aircraft;
+            const ck = a.cockpitOffset || {};
+            const ch = a.chaseOffset || {};
+            cfgBase.aircraft = {
+                id: String(a.id || '').trim(),
+                radius: typeof a.radius === 'number' && Number.isFinite(a.radius) ? a.radius : 4,
+                label: a.label || '操縦する',
+                cockpitOffset: {
+                    x: ck.x ?? 0,
+                    y: ck.y ?? 1.2,
+                    z: ck.z ?? 0
+                },
+                chaseOffset: {
+                    x: ch.x ?? 0,
+                    y: ch.y ?? 3,
+                    z: ch.z ?? 12
+                }
+            };
+        }
         const cm = String(config.chunkManifest || '').trim();
         if (cm) {
             cfgBase.chunkManifest = cm;
@@ -2356,6 +2446,23 @@ function bindEvents() {
     });
     document.getElementById('obj-taiko-group-id').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-taiko-chart-id').addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-vehicle-type')?.addEventListener('change', () => {
+        updateVehicleAircraftFieldsVisibility();
+        syncObjectFromPanel();
+    });
+    for (const acId of [
+        'obj-ac-id',
+        'obj-ac-radius',
+        'obj-ac-label',
+        'obj-ac-cockpit-x',
+        'obj-ac-cockpit-y',
+        'obj-ac-cockpit-z',
+        'obj-ac-chase-x',
+        'obj-ac-chase-y',
+        'obj-ac-chase-z'
+    ]) {
+        document.getElementById(acId)?.addEventListener('change', syncObjectFromPanel);
+    }
 
     document.getElementById('btn-save').addEventListener('click', async () => {
         const status = document.getElementById('save-status');
@@ -2966,9 +3073,10 @@ function bindEvents() {
      * @param {File} file
      * @param {(ratio: number) => void} [onUploadProgress]
      * @param {() => void} [onUploadBytesSent] リクエストボディの送信完了後（サーバ処理待ち）。GLB のテクスチャリサイズ中など。
+     * @param {boolean} [skipSpatialChunk] true のとき GLB の空間チャンク分割をサーバで行わない
      * @returns {Promise<{ status: number, text: string, json: object|null }>}
      */
-    function postAdminModelUploadXHR(url, file, onUploadProgress, onUploadBytesSent) {
+    function postAdminModelUploadXHR(url, file, onUploadProgress, onUploadBytesSent, skipSpatialChunk) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', url);
@@ -2995,6 +3103,7 @@ function bindEvents() {
             const form = new FormData();
             form.append('model', file);
             form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+            if (skipSpatialChunk) form.append('skipSpatialChunk', '1');
             xhr.send(form);
         });
     }
@@ -3019,14 +3128,16 @@ function bindEvents() {
      * @param {(ratio: number) => void} [onUploadProgress]
      * @param {{ setStatus: (t: string, c?: string) => void }} ui
      * @param {string} fileName
+     * @param {boolean} [skipSpatialChunk]
      */
-    async function postAdminModelUploadWithPhaseCleanup(url, file, onUploadProgress, ui, fileName) {
+    async function postAdminModelUploadWithPhaseCleanup(url, file, onUploadProgress, ui, fileName, skipSpatialChunk) {
         try {
             return await postAdminModelUploadXHR(
                 url,
                 file,
                 onUploadProgress,
-                onModelUploadBytesSentIfGlb(ui, fileName)
+                onModelUploadBytesSentIfGlb(ui, fileName),
+                skipSpatialChunk
             );
         } finally {
             if (activeGlbServerPhaseUi === ui) activeGlbServerPhaseUi = null;
@@ -3362,6 +3473,9 @@ function bindEvents() {
             approvedOverwriteNames = selectedNames;
         }
 
+        const skipChunkEl = document.getElementById('model-upload-skip-chunk');
+        const skipSpatialChunk = !!(skipChunkEl && skipChunkEl.checked);
+
         let ok = 0;
         let skipped = 0;
         let failed = 0;
@@ -3388,6 +3502,9 @@ function bindEvents() {
             }
             if (uploadData.chunkManifest) {
                 msg += ` チャンク: worlds.json の models に chunkManifest「${uploadData.chunkManifest}」を追加してください（単体 GLB も保存済み）。`;
+            }
+            if (uploadData.spatialChunkSkipped) {
+                msg += ' 空間チャンク分けはスキップしました（単体 GLB のみ。chunkManifest は不要です）。';
             }
             ui.setStatus(msg, cls);
             ui.setProgress(1);
@@ -3432,7 +3549,8 @@ function bindEvents() {
                         updateOverallProgress(completedFiles, total, r);
                     },
                     ui,
-                    name
+                    name,
+                    skipSpatialChunk
                 );
 
                 if (xhrRes.status === 409) {
@@ -3461,7 +3579,8 @@ function bindEvents() {
                             updateOverallProgress(completedFiles, total, r);
                         },
                         ui,
-                        name
+                        name,
+                        skipSpatialChunk
                     );
                     if (xhrRes.status === 409) {
                         lastErr = '同名の上書き確認が必要: ' + name;
@@ -3529,7 +3648,8 @@ function bindEvents() {
                                 ui.setProgress(r);
                             },
                             ui,
-                            name
+                            name,
+                            skipSpatialChunk
                         );
                         if (xhrRes.status === 409) {
                             lastErr = '同名の上書き確認が必要: ' + name;

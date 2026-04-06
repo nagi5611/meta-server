@@ -518,6 +518,57 @@
                                             <label class="prop-label" for="obj-anim-z">Rot/Frame Z</label>
                                             <input type="number" id="obj-anim-z" class="prop-input num" step="0.01">
                                         </div>
+                                        <div class="prop-group-label">乗り物</div>
+                                        <p class="hint" style="margin:4px 0 8px;">3D モデルを配置したあと、種類を選んでパラメータを設定してください（メタバース内の操縦用）。</p>
+                                        <div class="prop-row">
+                                            <label class="prop-label" for="obj-vehicle-type">種類</label>
+                                            <select id="obj-vehicle-type" class="prop-input">
+                                                <option value="">なし</option>
+                                                <option value="airplane">飛行機</option>
+                                            </select>
+                                        </div>
+                                        <div id="obj-aircraft-fields" class="block-content" style="display:none;margin-top:8px;padding-left:4px;border-left:2px solid rgba(128,128,128,0.35);">
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-id">機体 ID（ワールド内で一意）</label>
+                                                <input type="text" id="obj-ac-id" class="prop-input" placeholder="例: hangar-plane-1">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-radius">接近・操縦距離</label>
+                                                <input type="number" id="obj-ac-radius" class="prop-input num" step="0.1" min="0.1" value="4">
+                                                <span class="prop-unit">m</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-label">プロンプト文言</label>
+                                                <input type="text" id="obj-ac-label" class="prop-input" placeholder="操縦する">
+                                            </div>
+                                            <div class="prop-group-label">コックピット相対位置（モデル座標）</div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-cockpit-x">X</label>
+                                                <input type="number" id="obj-ac-cockpit-x" class="prop-input num" step="0.1" value="0">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-cockpit-y">Y</label>
+                                                <input type="number" id="obj-ac-cockpit-y" class="prop-input num" step="0.1" value="1.2">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-cockpit-z">Z</label>
+                                                <input type="number" id="obj-ac-cockpit-z" class="prop-input num" step="0.1" value="0">
+                                            </div>
+                                            <div class="prop-group-label">追従カメラ相対位置（モデル座標・+Z が後方寄り）</div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-chase-x">X</label>
+                                                <input type="number" id="obj-ac-chase-x" class="prop-input num" step="0.1" value="0">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-chase-y">Y</label>
+                                                <input type="number" id="obj-ac-chase-y" class="prop-input num" step="0.1" value="3">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-chase-z">Z</label>
+                                                <input type="number" id="obj-ac-chase-z" class="prop-input num" step="0.1" value="12">
+                                            </div>
+                                            <p class="hint" style="margin-top:6px;">前進方向はモデルの <strong>-Z</strong> 軸です。Blender 等の向きに合わせてオブジェクトの回転を調整してください。</p>
+                                        </div>
                                     </div>
                                 </details>
                                 <details class="block" id="object-props-taiko">
@@ -943,6 +994,10 @@
                 </div>
             </fieldset>
             <p id="model-upload-hint-model" class="hint model-upload-hint">GLB はサーバでテクスチャ長辺を最大 1536px に縮小してから保存します（複数アップロード時はサーバ側で順番に処理されます）。</p>
+            <div class="model-upload-skip-chunk-row prop-row checkbox-row" style="margin-top:10px;">
+                <input type="checkbox" id="model-upload-skip-chunk" class="prop-checkbox">
+                <label class="prop-label" for="model-upload-skip-chunk">空間チャンク分けをしない（単体 GLB のみ保存。条件を満たしても .chunks.json は作りません）</label>
+            </div>
             <p id="model-upload-hint-pdf" class="hint model-upload-hint" hidden>PDF をサーバーにアップロードします。同名ファイルがある場合は上書きの確認が表示されます。</p>
             <p id="model-upload-hint-hdr" class="hint model-upload-hint" hidden>Radiance の <code>.hdr</code> のみ。<code>default.hdr</code> として保存され、メタバースは <code>/env/default.hdr</code> から読み込みます。</p>
             <div id="model-upload-3d-only" class="model-upload-3d-only">

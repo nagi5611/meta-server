@@ -4075,18 +4075,23 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         let outBuffer = req.file.buffer;
         let textureResize = null;
         let spatialChunk = null;
+        const skipSpatialChunk = req.body?.skipSpatialChunk === '1' || req.body?.skipSpatialChunk === 'true';
         if (ext === '.glb') {
             const pipelineResult = await runGlbTextureResizeQueued(req.file.buffer);
             outBuffer = pipelineResult.buffer;
             textureResize = pipelineResult.textureResize;
-            try {
-                spatialChunk = await runGlbSpatialChunkIfNeeded(outBuffer, {
-                    modelsDir: MODELS_DIR,
-                    baseFilename: filename,
-                });
-            } catch (e) {
-                console.warn('[upload] spatial chunk error:', e);
-                spatialChunk = { applied: false, reason: 'error', detail: String(e) };
+            if (!skipSpatialChunk) {
+                try {
+                    spatialChunk = await runGlbSpatialChunkIfNeeded(outBuffer, {
+                        modelsDir: MODELS_DIR,
+                        baseFilename: filename,
+                    });
+                } catch (e) {
+                    console.warn('[upload] spatial chunk error:', e);
+                    spatialChunk = { applied: false, reason: 'error', detail: String(e) };
+                }
+            } else {
+                spatialChunk = { applied: false, reason: 'skipped_by_client' };
             }
         }
         fs.writeFileSync(destPath, outBuffer);
@@ -4106,6 +4111,9 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
             payload.spatialChunk = {
                 chunkFiles: spatialChunk.chunkFiles,
             };
+        }
+        if (skipSpatialChunk && ext === '.glb') {
+            payload.spatialChunkSkipped = true;
         }
         res.json(payload);
     } catch (err) {
