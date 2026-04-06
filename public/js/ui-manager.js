@@ -10,7 +10,33 @@ class UIManager {
         this.worldLoadLabel = null;
         this.worldLoadBarFill = null;
         this.worldLoadPct = null;
+        /** @type {HTMLElement|null} */
+        this.aircraftBoardPrompt = null;
+        /** @type {HTMLElement|null} */
+        this.aircraftHud = null;
+        /** @type {(() => void)|null} */
+        this._aircraftBoardHandler = null;
+        /** @type {(() => void)|null} */
+        this._aircraftHudExit = null;
+        /** @type {(() => void)|null} */
+        this._aircraftHudCamera = null;
         this.init();
+    }
+
+    /**
+     * @param {() => void} fn
+     */
+    setAircraftBoardHandler(fn) {
+        this._aircraftBoardHandler = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * @param {{ onExit?: () => void, onToggleCamera?: () => void }} handlers
+     */
+    setAircraftHudHandlers(handlers) {
+        const h = handlers && typeof handlers === 'object' ? handlers : {};
+        this._aircraftHudExit = typeof h.onExit === 'function' ? h.onExit : null;
+        this._aircraftHudCamera = typeof h.onToggleCamera === 'function' ? h.onToggleCamera : null;
     }
 
     /**
@@ -33,6 +59,46 @@ class UIManager {
             this.teleportPrompt.id = 'teleport-prompt';
             this.teleportPrompt.style.display = 'none';
             document.body.appendChild(this.teleportPrompt);
+        }
+
+        this.aircraftBoardPrompt = document.getElementById('aircraft-board-prompt');
+        if (!this.aircraftBoardPrompt) {
+            this.aircraftBoardPrompt = document.createElement('div');
+            this.aircraftBoardPrompt.id = 'aircraft-board-prompt';
+            this.aircraftBoardPrompt.style.display = 'none';
+            document.body.appendChild(this.aircraftBoardPrompt);
+        }
+        if (!this.aircraftBoardPrompt.dataset.wiredBoard) {
+            this.aircraftBoardPrompt.dataset.wiredBoard = '1';
+            const triggerBoard = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this._aircraftBoardHandler) this._aircraftBoardHandler();
+            };
+            this.aircraftBoardPrompt.addEventListener('click', triggerBoard);
+            this.aircraftBoardPrompt.addEventListener('touchend', triggerBoard, { passive: false });
+        }
+
+        this.aircraftHud = document.getElementById('aircraft-hud');
+        if (!this.aircraftHud) {
+            this.aircraftHud = document.createElement('div');
+            this.aircraftHud.id = 'aircraft-hud';
+            this.aircraftHud.style.display = 'none';
+            document.body.appendChild(this.aircraftHud);
+        }
+        if (!this.aircraftHud.dataset.wiredHud) {
+            this.aircraftHud.dataset.wiredHud = '1';
+            this.aircraftHud.addEventListener('click', (e) => {
+                const t = e.target;
+                if (t && t.id === 'aircraft-hud-exit' && this._aircraftHudExit) {
+                    e.preventDefault();
+                    this._aircraftHudExit();
+                }
+                if (t && t.id === 'aircraft-hud-camera' && this._aircraftHudCamera) {
+                    e.preventDefault();
+                    this._aircraftHudCamera();
+                }
+            });
         }
 
         // プレイヤー一覧のイベント委譲（ビデオ視聴ボタン）
@@ -242,6 +308,32 @@ class UIManager {
                 return `${sep}<div class="player-list-item ${micClass}">${playerInfo}${watchBtn}${pingSpan}${perfSpan}${roleSpan}</div>`;
             }).join('');
         }
+    }
+
+    /**
+     * @param {string} [label]
+     */
+    showAircraftBoardPrompt(label) {
+        if (!this.aircraftBoardPrompt) return;
+        this.aircraftBoardPrompt.textContent = label || '操縦する（クリック）';
+        this.aircraftBoardPrompt.style.display = 'block';
+    }
+
+    hideAircraftBoardPrompt() {
+        if (!this.aircraftBoardPrompt) return;
+        this.aircraftBoardPrompt.style.display = 'none';
+    }
+
+    showAircraftHud() {
+        if (!this.aircraftHud) return;
+        this.aircraftHud.innerHTML = '<button type="button" id="aircraft-hud-exit">降りる (F)</button><button type="button" id="aircraft-hud-camera">視点 (V)</button>';
+        this.aircraftHud.style.display = 'flex';
+    }
+
+    hideAircraftHud() {
+        if (!this.aircraftHud) return;
+        this.aircraftHud.style.display = 'none';
+        this.aircraftHud.innerHTML = '';
     }
 }
 

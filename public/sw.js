@@ -114,7 +114,7 @@ self.addEventListener('message', (event) => {
         cacheWritesDisabled = !!data.value;
         return;
     }
-
+    
     if (data.type === 'INVALIDATE' && Array.isArray(data.urls)) {
         event.waitUntil((async () => {
             const cache = await caches.open(CACHE_NAME);

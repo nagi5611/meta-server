@@ -45,7 +45,20 @@ const DEFAULT_WORLDS = {
             { path: 'models/lobby.glb', position: { x: 0, y: 1, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 2, y: 2, z: 2 } },
             { path: 'models/monument.glb', position: { x: 0, y: 3.5, z: -10 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1.5, y: 1.5, z: 1.5 }, animate: { rotation: { x: 0, y: 0.1, z: 0 } } },
             { path: 'models/teleporter_s2.glb', position: { x: 6, y: 1.35, z: -10 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 0.05, y: 0.05, z: 0.05 }, animate: { rotation: { x: 0, y: 0.1, z: 0 } }, teleporter: { id: 's1', destinationWorld: 'school', radius: 3, label: '新校舎' } },
-            { path: 'models/teleporter_l2.glb', position: { x: 6, y: 3.9, z: -10 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 0.3, y: 0.3, z: 0.3 } }
+            { path: 'models/teleporter_l2.glb', position: { x: 6, y: 3.9, z: -10 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 0.3, y: 0.3, z: 0.3 } },
+            {
+                path: 'models/teleporter_l2.glb',
+                position: { x: -18, y: 3, z: 18 },
+                rotation: { x: 0, y: 135, z: 0 },
+                scale: { x: 2.5, y: 2.5, z: 2.5 },
+                aircraft: {
+                    id: 'lobby-plane-1',
+                    radius: 6,
+                    label: '操縦する',
+                    cockpitOffset: { x: 0, y: 1.2, z: 0 },
+                    chaseOffset: { x: 0, y: 3, z: 12 }
+                }
+            }
         ],
         spawnPoint: { x: 0, y: 10, z: 0 },
         lights: [
@@ -220,6 +233,98 @@ function validateWorldsPlayBoundsAndColliders(worlds) {
         }
     }
     return errors;
+}
+
+/**
+ * aircraft メタデータの検証（同一ワールド内 id 一意）
+ * @param {Record<string, unknown>} worlds
+ * @returns {string[]}
+ */
+function validateWorldsAircraft(worlds) {
+    const errors = [];
+    if (!worlds || typeof worlds !== 'object') return errors;
+    for (const [wid, w] of Object.entries(worlds)) {
+        if (!w || typeof w !== 'object' || !Array.isArray(w.models)) continue;
+        const seen = new Set();
+        w.models.forEach((m, i) => {
+            const a = m && m.aircraft;
+            if (!a || typeof a !== 'object') return;
+            const id = String(a.id || '').trim();
+            if (!id) {
+                errors.push(`ワールド「${wid}」オブジェクト#${i + 1}: aircraft.id が必要です`);
+                return;
+            }
+            if (seen.has(id)) {
+                errors.push(`ワールド「${wid}」: aircraft.id「${id}」が重複しています`);
+            }
+            seen.add(id);
+            const r = a.radius;
+            if (r != null && (typeof r !== 'number' || !Number.isFinite(r) || r <= 0)) {
+                errors.push(`ワールド「${wid}」 aircraft「${id}」: radius は正の有限数値にしてください`);
+            }
+        });
+    }
+    return errors;
+}
+
+/**
+ * @param {string} worldId
+ * @param {string} slotId
+ * @returns {boolean}
+ */
+function worldContainsAircraftSlot(worldId, slotId) {
+    const worlds = readWorlds();
+    const w = worlds[worldId];
+    if (!w || !Array.isArray(w.models)) return false;
+    const sid = String(slotId || '').trim();
+    return w.models.some((m) => m && m.aircraft && String(m.aircraft.id || '').trim() === sid);
+}
+
+/**
+ * @param {import('socket.io').Server} ioSrv
+ * @param {string} roomId
+ * @param {string} socketId
+ */
+function releaseAllAircraftForPlayerInRoom(ioSrv, roomId, socketId) {
+    const rs = roomStates.get(roomId);
+    if (!rs || !rs.aircraft) return;
+    const released = [];
+    for (const [slotId, pilotId] of rs.aircraft.pilots) {
+        if (pilotId === socketId) {
+            rs.aircraft.pilots.delete(slotId);
+            rs.aircraft.poses.delete(slotId);
+            released.push(slotId);
+        }
+    }
+    const player = rs.players.get(socketId);
+    if (player) player.pilotingAircraftId = null;
+    for (const slotId of released) {
+        ioSrv.to(roomId).emit('aircraft-released', { slotId });
+    }
+}
+
+/**
+ * @param {{ aircraft?: { pilots: Map<string, string>, poses: Map<string, { position: object, quaternion: object }> } }} rs
+ * @returns {{ id: string, pilotId: string, position: object, quaternion: object }[]}
+ */
+function buildAircraftSnapshotList(rs) {
+    if (!rs?.aircraft?.pilots?.size) return [];
+    const list = [];
+    for (const [slotId, pilotSocketId] of rs.aircraft.pilots) {
+        const pose = rs.aircraft.poses.get(slotId);
+        if (!pose || !pose.position || !pose.quaternion) continue;
+        const p = pose.position;
+        const q = pose.quaternion;
+        if (![p.x, p.y, p.z].every((n) => typeof n === 'number' && Number.isFinite(n))) continue;
+        if (![q.x, q.y, q.z, q.w].every((n) => typeof n === 'number' && Number.isFinite(n))) continue;
+        list.push({
+            id: slotId,
+            pilotId: pilotSocketId,
+            position: { x: p.x, y: p.y, z: p.z },
+            quaternion: { x: q.x, y: q.y, z: q.z, w: q.w }
+        });
+    }
+    return list;
 }
 
 /**
@@ -1626,11 +1731,19 @@ const PING_STALE_MS = 15000;
 function getRoomState(roomId) {
     if (!roomStates.has(roomId)) {
         roomStates.set(roomId, {
-            players: new Map()
+            players: new Map(),
+            aircraft: {
+                pilots: new Map(),
+                poses: new Map()
+            }
         });
         console.log(`Created new room: ${roomId}`);
     }
-    return roomStates.get(roomId);
+    const rs = roomStates.get(roomId);
+    if (!rs.aircraft) {
+        rs.aircraft = { pilots: new Map(), poses: new Map() };
+    }
+    return rs;
 }
 
 // VC: Cleanup peer resources
@@ -1865,10 +1978,16 @@ io.on('connection', (socket) => {
         adminInvisible: false,
         animState: 'idle',
         serverLowAssistPrev: null,
-        serverLowAssistAt: Date.now()
+        serverLowAssistAt: Date.now(),
+        pilotingAircraftId: null
     };
     roomState.players.set(socket.id, initialPlayerState);
     setPhysicsAssistGrace(socket);
+
+    const aircraftSnap = buildAircraftSnapshotList(roomState);
+    if (aircraftSnap.length > 0) {
+        socket.emit('aircraft-initial', { aircraft: aircraftSnap });
+    }
 
     // Send current players in this room to the new player (with displayName for admin)
     const currentPlayers = Array.from(roomState.players.values()).map(p => ({
@@ -2261,7 +2380,9 @@ io.on('connection', (socket) => {
                 const wcfg = worldsData[currentRoom];
                 const effTier = socket.data.effectivePerfTier || 'high';
 
-                if (!player.isAdmin && !inGrace && effTier === 'low') {
+                const skipAssist = !!player.pilotingAircraftId;
+
+                if (!player.isAdmin && !inGrace && effTier === 'low' && !skipAssist) {
                     const low = applyLowTierPositionChecks(
                         pos,
                         player.serverLowAssistPrev,
@@ -2276,7 +2397,7 @@ io.on('connection', (socket) => {
                     }
                 }
 
-                if (!player.isAdmin && !inGrace) {
+                if (!player.isAdmin && !inGrace && !skipAssist) {
                     const clamped = clampPlayerFeetYForWorld(wcfg, pos.y);
                     if (clamped.changed) {
                         pos.y = clamped.y;
@@ -2304,8 +2425,78 @@ io.on('connection', (socket) => {
         if (data.animState !== undefined && data.animState !== null) {
             player.animState = normalizePlayerAnimState(data.animState);
         }
+
+        const pilotSlot = player.pilotingAircraftId;
+        if (pilotSlot && data.aircraftPose && String(data.aircraftPose.slotId || '') === String(pilotSlot)) {
+            if (!roomState.aircraft) {
+                roomState.aircraft = { pilots: new Map(), poses: new Map() };
+            }
+            const ap = data.aircraftPose;
+            const pq = ap.position;
+            const qq = ap.quaternion;
+            if (pq && qq
+                && [pq.x, pq.y, pq.z].every((n) => typeof n === 'number' && Number.isFinite(n))
+                && [qq.x, qq.y, qq.z, qq.w].every((n) => typeof n === 'number' && Number.isFinite(n))) {
+                roomState.aircraft.poses.set(pilotSlot, {
+                    position: { x: pq.x, y: pq.y, z: pq.z },
+                    quaternion: { x: qq.x, y: qq.y, z: qq.z, w: qq.w },
+                    timestamp: incomingTimestamp
+                });
+            }
+        }
+
         player.timestamp = incomingTimestamp;
         player.world = currentRoom;
+    });
+
+    socket.on('aircraft-board', (data, callback) => {
+        const slotId = data && String(data.slotId || '').trim();
+        const world = socket.data.currentRoom;
+        if (!slotId || !world) {
+            if (typeof callback === 'function') callback({ ok: false, error: 'bad_request' });
+            return;
+        }
+        if (!worldContainsAircraftSlot(world, slotId)) {
+            if (typeof callback === 'function') callback({ ok: false, error: 'invalid_slot' });
+            return;
+        }
+        const rs = getRoomState(world);
+        if (rs.aircraft.pilots.has(slotId)) {
+            if (typeof callback === 'function') callback({ ok: false, error: 'busy' });
+            return;
+        }
+        const pl = rs.players.get(socket.id);
+        if (!pl) {
+            if (typeof callback === 'function') callback({ ok: false, error: 'no_player' });
+            return;
+        }
+        if (pl.pilotingAircraftId) {
+            if (typeof callback === 'function') callback({ ok: false, error: 'already_piloting' });
+            return;
+        }
+        rs.aircraft.pilots.set(slotId, socket.id);
+        pl.pilotingAircraftId = slotId;
+        if (typeof callback === 'function') callback({ ok: true });
+    });
+
+    socket.on('aircraft-exit', (data, callback) => {
+        const world = socket.data.currentRoom;
+        if (!world) {
+            if (typeof callback === 'function') callback({ ok: false, error: 'no_room' });
+            return;
+        }
+        const rs = getRoomState(world);
+        const pl = rs.players.get(socket.id);
+        const slotId = (data && String(data.slotId || '').trim()) || (pl && pl.pilotingAircraftId);
+        if (!slotId || rs.aircraft.pilots.get(slotId) !== socket.id) {
+            if (typeof callback === 'function') callback({ ok: false, error: 'not_pilot' });
+            return;
+        }
+        rs.aircraft.pilots.delete(slotId);
+        rs.aircraft.poses.delete(slotId);
+        if (pl) pl.pilotingAircraftId = null;
+        io.to(world).emit('aircraft-released', { slotId });
+        if (typeof callback === 'function') callback({ ok: true });
     });
 
     // Handle world/room change (callback は Socket.io ack: テレポーター権限拒否時や完了時に使用)
@@ -2342,6 +2533,7 @@ io.on('connection', (socket) => {
 
         // Remove from old room
         if (oldRoom) {
+            releaseAllAircraftForPlayerInRoom(io, oldRoom, socket.id);
             oldRoomState.players.delete(socket.id);
             socket.leave(oldRoom);
             socket.to(oldRoom).emit('player-left', socket.id);
@@ -2365,10 +2557,16 @@ io.on('connection', (socket) => {
             adminInvisible: !!(oldPlayerState && oldPlayerState.adminInvisible),
             animState: normalizePlayerAnimState(oldPlayerState?.animState) || 'idle',
             serverLowAssistPrev: null,
-            serverLowAssistAt: Date.now()
+            serverLowAssistAt: Date.now(),
+            pilotingAircraftId: null
         };
         newRoomState.players.set(socket.id, playerState);
         setPhysicsAssistGrace(socket);
+
+        const acInit = buildAircraftSnapshotList(newRoomState);
+        if (acInit.length > 0) {
+            socket.emit('aircraft-initial', { aircraft: acInit });
+        }
 
         // Notify new room
         socket.to(newRoom).emit('player-joined', playerState);
@@ -3294,6 +3492,7 @@ io.on('connection', (socket) => {
         
         const currentRoom = socket.data.currentRoom;
         if (currentRoom) {
+            releaseAllAircraftForPlayerInRoom(io, currentRoom, socket.id);
             const roomState = getRoomState(currentRoom);
             roomState.players.delete(socket.id);
             
@@ -3441,9 +3640,15 @@ setInterval(() => {
             };
         });
         
+        if (!roomState.aircraft) {
+            roomState.aircraft = { pilots: new Map(), poses: new Map() };
+        }
+        const aircraftList = buildAircraftSnapshotList(roomState);
+
         const snapshot = {
             timestamp: tickTimestamp,
-            players: playersArray
+            players: playersArray,
+            aircraft: aircraftList
         };
         
         // Broadcast to all players in this room
@@ -3474,11 +3679,15 @@ app.post('/admin/worlds', (req, res) => {
     if (!worlds || typeof worlds !== 'object') {
         return res.status(400).json({ error: 'Invalid body: expected worlds object' });
     }
-    const taikoErrs = validateWorldsTaikoMultiplayer(worlds);
-    if (taikoErrs.length > 0) {
-        return res.status(400).json({ error: taikoErrs.join(' ') });
-    }
-    const physicsErrs = validateWorldsPhysicsAssist(worlds);
+        const taikoErrs = validateWorldsTaikoMultiplayer(worlds);
+        if (taikoErrs.length > 0) {
+            return res.status(400).json({ error: taikoErrs.join(' ') });
+        }
+        const aircraftErrs = validateWorldsAircraft(worlds);
+        if (aircraftErrs.length > 0) {
+            return res.status(400).json({ error: aircraftErrs.join(' ') });
+        }
+        const physicsErrs = validateWorldsPhysicsAssist(worlds);
     if (physicsErrs.length > 0) {
         return res.status(400).json({ error: physicsErrs.join(' ') });
     }
@@ -4255,6 +4464,7 @@ app.post('/admin/command', async (req, res) => {
             const oldRoom = targetSocket.data.currentRoom;
             const newRoom = worldId;
             if (oldRoom !== newRoom) {
+                releaseAllAircraftForPlayerInRoom(io, oldRoom, targetSocketId);
                 const oldRoomState = getRoomState(oldRoom);
                 const oldPlayer = oldRoomState.players.get(targetSocketId);
                 oldRoomState.players.delete(targetSocketId);
@@ -4272,7 +4482,10 @@ app.post('/admin/command', async (req, res) => {
                     world: newRoom,
                     timestamp: 0,
                     adminInvisible: !!(oldPlayer && oldPlayer.adminInvisible),
-                    animState: normalizePlayerAnimState(oldPlayer?.animState) || 'idle'
+                    animState: normalizePlayerAnimState(oldPlayer?.animState) || 'idle',
+                    pilotingAircraftId: null,
+                    serverLowAssistPrev: null,
+                    serverLowAssistAt: Date.now()
                 };
                 newRoomState.players.set(targetSocketId, playerState);
                 io.to(newRoom).emit('player-joined', playerState);
@@ -4281,9 +4494,13 @@ app.post('/admin/command', async (req, res) => {
                 await cleanupVideoVCPeer(targetSocketId);
                 targetSocket.emit('video-vc-room-changed', { roomId: newRoom });
             } else {
+                releaseAllAircraftForPlayerInRoom(io, newRoom, targetSocketId);
                 const roomState = getRoomState(newRoom);
                 const player = roomState.players.get(targetSocketId);
-                if (player) player.position = position;
+                if (player) {
+                    player.position = position;
+                    player.pilotingAircraftId = null;
+                }
             }
             setPhysicsAssistGrace(targetSocket);
             targetSocket.emit('admin-tp', { world: worldId, position });

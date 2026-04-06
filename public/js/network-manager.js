@@ -24,6 +24,23 @@ class NetworkManager {
         this.DISCONNECT_THRESHOLD_MS = 30000;   // 30秒で切断
         /** @type {(() => object)|null} report-ping に載せる性能ペイロード */
         this._perfPayloadGetter = null;
+
+        /** @type {(() => object|null)|null} 操縦中の機体姿勢を player-update に同梱 */
+        this._getAircraftPoseForNetwork = null;
+        /** @type {((list: object[]) => void)|null} */
+        this._onAircraftSnapshot = null;
+        /** @type {((slotId: string) => void)|null} */
+        this._onAircraftReleased = null;
+    }
+
+    /**
+     * @param {{ getPose?: () => object|null, onSnapshot?: (list: object[]) => void, onReleased?: (slotId: string) => void }} bridge
+     */
+    setAircraftNetworkBridge(bridge) {
+        const b = bridge && typeof bridge === 'object' ? bridge : {};
+        this._getAircraftPoseForNetwork = typeof b.getPose === 'function' ? b.getPose : null;
+        this._onAircraftSnapshot = typeof b.onSnapshot === 'function' ? b.onSnapshot : null;
+        this._onAircraftReleased = typeof b.onReleased === 'function' ? b.onReleased : null;
     }
 
     /**
@@ -195,6 +212,23 @@ class NetworkManager {
                     }
                 }
             }
+
+            if (snapshot.aircraft && this._onAircraftSnapshot) {
+                this._onAircraftSnapshot(snapshot.aircraft);
+            }
+        });
+
+        this.socket.on('aircraft-initial', (data) => {
+            if (Array.isArray(data?.aircraft) && this._onAircraftSnapshot) {
+                this._onAircraftSnapshot(data.aircraft);
+            }
+        });
+
+        this.socket.on('aircraft-released', (data) => {
+            const sid = data && data.slotId;
+            if (sid && this._onAircraftReleased) {
+                this._onAircraftReleased(String(sid));
+            }
         });
 
         // Handle player leaving
@@ -295,6 +329,11 @@ class NetworkManager {
                 world: this.currentWorld,
                 adminInvisible: this.adminInvisible
             };
+
+            const aircraftPose = this._getAircraftPoseForNetwork?.();
+            if (aircraftPose) {
+                updateData.aircraftPose = aircraftPose;
+            }
 
             this.socket.emit('player-update', updateData);
         }, 33); // 33ms = ~30fps

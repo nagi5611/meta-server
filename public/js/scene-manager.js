@@ -63,6 +63,8 @@ class SceneManager {
         this.animatedModels = []; // Track models with animations
         this.teleporters = []; // Track teleporter models
         this.taikos = []; // Track taiko drum models
+        /** @type {object[]} 飛行機スロット（ワールドロード時に登録） */
+        this.aircraftSlots = [];
         /** Lights added for current world (removed on clearWorld) */
         this.worldLights = [];
         /** Ground mesh (first child of environmentGroup). Visibility controlled by setFloorVisible. */
@@ -697,6 +699,10 @@ class SceneManager {
                     multiplayerChartId: t.multiplayer ? String(t.multiplayerChartId || '').trim() : ''
                 });
                 console.log(`  Taiko: radius=${t.radius || 3}${t.multiplayer ? ` mp group=${t.groupId}` : ''}`);
+            }
+
+            if (config.aircraft) {
+                this._registerAircraftSlot(model, config.aircraft, position);
             }
 
             loadedCount++;
@@ -1416,12 +1422,43 @@ class SceneManager {
             this.collider = null;
         }
 
-        // Clear teleporters, taikos, and animations for this world
+        // Clear teleporters, taikos, aircraft, and animations for this world
         this.teleporters = [];
         this.taikos = [];
+        this.aircraftSlots = [];
         this.animatedModels = [];
 
         console.log('World cleared');
+    }
+
+    /**
+     * ワールド設定の aircraft とシーン上のルートオブジェクトを紐づけて登録する
+     * @param {THREE.Object3D} model
+     * @param {object} aircraftCfg - models[].aircraft
+     * @param {{x:number,y:number,z:number}} position - 設定上の位置（近接ゾーン用）
+     */
+    _registerAircraftSlot(model, aircraftCfg, position) {
+        const id = String(aircraftCfg.id || '').trim();
+        if (!id) {
+            console.warn('  Aircraft: skipped — missing id');
+            return;
+        }
+        model.userData.aircraftId = id;
+        const cockpit = aircraftCfg.cockpitOffset || { x: 0, y: 1.2, z: 0 };
+        const chase = aircraftCfg.chaseOffset || { x: 0, y: 3, z: 12 };
+        this.aircraftSlots.push({
+            id,
+            position: { x: position.x, y: position.y, z: position.z },
+            radius: typeof aircraftCfg.radius === 'number' && Number.isFinite(aircraftCfg.radius) ? aircraftCfg.radius : 4,
+            label: aircraftCfg.label || '操縦する',
+            cockpitOffset: { x: cockpit.x, y: cockpit.y, z: cockpit.z },
+            chaseOffset: { x: chase.x, y: chase.y, z: chase.z },
+            root: model,
+            parkedPosition: model.position.clone(),
+            parkedQuaternion: model.quaternion.clone(),
+            parkedScale: model.scale.clone()
+        });
+        console.log(`  Aircraft: ID=${id}, radius=${aircraftCfg.radius || 4}`);
     }
 
     /**
@@ -1429,6 +1466,13 @@ class SceneManager {
      */
     getTeleporters() {
         return this.teleporters;
+    }
+
+    /**
+     * 現在ワールドの飛行機スロット（操縦・同期用）
+     */
+    getAircraftSlots() {
+        return this.aircraftSlots;
     }
 
     /**

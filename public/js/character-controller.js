@@ -70,7 +70,24 @@ class CharacterController {
         /** true の間は歩行物理（重力・BVH 移動）を回さない。初回ゲーム入力で false に戻す */
         this._suspendPhysicsUntilGameplayInput = false;
 
+        /** 飛行機操縦中: getPosition/getRotation を委譲し update をスキップ */
+        this._aircraftPoseProvider = null;
+        this._aircraftFeetScratch = new THREE.Vector3();
+
         this.setupControls();
+    }
+
+    /**
+     * 操縦中は歩行・マウス視点を無効化し、同期位置を委譲する
+     * @param {{ getPosition: (out?: THREE.Vector3) => THREE.Vector3|null, getQuaternion: (out?: THREE.Quaternion) => THREE.Quaternion|null }|null} provider
+     */
+    setAircraftPoseProvider(provider) {
+        this._aircraftPoseProvider = provider && typeof provider.getPosition === 'function'
+            ? provider
+            : null;
+        if (this._aircraftPoseProvider && document.pointerLockElement) {
+            document.exitPointerLock();
+        }
     }
 
     /**
@@ -200,6 +217,10 @@ class CharacterController {
     }
 
     onKeyDown(event) {
+        if (this._aircraftPoseProvider) {
+            if (event.code === 'KeyU' && document.pointerLockElement) document.exitPointerLock();
+            return;
+        }
         // Ignore keyboard input if user is typing in chat or other input fields
         if (this.isInputActive()) {
             return;
@@ -246,6 +267,9 @@ class CharacterController {
     }
 
     onKeyUp(event) {
+        if (this._aircraftPoseProvider) {
+            return;
+        }
         // Ignore keyboard input if user is typing in chat or other input fields
         if (this.isInputActive()) {
             return;
@@ -294,6 +318,9 @@ class CharacterController {
      * @returns {{ isMoving: boolean, isDashing: boolean, isGrounded: boolean }}
      */
     getMovementState() {
+        if (this._aircraftPoseProvider) {
+            return { isMoving: false, isDashing: false, isGrounded: true };
+        }
         const kbMoving = this.moveForward || this.moveBackward || this.moveLeft || this.moveRight;
         const mobileMoving = this.isMobileMode && (this.mobileMoveVector.x !== 0 || this.mobileMoveVector.y !== 0);
         const xrMoving = this.xrPresenting && (this.xrMoveVector.x !== 0 || this.xrMoveVector.y !== 0);
@@ -308,6 +335,9 @@ class CharacterController {
      * @returns {'idle'|'walk'|'dash'|'jump'}
      */
     getAnimationState() {
+        if (this._aircraftPoseProvider) {
+            return 'idle';
+        }
         const { isMoving, isDashing, isGrounded } = this.getMovementState();
         if (!isGrounded) return 'jump';
         if (isDashing) return 'dash';
@@ -316,6 +346,7 @@ class CharacterController {
     }
 
     onMouseMove(event) {
+        if (this._aircraftPoseProvider) return;
         if (this.xrPresenting) return;
         if (!this.isPointerLocked) return;
 
@@ -359,6 +390,9 @@ class CharacterController {
     }
 
     update(deltaTime) {
+        if (this._aircraftPoseProvider) {
+            return;
+        }
         if (this.xrPresenting) {
             this._updateXrMovement(deltaTime);
             return;
@@ -552,6 +586,10 @@ class CharacterController {
     }
 
     getPosition() {
+        if (this._aircraftPoseProvider) {
+            const p = this._aircraftPoseProvider.getPosition(this._aircraftFeetScratch);
+            if (p) return p;
+        }
         return this.physicsManager.getCharacterPosition();
     }
 
@@ -564,6 +602,10 @@ class CharacterController {
     }
 
     getRotation() {
+        if (this._aircraftPoseProvider && typeof this._aircraftPoseProvider.getQuaternion === 'function') {
+            const q = this._aircraftPoseProvider.getQuaternion(this.playerQuaternion);
+            if (q) return q;
+        }
         // Return player's facing direction (not camera quaternion)
         return this.playerQuaternion;
     }

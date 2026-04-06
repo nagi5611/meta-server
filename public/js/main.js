@@ -20,6 +20,8 @@ import MobileUIManager from './mobile-ui-manager.js';
 import { createMetaverseVRButton } from './vr-entry-button.js';
 import WebXRLocomotion from './webxr-locomotion.js';
 import { registerMetaverseServiceWorker } from './service-worker-register.js';
+import AircraftController from './aircraft-controller.js';
+import AircraftManager from './aircraft-manager.js';
 
 const DEFAULT_ROOM = 'lobby';
 
@@ -40,6 +42,8 @@ class MetaverseApp {
         this.pdfViewerVoiceChatManager = null;
         this.pdfViewerManager = null;
         this.taikoGameManager = null;
+        this.aircraftController = null;
+        this.aircraftManager = null;
         this.clock = 0;
         this.isPageVisible = true;
         this.nearbyPdfPath = null;
@@ -156,6 +160,7 @@ class MetaverseApp {
         this.userRole = (window.location.pathname === '/admin') ? 'admin' : (localStorage.getItem('userRole') || 'guest');
         this.teleportManager.setUserRole(this.userRole);
         this.teleportManager.setTeleportCallback((destinationWorld, teleporterId) => {
+            if (this.aircraftManager) this.aircraftManager.forceLocalPilotingReset();
             this.networkManager.changeWorld(destinationWorld, { teleporterId }, (err) => {
                 if (err) {
                     alert(err.message || 'このテレポーターは利用できません');
@@ -262,7 +267,38 @@ class MetaverseApp {
             );
         };
         this.setupClientPerfObservers();
-        this.networkManager.setPerfPayloadGetter(() => this.getPerfPayloadForPing());
+
+        this.aircraftController = new AircraftController(
+            this.sceneManager.getCamera(),
+            this.physicsManager
+        );
+        this.aircraftManager = new AircraftManager(
+            this.sceneManager,
+            this.aircraftController,
+            this.characterController,
+            this.networkManager,
+            this.uiManager
+        );
+        this.aircraftManager.setMobileMode(this.isMobileMode);
+        this.aircraftManager.refreshSlotsFromScene();
+
+        this.uiManager.setAircraftBoardHandler(() => {
+            this.aircraftManager.tryBoardNearest();
+        });
+        this.uiManager.setAircraftHudHandlers({
+            onExit: () => this.aircraftManager.exitPiloting(),
+            onToggleCamera: () => this.aircraftManager.toggleCameraMode()
+        });
+
+        this.networkManager.setAircraftNetworkBridge({
+            getPose: () => this.aircraftManager.getAircraftPoseForNetwork(),
+            onSnapshot: (list) => this.aircraftManager.applyNetworkAircraftSnapshot(
+                list,
+                this.networkManager.myPlayerId
+            ),
+            onReleased: (slotId) => this.aircraftManager.onAircraftReleased(slotId)
+        });
+
         this.networkManager.connect();
         this.networkManager.startSendingUpdates(this.characterController);
         if (this.pdfViewerManager) this.pdfViewerManager.setSocket(this.networkManager.socket);
@@ -322,6 +358,7 @@ class MetaverseApp {
             if (nowMobile === this.isMobileMode) return;
             this.isMobileMode = nowMobile;
             this.characterController.setMobileMode(nowMobile);
+            if (this.aircraftManager) this.aircraftManager.setMobileMode(nowMobile);
             if (nowMobile) {
                 MobileJoystickManager.init(this.characterController);
                 MobileUIManager.init();
@@ -384,6 +421,7 @@ class MetaverseApp {
         // Vキー: ビデオ配信中のユーザーを視聴（ポインターロック中でも使える）
         document.addEventListener('keydown', (e) => {
             if (e.code !== 'KeyV' || e.repeat) return;
+            if (this.aircraftManager?.isPiloting) return;
             const input = document.activeElement?.tagName?.toLowerCase();
             if (input === 'input' || input === 'textarea') return;
             const videoOn = (this.networkManager?.lastPlayersSnapshot || []).find(p => p.vcVideoOn);
@@ -602,6 +640,11 @@ class MetaverseApp {
     async onWorldChanged(world) {
         console.log(`World changed to: ${world.id}`);
 
+        if (this.aircraftManager) {
+            this.aircraftManager.forceLocalPilotingReset();
+            this.aircraftManager.refreshSlotsFromScene();
+        }
+
         // Get new spawn point
         const spawnPoint = world.spawnPoint;
 
@@ -648,6 +691,7 @@ class MetaverseApp {
     async onAdminTp(data) {
         const { world: worldId, position } = data;
         if (!worldId || !position) return;
+        if (this.aircraftManager) this.aircraftManager.forceLocalPilotingReset();
         const { x, y, z } = position;
         const currentWorldId = this.worldManager.getCurrentWorldId();
 
@@ -774,8 +818,11 @@ class MetaverseApp {
         const xrActive = this.sceneManager.getRenderer().xr.isPresenting;
         // WebXR 中はタブがバックグラウンド扱いでも物理を回す（ヘッドセット表示を維持）
         if (this.isPageVisible || xrActive) {
-            // Update character controller (includes physics)
+            // Update character controller (includes physics). 操縦中は内部で早期 return
             this.characterController.update(deltaTime);
+            if (this.aircraftManager?.isPiloting && this.aircraftController) {
+                this.aircraftController.update(deltaTime);
+            }
 
             // Update local player visual and animation state
             const position = this.characterController.getPosition();
@@ -793,6 +840,9 @@ class MetaverseApp {
             if (this.teleportManager) {
                 this.teleportManager.update(position);
             }
+            if (this.aircraftManager) {
+                this.aircraftManager.updateProximity(position);
+            }
             const pdfObj = this.sceneManager.getNearbyPdfObject(position, 5);
             // PDFがテレポーターのときは「PDFを表示」にせずテレポート扱いにする
             this.nearbyPdfPath = (pdfObj && !pdfObj.teleporter) ? pdfObj.pdfPath : null;
@@ -804,16 +854,28 @@ class MetaverseApp {
             }
             if (this.pdfViewerManager && this.pdfViewerManager.isOpen()) {
                 this.uiManager.hideTeleportPrompt();
+                this.uiManager.hideAircraftBoardPrompt();
             } else if (this.taikoGameManager && this.taikoGameManager.isOpen()) {
                 this.uiManager.hideTeleportPrompt();
+                this.uiManager.hideAircraftBoardPrompt();
+            } else if (this.aircraftManager && this.aircraftManager.isPiloting) {
+                this.uiManager.hideTeleportPrompt();
+                this.uiManager.hideAircraftBoardPrompt();
             } else if (this.teleportManager && this.teleportManager.nearestTaikoZone) {
+                this.uiManager.hideAircraftBoardPrompt();
                 this.uiManager.showTaikoPrompt();
             } else if (this.nearbyPdfPath) {
+                this.uiManager.hideAircraftBoardPrompt();
                 this.uiManager.showPdfPrompt();
             } else if (this.teleportManager && this.teleportManager.nearestZone) {
+                this.uiManager.hideAircraftBoardPrompt();
                 this.uiManager.showTeleportPrompt(this.teleportManager.nearestZone.label);
+            } else if (this.aircraftManager && this.aircraftManager.nearestSlot) {
+                this.uiManager.hideTeleportPrompt();
+                this.uiManager.showAircraftBoardPrompt(this.aircraftManager.nearestSlot.label);
             } else {
                 this.uiManager.hideTeleportPrompt();
+                this.uiManager.hideAircraftBoardPrompt();
             }
         }
 
