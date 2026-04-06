@@ -1445,6 +1445,8 @@ function updatePhysicsAssistSpawnHint() {
 function fillWorldAircraftPhysicsForm(world) {
     const m = mergeAircraftPhysicsFromWorld(world && world.aircraftPhysics);
     const ids = [
+        ['world-aircraft-gravity', m.gravity],
+        ['world-aircraft-lift-per-speed', m.liftPerHorizontalSpeed],
         ['world-aircraft-max-speed', m.maxSpeed],
         ['world-aircraft-thrust-accel', m.thrustAccel],
         ['world-aircraft-drag', m.drag],
@@ -1468,6 +1470,8 @@ function readWorldAircraftPhysicsFromForm() {
         return Number.isFinite(n) ? n : fallback;
     };
     const raw = {
+        gravity: parse('world-aircraft-gravity', DEFAULT_AIRCRAFT_PHYSICS.gravity),
+        liftPerHorizontalSpeed: parse('world-aircraft-lift-per-speed', DEFAULT_AIRCRAFT_PHYSICS.liftPerHorizontalSpeed),
         maxSpeed: parse('world-aircraft-max-speed', DEFAULT_AIRCRAFT_PHYSICS.maxSpeed),
         thrustAccel: parse('world-aircraft-thrust-accel', DEFAULT_AIRCRAFT_PHYSICS.thrustAccel),
         drag: parse('world-aircraft-drag', DEFAULT_AIRCRAFT_PHYSICS.drag),
@@ -3850,6 +3854,8 @@ function bindEvents() {
     });
 
     for (const aircraftInputId of [
+        'world-aircraft-gravity',
+        'world-aircraft-lift-per-speed',
         'world-aircraft-max-speed',
         'world-aircraft-thrust-accel',
         'world-aircraft-drag',

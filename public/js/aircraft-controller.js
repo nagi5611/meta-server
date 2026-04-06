@@ -39,7 +39,7 @@ export default class AircraftController {
         this._onKeyDown = (e) => this._handleKey(e, true);
         this._onKeyUp = (e) => this._handleKey(e, false);
         this._bound = false;
-        /** @type {{ maxSpeed: number, thrustAccel: number, drag: number, yawRate: number, pitchRate: number, rollRate: number }} */
+        /** @type {{ maxSpeed: number, thrustAccel: number, drag: number, yawRate: number, pitchRate: number, rollRate: number, gravity: number, liftPerHorizontalSpeed: number }} */
         this.physics = mergeAircraftPhysicsFromWorld(null);
     }
 
@@ -215,6 +215,9 @@ export default class AircraftController {
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
         this.velocity.addScaledVector(this._fwd, thrust * ph.thrustAccel * dt);
         this.velocity.multiplyScalar(ph.drag);
+        const vH = Math.hypot(this.velocity.x, this.velocity.z);
+        const liftAccel = ph.liftPerHorizontalSpeed * vH;
+        this.velocity.y += (liftAccel - ph.gravity) * dt;
         const sp = this.velocity.length();
         if (sp > ph.maxSpeed) this.velocity.multiplyScalar(ph.maxSpeed / sp);
 

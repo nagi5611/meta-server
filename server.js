@@ -192,7 +192,9 @@ function validateWorldsAircraftPhysics(worlds) {
         drag: [0.5, 0.99999],
         yawRate: [0.01, 20],
         pitchRate: [0.01, 20],
-        rollRate: [0.01, 20]
+        rollRate: [0.01, 20],
+        gravity: [0, 50],
+        liftPerHorizontalSpeed: [0, 5]
     };
     for (const [wid, w] of Object.entries(worlds)) {
         if (!w || typeof w !== 'object') continue;

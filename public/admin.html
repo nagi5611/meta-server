@@ -753,7 +753,15 @@
                                     <details class="block">
                                         <summary class="block-header">飛行機操縦（ワールド共通）</summary>
                                         <div class="block-content">
-                                            <p class="hint">このワールド内の飛行機スロットすべてに適用されます。1 に近い drag は空気抵抗が弱い（滑らかに加速）です。</p>
+                                            <p class="hint">このワールド内の飛行機スロットすべてに適用されます。揚力は水平速度に比例（低速は落ちやすい）。1 に近い drag は空気抵抗が弱いです。</p>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-gravity">重力加速度</label>
+                                                <input type="number" id="world-aircraft-gravity" class="prop-input num" step="0.1" min="0"><span class="prop-unit">m/s²</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-lift-per-speed">揚力係数（水平速 1m/s あたりの上向き加速度）</label>
+                                                <input type="number" id="world-aircraft-lift-per-speed" class="prop-input num" step="0.01" min="0"><span class="prop-unit">1/s</span>
+                                            </div>
                                             <div class="prop-row">
                                                 <label class="prop-label" for="world-aircraft-max-speed">最高速度</label>
                                                 <input type="number" id="world-aircraft-max-speed" class="prop-input num" step="0.5" min="1"><span class="prop-unit">m/s</span>
