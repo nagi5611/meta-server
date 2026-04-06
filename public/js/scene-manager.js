@@ -392,7 +392,8 @@ class SceneManager {
     }
 
     /**
-     * 足元中心・描画距離（球）で environment の可視を更新する（4 フレームに 1 回）
+     * 足元中心・描画距離（球）で environment の可視を更新する（4 フレームに 1 回）。
+     * 登録時の包絡球心が固定のため、移動するオブジェクト（models[].aircraft）は _drawCullTargets に入れない。
      * @param {import('three').Vector3} feetWorld
      */
     updateDrawDistanceCulling(feetWorld) {
@@ -663,7 +664,8 @@ class SceneManager {
             this.environmentGroup.add(model);
 
             model.updateMatrixWorld(true);
-            if (!String(config.chunkManifest || '').trim()) {
+            // 飛行機ルートは操縦で移動するが、drawCull の球心は登録時固定のため、そのままだと離陸後に視距離外扱いで非表示になる
+            if (!String(config.chunkManifest || '').trim() && !config.aircraft) {
                 this._registerDrawCullTarget(model);
             }
 
@@ -789,7 +791,9 @@ class SceneManager {
                         totalTris += tris;
                         anchor.add(scene);
                         scene.updateMatrixWorld(true);
-                        this._registerDrawCullTarget(scene);
+                        if (!fullConfig.aircraft) {
+                            this._registerDrawCullTarget(scene);
+                        }
                         completedChunkBytes += chunkBudget;
                     }
                     if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
