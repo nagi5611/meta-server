@@ -102,3 +102,11 @@
 - `client-perf`（仮称）イベントの **JSON スキーマ**とティア決定アルゴリズム（疑似コード可）。
 - `socket.data` に載せる **サーバ側状態**一覧（現在の `physicsAssistGraceUntil` との優先順位）。
 - LOD-1 用 **速度・バウンディング**の具体式と、既存 `physicsAssist` 設定との組み合わせ表。
+
+---
+
+## 実装済み（確定仕様の要約）
+
+- **送信**: `report-ping` に `pingMs` に加え `fpsSample`（可視/XR 時のみ 10 秒ごと 1 秒窓のフレーム数）、`perfTier`（`low`≤15 / `medium`≤30 / `high`）、`loafCount`・`longtaskCount`（前回 ping からの差分）、任意 `perfSampleAt`。
+- **サーバ**: `socket.data.effectivePerfTier`（管理者は常に `high`）。`[perf]` 行を `console.log`。Low のみ `player-update` で速度上限（`PHYSICS_LOW_MAX_HORIZ_SPEED`）、`playBounds`、`serverColliders`（AABB ソリッド）を適用。補正は `physics-position-correction` と既存 `physics-y-correction`。
+- **ワールド**: `playBounds` / `serverColliders` は `POST /admin/worlds` で検証。未設定時は壁 AABB 検証をスキップ（速度・境界・Y クランプのみ）。

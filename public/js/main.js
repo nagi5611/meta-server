@@ -50,6 +50,26 @@ class MetaverseApp {
         /** @type {'first'|'third'|null} VR 開始前の視点モード（終了時に復元） */
         this._viewModeBeforeVr = null;
 
+        // public/js/main.js — report-ping 用クライアント性能サンプル（FPS 1s/10s、LoAF/longtask）
+        /** @type {number|null} */
+        this._perfLastFpsSample = null;
+        /** @type {number|null} */
+        this._perfFpsSampleAtMs = null;
+        /** @type {'low'|'medium'|'high'} */
+        this._lastPerfTier = 'high';
+        this._perfLoafAccum = 0;
+        this._perfLongtaskAccum = 0;
+        /** @type {PerformanceObserver|null} */
+        this._perfLoafObserver = null;
+        /** @type {PerformanceObserver|null} */
+        this._perfLongtaskObserver = null;
+        this._perfFpsSamplingActive = false;
+        this._perfFpsFrames = 0;
+        /** @type {number} */
+        this._perfFpsSampleEndAt = 0;
+        /** @type {number} */
+        this._perfNextFpsWindowAt = 0;
+
         // Setup page visibility handling
         this.setupPageVisibility();
     }
@@ -231,6 +251,18 @@ class MetaverseApp {
                 this.characterController.getRotation()
             );
         };
+        this.networkManager.onPhysicsPositionCorrection = (data) => {
+            if (!data || typeof data.x !== 'number' || typeof data.y !== 'number' || typeof data.z !== 'number') return;
+            if (![data.x, data.y, data.z].every((n) => Number.isFinite(n))) return;
+            this.characterController.setPosition(data.x, data.y, data.z);
+            this.characterController.resetVelocity();
+            this.playerManager.updateLocalPlayer(
+                { x: data.x, y: data.y, z: data.z },
+                this.characterController.getRotation()
+            );
+        };
+        this.setupClientPerfObservers();
+        this.networkManager.setPerfPayloadGetter(() => this.getPerfPayloadForPing());
         this.networkManager.connect();
         this.networkManager.startSendingUpdates(this.characterController);
         if (this.pdfViewerManager) this.pdfViewerManager.setSocket(this.networkManager.socket);
@@ -401,6 +433,7 @@ class MetaverseApp {
 
         // Start game loop (WebXR 対応の setAnimationLoop)
         this.clock = performance.now();
+        this._perfNextFpsWindowAt = performance.now() + 10000;
         this._frameCallback = (time, frame) => this.frameUpdate(time, frame);
         const renderer = this.sceneManager.getRenderer();
         renderer.setAnimationLoop(this._frameCallback);
@@ -483,6 +516,12 @@ class MetaverseApp {
         document.getElementById('admin-info-username').textContent = data.displayName || data.username || '-';
         document.getElementById('admin-info-connected').textContent = data.connectedAt ? fmt(new Date(data.connectedAt)) : '-';
         document.getElementById('admin-info-ping').textContent = data.pingMs != null ? `${data.pingMs}ms` : '-';
+        document.getElementById('admin-info-fps').textContent = data.fpsSample != null ? String(data.fpsSample) : '-';
+        document.getElementById('admin-info-perf-tier').textContent = data.perfTier != null ? String(data.perfTier) : '-';
+        const loafLt = (data.loafCount != null || data.longtaskCount != null)
+            ? `${data.loafCount ?? '-'} / ${data.longtaskCount ?? '-'}`
+            : '-';
+        document.getElementById('admin-info-loaf').textContent = loafLt;
         document.getElementById('admin-info-ip').textContent = data.ip || '-';
         document.getElementById('admin-info-browser').textContent = data.browser || '-';
         document.getElementById('admin-info-os').textContent = data.os || '-';
@@ -637,6 +676,78 @@ class MetaverseApp {
     }
 
     /**
+     * LoAF / longtask を PerformanceObserver で集計（report-ping の差分送信用）
+     */
+    setupClientPerfObservers() {
+        try {
+            const types = typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes
+                ? PerformanceObserver.supportedEntryTypes
+                : [];
+            if (types.includes('long-animation-frame')) {
+                const o = new PerformanceObserver((list) => {
+                    this._perfLoafAccum += list.getEntries().length;
+                });
+                o.observe({ type: 'long-animation-frame', buffered: false });
+                this._perfLoafObserver = o;
+            }
+            if (types.includes('longtask')) {
+                const o = new PerformanceObserver((list) => {
+                    this._perfLongtaskAccum += list.getEntries().length;
+                });
+                o.observe({ entryTypes: ['longtask'] });
+                this._perfLongtaskObserver = o;
+            }
+        } catch (e) {
+            console.warn('[Perf] PerformanceObserver init failed:', e);
+        }
+    }
+
+    /**
+     * report-ping 送信直前に NetworkManager から呼ばれる。LoAF/longtask は読み取り後にリセット。
+     * @returns {{ fpsSample: number|null, perfTier: string, loafCount: number, longtaskCount: number, perfSampleAt: number|null }}
+     */
+    getPerfPayloadForPing() {
+        const loaf = this._perfLoafAccum;
+        const lt = this._perfLongtaskAccum;
+        this._perfLoafAccum = 0;
+        this._perfLongtaskAccum = 0;
+        return {
+            fpsSample: this._perfLastFpsSample != null ? this._perfLastFpsSample : null,
+            perfTier: this._lastPerfTier || 'high',
+            loafCount: loaf,
+            longtaskCount: lt,
+            perfSampleAt: this._perfFpsSampleAtMs != null ? this._perfFpsSampleAtMs : null
+        };
+    }
+
+    /**
+     * 可視または WebXR 中のみ FPS を数え、10 秒周期で 1 秒窓をサンプルしてティアを更新する。
+     * @param {number} _timeMs
+     */
+    _updateClientPerfSampling(_timeMs) {
+        if (!this.sceneManager) return;
+        const xrActive = this.sceneManager.getRenderer().xr.isPresenting;
+        const visibleOrXr = document.visibilityState === 'visible' || xrActive;
+        const now = performance.now();
+
+        if (this._perfFpsSamplingActive) {
+            if (visibleOrXr) this._perfFpsFrames += 1;
+            if (now >= this._perfFpsSampleEndAt) {
+                const fps = this._perfFpsFrames;
+                this._perfLastFpsSample = fps;
+                this._perfFpsSampleAtMs = Date.now();
+                this._lastPerfTier = fps <= 15 ? 'low' : fps <= 30 ? 'medium' : 'high';
+                this._perfFpsSamplingActive = false;
+                this._perfNextFpsWindowAt = now + 9000;
+            }
+        } else if (now >= this._perfNextFpsWindowAt) {
+            this._perfFpsSamplingActive = true;
+            this._perfFpsSampleEndAt = now + 1000;
+            this._perfFpsFrames = visibleOrXr ? 1 : 0;
+        }
+    }
+
+    /**
      * メインフレーム（WebGLRenderer#setAnimationLoop）。WebXR 時は第2引数に XRFrame が渡る場合がある。
      * @param {number} timeMs
      * @param {XRFrame} [_xrFrame]
@@ -646,6 +757,8 @@ class MetaverseApp {
         const currentTime = timeMs;
         let deltaTime = (currentTime - this.clock) / 1000;
         this.clock = currentTime;
+
+        this._updateClientPerfSampling(timeMs);
 
         // Clamp deltaTime to prevent physics issues when tab is inactive
         // Maximum 100ms (0.1 seconds) to prevent large jumps

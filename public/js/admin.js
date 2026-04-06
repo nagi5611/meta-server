@@ -2926,7 +2926,7 @@ async function loadPlayers() {
         const tbody = document.getElementById('players-tbody');
 
         if (players.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="loading">接続中のプレイヤーなし</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="loading">接続中のプレイヤーなし</td></tr>';
             // Update room filter when players are loaded
             updateRoomFilter();
             return;
@@ -2950,6 +2950,9 @@ async function loadPlayers() {
             const pingClass = ping == null ? 'ping-none' : (ping <= 100 ? 'ping-green' : ping <= 300 ? 'ping-yellow' : 'ping-red');
             const pingText = ping != null ? `${ping}ms` : '応答なし';
             const pingCell = `<span class="ping-badge ${pingClass}">${pingText}</span>`;
+            const perfTier = player.perfTier != null ? escapeHtml(String(player.perfTier)) : '-';
+            const perfFps = player.fpsSample != null ? escapeHtml(String(player.fpsSample)) : '-';
+            const perfCell = `<span class="perf-cell" title="effectiveTier / 直近1秒FPSサンプル">${perfTier} / ${perfFps}</span>`;
 
             const roleLabel = player.role === 'student' ? '[生徒]' : player.role === 'teacher' ? '[教師]' : player.role === 'admin' ? '[管理者]' : '';
 
@@ -2960,6 +2963,7 @@ async function loadPlayers() {
                     <td><span class="room-badge">${escapeHtml(player.room)}</span></td>
                     <td>${connectedTime}</td>
                     <td>${pingCell}</td>
+                    <td>${perfCell}</td>
                     <td><span class="role-badge">${roleLabel}</span></td>
                     <td><div class="vc-status">${vcStatus}</div></td>
                     <td>
@@ -2978,7 +2982,7 @@ async function loadPlayers() {
     } catch (error) {
         console.error('Failed to load players:', error);
         document.getElementById('players-tbody').innerHTML = 
-            '<tr><td colspan="8" class="loading">エラー: プレイヤー情報の取得に失敗しました</td></tr>';
+            '<tr><td colspan="9" class="loading">エラー: プレイヤー情報の取得に失敗しました</td></tr>';
     }
 }
 

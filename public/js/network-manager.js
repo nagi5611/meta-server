@@ -22,6 +22,16 @@ class NetworkManager {
         this.lastPongTime = 0;
         this.NO_RESPONSE_THRESHOLD_MS = 10000;  // 10秒で応答なし表示
         this.DISCONNECT_THRESHOLD_MS = 30000;   // 30秒で切断
+        /** @type {(() => object)|null} report-ping に載せる性能ペイロード */
+        this._perfPayloadGetter = null;
+    }
+
+    /**
+     * report-ping にマージするオブジェクトを返す関数を登録（main.js から設定）
+     * @param {() => object} fn
+     */
+    setPerfPayloadGetter(fn) {
+        this._perfPayloadGetter = typeof fn === 'function' ? fn : null;
     }
 
     connect() {
@@ -230,6 +240,14 @@ class NetworkManager {
                 this.onPhysicsYCorrection(data);
             }
         });
+
+        this.socket.on('physics-position-correction', (data) => {
+            if (this.onPhysicsPositionCorrection && data
+                && typeof data.x === 'number' && typeof data.y === 'number' && typeof data.z === 'number'
+                && [data.x, data.y, data.z].every((n) => Number.isFinite(n))) {
+                this.onPhysicsPositionCorrection(data);
+            }
+        });
     }
 
     /**
@@ -358,7 +376,8 @@ class NetworkManager {
                     const rtt = Math.round(Date.now() - res.ts);
                     this.pingMs = rtt;
                     this.lastPongTime = Date.now();
-                    this.socket.emit('report-ping', { pingMs: rtt });
+                    const perf = typeof this._perfPayloadGetter === 'function' ? this._perfPayloadGetter() : {};
+                    this.socket.emit('report-ping', { pingMs: rtt, ...perf });
                 }
             });
         };

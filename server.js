@@ -32,6 +32,11 @@ const STATIC_DIR = path.join(__dirname, isProductionBuild ? 'dist' : 'public');
 const WORLDS_PATH = STORAGE_PATHS.WORLDS_PATH;
 /** 接続直後・change-world・admin-tp 後に Y クランプを抑止する時間（ms） */
 const PHYSICS_ASSIST_GRACE_MS = Number(process.env.PHYSICS_ASSIST_GRACE_MS) || 3000;
+/** Low ティア時の水平方向最大速度（m/s）。超過時は直前サーバ位置に戻す */
+const PHYSICS_LOW_MAX_HORIZ_SPEED = Number(process.env.PHYSICS_LOW_MAX_HORIZ_SPEED) || 24;
+/** クライアント physics-manager の capsuleInfo と一致させる */
+const SERVER_CAPSULE_RADIUS = 0.5;
+const SERVER_CAPSULE_HEIGHT = 1.0;
 const DEFAULT_WORLDS = {
     'lobby': {
         id: 'lobby',
@@ -158,6 +163,181 @@ function validateWorldsPhysicsAssist(worlds) {
         }
     }
     return errors;
+}
+
+/**
+ * playBounds / serverColliders の形を検証（POST /admin/worlds 用）
+ * @param {Record<string, unknown>} worlds
+ * @returns {string[]}
+ */
+function validateWorldsPlayBoundsAndColliders(worlds) {
+    const errors = [];
+    if (!worlds || typeof worlds !== 'object') return errors;
+    for (const [wid, w] of Object.entries(worlds)) {
+        if (!w || typeof w !== 'object') continue;
+        const pb = w.playBounds;
+        if (pb != null) {
+            if (typeof pb !== 'object' || !pb.min || !pb.max) {
+                errors.push(`ワールド「${wid}」: playBounds は { min:{x,y,z}, max:{x,y,z} } 形式にしてください`);
+                continue;
+            }
+            const axes = ['x', 'y', 'z'];
+            for (const ax of axes) {
+                if (!(ax in pb.min) || !(ax in pb.max)) {
+                    errors.push(`ワールド「${wid}」: playBounds.min/max に ${ax} が必要です`);
+                    continue;
+                }
+                const a = pb.min[ax];
+                const b = pb.max[ax];
+                if (typeof a !== 'number' || typeof b !== 'number' || !Number.isFinite(a) || !Number.isFinite(b)) {
+                    errors.push(`ワールド「${wid}」: playBounds.min/max の ${ax} は有限数値にしてください`);
+                } else if (a > b) {
+                    errors.push(`ワールド「${wid}」: playBounds の min.${ax} は max.${ax} 以下にしてください`);
+                }
+            }
+        }
+        const sc = w.serverColliders;
+        if (sc != null) {
+            if (!Array.isArray(sc)) {
+                errors.push(`ワールド「${wid}」: serverColliders は配列にしてください`);
+                continue;
+            }
+            sc.forEach((box, i) => {
+                if (!box || typeof box !== 'object' || !box.min || !box.max) {
+                    errors.push(`ワールド「${wid}」: serverColliders[${i}] は { min, max } 形式にしてください`);
+                    return;
+                }
+                for (const ax of ['x', 'y', 'z']) {
+                    const a = box.min[ax];
+                    const b = box.max[ax];
+                    if (typeof a !== 'number' || typeof b !== 'number' || !Number.isFinite(a) || !Number.isFinite(b)) {
+                        errors.push(`ワールド「${wid}」: serverColliders[${i}] の min/max.${ax} は有限数値にしてください`);
+                    } else if (a > b) {
+                        errors.push(`ワールド「${wid}」: serverColliders[${i}] の min.${ax} は max.${ax} 以下にしてください`);
+                    }
+                }
+            });
+        }
+    }
+    return errors;
+}
+
+/**
+ * @param {number} px
+ * @param {number} py
+ * @param {number} pz
+ * @param {{ min: {x:number,y:number,z:number}, max: {x:number,y:number,z:number} }} box
+ */
+function pointInsidePlayAabb(px, py, pz, box) {
+    return px >= box.min.x && px <= box.max.x
+        && py >= box.min.y && py <= box.max.y
+        && pz >= box.min.z && pz <= box.max.z;
+}
+
+/**
+ * 移動線分がソリッド AABB 内を通過するか（サンプリング）。足元・頭高の2点を各 t で判定。
+ * @param {number} ax
+ * @param {number} ay
+ * @param {number} az
+ * @param {number} bx
+ * @param {number} by
+ * @param {number} bz
+ * @param {{ min: object, max: object }} solid
+ */
+function segmentIntersectsSolidAabb(ax, ay, az, bx, by, bz, solid, steps = 16) {
+    for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const x = ax + (bx - ax) * t;
+        const y0 = ay + (by - ay) * t;
+        const z = az + (bz - az) * t;
+        const y1 = y0 + SERVER_CAPSULE_HEIGHT;
+        if (pointInsidePlayAabb(x, y0, z, solid) || pointInsidePlayAabb(x, y1, z, solid)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * playBounds 内にクランプ
+ * @param {{ x: number, y: number, z: number }} pos
+ * @param {unknown} pb
+ */
+function clampPositionToPlayBounds(pos, pb) {
+    if (!pb || typeof pb !== 'object' || !pb.min || !pb.max) return pos;
+    const { min, max } = pb;
+    return {
+        x: Math.min(max.x, Math.max(min.x, pos.x)),
+        y: Math.min(max.y, Math.max(min.y, pos.y)),
+        z: Math.min(max.z, Math.max(min.z, pos.z))
+    };
+}
+
+/**
+ * Low ティア: 速度・playBounds・serverColliders。戻り値は補正後位置と full 補正フラグ。
+ * @param {{ x: number, y: number, z: number }} candidate
+ * @param {{ x: number, y: number, z: number }|null} authPrev
+ * @param {number} prevAtMs
+ * @param {unknown} wcfg
+ */
+function applyLowTierPositionChecks(candidate, authPrev, prevAtMs, wcfg) {
+    let x = candidate.x;
+    let y = candidate.y;
+    let z = candidate.z;
+    let usedFullCorrection = false;
+
+    const now = Date.now();
+    const dtSec = Math.max(0.001, (now - prevAtMs) / 1000);
+
+    if (authPrev && Number.isFinite(authPrev.x) && Number.isFinite(authPrev.y) && Number.isFinite(authPrev.z)) {
+        const dx = x - authPrev.x;
+        const dz = z - authPrev.z;
+        const horiz = Math.sqrt(dx * dx + dz * dz) / dtSec;
+        if (horiz > PHYSICS_LOW_MAX_HORIZ_SPEED) {
+            x = authPrev.x;
+            y = authPrev.y;
+            z = authPrev.z;
+            usedFullCorrection = true;
+        }
+    }
+
+    const next = { x, y, z };
+    if (wcfg && typeof wcfg === 'object' && wcfg.playBounds) {
+        const clamped = clampPositionToPlayBounds(next, wcfg.playBounds);
+        if (clamped.x !== next.x || clamped.y !== next.y || clamped.z !== next.z) {
+            next.x = clamped.x;
+            next.y = clamped.y;
+            next.z = clamped.z;
+            usedFullCorrection = true;
+        }
+    }
+
+    const colliders = wcfg && typeof wcfg === 'object' && Array.isArray(wcfg.serverColliders) ? wcfg.serverColliders : [];
+    if (colliders.length > 0) {
+        for (const solid of colliders) {
+            if (!solid || typeof solid !== 'object' || !solid.min || !solid.max) continue;
+            if (authPrev && Number.isFinite(authPrev.x)
+                && segmentIntersectsSolidAabb(authPrev.x, authPrev.y, authPrev.z, next.x, next.y, next.z, solid)) {
+                next.x = authPrev.x;
+                next.y = authPrev.y;
+                next.z = authPrev.z;
+                usedFullCorrection = true;
+                break;
+            }
+            if (pointInsidePlayAabb(next.x, next.y, next.z, solid)
+                || pointInsidePlayAabb(next.x, next.y + SERVER_CAPSULE_HEIGHT, next.z, solid)) {
+                if (authPrev && Number.isFinite(authPrev.x)) {
+                    next.x = authPrev.x;
+                    next.y = authPrev.y;
+                    next.z = authPrev.z;
+                    usedFullCorrection = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    return { pos: next, usedFullCorrection };
 }
 
 /**
@@ -1669,6 +1849,7 @@ io.on('connection', (socket) => {
     const currentRoom = DEFAULT_ROOM;
     socket.join(currentRoom);
     socket.data.currentRoom = currentRoom;
+    socket.data.effectivePerfTier = 'high';
 
     // Initialize player data in room state
     const roomState = getRoomState(currentRoom);
@@ -1682,7 +1863,9 @@ io.on('connection', (socket) => {
         world: currentRoom,
         timestamp: 0, // Will be updated on first player-update
         adminInvisible: false,
-        animState: 'idle'
+        animState: 'idle',
+        serverLowAssistPrev: null,
+        serverLowAssistAt: Date.now()
     };
     roomState.players.set(socket.id, initialPlayerState);
     setPhysicsAssistGrace(socket);
@@ -1706,11 +1889,47 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Client reports its measured RTT (used for per-player ping display)
-    socket.on('report-ping', ({ pingMs }) => {
-        if (typeof pingMs === 'number' && pingMs >= 0 && pingMs < 10000) {
-            playerPings.set(socket.id, { pingMs, reportedAt: Date.now() });
+    // Client reports RTT + client perf (FPS サンプル・LoAF 等)
+    socket.on('report-ping', (payload) => {
+        const pingMs = payload && typeof payload.pingMs === 'number' ? payload.pingMs : NaN;
+        if (!(pingMs >= 0 && pingMs < 10000)) return;
+
+        const fpsSample = payload.fpsSample != null && typeof payload.fpsSample === 'number' && Number.isFinite(payload.fpsSample)
+            ? Math.max(0, Math.min(1000, Math.floor(payload.fpsSample)))
+            : null;
+        let perfTier = payload.perfTier;
+        if (perfTier !== 'low' && perfTier !== 'medium' && perfTier !== 'high') {
+            perfTier = fpsSample != null
+                ? (fpsSample <= 15 ? 'low' : fpsSample <= 30 ? 'medium' : 'high')
+                : 'high';
         }
+        const loafCount = payload.loafCount != null && typeof payload.loafCount === 'number' && Number.isFinite(payload.loafCount)
+            ? Math.max(0, Math.floor(payload.loafCount)) : 0;
+        const longtaskCount = payload.longtaskCount != null && typeof payload.longtaskCount === 'number' && Number.isFinite(payload.longtaskCount)
+            ? Math.max(0, Math.floor(payload.longtaskCount)) : 0;
+        const perfSampleAt = payload.perfSampleAt != null && typeof payload.perfSampleAt === 'number' && Number.isFinite(payload.perfSampleAt)
+            ? payload.perfSampleAt : null;
+
+        const roomState = getRoomState(socket.data.currentRoom);
+        const pl = roomState?.players?.get(socket.id);
+        const isAdminPlayer = !!(socket.data.isAdmin || pl?.isAdmin);
+        const effectiveTier = isAdminPlayer ? 'high' : perfTier;
+
+        socket.data.effectivePerfTier = effectiveTier;
+
+        playerPings.set(socket.id, {
+            pingMs,
+            reportedAt: Date.now(),
+            fpsSample,
+            perfTier,
+            effectiveTier,
+            loafCount,
+            longtaskCount,
+            perfSampleAt
+        });
+
+        const uname = pl?.username || 'Guest';
+        console.log(`[perf] ${socket.id.slice(0, 8)}… ${uname} ping=${pingMs}ms fps=${fpsSample ?? '-'} tier=${perfTier} eff=${effectiveTier} loaf=${loafCount} longtask=${longtaskCount}`);
     });
 
     // 太鼓BGM同期用: サーバ時刻の取得（RTT推定はクライアント側）
@@ -2034,18 +2253,44 @@ io.on('connection', (socket) => {
         // Update player state with latest data
         if (data.position) {
             const pos = { ...data.position };
-            const graceUntil = socket.data.physicsAssistGraceUntil;
-            const inGrace = typeof graceUntil === 'number' && Date.now() < graceUntil;
-            if (!player.isAdmin && !inGrace) {
+            const posOk = [pos.x, pos.y, pos.z].every((n) => typeof n === 'number' && Number.isFinite(n));
+            if (posOk) {
+                const graceUntil = socket.data.physicsAssistGraceUntil;
+                const inGrace = typeof graceUntil === 'number' && Date.now() < graceUntil;
                 const worldsData = readWorlds();
                 const wcfg = worldsData[currentRoom];
-                const clamped = clampPlayerFeetYForWorld(wcfg, pos.y);
-                if (clamped.changed) {
-                    pos.y = clamped.y;
-                    socket.emit('physics-y-correction', { y: pos.y });
+                const effTier = socket.data.effectivePerfTier || 'high';
+
+                if (!player.isAdmin && !inGrace && effTier === 'low') {
+                    const low = applyLowTierPositionChecks(
+                        pos,
+                        player.serverLowAssistPrev,
+                        typeof player.serverLowAssistAt === 'number' ? player.serverLowAssistAt : Date.now(),
+                        wcfg
+                    );
+                    pos.x = low.pos.x;
+                    pos.y = low.pos.y;
+                    pos.z = low.pos.z;
+                    if (low.usedFullCorrection) {
+                        socket.emit('physics-position-correction', { x: pos.x, y: pos.y, z: pos.z });
+                    }
                 }
+
+                if (!player.isAdmin && !inGrace) {
+                    const clamped = clampPlayerFeetYForWorld(wcfg, pos.y);
+                    if (clamped.changed) {
+                        pos.y = clamped.y;
+                        socket.emit('physics-y-correction', { y: pos.y });
+                    }
+                }
+
+                if (!player.isAdmin) {
+                    player.serverLowAssistPrev = { x: pos.x, y: pos.y, z: pos.z };
+                    player.serverLowAssistAt = Date.now();
+                }
+
+                player.position = pos;
             }
-            player.position = pos;
         }
         if (data.rotation) {
             player.rotation = data.rotation;
@@ -2118,7 +2363,9 @@ io.on('connection', (socket) => {
             world: newRoom,
             timestamp: 0,
             adminInvisible: !!(oldPlayerState && oldPlayerState.adminInvisible),
-            animState: normalizePlayerAnimState(oldPlayerState?.animState) || 'idle'
+            animState: normalizePlayerAnimState(oldPlayerState?.animState) || 'idle',
+            serverLowAssistPrev: null,
+            serverLowAssistAt: Date.now()
         };
         newRoomState.players.set(socket.id, playerState);
         setPhysicsAssistGrace(socket);
@@ -3087,13 +3334,22 @@ io.on('connection', (socket) => {
         const pingData = playerPings.get(targetSocketId);
         const info = clientInfo.get(targetSocketId);
         const now = Date.now();
-        const pingMs = (pingData && (now - pingData.reportedAt) < PING_STALE_MS) ? pingData.pingMs : null;
+        const pingFresh = pingData && (now - pingData.reportedAt) < PING_STALE_MS;
+        const pingMs = pingFresh ? pingData.pingMs : null;
+        const fpsSample = pingFresh && pingData.fpsSample != null ? pingData.fpsSample : null;
+        const perfTier = pingFresh && pingData.effectiveTier ? pingData.effectiveTier : null;
+        const loafCount = pingFresh ? (pingData.loafCount ?? null) : null;
+        const longtaskCount = pingFresh ? (pingData.longtaskCount ?? null) : null;
 
         callback({
             username: player.username,
             displayName: player.isAdmin ? 'admin' : player.username,
             connectedAt: stats?.connectedAt || null,
             pingMs,
+            fpsSample,
+            perfTier,
+            loafCount,
+            longtaskCount,
             ip: info?.ip || '-',
             browser: info?.browser || '-',
             os: info?.os || '-'
@@ -3159,7 +3415,10 @@ setInterval(() => {
             const vcSpeakerOn = !!(vcPeer && vcPeer.recvTransport);
             const vcVideoOn = !!(videoVcPeer && videoVcPeer.sendTransport);
             const pingData = playerPings.get(player.id);
-            const pingMs = (pingData && (now - pingData.reportedAt) < PING_STALE_MS) ? pingData.pingMs : null;
+            const pingFresh = pingData && (now - pingData.reportedAt) < PING_STALE_MS;
+            const pingMs = pingFresh ? pingData.pingMs : null;
+            const fpsSample = pingFresh && pingData.fpsSample != null ? pingData.fpsSample : null;
+            const perfTier = pingFresh && pingData.effectiveTier ? pingData.effectiveTier : null;
             const socket = io.sockets.sockets.get(player.id);
             const role = socket?.data?.role || null;
             return {
@@ -3176,6 +3435,8 @@ setInterval(() => {
                 vcSpeakerOn,
                 vcVideoOn,
                 pingMs,
+                fpsSample,
+                perfTier,
                 role
             };
         });
@@ -3220,6 +3481,10 @@ app.post('/admin/worlds', (req, res) => {
     const physicsErrs = validateWorldsPhysicsAssist(worlds);
     if (physicsErrs.length > 0) {
         return res.status(400).json({ error: physicsErrs.join(' ') });
+    }
+    const boundsErrs = validateWorldsPlayBoundsAndColliders(worlds);
+    if (boundsErrs.length > 0) {
+        return res.status(400).json({ error: boundsErrs.join(' ') });
     }
     try {
         writeWorlds(worlds);
@@ -3828,7 +4093,10 @@ app.get('/admin/players', (req, res) => {
             const connectedAt = stats ? stats.connectedAt : Date.now();
             const connectedDuration = Date.now() - connectedAt;
             const pingData = playerPings.get(socketId);
-            const pingMs = (pingData && (now - pingData.reportedAt) < PING_STALE_MS) ? pingData.pingMs : null;
+            const pingFresh = pingData && (now - pingData.reportedAt) < PING_STALE_MS;
+            const pingMs = pingFresh ? pingData.pingMs : null;
+            const fpsSample = pingFresh && pingData.fpsSample != null ? pingData.fpsSample : null;
+            const perfTier = pingFresh && pingData.effectiveTier ? pingData.effectiveTier : null;
 
             const socket = io.sockets.sockets.get(player.id);
             const role = socket?.data?.role || null;
@@ -3846,6 +4114,8 @@ app.get('/admin/players', (req, res) => {
                 vcMicOn: !!(peer && peer.sendTransport),
                 vcSpeakerOn: !!(peer && peer.recvTransport),
                 pingMs,
+                fpsSample,
+                perfTier,
                 traffic: stats ? {
                     bytesReceived: stats.bytesReceived,
                     bytesSent: stats.bytesSent,

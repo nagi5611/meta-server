@@ -208,7 +208,7 @@ class UIManager {
         const displayed = sorted;
 
         // プレイヤー一覧: 変更時のみ DOM 更新（毎フレーム差し替えするとクリックが奪われる）
-        const listHash = displayed.map(p => `${p.id}:${p.vcVideoOn}|${p.vcMicOn}|${p.vcSpeakerOn}|${p.pingMs}|${p.role || ''}`).join(';');
+        const listHash = displayed.map(p => `${p.id}:${p.vcVideoOn}|${p.vcMicOn}|${p.vcSpeakerOn}|${p.pingMs}|${p.fpsSample}|${p.perfTier}|${p.role || ''}`).join(';');
         if (listEl.dataset.listHash !== listHash) {
             listEl.dataset.listHash = listHash;
             const videoOnCount = displayed.filter(p => p.vcVideoOn).length;
@@ -230,11 +230,16 @@ class UIManager {
                 const pingClass = ping == null ? 'ping-none' : (ping <= 100 ? 'ping-green' : ping <= 300 ? 'ping-yellow' : 'ping-red');
                 const pingText = ping != null ? `${ping}ms` : '応答なし';
                 const pingSpan = `<span class="player-ping ${pingClass}" title="応答時間">${pingText}</span>`;
+                const tier = p.perfTier != null ? String(p.perfTier) : '';
+                const fpsTxt = p.fpsSample != null ? `${p.fpsSample}fps` : '';
+                const perfSpan = (tier || fpsTxt)
+                    ? `<span class="player-perf" title="性能ティア / 直近FPSサンプル">${tier}${tier && fpsTxt ? ' ' : ''}${fpsTxt}</span>`
+                    : '';
                 const roleLabel = p.role === 'student' ? '[生徒]' : p.role === 'teacher' ? '[教師]' : p.role === 'admin' ? '[管理者]' : '';
                 const roleSpan = roleLabel ? `<span class="player-role" title="種別">${roleLabel}</span>` : '';
                 const watchBtn = p.vcVideoOn ? `<button type="button" class="player-watch-video-btn" data-peer-id="${p.id}" title="ビデオを視聴">視聴</button>` : '';
                 const playerInfo = `<span class="player-info"><span class="player-vc-status">${videoIcon}${micIcon}${spkIcon}</span> ${name}</span>`;
-                return `${sep}<div class="player-list-item ${micClass}">${playerInfo}${watchBtn}${pingSpan}${roleSpan}</div>`;
+                return `${sep}<div class="player-list-item ${micClass}">${playerInfo}${watchBtn}${pingSpan}${perfSpan}${roleSpan}</div>`;
             }).join('');
         }
     }

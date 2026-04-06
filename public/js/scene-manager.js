@@ -29,6 +29,29 @@ import {
 /** ワールド複数モデル読み込みの同時実行数（キャッシュヒット時の直列待ちを緩和） */
 const WORLD_MODEL_LOAD_CONCURRENCY = 8;
 
+/**
+ * 工場関数配列を最大 concurrency 本で同時実行し、結果を入力順の配列で返す
+ * @template T
+ * @param {number} concurrency
+ * @param {Array<() => Promise<T>>} factories
+ * @returns {Promise<T[]>}
+ */
+async function runWithConcurrency(concurrency, factories) {
+    const n = factories.length;
+    const results = new Array(n);
+    let cursor = 0;
+    async function worker() {
+        while (true) {
+            const i = cursor++;
+            if (i >= n) break;
+            results[i] = await factories[i]();
+        }
+    }
+    const workers = Math.min(Math.max(1, concurrency), Math.max(1, n));
+    await Promise.all(Array.from({ length: workers }, () => worker()));
+    return results;
+}
+
 class SceneManager {
     constructor() {
         this.scene = null;
@@ -327,29 +350,31 @@ class SceneManager {
         }
         const chList = Array.isArray(manifest.chunks) ? manifest.chunks : [];
         if (!chList.length) return null;
-        /** @type {{ url: string, weight: number, label: string, center: number[], radius: number, filePath: string }[]} */
-        const chunkPlan = [];
-        let sum = 0;
-        for (const ch of chList) {
+        const nCh = Math.max(1, chList.length);
+        /** @type {(Promise<{ url: string, weight: number, label: string, center: number[], radius: number, filePath: string }|null>)[]} */
+        const chunkTasks = chList.map(async (ch) => {
             const fp = String(ch.file || '').replace(/^\//, '');
-            if (!fp) continue;
+            if (!fp) return null;
             const u = this._buildEncodedModelUrl(fp);
             const len = await fetchModelContentLength(u);
-            const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / Math.max(1, chList.length)));
+            const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / nCh));
             const cx = Array.isArray(ch.center) && ch.center.length >= 3 ? ch.center[0] : 0;
             const cy = Array.isArray(ch.center) && ch.center.length >= 3 ? ch.center[1] : 0;
             const cz = Array.isArray(ch.center) && ch.center.length >= 3 ? ch.center[2] : 0;
             const rad = Number.isFinite(ch.radius) ? Math.max(ch.radius, 0.01) : 0.01;
-            chunkPlan.push({
+            return {
                 url: u,
                 weight: w,
                 label: fp.split(/[/\\]/).pop() || fp,
                 center: [cx, cy, cz],
                 radius: rad,
                 filePath: fp
-            });
-            sum += w;
-        }
+            };
+        });
+        const settled = await Promise.all(chunkTasks);
+        /** @type {{ url: string, weight: number, label: string, center: number[], radius: number, filePath: string }[]} */
+        const chunkPlan = settled.filter(Boolean);
+        const sum = chunkPlan.reduce((s, e) => s + e.weight, 0);
         if (!chunkPlan.length || sum <= 0) return null;
         return { chunks: chunkPlan, sum };
     }
@@ -393,6 +418,104 @@ class SceneManager {
     }
 
     /**
+     * planWorldLoadBytes 用: モデル配列の 1 要素分のバイト見積
+     * @param {Object|string} config
+     * @param {number} idx
+     * @param {number} FALLBACK
+     * @returns {Promise<{ idx: number, entry: object, bytes: number }|null>}
+     */
+    async _planWorldLoadBytesForModel(config, idx, FALLBACK) {
+        const fullConfig = typeof config === 'string' ? { path: config } : config;
+        let resolvedManifest = String(fullConfig.chunkManifest || '').trim();
+        const modelPath = fullConfig.path;
+        if (!resolvedManifest && modelPath && modelPath.toLowerCase().endsWith('.glb') && !this._isObjPath(modelPath)) {
+            resolvedManifest = String(this._implicitChunksManifestPathFromModelPath(modelPath) || '').trim();
+        }
+        if (resolvedManifest) {
+            const built = await this._fetchAndBuildChunkPlanEntries(resolvedManifest, FALLBACK);
+            if (!built) {
+                console.warn('[SceneManager] chunk manifest missing or invalid:', resolvedManifest);
+                return {
+                    idx,
+                    entry: {
+                        fileLabel: resolvedManifest.split(/[/\\]/).pop() || resolvedManifest,
+                        totalFileBytes: FALLBACK,
+                        resolvedChunkManifest: resolvedManifest,
+                        chunkManifestPlan: null
+                    },
+                    bytes: FALLBACK
+                };
+            }
+            return {
+                idx,
+                entry: {
+                    fileLabel: resolvedManifest.split(/[/\\]/).pop() || resolvedManifest,
+                    totalFileBytes: built.sum,
+                    resolvedChunkManifest: resolvedManifest,
+                    chunkManifestPlan: { chunks: built.chunks }
+                },
+                bytes: built.sum
+            };
+        }
+
+        if (!modelPath) return null;
+
+        const url = this._buildEncodedModelUrl(modelPath);
+        const fileLabel = modelPath.split(/[/\\]/).pop() || modelPath;
+        if (this._isObjPath(modelPath)) {
+            const mtlPath = String(fullConfig.mtlPath || '').trim();
+            let objLen;
+            let mtlLen = 0;
+            if (mtlPath) {
+                const mtlUrl = this._buildEncodedModelUrl(mtlPath);
+                const pair = await Promise.all([
+                    fetchModelContentLength(url),
+                    fetchModelContentLength(mtlUrl)
+                ]);
+                objLen = pair[0];
+                const fetched = pair[1];
+                mtlLen = fetched != null && fetched > 0 ? fetched : 0;
+            } else {
+                objLen = await fetchModelContentLength(url);
+            }
+            let wMtl = 0;
+            let wObj = 0;
+            if (mtlPath) {
+                wMtl = mtlLen > 0 ? mtlLen : Math.min(FALLBACK, Math.max(4096, Math.floor(FALLBACK * 0.05)));
+                wObj = objLen != null && objLen > 0 ? objLen : Math.max(1, FALLBACK - wMtl);
+            } else {
+                wObj = objLen != null && objLen > 0 ? objLen : FALLBACK;
+            }
+            const totalFile = wMtl + wObj;
+            return {
+                idx,
+                entry: {
+                    fileLabel,
+                    totalFileBytes: totalFile,
+                    wMtl,
+                    wObj,
+                    contentLenObj: objLen
+                },
+                bytes: totalFile
+            };
+        }
+
+        const glbLen = await fetchModelContentLength(url);
+        const totalFile = glbLen != null && glbLen > 0 ? glbLen : FALLBACK;
+        return {
+            idx,
+            entry: {
+                fileLabel,
+                totalFileBytes: totalFile,
+                wMtl: 0,
+                wObj: totalFile,
+                contentLenObj: glbLen
+            },
+            bytes: totalFile
+        };
+    }
+
+    /**
      * 各アセットの Content-Length を集計し、進捗バー用の総バイト数を返す（HEAD 不可時は仮定値を混ぜる）
      * @param {Array<Object|string>} modelConfigs
      * @param {Array<Object>} [pdfConfigs]
@@ -400,94 +523,39 @@ class SceneManager {
      */
     async planWorldLoadBytes(modelConfigs, pdfConfigs) {
         const FALLBACK = 5 * 1024 * 1024;
-        let totalBytes = 0;
-        const modelByIndex = new Map();
         const list = Array.isArray(modelConfigs) ? modelConfigs : [];
-        for (let idx = 0; idx < list.length; idx++) {
-            const config = list[idx];
-            const fullConfig = typeof config === 'string' ? { path: config } : config;
-            let resolvedManifest = String(fullConfig.chunkManifest || '').trim();
-            const modelPath = fullConfig.path;
-            if (!resolvedManifest && modelPath && modelPath.toLowerCase().endsWith('.glb') && !this._isObjPath(modelPath)) {
-                resolvedManifest = String(this._implicitChunksManifestPathFromModelPath(modelPath) || '').trim();
-            }
-            if (resolvedManifest) {
-                const built = await this._fetchAndBuildChunkPlanEntries(resolvedManifest, FALLBACK);
-                if (!built) {
-                    console.warn('[SceneManager] chunk manifest missing or invalid:', resolvedManifest);
-                    modelByIndex.set(idx, {
-                        fileLabel: resolvedManifest.split(/[/\\]/).pop() || resolvedManifest,
-                        totalFileBytes: FALLBACK,
-                        resolvedChunkManifest: resolvedManifest,
-                        chunkManifestPlan: null
-                    });
-                    totalBytes += FALLBACK;
-                    continue;
-                }
-                modelByIndex.set(idx, {
-                    fileLabel: resolvedManifest.split(/[/\\]/).pop() || resolvedManifest,
-                    totalFileBytes: built.sum,
-                    resolvedChunkManifest: resolvedManifest,
-                    chunkManifestPlan: { chunks: built.chunks }
-                });
-                totalBytes += built.sum;
-                continue;
-            }
+        const modelFactories = list.map(
+            (config, idx) => () => this._planWorldLoadBytesForModel(config, idx, FALLBACK)
+        );
+        const modelSlots = await runWithConcurrency(WORLD_MODEL_LOAD_CONCURRENCY, modelFactories);
 
-            if (!modelPath) continue;
-            const url = this._buildEncodedModelUrl(modelPath);
-            const fileLabel = modelPath.split(/[/\\]/).pop() || modelPath;
-            if (this._isObjPath(modelPath)) {
-                const objLen = await fetchModelContentLength(url);
-                const mtlPath = String(fullConfig.mtlPath || '').trim();
-                let mtlLen = 0;
-                if (mtlPath) {
-                    const mtlUrl = this._buildEncodedModelUrl(mtlPath);
-                    const fetched = await fetchModelContentLength(mtlUrl);
-                    mtlLen = fetched != null && fetched > 0 ? fetched : 0;
-                }
-                let wMtl = 0;
-                let wObj = 0;
-                if (mtlPath) {
-                    wMtl = mtlLen > 0 ? mtlLen : Math.min(FALLBACK, Math.max(4096, Math.floor(FALLBACK * 0.05)));
-                    wObj = objLen != null && objLen > 0 ? objLen : Math.max(1, FALLBACK - wMtl);
-                } else {
-                    wObj = objLen != null && objLen > 0 ? objLen : FALLBACK;
-                }
-                const totalFile = wMtl + wObj;
-                modelByIndex.set(idx, {
-                    fileLabel,
-                    totalFileBytes: totalFile,
-                    wMtl,
-                    wObj,
-                    contentLenObj: objLen
-                });
-                totalBytes += totalFile;
-            } else {
-                const glbLen = await fetchModelContentLength(url);
-                const totalFile = glbLen != null && glbLen > 0 ? glbLen : FALLBACK;
-                modelByIndex.set(idx, {
-                    fileLabel,
-                    totalFileBytes: totalFile,
-                    wMtl: 0,
-                    wObj: totalFile,
-                    contentLenObj: glbLen
-                });
-                totalBytes += totalFile;
-            }
+        const modelByIndex = new Map();
+        let totalBytes = 0;
+        for (const slot of modelSlots) {
+            if (!slot) continue;
+            modelByIndex.set(slot.idx, slot.entry);
+            totalBytes += slot.bytes;
         }
-        const pdfByIndex = new Map();
+
         const pdfs = Array.isArray(pdfConfigs) ? pdfConfigs : [];
-        for (let idx = 0; idx < pdfs.length; idx++) {
-            const path = pdfs[idx].path || '';
-            const pdfPath = path || 'pdfs/placeholder.pdf';
-            const pdfUrl = pdfPath.startsWith('/') ? pdfPath : '/' + pdfPath;
-            const len = await fetchModelContentLength(pdfUrl);
-            const fileLabel = pdfPath.split(/[/\\]/).pop() || pdfPath;
-            const totalFile = len != null && len > 0 ? len : FALLBACK;
-            pdfByIndex.set(idx, { fileLabel, totalFileBytes: totalFile });
-            totalBytes += totalFile;
+        const pdfFactories = pdfs.map((pdfCfg, idx) => {
+            return async () => {
+                const path = pdfCfg.path || '';
+                const pdfPath = path || 'pdfs/placeholder.pdf';
+                const pdfUrl = pdfPath.startsWith('/') ? pdfPath : '/' + pdfPath;
+                const len = await fetchModelContentLength(pdfUrl);
+                const fileLabel = pdfPath.split(/[/\\]/).pop() || pdfPath;
+                const totalFile = len != null && len > 0 ? len : FALLBACK;
+                return { idx, entry: { fileLabel, totalFileBytes: totalFile }, bytes: totalFile };
+            };
+        });
+        const pdfSlots = await runWithConcurrency(WORLD_MODEL_LOAD_CONCURRENCY, pdfFactories);
+        const pdfByIndex = new Map();
+        for (const slot of pdfSlots) {
+            pdfByIndex.set(slot.idx, slot.entry);
+            totalBytes += slot.bytes;
         }
+
         return { totalBytes, modelByIndex, pdfByIndex };
     }
 
