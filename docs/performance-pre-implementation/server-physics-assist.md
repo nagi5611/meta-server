@@ -35,3 +35,7 @@
 - **動作**: `player-update` 受信時にサーバが Y のみクランプし、変更時は `physics-y-correction` で本人に即時スナップ。`isAdmin` はスキップ。接続直後・`change-world`・`admin-tp` 後は `PHYSICS_ASSIST_GRACE_MS`（既定 3000ms）クランプしない。
 - **worlds.json**: サーバはメモリキャッシュを使用（`writeWorlds` で更新）。ファイルを直接編集した場合は**再起動**または管理画面から再保存で反映。
 - **限界**: 単一の min/max は多層マップの「合法領域」表現には不向き（void 用キル面想定）。水平の壁抜けは対象外。
+
+## 関連（実装前）
+
+- [physics-assist-lod-by-client-performance.md](physics-assist-lod-by-client-performance.md) … クライアント性能指標に応じたサーバ検証の LOD（軽量 Y クランプ〜速度・セグメント検証〜将来のサーバコライダ）。

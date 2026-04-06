@@ -19,6 +19,7 @@
 | 4 | 指向光（高精度 / 低精度） | [directional-light-quality.md](directional-light-quality.md) |
 | 5 | GLB テクスチャのアップロード時スケール変更 | [glb-texture-resize-upload.md](glb-texture-resize-upload.md) |
 | 6 | サーバ側物理補助 | [server-physics-assist.md](server-physics-assist.md) |
+| 7 | 物理補助 LOD（性能連動） | [physics-assist-lod-by-client-performance.md](physics-assist-lod-by-client-performance.md) |
 
 ## 推奨する検討順（実装前）
 
@@ -28,6 +29,7 @@
 4. **LOD** … アセットワークフロー合意が取れてから。
 5. **チャンク** … ワールドデータ分割の合意が取れてから。
 6. **サーバ物理補助** … 地形データのサーバ側表現が決まってから。
+7. **物理補助 LOD（性能連動）** … `player-update` 30Hz 前提とクライアント報告の信頼性を踏まえ、LOD-0/1 の閾値と速度上限を決めてから（LOD-2 は地形表現とセット）。
 
 ## 次のアクション（このフォルダのゴール）
 

@@ -26,6 +26,9 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 
+/** ワールド複数モデル読み込みの同時実行数（キャッシュヒット時の直列待ちを緩和） */
+const WORLD_MODEL_LOAD_CONCURRENCY = 8;
+
 class SceneManager {
     constructor() {
         this.scene = null;
@@ -507,8 +510,44 @@ class SceneManager {
         let loadedCount = 0;
 
         const tb = loadState?.totalBytes ?? 0;
+        const modelCount = modelConfigs.length;
+        /** bytePlan+loadState が無い場合は進捗の都合で並列度1 */
+        const useAggregatedProgress = !!(bytePlan && loadState);
+        const concurrency = useAggregatedProgress ? WORLD_MODEL_LOAD_CONCURRENCY : 1;
+        /** @type {Float64Array|null} */
+        const modelProgressFrac = useAggregatedProgress ? new Float64Array(modelCount) : null;
+
         /**
-         * このアセット開始時点の completedBytes を base とし、ファイル内 xhr 進捗を反映する
+         * モデルごとの進捗率から loadState / コールバックを更新（複数モデル同時読込用）
+         * @param {string} fileName
+         */
+        const aggregateProgress = (fileName) => {
+            if (!useAggregatedProgress || !loadState || !bytePlan || !modelProgressFrac) return;
+            let sum = 0;
+            for (let i = 0; i < modelCount; i++) {
+                const p = bytePlan.modelByIndex.get(i);
+                if (p) sum += modelProgressFrac[i] * p.totalFileBytes;
+            }
+            loadState.completedBytes = Math.min(tb, sum);
+            onByteProgress?.({ fileName, loadedBytes: loadState.completedBytes, totalBytes: tb });
+        };
+
+        /**
+         * インデックス idx のモデルについて、モデル内バイト進捗を反映する
+         * @param {number} idx
+         * @param {string} fileName
+         * @param {number} bytesDoneInModel
+         * @param {number} fileBudget
+         */
+        const setModelBytesProgress = (idx, fileName, bytesDoneInModel, fileBudget) => {
+            if (!modelProgressFrac) return;
+            const denom = fileBudget > 0 ? fileBudget : 1;
+            modelProgressFrac[idx] = Math.min(1, bytesDoneInModel / denom);
+            aggregateProgress(fileName);
+        };
+
+        /**
+         * このアセット開始時点の completedBytes を base とし、ファイル内 xhr 進捗を反映する（直列・非集約時）
          * @param {string} fileName
          * @param {number} loadedInFile
          * @param {number} totalInFile
@@ -516,7 +555,7 @@ class SceneManager {
          * @param {number} baseBytes
          */
         const emitFromBase = (fileName, loadedInFile, totalInFile, fileBudget, baseBytes) => {
-            if (!onByteProgress || !bytePlan || !loadState) return;
+            if (useAggregatedProgress || !onByteProgress || !bytePlan || !loadState) return;
             const denom = totalInFile > 0 ? totalInFile : fileBudget;
             const frac = denom > 0 ? Math.min(1, loadedInFile / denom) : 0;
             const loadedBytes = Math.min(tb, baseBytes + frac * fileBudget);
@@ -613,12 +652,17 @@ class SceneManager {
                     ? (modelPath.split(/[/\\]/).pop() || modelPath)
                     : (manifestPath ? manifestPath.split(/[/\\]/).pop() || manifestPath : 'model'));
             const fileBudget = plan?.totalFileBytes ?? (5 * 1024 * 1024);
-            const fileStart = loadState?.completedBytes ?? 0;
+            const fileStart = useAggregatedProgress ? 0 : (loadState?.completedBytes ?? 0);
 
             /**
              * 読み込み失敗・棄却時でもバーが止まらないよう、このアセット分の見積バイトを進捗に反映する
              */
             const snapBudgetDone = () => {
+                if (useAggregatedProgress && modelProgressFrac && loadState && bytePlan) {
+                    modelProgressFrac[idx] = 1;
+                    aggregateProgress(plan?.fileLabel || fileLabel);
+                    return;
+                }
                 if (!loadState || !bytePlan || !plan) return;
                 loadState.completedBytes = Math.min(tb, fileStart + plan.totalFileBytes);
                 onByteProgress?.({
@@ -638,7 +682,7 @@ class SceneManager {
                 const anchor = new THREE.Group();
                 const cfgForFinish = { ...fullConfig, chunkManifest: manifestPath };
                 let totalTris = 0;
-                let subBase = fileStart;
+                let completedChunkBytes = 0;
                 const loader = createGLTFLoaderWithDraco();
                 try {
                     for (let ci = 0; ci < chunkPlan.length; ci++) {
@@ -648,13 +692,22 @@ class SceneManager {
                             loader.load(
                                 ent.url,
                                 (gltf) => resolve(gltf.scene),
-                                (xhr) => emitFromBase(
-                                    ent.label,
-                                    xhr.loaded,
-                                    xhr.total || 0,
-                                    chunkBudget,
-                                    subBase
-                                ),
+                                (xhr) => {
+                                    const denom = xhr.total > 0 ? xhr.total : chunkBudget;
+                                    const chunkFrac = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
+                                    const bytesIntoModel = completedChunkBytes + chunkFrac * chunkBudget;
+                                    if (useAggregatedProgress) {
+                                        setModelBytesProgress(idx, ent.label, bytesIntoModel, fileBudget);
+                                    } else {
+                                        emitFromBase(
+                                            ent.label,
+                                            xhr.loaded,
+                                            xhr.total || 0,
+                                            chunkBudget,
+                                            fileStart + completedChunkBytes
+                                        );
+                                    }
+                                },
                                 reject
                             );
                         });
@@ -663,7 +716,7 @@ class SceneManager {
                         anchor.add(scene);
                         scene.updateMatrixWorld(true);
                         this._registerDrawCullTarget(scene);
-                        subBase += chunkBudget;
+                        completedChunkBytes += chunkBudget;
                     }
                     if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
                         this._disposeModelObject(anchor);
@@ -681,7 +734,12 @@ class SceneManager {
                     }
                     finishAddModel(anchor, cfgForFinish, manifestPath, totalTris);
                     if (loadState) {
-                        loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                        if (useAggregatedProgress && modelProgressFrac) {
+                            modelProgressFrac[idx] = 1;
+                            aggregateProgress(plan?.fileLabel || fileLabel);
+                        } else {
+                            loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                        }
                     }
                 } catch (error) {
                     console.error(`Error loading chunk manifest ${manifestPath}:`, error);
@@ -727,7 +785,15 @@ class SceneManager {
                             objLoader.load(
                                 url,
                                 (object) => resolve(object),
-                                (xhr) => emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, fileBudget, fileStart),
+                                (xhr) => {
+                                    const denom = xhr.total > 0 ? xhr.total : fileBudget;
+                                    const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
+                                    if (useAggregatedProgress) {
+                                        setModelBytesProgress(idx, fileLabel, f * fileBudget, fileBudget);
+                                    } else {
+                                        emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, fileBudget, fileStart);
+                                    }
+                                },
                                 reject
                             );
                             return;
@@ -749,11 +815,27 @@ class SceneManager {
                                 objLoader.load(
                                     objFile,
                                     (object) => resolve(object),
-                                    (xhr) => emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, wObj, baseAfterMtl),
+                                    (xhr) => {
+                                        const denom = xhr.total > 0 ? xhr.total : wObj;
+                                        const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
+                                        if (useAggregatedProgress) {
+                                            setModelBytesProgress(idx, fileLabel, wMtl + f * wObj, fileBudget);
+                                        } else {
+                                            emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, wObj, baseAfterMtl);
+                                        }
+                                    },
                                     reject
                                 );
                             },
-                            (xhr) => emitFromBase(mtlFile || fileLabel, xhr.loaded, xhr.total || 0, wMtl, fileStart),
+                            (xhr) => {
+                                const denom = xhr.total > 0 ? xhr.total : wMtl;
+                                const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
+                                if (useAggregatedProgress) {
+                                    setModelBytesProgress(idx, mtlFile || fileLabel, f * wMtl, fileBudget);
+                                } else {
+                                    emitFromBase(mtlFile || fileLabel, xhr.loaded, xhr.total || 0, wMtl, fileStart);
+                                }
+                            },
                             reject
                         );
                         return;
@@ -763,7 +845,15 @@ class SceneManager {
                     loader.load(
                         url,
                         (gltf) => resolve(gltf.scene),
-                        (xhr) => emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, fileBudget, fileStart),
+                        (xhr) => {
+                            const denom = xhr.total > 0 ? xhr.total : fileBudget;
+                            const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
+                            if (useAggregatedProgress) {
+                                setModelBytesProgress(idx, fileLabel, f * fileBudget, fileBudget);
+                            } else {
+                                emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, fileBudget, fileStart);
+                            }
+                        },
                         reject
                     );
                 });
@@ -785,7 +875,12 @@ class SceneManager {
                 }
                 finishAddModel(model, fullConfig, modelPath, tris);
                 if (loadState) {
-                    loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                    if (useAggregatedProgress && modelProgressFrac) {
+                        modelProgressFrac[idx] = 1;
+                        aggregateProgress(plan?.fileLabel || fileLabel);
+                    } else {
+                        loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                    }
                 }
             } catch (error) {
                 console.error(`Error loading model ${modelPath}:`, error);
@@ -794,9 +889,19 @@ class SceneManager {
         };
 
         try {
-            for (let mi = 0; mi < modelConfigs.length; mi++) {
-                await loadOne(modelConfigs[mi], mi);
-            }
+            let nextModelIndex = 0;
+            /**
+             * 共有インデックスから次のモデルを読み込む（最大 concurrency 本まで同時実行）
+             */
+            const modelWorker = async () => {
+                while (true) {
+                    const mi = nextModelIndex++;
+                    if (mi >= modelConfigs.length) break;
+                    await loadOne(modelConfigs[mi], mi);
+                }
+            };
+            const workerCount = Math.min(concurrency, modelConfigs.length);
+            await Promise.all(Array.from({ length: workerCount }, () => modelWorker()));
             this.environmentGroup.updateMatrixWorld(true);
             console.log('All models loaded, generating BVH...');
 
