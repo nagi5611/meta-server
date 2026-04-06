@@ -5,7 +5,7 @@ import { mergeAircraftPhysicsFromWorld } from './aircraft-physics-defaults.js';
 
 const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
-/** 地上判定の Y 余裕（この範囲なら接地扱いで横滑り停止） */
+/** 地上判定の Y 余裕（この範囲なら接地扱いで横スリップのみ除去） */
 const GROUNDED_Y_TOLERANCE = 0.15;
 
 /**
@@ -253,8 +253,21 @@ export default class AircraftController {
                 root.getWorldPosition(this._worldPos);
                 const onGround = this._worldPos.y <= minY + GROUNDED_Y_TOLERANCE;
                 if (onGround && thrust === 0) {
-                    this.velocity.x = 0;
-                    this.velocity.z = 0;
+                    root.getWorldQuaternion(this._worldQuat);
+                    this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
+                    let hx = this._fwd.x;
+                    let hz = this._fwd.z;
+                    const lenH = Math.hypot(hx, hz);
+                    if (lenH > 1e-6) {
+                        hx /= lenH;
+                        hz /= lenH;
+                        const fwdSpeed = this.velocity.x * hx + this.velocity.z * hz;
+                        this.velocity.x = hx * fwdSpeed;
+                        this.velocity.z = hz * fwdSpeed;
+                    } else {
+                        this.velocity.x = 0;
+                        this.velocity.z = 0;
+                    }
                 }
             }
         }
