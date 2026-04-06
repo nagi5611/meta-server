@@ -105,10 +105,10 @@ export default class AircraftController {
             ['KeyS', 'back'],
             ['KeyA', 'yawL'],
             ['KeyD', 'yawR'],
-            ['ArrowUp', 'pitchUp'],
-            ['ArrowDown', 'pitchDn'],
-            ['ArrowLeft', 'rollL'],
-            ['ArrowRight', 'rollR']
+            ['ArrowUp', 'pitchDn'],
+            ['ArrowDown', 'pitchUp'],
+            ['ArrowLeft', 'rollR'],
+            ['ArrowRight', 'rollL']
         ];
         for (const [code, key] of map) {
             if (c === code) {
