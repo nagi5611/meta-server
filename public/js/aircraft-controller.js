@@ -341,6 +341,11 @@ export default class AircraftController {
         const sp = this.velocity.length();
         if (sp > ph.maxSpeed) this.velocity.multiplyScalar(ph.maxSpeed / sp);
 
+        const climbK = ph.excessClimbDamping;
+        if (climbK > 0 && !this._aircraftGrounded && this.velocity.y > 0) {
+            this.velocity.y *= Math.exp(-climbK * dt);
+        }
+
         const slipK = ph.sideslipDamping;
         if (slipK > 0 && !this._aircraftGrounded && this._fwd.lengthSq() > 1e-12) {
             this._lookTarget.copy(this._fwd).normalize();

@@ -776,6 +776,11 @@
                                             </div>
                                             <p class="hint" style="margin-top:4px;">0 で無効。1〜2 程度でヨー後の進行方向が機首に追従しやすくなります（指数減衰 exp(−k·Δt)）。</p>
                                             <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-excess-climb-damping">上向き速度減衰（過剰揚力・上昇の抑え）</label>
+                                                <input type="number" id="world-aircraft-excess-climb-damping" class="prop-input num" step="0.1" min="0"><span class="prop-unit">1/s</span>
+                                            </div>
+                                            <p class="hint" style="margin-top:4px;">空中で vy&gt;0 のときだけ縦速度を指数減衰。揚力がワールド上方向に積み上がって上昇が止まらない場合に 0.5〜1.5 程度から調整。</p>
+                                            <div class="prop-row">
                                                 <label class="prop-label" for="world-aircraft-max-speed">最高速度</label>
                                                 <input type="number" id="world-aircraft-max-speed" class="prop-input num" step="0.5" min="1"><span class="prop-unit">m/s</span>
                                             </div>

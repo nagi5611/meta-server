@@ -1,6 +1,6 @@
 // public/js/aircraft-physics-defaults.js — 飛行機操縦の数値デフォルト（THREE に依存しない）
 
-/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccel: number, pitchAccel: number, rollAccel: number, yawMaxRate: number, pitchMaxRate: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, sideslipDamping: number, gravity: number, liftPerHorizontalSpeed: number }>} */
+/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccel: number, pitchAccel: number, rollAccel: number, yawMaxRate: number, pitchMaxRate: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, sideslipDamping: number, excessClimbDamping: number, gravity: number, liftPerHorizontalSpeed: number }>} */
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     maxSpeed: 45,
     thrustAccel: 18,
@@ -19,6 +19,8 @@ export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     yawGroundFrictionRight: 0,
     /** 空中のみ: 速度の機体前後軸に垂直な成分を exp(-k*dt) で減衰 (1/s)。0 で無効 */
     sideslipDamping: 0,
+    /** 空中かつ上向き速度時のみ vy を exp(-k*dt) で減衰 (1/s)。揚力の積み上がりを抑える。0 で無効 */
+    excessClimbDamping: 0,
     gravity: 9.81,
     liftPerHorizontalSpeed: 0.35
 });
@@ -47,7 +49,7 @@ export function mergeAircraftPhysicsFromWorld(raw) {
             base[k] = Math.min(50, Math.max(0, v));
         } else if (k === 'liftPerHorizontalSpeed') {
             base[k] = Math.min(5, Math.max(0, v));
-        } else if (k === 'sideslipDamping') {
+        } else if (k === 'sideslipDamping' || k === 'excessClimbDamping') {
             base[k] = Math.min(10, Math.max(0, v));
         } else if (k === 'angularDecel' || k === 'yawGroundFrictionLeft' || k === 'yawGroundFrictionRight') {
             base[k] = Math.min(30, Math.max(0, v));
