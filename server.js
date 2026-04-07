@@ -224,6 +224,33 @@ function validateWorldsAircraftPhysics(worlds) {
 }
 
 /**
+ * 表示用床プレーンの寸法（floorWidth / floorDepth）検証（POST /admin/worlds 用）
+ * @param {Record<string, unknown>} worlds
+ * @returns {string[]}
+ */
+function validateWorldsFloorDimensions(worlds) {
+    const errors = [];
+    if (!worlds || typeof worlds !== 'object') return errors;
+    const lo = 10;
+    const hi = 200000;
+    for (const [wid, w] of Object.entries(worlds)) {
+        if (!w || typeof w !== 'object') continue;
+        for (const key of ['floorWidth', 'floorDepth']) {
+            if (!(key in w)) continue;
+            const v = w[key];
+            if (typeof v !== 'number' || !Number.isFinite(v)) {
+                errors.push(`ワールド「${wid}」: ${key} は有限の数値にしてください`);
+                continue;
+            }
+            if (v < lo || v > hi) {
+                errors.push(`ワールド「${wid}」: ${key} は ${lo}〜${hi}（m）にしてください`);
+            }
+        }
+    }
+    return errors;
+}
+
+/**
  * playBounds / serverColliders の形を検証（POST /admin/worlds 用）
  * @param {Record<string, unknown>} worlds
  * @returns {string[]}
@@ -3744,6 +3771,10 @@ app.post('/admin/worlds', (req, res) => {
     const boundsErrs = validateWorldsPlayBoundsAndColliders(worlds);
     if (boundsErrs.length > 0) {
         return res.status(400).json({ error: boundsErrs.join(' ') });
+    }
+    const floorDimErrs = validateWorldsFloorDimensions(worlds);
+    if (floorDimErrs.length > 0) {
+        return res.status(400).json({ error: floorDimErrs.join(' ') });
     }
     try {
         writeWorlds(worlds);

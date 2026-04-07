@@ -55,6 +55,45 @@ let worldSelectLoadGen = 0;
 let editorGround = null; // 編集プレビュー用の床メッシュ（表示切替用）
 let editorGrid = null;   // 編集プレビュー用のグリッド（表示切替用）
 let editorDracoLoader = null;
+
+const DEFAULT_FLOOR_WIDTH_M = 1000;
+const DEFAULT_FLOOR_DEPTH_M = 1000;
+
+/**
+ * ワールド設定の床寸法（m）を正規化
+ * @param {{ floorWidth?: unknown, floorDepth?: unknown }} [w]
+ * @returns {{ fw: number, fd: number }}
+ */
+function normalizedFloorDimensions(w) {
+    const fw0 = w && typeof w.floorWidth === 'number' && Number.isFinite(w.floorWidth) && w.floorWidth > 0 ? w.floorWidth : DEFAULT_FLOOR_WIDTH_M;
+    const fd0 = w && typeof w.floorDepth === 'number' && Number.isFinite(w.floorDepth) && w.floorDepth > 0 ? w.floorDepth : DEFAULT_FLOOR_DEPTH_M;
+    return { fw: fw0, fd: fd0 };
+}
+
+/**
+ * エディタプレビューの床プレーン・グリッドをワールドの幅・奥行きに合わせる
+ * @param {{ floorWidth?: unknown, floorDepth?: unknown, floorEnabled?: unknown }} [world]
+ */
+function applyEditorFloorMeshFromWorld(world) {
+    if (!editorGround || !scene) return;
+    const { fw, fd } = normalizedFloorDimensions(world || {});
+    editorGround.geometry.dispose();
+    editorGround.geometry = new THREE.PlaneGeometry(fw, fd);
+    if (editorGrid) {
+        scene.remove(editorGrid);
+        editorGrid.geometry.dispose();
+        const mat = editorGrid.material;
+        if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+        else if (mat) mat.dispose();
+    }
+    const gridSize = Math.max(fw, fd);
+    const divisions = Math.max(10, Math.round((100 * gridSize) / 1000));
+    editorGrid = new THREE.GridHelper(gridSize, divisions, 0x000000, 0x2a4a2a);
+    editorGrid.position.y = 0.01;
+    scene.add(editorGrid);
+    editorGrid.visible = world && world.floorEnabled !== false;
+    if (editorGround) editorGround.visible = world && world.floorEnabled !== false;
+}
 const pointer = new THREE.Vector2();
 
 /**
@@ -1282,7 +1321,13 @@ function buildWorldsFromScene() {
             lights: w.lights ? w.lights.map((l) => ({ ...l })) : [],
             pdfs: w.pdfs ? w.pdfs.map((p) => ({ ...p })) : [],
             vdbs: [],
-            floorEnabled: wid === selectedWorldId ? document.getElementById('floor-enabled').checked : (w.floorEnabled !== false)
+            floorEnabled: wid === selectedWorldId ? document.getElementById('floor-enabled').checked : (w.floorEnabled !== false),
+            floorWidth: wid === selectedWorldId
+                ? (parseFloat(document.getElementById('floor-width')?.value) || DEFAULT_FLOOR_WIDTH_M)
+                : normalizedFloorDimensions(w).fw,
+            floorDepth: wid === selectedWorldId
+                ? (parseFloat(document.getElementById('floor-depth')?.value) || DEFAULT_FLOOR_DEPTH_M)
+                : normalizedFloorDimensions(w).fd
         };
         if (wid !== selectedWorldId && w.physicsAssist && typeof w.physicsAssist === 'object') {
             const src = w.physicsAssist;
@@ -1354,6 +1399,8 @@ function buildWorldsFromScene() {
                 z: parseFloat(document.getElementById('spawn-z').value) || 0
             };
             w.floorEnabled = document.getElementById('floor-enabled').checked;
+            w.floorWidth = parseFloat(document.getElementById('floor-width')?.value) || DEFAULT_FLOOR_WIDTH_M;
+            w.floorDepth = parseFloat(document.getElementById('floor-depth')?.value) || DEFAULT_FLOOR_DEPTH_M;
             const paEn = document.getElementById('physics-assist-enabled')?.checked;
             const minRaw = document.getElementById('physics-assist-min-y')?.value?.trim() ?? '';
             const maxRaw = document.getElementById('physics-assist-max-y')?.value?.trim() ?? '';
@@ -1608,8 +1655,12 @@ async function loadWorldIntoScene(world) {
     document.getElementById('spawn-z').value = (world.spawnPoint && world.spawnPoint.z) ?? 0;
     const floorEl = document.getElementById('floor-enabled');
     if (floorEl) floorEl.checked = world.floorEnabled !== false;
-    if (editorGround) editorGround.visible = world.floorEnabled !== false;
-    if (editorGrid) editorGrid.visible = world.floorEnabled !== false;
+    const { fw, fd } = normalizedFloorDimensions(world);
+    const floorWEl = document.getElementById('floor-width');
+    const floorDEl = document.getElementById('floor-depth');
+    if (floorWEl) floorWEl.value = String(fw);
+    if (floorDEl) floorDEl.value = String(fd);
+    applyEditorFloorMeshFromWorld(world);
 
     const paEn = document.getElementById('physics-assist-enabled');
     const paMin = document.getElementById('physics-assist-min-y');
@@ -1733,7 +1784,9 @@ const EMPTY_EDITOR_WORLD = {
     lights: [],
     pdfs: [],
     spawnPoint: { x: 0, y: 10, z: 0 },
-    floorEnabled: true
+    floorEnabled: true,
+    floorWidth: DEFAULT_FLOOR_WIDTH_M,
+    floorDepth: DEFAULT_FLOOR_DEPTH_M
 };
 
 /**
@@ -2945,7 +2998,18 @@ function bindEvents() {
         if (!id || /[^a-zA-Z0-9_]/.test(id)) return;
         if (worlds[id]) { alert('そのIDは既に存在します'); return; }
         const name = prompt('表示名', id);
-        worlds[id] = { id, name: name || id, models: [], spawnPoint: { x: 0, y: 10, z: 0 }, lights: [], pdfs: [], vdbs: [], floorEnabled: true };
+        worlds[id] = {
+            id,
+            name: name || id,
+            models: [],
+            spawnPoint: { x: 0, y: 10, z: 0 },
+            lights: [],
+            pdfs: [],
+            vdbs: [],
+            floorEnabled: true,
+            floorWidth: DEFAULT_FLOOR_WIDTH_M,
+            floorDepth: DEFAULT_FLOOR_DEPTH_M
+        };
         renderWorldList();
         void selectWorld(id);
     });
@@ -3821,6 +3885,25 @@ function bindEvents() {
         worlds[selectedWorldId].floorEnabled = document.getElementById('floor-enabled').checked;
         if (editorGround) editorGround.visible = worlds[selectedWorldId].floorEnabled;
         if (editorGrid) editorGrid.visible = worlds[selectedWorldId].floorEnabled;
+    });
+
+    function applyFloorDimsFromInputs() {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        const w = worlds[selectedWorldId];
+        w.floorWidth = parseFloat(document.getElementById('floor-width')?.value) || DEFAULT_FLOOR_WIDTH_M;
+        w.floorDepth = parseFloat(document.getElementById('floor-depth')?.value) || DEFAULT_FLOOR_DEPTH_M;
+        applyEditorFloorMeshFromWorld(w);
+    }
+
+    document.getElementById('floor-width').addEventListener('change', () => {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        pushUndo();
+        applyFloorDimsFromInputs();
+    });
+    document.getElementById('floor-depth').addEventListener('change', () => {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        pushUndo();
+        applyFloorDimsFromInputs();
     });
 
     function applyPhysicsAssistPanelToSelectedWorld() {

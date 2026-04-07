@@ -9,6 +9,9 @@ const CLEARANCE_ABOVE_GROUND = 0.5;
 const GROUNDED_Y_TOLERANCE = 0.15;
 /** ワールド YXZ オイラー Z（ロール）の上限 ±30° */
 const MAX_BANK_RAD = Math.PI / 6;
+/** 接地中に許すワールド YXZ ピッチ（x）の上限（機首上げ）。これ以上は入力・角速度を抑止し姿勢をクランプ */
+const MAX_GROUND_PITCH_RAD = 0.12;
+const GROUND_PITCH_GATE_RAD = 0.02;
 
 /**
  * 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -49,6 +52,8 @@ export default class AircraftController {
         this._eulerScratch = new THREE.Euler(0, 0, 0, 'YXZ');
         this._qClampWorld = new THREE.Quaternion();
         this._qParentWorld = new THREE.Quaternion();
+        /** 直前フレーム終了時の接地（レイ判定・次フレームのピッチ制限に使用） */
+        this._aircraftGrounded = false;
         this.physics = mergeAircraftPhysicsFromWorld(null);
     }
 
@@ -77,6 +82,7 @@ export default class AircraftController {
         this._omegaYaw = 0;
         this._omegaPitch = 0;
         this._omegaRoll = 0;
+        this._aircraftGrounded = false;
         this._attachKeys();
     }
 
@@ -87,6 +93,7 @@ export default class AircraftController {
         this._omegaYaw = 0;
         this._omegaPitch = 0;
         this._omegaRoll = 0;
+        this._aircraftGrounded = false;
     }
 
     _attachKeys() {
@@ -248,6 +255,30 @@ export default class AircraftController {
     }
 
     /**
+     * 接地中ワールド YXZ のピッチ（x）を上限以下にし、必要ならローカル姿勢を書き換える
+     * @param {import('three').Object3D} root
+     */
+    _clampWorldPitchOnGround(root) {
+        root.updateMatrixWorld(true);
+        root.getWorldQuaternion(this._worldQuat);
+        this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
+        const x = this._eulerScratch.x;
+        if (x <= MAX_GROUND_PITCH_RAD) return;
+        this._eulerScratch.x = MAX_GROUND_PITCH_RAD;
+        this._qClampWorld.setFromEuler(this._eulerScratch);
+        if (root.parent) {
+            root.parent.updateMatrixWorld(true);
+            root.parent.getWorldQuaternion(this._qParentWorld);
+            const qLocal = this._qParentWorld.clone().invert().multiply(this._qClampWorld);
+            root.quaternion.copy(qLocal);
+        } else {
+            root.quaternion.copy(this._qClampWorld);
+        }
+        this._omegaPitch = 0;
+        root.updateMatrixWorld(true);
+    }
+
+    /**
      * @param {number} deltaTime
      */
     update(deltaTime) {
@@ -256,8 +287,19 @@ export default class AircraftController {
         const dt = Math.min(0.1, deltaTime);
 
         const yawIn = (this.keys.yawR ? 1 : 0) - (this.keys.yawL ? 1 : 0);
-        const pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
+        let pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
         const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
+
+        if (this._aircraftGrounded) {
+            root.updateMatrixWorld(true);
+            root.getWorldQuaternion(this._worldQuat);
+            this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
+            const px = this._eulerScratch.x;
+            if (px >= MAX_GROUND_PITCH_RAD - GROUND_PITCH_GATE_RAD) {
+                if (pitchIn > 0) pitchIn = 0;
+                if (this._omegaPitch > 0) this._omegaPitch = 0;
+            }
+        }
 
         const ph = this.physics;
         const dec = ph.angularDecel;
@@ -279,6 +321,9 @@ export default class AircraftController {
         root.rotateOnAxis(new THREE.Vector3(0, 0, 1), -this._omegaRoll * dt);
         root.updateMatrixWorld(true);
         this._clampWorldBank(root);
+        if (this._aircraftGrounded) {
+            this._clampWorldPitchOnGround(root);
+        }
 
         const thrust = (this.keys.forward ? 1 : 0) - (this.keys.back ? 1 : 0);
         root.getWorldQuaternion(this._worldQuat);
@@ -326,7 +371,8 @@ export default class AircraftController {
                 }
                 root.getWorldPosition(this._worldPos);
                 const onGround = this._worldPos.y <= minY + GROUNDED_Y_TOLERANCE;
-                if (onGround && thrust === 0) {
+                this._aircraftGrounded = onGround;
+                if (onGround) {
                     root.getWorldQuaternion(this._worldQuat);
                     this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
                     let hx = this._fwd.x;
@@ -343,7 +389,11 @@ export default class AircraftController {
                         this.velocity.z = 0;
                     }
                 }
+            } else {
+                this._aircraftGrounded = false;
             }
+        } else {
+            this._aircraftGrounded = false;
         }
 
         this._updateCamera();

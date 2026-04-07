@@ -101,6 +101,7 @@ class WorldManager {
         this.currentWorld = world;
 
         this.sceneManager.setFloorVisible(world.floorEnabled !== false);
+        this.sceneManager.applyFloorDimensionsFromWorld(world);
 
         // Add world-specific lights (position, type, intensity)
         this.sceneManager.addWorldLights(world.lights);

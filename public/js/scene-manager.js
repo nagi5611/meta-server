@@ -1350,6 +1350,50 @@ class SceneManager {
     }
 
     /**
+     * ワールドの floorWidth / floorDepth（m）で接地プレーンとグリッドを作り直す。既定 1000×1000。
+     * BVH 再生成前に呼ぶこと。
+     * @param {{ floorWidth?: unknown, floorDepth?: unknown }} [world]
+     */
+    applyFloorDimensionsFromWorld(world) {
+        const def = 1000;
+        const fwRaw = world && typeof world === 'object' ? world.floorWidth : null;
+        const fdRaw = world && typeof world === 'object' ? world.floorDepth : null;
+        const fw = typeof fwRaw === 'number' && Number.isFinite(fwRaw) && fwRaw > 0 ? fwRaw : def;
+        const fd = typeof fdRaw === 'number' && Number.isFinite(fdRaw) && fdRaw > 0 ? fdRaw : def;
+
+        if (this.gridHelper) {
+            this._drawCullTargets = this._drawCullTargets.filter((o) => o !== this.gridHelper);
+            this.scene.remove(this.gridHelper);
+            const gh = this.gridHelper;
+            if (gh.geometry) gh.geometry.dispose();
+            const mat = gh.material;
+            if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+            else if (mat) mat.dispose();
+            this.gridHelper = null;
+        }
+
+        if (this.groundMesh) {
+            this._drawCullTargets = this._drawCullTargets.filter((o) => o !== this.groundMesh);
+            const oldG = this.groundMesh.geometry;
+            if (oldG) oldG.dispose();
+            this.groundMesh.geometry = new THREE.PlaneGeometry(fw, fd);
+            this._registerDrawCullTarget(this.groundMesh);
+            const inRg = this.groundMesh.userData._cullInRange !== false;
+            this.groundMesh.visible = this._floorWantedVisible && inRg;
+        }
+
+        const gridSize = Math.max(fw, fd);
+        const divisions = Math.max(10, Math.round((100 * gridSize) / 1000));
+        this.gridHelper = new THREE.GridHelper(gridSize, divisions, 0x000000, 0x2a4a2a);
+        this.gridHelper.position.y = 0.01;
+        this.scene.add(this.gridHelper);
+
+        this._registerDrawCullTarget(this.gridHelper);
+        const inR = this.gridHelper.userData._cullInRange !== false;
+        this.gridHelper.visible = this._floorWantedVisible && inR;
+    }
+
+    /**
      * Generate BVH collision mesh from environment group
      */
     generateBVH() {
