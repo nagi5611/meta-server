@@ -1045,8 +1045,9 @@ a.admin-menu-link:hover {
     box-shadow: 0 6px 20px rgba(198, 40, 40, 0.4);
 }
 
-/* Logout Modal */
-#logout-modal {
+/* Logout / Restart Modal */
+#logout-modal,
+#restart-modal {
     display: none;
     position: fixed;
     top: 0;
@@ -1060,11 +1061,13 @@ a.admin-menu-link:hover {
     align-items: center;
 }
 
-#logout-modal.visible {
+#logout-modal.visible,
+#restart-modal.visible {
     display: flex;
 }
 
-#logout-modal-content {
+#logout-modal-content,
+#restart-modal-content {
     background: rgba(255, 255, 255, 0.98);
     padding: 32px;
     border-radius: 20px;
@@ -1086,13 +1089,15 @@ a.admin-menu-link:hover {
     }
 }
 
-#logout-modal-content h3 {
+#logout-modal-content h3,
+#restart-modal-content h3 {
     color: #333;
     font-size: 24px;
     margin-bottom: 16px;
 }
 
-#logout-modal-content p {
+#logout-modal-content p,
+#restart-modal-content p {
     color: #666;
     font-size: 16px;
     line-height: 1.6;
@@ -1136,6 +1141,17 @@ a.admin-menu-link:hover {
     background: linear-gradient(135deg, #c62828, #b71c1c);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(198, 40, 40, 0.4);
+}
+
+.logout-btn.secondary {
+    background: linear-gradient(135deg, #eceff1, #cfd8dc);
+    color: #37474f;
+}
+
+.logout-btn.secondary:hover {
+    background: linear-gradient(135deg, #cfd8dc, #b0bec5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(55, 71, 79, 0.2);
 }
 
 /* Help Modal (操作方法) */

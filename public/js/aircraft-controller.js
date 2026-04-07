@@ -52,6 +52,16 @@ export default class AircraftController {
         /** 直前フレーム終了時の接地（レイ判定・接地用ヨー摩擦・ピッチパラメータ切替に使用） */
         this._aircraftGrounded = false;
         this.physics = mergeAircraftPhysicsFromWorld(null);
+        /** 乗客モード: 操縦入力なしでカメラのみ。機体姿勢はネット同期 */
+        this.passengerViewSlot = null;
+        this.passengerLookYaw = 0;
+        this.passengerLookPitch = 0;
+        this._passengerMouseSensitivity = 0.002;
+        /** @type {((e: MouseEvent) => void)|null} */
+        this._onPassengerMouseMove = null;
+        this._passengerMouseBound = false;
+        this._passengerAimScratch = new THREE.Vector3();
+        this._passengerBaseObj = new THREE.Object3D();
     }
 
     /**
@@ -91,6 +101,42 @@ export default class AircraftController {
         this._omegaPitch = 0;
         this._omegaRoll = 0;
         this._aircraftGrounded = false;
+    }
+
+    /**
+     * 乗客視点用にスロットを登録し、マウスで視点オフセットを付与する
+     * @param {object} slot
+     */
+    bindPassengerView(slot) {
+        this.unbindPassengerView();
+        this.passengerViewSlot = slot;
+        this.passengerLookYaw = 0;
+        this.passengerLookPitch = 0;
+        this._onPassengerMouseMove = (e) => {
+            if (!this.passengerViewSlot) return;
+            if (!document.pointerLockElement) return;
+            if (this._isInputActive()) return;
+            this.passengerLookYaw -= e.movementX * this._passengerMouseSensitivity;
+            this.passengerLookPitch -= e.movementY * this._passengerMouseSensitivity;
+            const lim = Math.PI / 2 - 0.08;
+            this.passengerLookPitch = THREE.MathUtils.clamp(this.passengerLookPitch, -lim, lim);
+        };
+        document.addEventListener('mousemove', this._onPassengerMouseMove);
+        this._passengerMouseBound = true;
+    }
+
+    /**
+     * 乗客視点の解除
+     */
+    unbindPassengerView() {
+        if (this._onPassengerMouseMove && this._passengerMouseBound) {
+            document.removeEventListener('mousemove', this._onPassengerMouseMove);
+        }
+        this._onPassengerMouseMove = null;
+        this._passengerMouseBound = false;
+        this.passengerViewSlot = null;
+        this.passengerLookYaw = 0;
+        this.passengerLookPitch = 0;
     }
 
     _attachKeys() {
@@ -163,10 +209,20 @@ export default class AircraftController {
      * @returns {THREE.Vector3|null}
      */
     getAvatarFeetWorld(out) {
-        const root = this.slot?.root;
+        return AircraftController.getAvatarFeetWorldForSlot(this.slot, out);
+    }
+
+    /**
+     * 任意スロットの足元ワールド座標（操縦・乗客共通）
+     * @param {object|null|undefined} slot
+     * @param {THREE.Vector3} [out]
+     * @returns {THREE.Vector3|null}
+     */
+    static getAvatarFeetWorldForSlot(slot, out) {
+        const root = slot?.root;
         if (!root) return null;
         root.updateMatrixWorld(true);
-        const ck = this.slot.cockpitOffset || { x: 0, y: 1.2, z: 0 };
+        const ck = slot.cockpitOffset || { x: 0, y: 1.2, z: 0 };
         const o = out || new THREE.Vector3();
         const localFeetY = Math.max(0, ck.y - 1.0);
         o.set(ck.x, localFeetY, ck.z);
@@ -179,7 +235,16 @@ export default class AircraftController {
      * @returns {THREE.Quaternion|null}
      */
     getAvatarQuaternion(out) {
-        const root = this.slot?.root;
+        return AircraftController.getAvatarQuaternionForSlot(this.slot, out);
+    }
+
+    /**
+     * @param {object|null|undefined} slot
+     * @param {THREE.Quaternion} [out]
+     * @returns {THREE.Quaternion|null}
+     */
+    static getAvatarQuaternionForSlot(slot, out) {
+        const root = slot?.root;
         if (!root) return null;
         const q = out || new THREE.Quaternion();
         root.getWorldQuaternion(q);
@@ -379,6 +444,41 @@ export default class AircraftController {
         }
 
         this._updateCamera();
+    }
+
+    /**
+     * 乗客時: 機体は同期済み root のみ使用し、カメラに視点オフセットを適用する
+     */
+    updatePassengerCamera() {
+        const slot = this.passengerViewSlot;
+        if (!slot?.root) return;
+        const root = slot.root;
+        root.updateMatrixWorld(true);
+        const cockpit = slot.cockpitOffset || { x: 0, y: 1.2, z: 0 };
+        const chase = slot.chaseOffset || { x: 0, y: 2, z: 8 };
+        this._eulerScratch.set(this.passengerLookPitch, this.passengerLookYaw, 0, 'YXZ');
+        this._qClampWorld.setFromEuler(this._eulerScratch);
+        const qOff = this._qClampWorld;
+
+        if (this.cameraMode === 'cockpit') {
+            this._lookTarget.set(cockpit.x, cockpit.y, cockpit.z);
+            root.localToWorld(this._lookTarget);
+            this.camera.position.copy(this._lookTarget);
+            root.getWorldQuaternion(this._worldQuat);
+            this.camera.quaternion.copy(this._worldQuat).multiply(qOff);
+            return;
+        }
+
+        this._lookTarget.set(chase.x, chase.y, chase.z);
+        root.localToWorld(this._lookTarget);
+        this.camera.position.copy(this._lookTarget);
+        root.getWorldPosition(this._passengerAimScratch);
+        this._passengerAimScratch.y += 1;
+        const o = this._passengerBaseObj;
+        o.position.copy(this.camera.position);
+        o.quaternion.identity();
+        o.lookAt(this._passengerAimScratch);
+        this.camera.quaternion.copy(o.quaternion).multiply(qOff);
     }
 
     /**

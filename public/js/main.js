@@ -444,6 +444,27 @@ class MetaverseApp {
             const world = this.worldManager.getWorld('lobby');
             if (world) this.worldManager.loadWorld('lobby', () => {});
         });
+        this.menuManager.setRestartWorldCallback(async () => {
+            if (this.aircraftManager?.isPiloting) {
+                await this.aircraftManager.exitPiloting();
+            }
+            if (this.aircraftManager?.isPassenger) {
+                this.aircraftManager.exitPassenger();
+            }
+            try {
+                document.exitPointerLock();
+            } catch (_) {
+                /* 未ロック時など */
+            }
+            this.characterController.resetMovement();
+            const sp = this.worldManager.getSpawnPoint();
+            this.characterController.setPosition(sp.x, sp.y, sp.z);
+            this.characterController.resetVelocity();
+            this.playerManager.updateLocalPlayer(
+                { x: sp.x, y: sp.y, z: sp.z },
+                this.characterController.getRotation()
+            );
+        });
         this.menuManager.setSceneManager(this.sceneManager);
         this.sceneManager.applyGraphicsSettings(this.menuManager.settings);
         this.characterController.setHeadPositionProvider((out) => this.playerManager.getLocalHeadWorldPosition(out));
@@ -453,7 +474,7 @@ class MetaverseApp {
             const mode = this.menuManager?.settings?.viewMode || 'third';
             const hideForFirst = mode === 'first';
             const hideForAdmin = !!(this.networkManager && this.networkManager.adminInvisible);
-            const hideForAircraft = !!(this.aircraftManager && this.aircraftManager.isPiloting);
+            const hideForAircraft = !!(this.aircraftManager && (this.aircraftManager.isPiloting || this.aircraftManager.isPassenger));
             this.playerManager.setLocalPlayerVisible(!hideForFirst && !hideForAdmin && !hideForAircraft);
         };
         this.aircraftManager.setOnPilotingChange(() => this.refreshLocalAvatarVisibility());
@@ -495,7 +516,7 @@ class MetaverseApp {
         // Vキー: ビデオ配信中のユーザーを視聴（ポインターロック中でも使える）
         document.addEventListener('keydown', (e) => {
             if (e.code !== 'KeyV' || e.repeat) return;
-            if (this.aircraftManager?.isPiloting) return;
+            if (this.aircraftManager?.isPiloting || this.aircraftManager?.isPassenger) return;
             const input = document.activeElement?.tagName?.toLowerCase();
             if (input === 'input' || input === 'textarea') return;
             const videoOn = (this.networkManager?.lastPlayersSnapshot || []).find(p => p.vcVideoOn);
@@ -911,6 +932,9 @@ class MetaverseApp {
                 this.aircraftController.update(deltaTime);
                 this.uiManager.updateAircraftHudTelemetry(this.aircraftController.getHudSnapshot());
             }
+            if (this.aircraftManager?.isPassenger && this.aircraftController) {
+                this.aircraftController.updatePassengerCamera();
+            }
             this.characterController.update(deltaTime);
 
             // Update local player visual and animation state
@@ -947,7 +971,7 @@ class MetaverseApp {
             } else if (this.taikoGameManager && this.taikoGameManager.isOpen()) {
                 this.uiManager.hideTeleportPrompt();
                 this.uiManager.hideAircraftBoardPrompt();
-            } else if (this.aircraftManager && this.aircraftManager.isPiloting) {
+            } else if (this.aircraftManager && (this.aircraftManager.isPiloting || this.aircraftManager.isPassenger)) {
                 this.uiManager.hideTeleportPrompt();
                 this.uiManager.hideAircraftBoardPrompt();
             } else if (this.teleportManager && this.teleportManager.nearestTaikoZone) {
@@ -961,7 +985,10 @@ class MetaverseApp {
                 this.uiManager.showTeleportPrompt(this.teleportManager.nearestZone.label);
             } else if (this.aircraftManager && this.aircraftManager.nearestSlot) {
                 this.uiManager.hideTeleportPrompt();
-                this.uiManager.showAircraftBoardPrompt(this.aircraftManager.nearestSlot.label);
+                this.uiManager.showAircraftBoardPrompt(
+                    this.aircraftManager.nearestSlot.label,
+                    this.aircraftManager.getNearestBoardingUiMode()
+                );
             } else {
                 this.uiManager.hideTeleportPrompt();
                 this.uiManager.hideAircraftBoardPrompt();

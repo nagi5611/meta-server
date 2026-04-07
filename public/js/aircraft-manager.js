@@ -1,6 +1,7 @@
 // public/js/aircraft-manager.js — 近接・搭乗・サーバー同期・駐機位置リセット
 
 import * as THREE from 'three';
+import AircraftController from './aircraft-controller.js';
 
 const STORAGE_CAMERA = 'metaverse-aircraft-camera';
 
@@ -39,6 +40,12 @@ export default class AircraftManager {
         this.isPiloting = false;
         /** @type {AircraftSlot|null} */
         this.activeSlot = null;
+        /** 他プレイヤー操縦中の同乗（サーバー登録なし） */
+        this.isPassenger = false;
+        /** @type {AircraftSlot|null} */
+        this.passengerSlot = null;
+        /** @type {Map<string, string>} slotId -> pilot socket id（players-update の aircraft から更新） */
+        this._slotPilotId = new Map();
         this.isMobileMode = false;
         this._tmpPlayerPos = new THREE.Vector3();
         /** @type {((e: KeyboardEvent) => void)|null} */
@@ -104,7 +111,7 @@ export default class AircraftManager {
      * @param {THREE.Vector3} playerWorldFeet
      */
     updateProximity(playerWorldFeet) {
-        if (this.isPiloting || this.isMobileMode) {
+        if (this.isPiloting || this.isPassenger || this.isMobileMode) {
             this.nearestSlot = null;
             return;
         }
@@ -127,25 +134,109 @@ export default class AircraftManager {
      * @returns {boolean}
      */
     async tryBoardNearest() {
-        if (!this.nearestSlot || this.isPiloting || this.isMobileMode) return false;
+        if (!this.nearestSlot || this.isPiloting || this.isPassenger || this.isMobileMode) return false;
         if (this.characterController.xrPresenting) return false;
         const slot = this.nearestSlot;
         const socket = this.networkManager.socket;
         if (!socket?.connected) return false;
 
+        if (this._slotHasOtherPilot(slot.id)) {
+            this._enterPassenger(slot);
+            return true;
+        }
+
         return new Promise((resolve) => {
             socket.emit('aircraft-board', { slotId: slot.id }, (res) => {
-                if (!res || !res.ok) {
-                    if (res?.error === 'busy') {
-                        console.warn('[Aircraft] 既に他プレイヤーが操縦中です');
-                    }
-                    resolve(false);
+                if (res?.ok) {
+                    this._enterPiloting(slot);
+                    resolve(true);
                     return;
                 }
-                this._enterPiloting(slot);
-                resolve(true);
+                if (res?.error === 'busy') {
+                    this._enterPassenger(slot);
+                    resolve(true);
+                    return;
+                }
+                resolve(false);
             });
         });
+    }
+
+    /**
+     * スナップショット上、そのスロットを自分以外が操縦しているか
+     * @param {string} slotId
+     * @returns {boolean}
+     */
+    _slotHasOtherPilot(slotId) {
+        const myId = this.networkManager?.myPlayerId;
+        const pid = this._slotPilotId.get(slotId);
+        if (!pid || !myId) return false;
+        return pid !== myId;
+    }
+
+    /**
+     * 搭乗プロンプト用: 他者操縦中なら同乗文面にする
+     * @returns {'pilot'|'passenger'}
+     */
+    getNearestBoardingUiMode() {
+        const slot = this.nearestSlot;
+        if (!slot?.id) return 'pilot';
+        return this._slotHasOtherPilot(slot.id) ? 'passenger' : 'pilot';
+    }
+
+    /**
+     * @param {AircraftSlot} slot
+     */
+    _enterPassenger(slot) {
+        document.exitPointerLock();
+        this.passengerSlot = slot;
+        this.isPassenger = true;
+        this.characterController.resetMovement();
+        this.characterController.setFlyMode(false);
+        this.characterController.setAircraftPoseProvider({
+            getPosition: (out) => AircraftController.getAvatarFeetWorldForSlot(slot, out),
+            getQuaternion: (out) => AircraftController.getAvatarQuaternionForSlot(slot, out)
+        });
+        this.aircraftController.unbind();
+        this.aircraftController.bindPassengerView(slot);
+        this.uiManager.hideAircraftBoardPrompt();
+
+        this._pilotKeyHandler = (e) => {
+            if (!this.isPassenger) return;
+            if (this.characterController.isInputActive()) return;
+            if (e.code === 'KeyF') {
+                e.preventDefault();
+                this.exitPassenger();
+            } else if (e.code === 'KeyV') {
+                e.preventDefault();
+                this.toggleCameraMode();
+            }
+        };
+        document.addEventListener('keydown', this._pilotKeyHandler);
+        this._notifyPilotingChange();
+    }
+
+    /**
+     * 同乗をやめ地上へ
+     */
+    exitPassenger() {
+        if (!this.isPassenger || !this.passengerSlot) return;
+        const ps = this.passengerSlot;
+        this.placeCharacterBesideAircraft(ps);
+        this._localPassengerCleanup();
+    }
+
+    _localPassengerCleanup() {
+        if (this._pilotKeyHandler) {
+            document.removeEventListener('keydown', this._pilotKeyHandler);
+            this._pilotKeyHandler = null;
+        }
+        this.aircraftController.unbindPassengerView();
+        this.characterController.setAircraftPoseProvider(null);
+        this.isPassenger = false;
+        this.passengerSlot = null;
+        this.uiManager.hideAircraftBoardPrompt();
+        this._notifyPilotingChange();
     }
 
     /**
@@ -208,6 +299,7 @@ export default class AircraftManager {
             this._pilotKeyHandler = null;
         }
         this.aircraftController.unbind();
+        this.aircraftController.unbindPassengerView();
         this.characterController.setAircraftPoseProvider(null);
         this.isPiloting = false;
         this.activeSlot = null;
@@ -259,6 +351,12 @@ export default class AircraftManager {
      */
     applyNetworkAircraftSnapshot(list, mySocketId) {
         if (!Array.isArray(list)) return;
+        this._slotPilotId.clear();
+        for (const entry of list) {
+            if (entry?.id && entry?.pilotId) {
+                this._slotPilotId.set(String(entry.id), String(entry.pilotId));
+            }
+        }
         for (const entry of list) {
             if (!entry || !entry.id || !entry.position || !entry.quaternion) continue;
             if (mySocketId && entry.pilotId === mySocketId) continue;
@@ -299,6 +397,10 @@ export default class AircraftManager {
         if (this.isPiloting && this.activeSlot?.id === slotId) {
             return;
         }
+        if (this.isPassenger && this.passengerSlot?.id === slotId) {
+            this.placeCharacterBesideAircraft(this.passengerSlot);
+            this._localPassengerCleanup();
+        }
         this.resetSlotToParked(slotId);
     }
 
@@ -306,6 +408,10 @@ export default class AircraftManager {
      * サーバーが既に room から外した後（change-world 等）にローカルだけ操縦状態を掃除する
      */
     forceLocalPilotingReset() {
+        if (this.isPassenger && this.passengerSlot) {
+            this.placeCharacterBesideAircraft(this.passengerSlot);
+            this._localPassengerCleanup();
+        }
         if (!this.isPiloting) return;
         if (this._pilotKeyHandler) {
             document.removeEventListener('keydown', this._pilotKeyHandler);
@@ -313,6 +419,7 @@ export default class AircraftManager {
         }
         const sid = this.activeSlot?.id;
         this.aircraftController.unbind();
+        this.aircraftController.unbindPassengerView();
         this.characterController.setAircraftPoseProvider(null);
         this.isPiloting = false;
         this.activeSlot = null;
@@ -338,6 +445,7 @@ export default class AircraftManager {
         return !this.isMobileMode
             && !this.characterController.xrPresenting
             && !!this.nearestSlot
-            && !this.isPiloting;
+            && !this.isPiloting
+            && !this.isPassenger;
     }
 }

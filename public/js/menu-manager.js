@@ -12,9 +12,15 @@ class MenuManager {
         this.videoBtn = document.getElementById('video-btn');
         this.settingsBtn = document.getElementById('settings-btn');
         this.logoutBtn = document.getElementById('logout-btn');
-        
+        this.restartWorldBtn = document.getElementById('restart-world-btn');
+
         // Modals
         this.logoutModal = document.getElementById('logout-modal');
+        this.restartModal = document.getElementById('restart-modal');
+        this.restartSpawnConfirmBtn = document.getElementById('restart-spawn-confirm-btn');
+        this.restartModalCancelBtn = document.getElementById('restart-modal-cancel-btn');
+        /** @type {(() => void|Promise<void>)|null} */
+        this.onRestartWorldCallback = null;
         this.returnToLobbyBtn = document.getElementById('return-to-lobby-btn');
         this.logoutConfirmBtn = document.getElementById('logout-confirm-btn');
         this.onReturnToLobbyCallback = null;
@@ -139,6 +145,14 @@ class MenuManager {
      */
     setReturnToLobbyCallback(callback) {
         this.onReturnToLobbyCallback = callback;
+    }
+
+    /**
+     * リスタート（現在ワールドのスポーンへ）実行時に呼ぶ非同期処理を登録する
+     * @param {() => void|Promise<void>} callback
+     */
+    setRestartWorldCallback(callback) {
+        this.onRestartWorldCallback = typeof callback === 'function' ? callback : null;
     }
     
     async loadVideoDevices() {
@@ -409,6 +423,15 @@ class MenuManager {
                 this.closeLogoutModal();
             }
         });
+
+        this.restartWorldBtn?.addEventListener('click', () => this.openRestartModal());
+        this.restartSpawnConfirmBtn?.addEventListener('click', () => this.handleRestartWorldConfirm());
+        this.restartModalCancelBtn?.addEventListener('click', () => this.closeRestartModal());
+        this.restartModal?.addEventListener('click', (e) => {
+            if (e.target === this.restartModal) {
+                this.closeRestartModal();
+            }
+        });
         
         this.settingsModal.addEventListener('click', (e) => {
             if (e.target === this.settingsModal) {
@@ -536,6 +559,10 @@ class MenuManager {
                 this.closeSettings();
                 return;
             }
+            if (this.restartModal?.classList.contains('visible')) {
+                this.closeRestartModal();
+                return;
+            }
             if (this.logoutModal?.classList.contains('visible')) {
                 this.closeLogoutModal();
                 return;
@@ -640,6 +667,32 @@ class MenuManager {
     
     closeLogoutModal() {
         this.logoutModal.classList.remove('visible');
+    }
+
+    /** リスタート確認モーダルを開く */
+    openRestartModal() {
+        this.restartModal?.classList.add('visible');
+        if (this.restartModal) this.restartModal.setAttribute('aria-hidden', 'false');
+    }
+
+    /** リスタート確認モーダルを閉じる */
+    closeRestartModal() {
+        this.restartModal?.classList.remove('visible');
+        if (this.restartModal) this.restartModal.setAttribute('aria-hidden', 'true');
+    }
+
+    /**
+     * リスタート確定: 登録コールバックを await してからモーダルを閉じる
+     */
+    async handleRestartWorldConfirm() {
+        if (typeof this.onRestartWorldCallback === 'function') {
+            try {
+                await this.onRestartWorldCallback();
+            } catch (err) {
+                console.error('[Menu] Restart world failed:', err);
+            }
+        }
+        this.closeRestartModal();
     }
 
     /**

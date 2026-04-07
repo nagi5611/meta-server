@@ -312,10 +312,13 @@ class UIManager {
 
     /**
      * @param {string} [label]
+     * @param {'pilot'|'passenger'} [mode]
      */
-    showAircraftBoardPrompt(label) {
+    showAircraftBoardPrompt(label, mode = 'pilot') {
         if (!this.aircraftBoardPrompt) return;
-        const t = (label || '操縦する').trim();
+        const name = (label || '').trim();
+        const verb = mode === 'passenger' ? '同乗する' : '操縦する';
+        const t = name ? `${name} — ${verb}` : verb;
         this.aircraftBoardPrompt.textContent = `${t}（クリック / E）`;
         this.aircraftBoardPrompt.style.display = 'block';
     }
