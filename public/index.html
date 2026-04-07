@@ -13,12 +13,13 @@
     <script>
         // アクセス制御
         const username = localStorage.getItem('username');
-        const isAdminPath = window.location.pathname === '/admin';
+        const p = window.location.pathname;
+        const isAdminPath = p === '/admin' || p === '/admin/';
         if (isAdminPath) {
             // /admin: Basic認証でページ取得済み。トークン取得は main.js で実施
         } else {
             if (username && username.trim().toLowerCase() === 'admin') {
-                window.location.href = '/admin';
+                window.location.href = '/admin' + window.location.search + window.location.hash;
                 throw new Error('redirect');
             }
             if (!username || username.trim().length < 2) {

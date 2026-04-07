@@ -656,7 +656,9 @@ class MenuManager {
         localStorage.removeItem('username');
         localStorage.removeItem('userRole');
         sessionStorage.removeItem('metaverseAdminToken');
-        window.location.href = window.location.pathname === '/admin' ? '/admin.html' : '/login/';
+        const ap = window.location.pathname;
+        const fromAdminMetaverse = ap === '/admin' || ap === '/admin/';
+        window.location.href = fromAdminMetaverse ? '/admin.html' : '/login/';
     }
     
     openSettings() {

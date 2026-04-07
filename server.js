@@ -1291,10 +1291,12 @@ app.get('/setting.html', basicAuth, (req, res) => {
     res.redirect(302, '/admin.html?panel=world-edit');
 });
 
-// Admin metaverse: /admin でBasic認証必須。別セッションとして管理
-app.get('/admin', basicAuth, (req, res) => {
+// Admin metaverse: /admin（末尾スラッシュありも）でBasic認証必須。別セッションとして管理
+const sendAdminMetaverseIndex = (req, res) => {
     res.sendFile(path.join(STATIC_DIR, 'index.html'));
-});
+};
+app.get('/admin', basicAuth, sendAdminMetaverseIndex);
+app.get('/admin/', basicAuth, sendAdminMetaverseIndex);
 
 // Apply basic auth to admin API routes
 app.use('/admin', basicAuth);

@@ -47,6 +47,15 @@ function getWorldIdFromUrl() {
     return null;
 }
 
+/**
+ * 管理者用メタバースの URL か（/admin または /admin/）
+ * @returns {boolean}
+ */
+function isAdminMetaverseEntryPath() {
+    const p = window.location.pathname;
+    return p === '/admin' || p === '/admin/';
+}
+
 class MetaverseApp {
     constructor() {
         this.sceneManager = null;
@@ -123,12 +132,12 @@ class MetaverseApp {
         registerMetaverseServiceWorker();
 
         // /admin セッション: Basic認証済みでトークン取得が必須
-        if (window.location.pathname === '/admin') {
+        if (isAdminMetaverseEntryPath()) {
             try {
                 const res = await fetch('/admin/enter-metaverse', { credentials: 'include' });
                 if (!res.ok) {
                     alert('認証が必要です。Basic認証でログインしてください。');
-                    window.location.href = '/admin.html';
+                    window.location.href = '/admin.html' + window.location.search + window.location.hash;
                     return;
                 }
                 const { token, username } = await res.json();
@@ -137,7 +146,7 @@ class MetaverseApp {
             } catch (err) {
                 console.error('Admin metaverse auth failed:', err);
                 alert('管理者認証に失敗しました。');
-                window.location.href = '/admin.html';
+                window.location.href = '/admin.html' + window.location.search + window.location.hash;
                 return;
             }
         }
@@ -179,7 +188,7 @@ class MetaverseApp {
 
         // Initialize Teleport Manager
         this.teleportManager = new TeleportManager(this.worldManager, this.uiManager);
-        this.userRole = (window.location.pathname === '/admin') ? 'admin' : (localStorage.getItem('userRole') || 'guest');
+        this.userRole = isAdminMetaverseEntryPath() ? 'admin' : (localStorage.getItem('userRole') || 'guest');
         this.teleportManager.setUserRole(this.userRole);
         this.teleportManager.setTeleportCallback((destinationWorld, teleporterId) => {
             if (this.aircraftManager) this.aircraftManager.forceLocalPilotingReset();
@@ -497,7 +506,7 @@ class MetaverseApp {
         });
 
         // Admin: プレイヤーアバタークリックで情報表示
-        if (window.location.pathname === '/admin') {
+        if (isAdminMetaverseEntryPath()) {
             this.setupAdminPlayerInfoClick();
         }
 

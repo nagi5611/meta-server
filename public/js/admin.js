@@ -2669,7 +2669,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const { token, username } = await res.json();
             sessionStorage.setItem('metaverseAdminToken', token);
             localStorage.setItem('username', username);
-            window.location.href = '/admin';
+            const q = window.location.search || '';
+            const h = window.location.hash || '';
+            window.location.href = '/admin' + q + h;
         } catch (err) {
             console.error('Failed to enter metaverse as admin:', err);
             alert('メタバースへの入室に失敗しました。');
