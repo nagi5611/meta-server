@@ -310,6 +310,11 @@ class MetaverseApp {
             this.sceneManager.getCamera(),
             this.physicsManager
         );
+        // 初回 loadWorld 時は onWorldChange 未登録のため onWorldChanged が走らない。直リンクでもワールドの aircraftPhysics を反映する
+        const initialWorldForAircraft = this.worldManager.getCurrentWorld();
+        if (initialWorldForAircraft) {
+            this.aircraftController.applyWorldPhysics(initialWorldForAircraft.aircraftPhysics);
+        }
         this.aircraftManager = new AircraftManager(
             this.sceneManager,
             this.aircraftController,
