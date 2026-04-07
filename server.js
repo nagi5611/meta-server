@@ -202,7 +202,9 @@ function validateWorldsAircraftPhysics(worlds) {
         gravity: [0, 50],
         liftPerHorizontalSpeed: [0, 5],
         sideslipDamping: [0, 10],
-        excessClimbDamping: [0, 10]
+        excessClimbDamping: [0, 10],
+        pitchUpMaxGroundDeg: [0, 89],
+        pitchUpMaxAirDeg: [0, 89]
     };
     for (const [wid, w] of Object.entries(worlds)) {
         if (!w || typeof w !== 'object') continue;

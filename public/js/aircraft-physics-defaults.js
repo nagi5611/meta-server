@@ -1,6 +1,6 @@
 // public/js/aircraft-physics-defaults.js — 飛行機操縦の数値デフォルト（THREE に依存しない）
 
-/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccel: number, pitchAccel: number, rollAccel: number, yawMaxRate: number, pitchMaxRate: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, sideslipDamping: number, excessClimbDamping: number, gravity: number, liftPerHorizontalSpeed: number }>} */
+/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccel: number, pitchAccel: number, rollAccel: number, yawMaxRate: number, pitchMaxRate: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, sideslipDamping: number, excessClimbDamping: number, pitchUpMaxGroundDeg: number, pitchUpMaxAirDeg: number, gravity: number, liftPerHorizontalSpeed: number }>} */
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     maxSpeed: 45,
     thrustAccel: 18,
@@ -21,6 +21,10 @@ export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     sideslipDamping: 0,
     /** 空中かつ上向き速度時のみ vy を exp(-k*dt) で減衰 (1/s)。揚力の積み上がりを抑える。0 で無効 */
     excessClimbDamping: 0,
+    /** ワールド YXZ ピッチ（機首上げ）の上限・接地時（度）。旧既定 0.12 rad ≈ 6.9° */
+    pitchUpMaxGroundDeg: 6.9,
+    /** 同上・空中時（度） */
+    pitchUpMaxAirDeg: 85,
     gravity: 9.81,
     liftPerHorizontalSpeed: 0.35
 });
@@ -51,6 +55,8 @@ export function mergeAircraftPhysicsFromWorld(raw) {
             base[k] = Math.min(5, Math.max(0, v));
         } else if (k === 'sideslipDamping' || k === 'excessClimbDamping') {
             base[k] = Math.min(10, Math.max(0, v));
+        } else if (k === 'pitchUpMaxGroundDeg' || k === 'pitchUpMaxAirDeg') {
+            base[k] = Math.min(89, Math.max(0, v));
         } else if (k === 'angularDecel' || k === 'yawGroundFrictionLeft' || k === 'yawGroundFrictionRight') {
             base[k] = Math.min(30, Math.max(0, v));
         } else if (k.endsWith('Accel')) {

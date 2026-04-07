@@ -809,6 +809,15 @@
                                                 <label class="prop-label" for="world-aircraft-pitch-max-rate">ピッチ最高角速度</label>
                                                 <input type="number" id="world-aircraft-pitch-max-rate" class="prop-input num" step="0.05" min="0.02"><span class="prop-unit">rad/s</span>
                                             </div>
+                                            <p class="hint" style="margin-top:6px;">機首上げ上限はワールド YXZ オイラーのピッチ（度）。機首下げ側の下限は従来どおり無制限です。</p>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-pitch-up-max-ground-deg">ピッチ上げ上限（接地時）</label>
+                                                <input type="number" id="world-aircraft-pitch-up-max-ground-deg" class="prop-input num" step="0.5" min="0" max="89"><span class="prop-unit">°</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-pitch-up-max-air-deg">ピッチ上げ上限（空中）</label>
+                                                <input type="number" id="world-aircraft-pitch-up-max-air-deg" class="prop-input num" step="0.5" min="0" max="89"><span class="prop-unit">°</span>
+                                            </div>
                                             <div class="prop-row">
                                                 <label class="prop-label" for="world-aircraft-roll-accel">ロール角加速度</label>
                                                 <input type="number" id="world-aircraft-roll-accel" class="prop-input num" step="0.1" min="0.05"><span class="prop-unit">rad/s²</span>

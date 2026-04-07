@@ -9,9 +9,8 @@ const CLEARANCE_ABOVE_GROUND = 0.5;
 const GROUNDED_Y_TOLERANCE = 0.15;
 /** ワールド YXZ オイラー Z（ロール）の上限 ±30° */
 const MAX_BANK_RAD = Math.PI / 6;
-/** 接地中に許すワールド YXZ ピッチ（x）の上限（機首上げ）。これ以上は入力・角速度を抑止し姿勢をクランプ */
-const MAX_GROUND_PITCH_RAD = 0.12;
-const GROUND_PITCH_GATE_RAD = 0.02;
+/** ピッチ上限手前で上げ入力を止める余裕（rad） */
+const PITCH_UP_GATE_RAD = 0.02;
 
 /**
  * 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -255,16 +254,17 @@ export default class AircraftController {
     }
 
     /**
-     * 接地中ワールド YXZ のピッチ（x）を上限以下にし、必要ならローカル姿勢を書き換える
+     * ワールド YXZ のピッチ（x）を機首上げ maxUpRad 以下にし、必要ならローカル姿勢を書き換える
      * @param {import('three').Object3D} root
+     * @param {number} maxUpRad
      */
-    _clampWorldPitchOnGround(root) {
+    _clampWorldPitchUp(root, maxUpRad) {
         root.updateMatrixWorld(true);
         root.getWorldQuaternion(this._worldQuat);
         this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
         const x = this._eulerScratch.x;
-        if (x <= MAX_GROUND_PITCH_RAD) return;
-        this._eulerScratch.x = MAX_GROUND_PITCH_RAD;
+        if (x <= maxUpRad) return;
+        this._eulerScratch.x = maxUpRad;
         this._qClampWorld.setFromEuler(this._eulerScratch);
         if (root.parent) {
             root.parent.updateMatrixWorld(true);
@@ -290,18 +290,21 @@ export default class AircraftController {
         let pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
         const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
 
-        if (this._aircraftGrounded) {
+        const ph = this.physics;
+        const pitchUpMaxRad = THREE.MathUtils.degToRad(
+            this._aircraftGrounded ? ph.pitchUpMaxGroundDeg : ph.pitchUpMaxAirDeg
+        );
+        {
             root.updateMatrixWorld(true);
             root.getWorldQuaternion(this._worldQuat);
             this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
             const px = this._eulerScratch.x;
-            if (px >= MAX_GROUND_PITCH_RAD - GROUND_PITCH_GATE_RAD) {
+            if (px >= pitchUpMaxRad - PITCH_UP_GATE_RAD) {
                 if (pitchIn > 0) pitchIn = 0;
                 if (this._omegaPitch > 0) this._omegaPitch = 0;
             }
         }
 
-        const ph = this.physics;
         const dec = ph.angularDecel;
 
         root.updateMatrixWorld(true);
@@ -326,9 +329,10 @@ export default class AircraftController {
         root.rotateOnAxis(new THREE.Vector3(0, 0, 1), -this._omegaRoll * dt);
         root.updateMatrixWorld(true);
         this._clampWorldBank(root);
-        if (this._aircraftGrounded) {
-            this._clampWorldPitchOnGround(root);
-        }
+        this._clampWorldPitchUp(
+            root,
+            THREE.MathUtils.degToRad(this._aircraftGrounded ? ph.pitchUpMaxGroundDeg : ph.pitchUpMaxAirDeg)
+        );
 
         const thrust = (this.keys.forward ? 1 : 0) - (this.keys.back ? 1 : 0);
         root.getWorldQuaternion(this._worldQuat);
