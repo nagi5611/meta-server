@@ -192,9 +192,13 @@ function validateWorldsAircraftPhysics(worlds) {
         drag: [0.5, 0.99999],
         yawAccel: [0.05, 40],
         pitchAccel: [0.05, 40],
+        pitchAccelGround: [0.05, 40],
+        pitchAccelAir: [0.05, 40],
         rollAccel: [0.05, 40],
         yawMaxRate: [0.02, 10],
         pitchMaxRate: [0.02, 10],
+        pitchMaxRateGround: [0.02, 10],
+        pitchMaxRateAir: [0.02, 10],
         rollMaxRate: [0.02, 10],
         angularDecel: [0, 30],
         yawGroundFrictionLeft: [0, 30],
@@ -202,9 +206,7 @@ function validateWorldsAircraftPhysics(worlds) {
         gravity: [0, 50],
         liftPerHorizontalSpeed: [0, 5],
         sideslipDamping: [0, 10],
-        excessClimbDamping: [0, 10],
-        pitchUpMaxGroundDeg: [0, 89],
-        pitchUpMaxAirDeg: [0, 89]
+        excessClimbDamping: [0, 10]
     };
     for (const [wid, w] of Object.entries(worlds)) {
         if (!w || typeof w !== 'object') continue;

@@ -1,15 +1,17 @@
 // public/js/aircraft-physics-defaults.js — 飛行機操縦の数値デフォルト（THREE に依存しない）
 
-/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccel: number, pitchAccel: number, rollAccel: number, yawMaxRate: number, pitchMaxRate: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, sideslipDamping: number, excessClimbDamping: number, pitchUpMaxGroundDeg: number, pitchUpMaxAirDeg: number, gravity: number, liftPerHorizontalSpeed: number }>} */
+/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccel: number, pitchAccelGround: number, pitchAccelAir: number, rollAccel: number, yawMaxRate: number, pitchMaxRateGround: number, pitchMaxRateAir: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, sideslipDamping: number, excessClimbDamping: number, gravity: number, liftPerHorizontalSpeed: number }>} */
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     maxSpeed: 45,
     thrustAccel: 18,
     drag: 0.985,
     yawAccel: 5,
-    pitchAccel: 4,
+    pitchAccelGround: 4,
+    pitchAccelAir: 4,
     rollAccel: 5,
     yawMaxRate: 1.1,
-    pitchMaxRate: 0.9,
+    pitchMaxRateGround: 0.9,
+    pitchMaxRateAir: 0.9,
     rollMaxRate: 1.2,
     /** 入力オフ時の角速度減速 (rad/s²) */
     angularDecel: 3,
@@ -21,10 +23,6 @@ export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     sideslipDamping: 0,
     /** 空中かつ上向き速度時のみ vy を exp(-k*dt) で減衰 (1/s)。揚力の積み上がりを抑える。0 で無効 */
     excessClimbDamping: 0,
-    /** ワールド YXZ ピッチ（機首上げ）の上限・接地時（度）。旧既定 0.12 rad ≈ 6.9° */
-    pitchUpMaxGroundDeg: 6.9,
-    /** 同上・空中時（度） */
-    pitchUpMaxAirDeg: 85,
     gravity: 9.81,
     liftPerHorizontalSpeed: 0.35
 });
@@ -32,6 +30,7 @@ export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
 /**
  * worlds.json の aircraftPhysics を既定値でマージして検証クリップする。
  * 旧キー yawRate / pitchRate / rollRate は最高角速度として読み替える。
+ * 旧 pitchAccel / pitchMaxRate は接地・空中の両方にコピーする。
  * @param {Record<string, unknown>|null|undefined} raw
  */
 export function mergeAircraftPhysicsFromWorld(raw) {
@@ -39,7 +38,18 @@ export function mergeAircraftPhysicsFromWorld(raw) {
     if (!raw || typeof raw !== 'object') return base;
     const r = { ...raw };
     if (typeof r.yawRate === 'number' && typeof r.yawMaxRate !== 'number') r.yawMaxRate = r.yawRate;
-    if (typeof r.pitchRate === 'number' && typeof r.pitchMaxRate !== 'number') r.pitchMaxRate = r.pitchRate;
+    if (typeof r.pitchMaxRate === 'number') {
+        if (typeof r.pitchMaxRateGround !== 'number') r.pitchMaxRateGround = r.pitchMaxRate;
+        if (typeof r.pitchMaxRateAir !== 'number') r.pitchMaxRateAir = r.pitchMaxRate;
+    }
+    if (typeof r.pitchRate === 'number') {
+        if (typeof r.pitchMaxRateGround !== 'number') r.pitchMaxRateGround = r.pitchRate;
+        if (typeof r.pitchMaxRateAir !== 'number') r.pitchMaxRateAir = r.pitchRate;
+    }
+    if (typeof r.pitchAccel === 'number') {
+        if (typeof r.pitchAccelGround !== 'number') r.pitchAccelGround = r.pitchAccel;
+        if (typeof r.pitchAccelAir !== 'number') r.pitchAccelAir = r.pitchAccel;
+    }
     if (typeof r.rollRate === 'number' && typeof r.rollMaxRate !== 'number') r.rollMaxRate = r.rollRate;
 
     for (const k of Object.keys(DEFAULT_AIRCRAFT_PHYSICS)) {
@@ -55,10 +65,12 @@ export function mergeAircraftPhysicsFromWorld(raw) {
             base[k] = Math.min(5, Math.max(0, v));
         } else if (k === 'sideslipDamping' || k === 'excessClimbDamping') {
             base[k] = Math.min(10, Math.max(0, v));
-        } else if (k === 'pitchUpMaxGroundDeg' || k === 'pitchUpMaxAirDeg') {
-            base[k] = Math.min(89, Math.max(0, v));
         } else if (k === 'angularDecel' || k === 'yawGroundFrictionLeft' || k === 'yawGroundFrictionRight') {
             base[k] = Math.min(30, Math.max(0, v));
+        } else if (k === 'pitchAccelGround' || k === 'pitchAccelAir') {
+            base[k] = Math.min(40, Math.max(0.05, v));
+        } else if (k === 'pitchMaxRateGround' || k === 'pitchMaxRateAir') {
+            base[k] = Math.min(10, Math.max(0.02, v));
         } else if (k.endsWith('Accel')) {
             base[k] = Math.min(40, Math.max(0.05, v));
         } else if (k.endsWith('MaxRate')) {
