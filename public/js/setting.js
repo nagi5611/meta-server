@@ -1450,9 +1450,13 @@ function fillWorldAircraftPhysicsForm(world) {
         ['world-aircraft-max-speed', m.maxSpeed],
         ['world-aircraft-thrust-accel', m.thrustAccel],
         ['world-aircraft-drag', m.drag],
-        ['world-aircraft-yaw-rate', m.yawRate],
-        ['world-aircraft-pitch-rate', m.pitchRate],
-        ['world-aircraft-roll-rate', m.rollRate]
+        ['world-aircraft-yaw-accel', m.yawAccel],
+        ['world-aircraft-yaw-max-rate', m.yawMaxRate],
+        ['world-aircraft-pitch-accel', m.pitchAccel],
+        ['world-aircraft-pitch-max-rate', m.pitchMaxRate],
+        ['world-aircraft-roll-accel', m.rollAccel],
+        ['world-aircraft-roll-max-rate', m.rollMaxRate],
+        ['world-aircraft-angular-decel', m.angularDecel]
     ];
     for (const [id, v] of ids) {
         const el = document.getElementById(id);
@@ -1461,7 +1465,7 @@ function fillWorldAircraftPhysicsForm(world) {
 }
 
 /**
- * @returns {{ maxSpeed: number, thrustAccel: number, drag: number, yawRate: number, pitchRate: number, rollRate: number }}
+ * @returns {ReturnType<typeof mergeAircraftPhysicsFromWorld>}
  */
 function readWorldAircraftPhysicsFromForm() {
     const parse = (id, fallback) => {
@@ -1475,9 +1479,13 @@ function readWorldAircraftPhysicsFromForm() {
         maxSpeed: parse('world-aircraft-max-speed', DEFAULT_AIRCRAFT_PHYSICS.maxSpeed),
         thrustAccel: parse('world-aircraft-thrust-accel', DEFAULT_AIRCRAFT_PHYSICS.thrustAccel),
         drag: parse('world-aircraft-drag', DEFAULT_AIRCRAFT_PHYSICS.drag),
-        yawRate: parse('world-aircraft-yaw-rate', DEFAULT_AIRCRAFT_PHYSICS.yawRate),
-        pitchRate: parse('world-aircraft-pitch-rate', DEFAULT_AIRCRAFT_PHYSICS.pitchRate),
-        rollRate: parse('world-aircraft-roll-rate', DEFAULT_AIRCRAFT_PHYSICS.rollRate)
+        yawAccel: parse('world-aircraft-yaw-accel', DEFAULT_AIRCRAFT_PHYSICS.yawAccel),
+        yawMaxRate: parse('world-aircraft-yaw-max-rate', DEFAULT_AIRCRAFT_PHYSICS.yawMaxRate),
+        pitchAccel: parse('world-aircraft-pitch-accel', DEFAULT_AIRCRAFT_PHYSICS.pitchAccel),
+        pitchMaxRate: parse('world-aircraft-pitch-max-rate', DEFAULT_AIRCRAFT_PHYSICS.pitchMaxRate),
+        rollAccel: parse('world-aircraft-roll-accel', DEFAULT_AIRCRAFT_PHYSICS.rollAccel),
+        rollMaxRate: parse('world-aircraft-roll-max-rate', DEFAULT_AIRCRAFT_PHYSICS.rollMaxRate),
+        angularDecel: parse('world-aircraft-angular-decel', DEFAULT_AIRCRAFT_PHYSICS.angularDecel)
     };
     return mergeAircraftPhysicsFromWorld(raw);
 }
@@ -3859,9 +3867,13 @@ function bindEvents() {
         'world-aircraft-max-speed',
         'world-aircraft-thrust-accel',
         'world-aircraft-drag',
-        'world-aircraft-yaw-rate',
-        'world-aircraft-pitch-rate',
-        'world-aircraft-roll-rate'
+        'world-aircraft-yaw-accel',
+        'world-aircraft-yaw-max-rate',
+        'world-aircraft-pitch-accel',
+        'world-aircraft-pitch-max-rate',
+        'world-aircraft-roll-accel',
+        'world-aircraft-roll-max-rate',
+        'world-aircraft-angular-decel'
     ]) {
         document.getElementById(aircraftInputId)?.addEventListener('change', syncWorldAircraftPhysicsFromForm);
     }

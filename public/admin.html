@@ -774,17 +774,34 @@
                                                 <label class="prop-label" for="world-aircraft-drag">速度維持率（毎フレーム乗算）</label>
                                                 <input type="number" id="world-aircraft-drag" class="prop-input num" step="0.001" min="0.5" max="0.99999">
                                             </div>
+                                            <p class="hint" style="margin-top:6px;">ヨー・ピッチ・ロールは角加速度と最高角速度。ロールは姿勢上 ±30° で制限。入力を離すと角速度は angularDecel で減衰します。</p>
                                             <div class="prop-row">
-                                                <label class="prop-label" for="world-aircraft-yaw-rate">ヨー角速度</label>
-                                                <input type="number" id="world-aircraft-yaw-rate" class="prop-input num" step="0.05" min="0.01"><span class="prop-unit">rad/s</span>
+                                                <label class="prop-label" for="world-aircraft-yaw-accel">ヨー角加速度</label>
+                                                <input type="number" id="world-aircraft-yaw-accel" class="prop-input num" step="0.1" min="0.05"><span class="prop-unit">rad/s²</span>
                                             </div>
                                             <div class="prop-row">
-                                                <label class="prop-label" for="world-aircraft-pitch-rate">ピッチ角速度</label>
-                                                <input type="number" id="world-aircraft-pitch-rate" class="prop-input num" step="0.05" min="0.01"><span class="prop-unit">rad/s</span>
+                                                <label class="prop-label" for="world-aircraft-yaw-max-rate">ヨー最高角速度</label>
+                                                <input type="number" id="world-aircraft-yaw-max-rate" class="prop-input num" step="0.05" min="0.02"><span class="prop-unit">rad/s</span>
                                             </div>
                                             <div class="prop-row">
-                                                <label class="prop-label" for="world-aircraft-roll-rate">ロール角速度</label>
-                                                <input type="number" id="world-aircraft-roll-rate" class="prop-input num" step="0.05" min="0.01"><span class="prop-unit">rad/s</span>
+                                                <label class="prop-label" for="world-aircraft-pitch-accel">ピッチ角加速度</label>
+                                                <input type="number" id="world-aircraft-pitch-accel" class="prop-input num" step="0.1" min="0.05"><span class="prop-unit">rad/s²</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-pitch-max-rate">ピッチ最高角速度</label>
+                                                <input type="number" id="world-aircraft-pitch-max-rate" class="prop-input num" step="0.05" min="0.02"><span class="prop-unit">rad/s</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-roll-accel">ロール角加速度</label>
+                                                <input type="number" id="world-aircraft-roll-accel" class="prop-input num" step="0.1" min="0.05"><span class="prop-unit">rad/s²</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-roll-max-rate">ロール最高角速度</label>
+                                                <input type="number" id="world-aircraft-roll-max-rate" class="prop-input num" step="0.05" min="0.02"><span class="prop-unit">rad/s</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-angular-decel">角速度減衰（入力オフ時）</label>
+                                                <input type="number" id="world-aircraft-angular-decel" class="prop-input num" step="0.1" min="0"><span class="prop-unit">rad/s²</span>
                                             </div>
                                         </div>
                                     </details>

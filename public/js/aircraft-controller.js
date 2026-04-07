@@ -7,6 +7,8 @@ const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
 /** 地上判定の Y 余裕（この範囲なら接地扱いで横スリップのみ除去） */
 const GROUNDED_Y_TOLERANCE = 0.15;
+/** ワールド YXZ オイラー Z（ロール）の上限 ±30° */
+const MAX_BANK_RAD = Math.PI / 6;
 
 /**
  * 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -41,7 +43,12 @@ export default class AircraftController {
         this._onKeyDown = (e) => this._handleKey(e, true);
         this._onKeyUp = (e) => this._handleKey(e, false);
         this._bound = false;
-        /** @type {{ maxSpeed: number, thrustAccel: number, drag: number, yawRate: number, pitchRate: number, rollRate: number, gravity: number, liftPerHorizontalSpeed: number }} */
+        this._omegaYaw = 0;
+        this._omegaPitch = 0;
+        this._omegaRoll = 0;
+        this._eulerScratch = new THREE.Euler(0, 0, 0, 'YXZ');
+        this._qClampWorld = new THREE.Quaternion();
+        this._qParentWorld = new THREE.Quaternion();
         this.physics = mergeAircraftPhysicsFromWorld(null);
     }
 
@@ -67,6 +74,9 @@ export default class AircraftController {
         this.unbind();
         this.slot = slot;
         this.velocity.set(0, 0, 0);
+        this._omegaYaw = 0;
+        this._omegaPitch = 0;
+        this._omegaRoll = 0;
         this._attachKeys();
     }
 
@@ -74,6 +84,9 @@ export default class AircraftController {
         this._detachKeys();
         this.slot = null;
         this.velocity.set(0, 0, 0);
+        this._omegaYaw = 0;
+        this._omegaPitch = 0;
+        this._omegaRoll = 0;
     }
 
     _attachKeys() {
@@ -189,6 +202,52 @@ export default class AircraftController {
     }
 
     /**
+     * 角速度 1 軸: 入力ありは角加速度、なしは angularDecel で減速し ±maxRate でクリップ
+     * @param {number} input -1 | 0 | 1
+     * @param {number} omega
+     * @param {number} accel
+     * @param {number} maxRate
+     * @param {number} decel
+     * @param {number} dt
+     * @returns {number}
+     */
+    _integrateOmega(input, omega, accel, maxRate, decel, dt) {
+        let w = omega;
+        if (input !== 0) {
+            w += input * accel * dt;
+        } else if (decel > 0) {
+            const step = decel * dt;
+            if (Math.abs(w) <= step) w = 0;
+            else w -= Math.sign(w) * step;
+        }
+        return THREE.MathUtils.clamp(w, -maxRate, maxRate);
+    }
+
+    /**
+     * ワールド YXZ のロール角を ±MAX_BANK_RAD に収め、必要ならローカル姿勢を書き換える
+     * @param {import('three').Object3D} root
+     */
+    _clampWorldBank(root) {
+        root.updateMatrixWorld(true);
+        root.getWorldQuaternion(this._worldQuat);
+        this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
+        const z = this._eulerScratch.z;
+        if (z <= MAX_BANK_RAD && z >= -MAX_BANK_RAD) return;
+        this._eulerScratch.z = THREE.MathUtils.clamp(z, -MAX_BANK_RAD, MAX_BANK_RAD);
+        this._qClampWorld.setFromEuler(this._eulerScratch);
+        if (root.parent) {
+            root.parent.updateMatrixWorld(true);
+            root.parent.getWorldQuaternion(this._qParentWorld);
+            const qLocal = this._qParentWorld.clone().invert().multiply(this._qClampWorld);
+            root.quaternion.copy(qLocal);
+        } else {
+            root.quaternion.copy(this._qClampWorld);
+        }
+        this._omegaRoll = 0;
+        root.updateMatrixWorld(true);
+    }
+
+    /**
      * @param {number} deltaTime
      */
     update(deltaTime) {
@@ -201,10 +260,25 @@ export default class AircraftController {
         const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
 
         const ph = this.physics;
-        root.rotateOnAxis(new THREE.Vector3(0, 1, 0), -yawIn * ph.yawRate * dt);
-        root.rotateOnAxis(new THREE.Vector3(1, 0, 0), pitchIn * ph.pitchRate * dt);
-        root.rotateOnAxis(new THREE.Vector3(0, 0, 1), -rollIn * ph.rollRate * dt);
+        const dec = ph.angularDecel;
+
         root.updateMatrixWorld(true);
+        root.getWorldQuaternion(this._worldQuat);
+        this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
+        const bank = this._eulerScratch.z;
+        let rollInEff = rollIn;
+        if (bank >= MAX_BANK_RAD - 0.02 && rollIn > 0) rollInEff = 0;
+        if (bank <= -MAX_BANK_RAD + 0.02 && rollIn < 0) rollInEff = 0;
+
+        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, ph.yawAccel, ph.yawMaxRate, dec, dt);
+        this._omegaPitch = this._integrateOmega(pitchIn, this._omegaPitch, ph.pitchAccel, ph.pitchMaxRate, dec, dt);
+        this._omegaRoll = this._integrateOmega(rollInEff, this._omegaRoll, ph.rollAccel, ph.rollMaxRate, dec, dt);
+
+        root.rotateOnAxis(new THREE.Vector3(0, 1, 0), -this._omegaYaw * dt);
+        root.rotateOnAxis(new THREE.Vector3(1, 0, 0), this._omegaPitch * dt);
+        root.rotateOnAxis(new THREE.Vector3(0, 0, 1), -this._omegaRoll * dt);
+        root.updateMatrixWorld(true);
+        this._clampWorldBank(root);
 
         const thrust = (this.keys.forward ? 1 : 0) - (this.keys.back ? 1 : 0);
         root.getWorldQuaternion(this._worldQuat);
