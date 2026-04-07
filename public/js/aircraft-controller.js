@@ -312,7 +312,12 @@ export default class AircraftController {
         if (bank >= MAX_BANK_RAD - 0.02 && rollIn > 0) rollInEff = 0;
         if (bank <= -MAX_BANK_RAD + 0.02 && rollIn < 0) rollInEff = 0;
 
-        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, ph.yawAccel, ph.yawMaxRate, dec, dt);
+        let yawDecel = dec;
+        if (this._aircraftGrounded) {
+            if (this._omegaYaw > 0) yawDecel += ph.yawGroundFrictionRight;
+            else if (this._omegaYaw < 0) yawDecel += ph.yawGroundFrictionLeft;
+        }
+        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, ph.yawAccel, ph.yawMaxRate, yawDecel, dt);
         this._omegaPitch = this._integrateOmega(pitchIn, this._omegaPitch, ph.pitchAccel, ph.pitchMaxRate, dec, dt);
         this._omegaRoll = this._integrateOmega(rollInEff, this._omegaRoll, ph.rollAccel, ph.rollMaxRate, dec, dt);
 
@@ -397,6 +402,29 @@ export default class AircraftController {
         }
 
         this._updateCamera();
+    }
+
+    /**
+     * 操縦 HUD 用。毎フレーム update の直後に呼ぶ。
+     * @returns {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean }|null}
+     */
+    getHudSnapshot() {
+        const root = this.slot?.root;
+        if (!root) return null;
+        root.updateMatrixWorld(true);
+        root.getWorldQuaternion(this._worldQuat);
+        this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
+        const r2d = 180 / Math.PI;
+        return {
+            speedMs: this.velocity.length(),
+            pitchDeg: this._eulerScratch.x * r2d,
+            yawDeg: this._eulerScratch.y * r2d,
+            rollDeg: this._eulerScratch.z * r2d,
+            omegaYaw: this._omegaYaw,
+            omegaPitch: this._omegaPitch,
+            omegaRoll: this._omegaRoll,
+            grounded: this._aircraftGrounded
+        };
     }
 
     _updateCamera() {

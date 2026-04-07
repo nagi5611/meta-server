@@ -811,6 +811,15 @@
                                                 <label class="prop-label" for="world-aircraft-angular-decel">角速度減衰（入力オフ時）</label>
                                                 <input type="number" id="world-aircraft-angular-decel" class="prop-input num" step="0.1" min="0"><span class="prop-unit">rad/s²</span>
                                             </div>
+                                            <p class="hint" style="margin-top:6px;">接地中、ヨー入力がオフのとき <code>angularDecel</code> に加算される減速（左右別）。角速度の符号は内部値（D 側が正、A 側が負）。</p>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-yaw-ground-friction-left">接地ヨー摩擦（左/A・角速度負側）</label>
+                                                <input type="number" id="world-aircraft-yaw-ground-friction-left" class="prop-input num" step="0.1" min="0"><span class="prop-unit">rad/s²</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-yaw-ground-friction-right">接地ヨー摩擦（右/D・角速度正側）</label>
+                                                <input type="number" id="world-aircraft-yaw-ground-friction-right" class="prop-input num" step="0.1" min="0"><span class="prop-unit">rad/s²</span>
+                                            </div>
                                         </div>
                                     </details>
                                 </section>

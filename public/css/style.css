@@ -378,18 +378,43 @@ body {
 
 #aircraft-hud {
     position: absolute;
-    bottom: 96px;
+    bottom: 88px;
     left: 50%;
     transform: translateX(-50%);
     display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    max-width: min(96vw, 520px);
+    z-index: 102;
+    padding: 8px 12px;
+    background: rgba(20, 30, 50, 0.88);
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+#aircraft-hud .aircraft-hud-actions {
+    display: flex;
     flex-direction: row;
     flex-wrap: wrap;
     gap: 10px;
     justify-content: center;
-    z-index: 102;
-    padding: 8px 12px;
-    background: rgba(20, 30, 50, 0.85);
-    border-radius: 8px;
+}
+
+#aircraft-hud .aircraft-hud-telemetry {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    font-size: 12px;
+    line-height: 1.35;
+    color: rgba(220, 232, 255, 0.95);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+#aircraft-hud .aircraft-hud-line {
+    display: block;
 }
 
 #aircraft-hud button {

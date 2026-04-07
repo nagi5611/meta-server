@@ -327,8 +327,46 @@ class UIManager {
 
     showAircraftHud() {
         if (!this.aircraftHud) return;
-        this.aircraftHud.innerHTML = '<button type="button" id="aircraft-hud-exit">降りる (F)</button><button type="button" id="aircraft-hud-camera">視点 (V)</button>';
+        this.aircraftHud.innerHTML = `
+<div class="aircraft-hud-actions">
+<button type="button" id="aircraft-hud-exit">降りる (F)</button>
+<button type="button" id="aircraft-hud-camera">視点 (V)</button>
+</div>
+<div class="aircraft-hud-telemetry">
+<span class="aircraft-hud-line">速度 <strong id="aircraft-hud-speed">0</strong> m/s　姿勢 P <strong id="aircraft-hud-pitch">0</strong>° R <strong id="aircraft-hud-roll">0</strong>° Y <strong id="aircraft-hud-yaw">0</strong>°</span>
+<span class="aircraft-hud-line">角速度 ヨー <strong id="aircraft-hud-omegay">0</strong>　ピッチ <strong id="aircraft-hud-omegap">0</strong>　ロール <strong id="aircraft-hud-omegar">0</strong> rad/s　<strong id="aircraft-hud-ground">—</strong></span>
+</div>`;
         this.aircraftHud.style.display = 'flex';
+    }
+
+    /**
+     * 飛行機操縦中の計器表示（showAircraftHud 後・毎フレーム）
+     * @param {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean }|null} snap
+     */
+    updateAircraftHudTelemetry(snap) {
+        if (!this.aircraftHud || !snap) return;
+        const q = (n, d) => (Number.isFinite(n) ? n.toFixed(d) : '—');
+        const el = (id) => document.getElementById(id);
+        const s = el('aircraft-hud-speed');
+        const p = el('aircraft-hud-pitch');
+        const r = el('aircraft-hud-roll');
+        const y = el('aircraft-hud-yaw');
+        if (s) s.textContent = q(snap.speedMs, 1);
+        if (p) p.textContent = q(snap.pitchDeg, 1);
+        if (r) r.textContent = q(snap.rollDeg, 1);
+        if (y) {
+            const deg = snap.yawDeg;
+            const norm = Number.isFinite(deg) ? ((deg % 360) + 360) % 360 : NaN;
+            y.textContent = q(norm, 0);
+        }
+        const wy = el('aircraft-hud-omegay');
+        const wp = el('aircraft-hud-omegap');
+        const wr = el('aircraft-hud-omegar');
+        const g = el('aircraft-hud-ground');
+        if (wy) wy.textContent = q(snap.omegaYaw, 2);
+        if (wp) wp.textContent = q(snap.omegaPitch, 2);
+        if (wr) wr.textContent = q(snap.omegaRoll, 2);
+        if (g) g.textContent = snap.grounded ? '接地' : '空中';
     }
 
     hideAircraftHud() {

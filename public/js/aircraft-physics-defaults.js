@@ -1,6 +1,6 @@
 // public/js/aircraft-physics-defaults.js — 飛行機操縦の数値デフォルト（THREE に依存しない）
 
-/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccel: number, pitchAccel: number, rollAccel: number, yawMaxRate: number, pitchMaxRate: number, rollMaxRate: number, angularDecel: number, gravity: number, liftPerHorizontalSpeed: number }>} */
+/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccel: number, pitchAccel: number, rollAccel: number, yawMaxRate: number, pitchMaxRate: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, gravity: number, liftPerHorizontalSpeed: number }>} */
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     maxSpeed: 45,
     thrustAccel: 18,
@@ -13,6 +13,10 @@ export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     rollMaxRate: 1.2,
     /** 入力オフ時の角速度減速 (rad/s²) */
     angularDecel: 3,
+    /** 接地中・ヨー角速度が負（A/左寄り）のときに加算する減速 (rad/s²)。angularDecel に加算 */
+    yawGroundFrictionLeft: 0,
+    /** 接地中・ヨー角速度が正（D/右寄り）のときに加算する減速 (rad/s²) */
+    yawGroundFrictionRight: 0,
     gravity: 9.81,
     liftPerHorizontalSpeed: 0.35
 });
@@ -41,7 +45,7 @@ export function mergeAircraftPhysicsFromWorld(raw) {
             base[k] = Math.min(50, Math.max(0, v));
         } else if (k === 'liftPerHorizontalSpeed') {
             base[k] = Math.min(5, Math.max(0, v));
-        } else if (k === 'angularDecel') {
+        } else if (k === 'angularDecel' || k === 'yawGroundFrictionLeft' || k === 'yawGroundFrictionRight') {
             base[k] = Math.min(30, Math.max(0, v));
         } else if (k.endsWith('Accel')) {
             base[k] = Math.min(40, Math.max(0.05, v));

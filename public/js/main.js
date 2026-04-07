@@ -840,6 +840,7 @@ class MetaverseApp {
             // 操縦中は機体を先に進めてから、キャラ（物理・非表示アバター）を機体位置へ同期
             if (this.aircraftManager?.isPiloting && this.aircraftController) {
                 this.aircraftController.update(deltaTime);
+                this.uiManager.updateAircraftHudTelemetry(this.aircraftController.getHudSnapshot());
             }
             this.characterController.update(deltaTime);
 
