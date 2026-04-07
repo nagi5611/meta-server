@@ -25,6 +25,28 @@ import AircraftManager from './aircraft-manager.js';
 
 const DEFAULT_ROOM = 'lobby';
 
+/**
+ * 共有用 deep link からワールド ID を読む（?world=… または #world=…）
+ * @returns {string|null}
+ */
+function getWorldIdFromUrl() {
+    try {
+        const fromQuery = new URLSearchParams(window.location.search).get('world');
+        if (fromQuery != null) {
+            const id = String(fromQuery).trim();
+            if (id) return id;
+        }
+        const rawHash = window.location.hash.replace(/^#/, '');
+        if (rawHash.startsWith('world=')) {
+            const id = rawHash.slice('world='.length).split('&')[0].trim();
+            if (id) return decodeURIComponent(id);
+        }
+    } catch (_) {
+        /* ignore */
+    }
+    return null;
+}
+
 class MetaverseApp {
     constructor() {
         this.sceneManager = null;
@@ -203,8 +225,14 @@ class MetaverseApp {
             this.characterController.resetMovement();
         });
 
-        // Load initial world (lobby or first available)
-        const initialWorldId = this.worldManager.getWorld('lobby') ? 'lobby' : (this.worldManager.getAllWorlds()[0]?.id || 'lobby');
+        // Load initial world: URL ?world= / #world= が有効なら優先、なければ lobby または先頭
+        const defaultWorldId = this.worldManager.getWorld('lobby') ? 'lobby' : (this.worldManager.getAllWorlds()[0]?.id || 'lobby');
+        const urlWorldId = getWorldIdFromUrl();
+        const initialWorldId =
+            urlWorldId && this.worldManager.getWorld(urlWorldId) ? urlWorldId : defaultWorldId;
+        if (urlWorldId && urlWorldId !== initialWorldId) {
+            console.warn(`Unknown world in URL, using default: ${urlWorldId}`);
+        }
         console.log('Loading world:', initialWorldId);
         await new Promise((resolve) => {
             this.worldManager.loadWorld(initialWorldId, () => {
@@ -242,8 +270,9 @@ class MetaverseApp {
             // Continue anyway - PlayerManager will use fallback
         }
 
-        // Initialize network
+        // Initialize network（player-update の world と表示フィルタを初期ワールドに合わせる）
         this.networkManager = new NetworkManager(this.playerManager);
+        this.networkManager.currentWorld = initialWorldId;
         this.networkManager.onAdminTp = (data) => this.onAdminTp(data);
         this.networkManager.onPhysicsYCorrection = (data) => {
             const p = this.characterController.getPosition();
@@ -325,23 +354,39 @@ class MetaverseApp {
             });
         }
         
-        // Wait for socket connection, then join VC and Video VC
+        // Wait for socket connection: サーバーは常に lobby に入るため、URL 指定ワールドなら change-world で同期してから VC 参加
         this.networkManager.socket.on('connect', async () => {
-            if (this.voiceChatManager && !this.voiceChatManager.isJoined) {
-                try {
-                    await this.voiceChatManager.joinRoom(DEFAULT_ROOM);
-                    console.log('[VC] Auto-joined default room');
-                } catch (error) {
-                    console.error('[VC] Failed to auto-join:', error);
+            const roomId = this.worldManager.getCurrentWorldId() || DEFAULT_ROOM;
+            const joinVoiceAndVideo = async (vcRoom) => {
+                const id = vcRoom || DEFAULT_ROOM;
+                if (this.voiceChatManager && !this.voiceChatManager.isJoined) {
+                    try {
+                        await this.voiceChatManager.joinRoom(id);
+                        console.log('[VC] Auto-joined room:', id);
+                    } catch (error) {
+                        console.error('[VC] Failed to auto-join:', error);
+                    }
                 }
-            }
-            if (this.videoChatManager && !this.videoChatManager.isJoined) {
-                try {
-                    await this.videoChatManager.joinRoom(DEFAULT_ROOM);
-                    console.log('[Video VC] Auto-joined default room');
-                } catch (error) {
-                    console.error('[Video VC] Failed to auto-join:', error);
+                if (this.videoChatManager && !this.videoChatManager.isJoined) {
+                    try {
+                        await this.videoChatManager.joinRoom(id);
+                        console.log('[Video VC] Auto-joined room:', id);
+                    } catch (error) {
+                        console.error('[Video VC] Failed to auto-join:', error);
+                    }
                 }
+            };
+            if (roomId !== DEFAULT_ROOM) {
+                this.networkManager.changeWorld(roomId, {}, async (err) => {
+                    if (err) {
+                        console.error('[Network] Initial room sync failed:', err);
+                        await joinVoiceAndVideo(DEFAULT_ROOM);
+                        return;
+                    }
+                    await joinVoiceAndVideo(roomId);
+                });
+            } else {
+                await joinVoiceAndVideo(roomId);
             }
         });
 
@@ -705,6 +750,16 @@ class MetaverseApp {
         }
 
         console.log(`Teleported to spawn point: ${spawnPoint.x}, ${spawnPoint.y}, ${spawnPoint.z}`);
+
+        try {
+            const u = new URL(window.location.href);
+            if (world?.id) {
+                u.searchParams.set('world', world.id);
+                history.replaceState(null, '', u.pathname + u.search + u.hash);
+            }
+        } catch (_) {
+            /* ignore */
+        }
     }
 
     async onAdminTp(data) {

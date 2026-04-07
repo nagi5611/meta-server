@@ -22,7 +22,9 @@
                 throw new Error('redirect');
             }
             if (!username || username.trim().length < 2) {
-                window.location.href = '/login/';
+                const q = window.location.search || '';
+                const h = window.location.hash || '';
+                window.location.href = '/login/' + q + h;
             }
         }
     </script>
