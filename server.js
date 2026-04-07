@@ -200,7 +200,8 @@ function validateWorldsAircraftPhysics(worlds) {
         yawGroundFrictionLeft: [0, 30],
         yawGroundFrictionRight: [0, 30],
         gravity: [0, 50],
-        liftPerHorizontalSpeed: [0, 5]
+        liftPerHorizontalSpeed: [0, 5],
+        sideslipDamping: [0, 10]
     };
     for (const [wid, w] of Object.entries(worlds)) {
         if (!w || typeof w !== 'object') continue;

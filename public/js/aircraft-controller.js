@@ -341,6 +341,17 @@ export default class AircraftController {
         const sp = this.velocity.length();
         if (sp > ph.maxSpeed) this.velocity.multiplyScalar(ph.maxSpeed / sp);
 
+        const slipK = ph.sideslipDamping;
+        if (slipK > 0 && !this._aircraftGrounded && this._fwd.lengthSq() > 1e-12) {
+            this._lookTarget.copy(this._fwd).normalize();
+            const vParallel = this.velocity.dot(this._lookTarget);
+            this._worldPos.copy(this._lookTarget).multiplyScalar(vParallel);
+            const slipFactor = Math.exp(-slipK * dt);
+            this.velocity.sub(this._worldPos);
+            this.velocity.multiplyScalar(slipFactor);
+            this.velocity.add(this._worldPos);
+        }
+
         root.getWorldPosition(this._worldPos);
         this._worldPos.addScaledVector(this.velocity, dt);
         if (root.parent) {

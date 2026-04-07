@@ -771,6 +771,11 @@
                                                 <input type="number" id="world-aircraft-lift-per-speed" class="prop-input num" step="0.01" min="0"><span class="prop-unit">1/s</span>
                                             </div>
                                             <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-sideslip-damping">側滑り減衰（空中・機首に対する横速度成分）</label>
+                                                <input type="number" id="world-aircraft-sideslip-damping" class="prop-input num" step="0.1" min="0"><span class="prop-unit">1/s</span>
+                                            </div>
+                                            <p class="hint" style="margin-top:4px;">0 で無効。1〜2 程度でヨー後の進行方向が機首に追従しやすくなります（指数減衰 exp(−k·Δt)）。</p>
+                                            <div class="prop-row">
                                                 <label class="prop-label" for="world-aircraft-max-speed">最高速度</label>
                                                 <input type="number" id="world-aircraft-max-speed" class="prop-input num" step="0.5" min="1"><span class="prop-unit">m/s</span>
                                             </div>
