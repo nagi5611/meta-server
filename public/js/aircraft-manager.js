@@ -63,6 +63,7 @@ export default class AircraftManager {
     }
 
     _notifyPilotingChange() {
+        this.uiManager?.setMenuBarAircraftPiloting?.(this.isPiloting);
         try {
             this._onPilotingChange?.();
         } catch (_) { /* ignore */ }

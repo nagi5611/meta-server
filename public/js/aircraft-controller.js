@@ -9,6 +9,8 @@ const CLEARANCE_ABOVE_GROUND = 0.5;
 const GROUNDED_Y_TOLERANCE = 0.15;
 /** ワールド YXZ オイラー Z（ロール）の上限 ±30° */
 const MAX_BANK_RAD = Math.PI / 6;
+/** 接地中 Space ブレーキの減速度 (m/s²) */
+const WHEEL_BRAKE_DECEL_MS2 = 32;
 
 /**
  * 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -36,7 +38,8 @@ export default class AircraftController {
             pitchUp: false,
             pitchDn: false,
             rollL: false,
-            rollR: false
+            rollR: false,
+            brake: false
         };
         /** @type {'cockpit'|'chase'} */
         this.cameraMode = 'cockpit';
@@ -173,7 +176,8 @@ export default class AircraftController {
             ['ArrowUp', 'pitchDn'],
             ['ArrowDown', 'pitchUp'],
             ['ArrowLeft', 'rollR'],
-            ['ArrowRight', 'rollL']
+            ['ArrowRight', 'rollL'],
+            ['Space', 'brake']
         ];
         for (const [code, key] of map) {
             if (c === code) {
@@ -344,7 +348,8 @@ export default class AircraftController {
             if (this._omegaYaw > 0) yawDecel += ph.yawGroundFrictionRight;
             else if (this._omegaYaw < 0) yawDecel += ph.yawGroundFrictionLeft;
         }
-        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, ph.yawAccel, ph.yawMaxRate, yawDecel, dt);
+        const yawAccel = this._aircraftGrounded ? ph.yawAccelGround : ph.yawAccelAir;
+        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, yawAccel, ph.yawMaxRate, yawDecel, dt);
         const pitchAccel = this._aircraftGrounded ? ph.pitchAccelGround : ph.pitchAccelAir;
         const pitchMaxRate = this._aircraftGrounded ? ph.pitchMaxRateGround : ph.pitchMaxRateAir;
         this._omegaPitch = this._integrateOmega(pitchIn, this._omegaPitch, pitchAccel, pitchMaxRate, dec, dt);
@@ -428,7 +433,15 @@ export default class AircraftController {
                     if (lenH > 1e-6) {
                         hx /= lenH;
                         hz /= lenH;
-                        const fwdSpeed = this.velocity.x * hx + this.velocity.z * hz;
+                        let fwdSpeed = this.velocity.x * hx + this.velocity.z * hz;
+                        if (this.keys.brake) {
+                            const step = WHEEL_BRAKE_DECEL_MS2 * dt;
+                            const mag = Math.abs(fwdSpeed);
+                            if (mag > 0) {
+                                const ds = Math.min(mag, step);
+                                fwdSpeed -= Math.sign(fwdSpeed) * ds;
+                            }
+                        }
                         this.velocity.x = hx * fwdSpeed;
                         this.velocity.z = hz * fwdSpeed;
                     } else {

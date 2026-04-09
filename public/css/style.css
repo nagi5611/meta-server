@@ -905,6 +905,10 @@ body {
     border: 2px solid rgba(135, 206, 250, 0.3);
 }
 
+#menu-bar.aircraft-piloting {
+    opacity: 0.5;
+}
+
 /* Admin quick menu button */
 .admin-menu-button {
     width: 52px;

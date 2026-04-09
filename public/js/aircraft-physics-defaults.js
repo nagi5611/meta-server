@@ -1,11 +1,12 @@
 // public/js/aircraft-physics-defaults.js — 飛行機操縦の数値デフォルト（THREE に依存しない）
 
-/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccel: number, pitchAccelGround: number, pitchAccelAir: number, rollAccel: number, yawMaxRate: number, pitchMaxRateGround: number, pitchMaxRateAir: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, sideslipDamping: number, excessClimbDamping: number, gravity: number, liftPerHorizontalSpeed: number }>} */
+/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccelGround: number, yawAccelAir: number, pitchAccelGround: number, pitchAccelAir: number, rollAccel: number, yawMaxRate: number, pitchMaxRateGround: number, pitchMaxRateAir: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, sideslipDamping: number, excessClimbDamping: number, gravity: number, liftPerHorizontalSpeed: number }>} */
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     maxSpeed: 45,
     thrustAccel: 18,
     drag: 0.985,
-    yawAccel: 5,
+    yawAccelGround: 5,
+    yawAccelAir: 5,
     pitchAccelGround: 4,
     pitchAccelAir: 4,
     rollAccel: 5,
@@ -31,12 +32,17 @@ export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
  * worlds.json の aircraftPhysics を既定値でマージして検証クリップする。
  * 旧キー yawRate / pitchRate / rollRate は最高角速度として読み替える。
  * 旧 pitchAccel / pitchMaxRate は接地・空中の両方にコピーする。
+ * 旧 yawAccel は yawAccelGround / yawAccelAir の両方にコピーする。
  * @param {Record<string, unknown>|null|undefined} raw
  */
 export function mergeAircraftPhysicsFromWorld(raw) {
     const base = { ...DEFAULT_AIRCRAFT_PHYSICS };
     if (!raw || typeof raw !== 'object') return base;
     const r = { ...raw };
+    if (typeof r.yawAccel === 'number') {
+        if (typeof r.yawAccelGround !== 'number') r.yawAccelGround = r.yawAccel;
+        if (typeof r.yawAccelAir !== 'number') r.yawAccelAir = r.yawAccel;
+    }
     if (typeof r.yawRate === 'number' && typeof r.yawMaxRate !== 'number') r.yawMaxRate = r.yawRate;
     if (typeof r.pitchMaxRate === 'number') {
         if (typeof r.pitchMaxRateGround !== 'number') r.pitchMaxRateGround = r.pitchMaxRate;
@@ -67,7 +73,7 @@ export function mergeAircraftPhysicsFromWorld(raw) {
             base[k] = Math.min(10, Math.max(0, v));
         } else if (k === 'angularDecel' || k === 'yawGroundFrictionLeft' || k === 'yawGroundFrictionRight') {
             base[k] = Math.min(30, Math.max(0, v));
-        } else if (k === 'pitchAccelGround' || k === 'pitchAccelAir') {
+        } else if (k === 'pitchAccelGround' || k === 'pitchAccelAir' || k === 'yawAccelGround' || k === 'yawAccelAir') {
             base[k] = Math.min(40, Math.max(0.05, v));
         } else if (k === 'pitchMaxRateGround' || k === 'pitchMaxRateAir') {
             base[k] = Math.min(10, Math.max(0.02, v));

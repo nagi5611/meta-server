@@ -14,6 +14,8 @@ class UIManager {
         this.aircraftBoardPrompt = null;
         /** @type {HTMLElement|null} */
         this.aircraftHud = null;
+        /** @type {HTMLElement|null} */
+        this.menuBar = null;
         /** @type {(() => void)|null} */
         this._aircraftBoardHandler = null;
         /** @type {(() => void)|null} */
@@ -120,6 +122,17 @@ class UIManager {
         this.worldLoadLabel = document.getElementById('world-load-label');
         this.worldLoadBarFill = document.getElementById('world-load-bar-fill');
         this.worldLoadPct = document.getElementById('world-load-pct');
+
+        this.menuBar = document.getElementById('menu-bar');
+    }
+
+    /**
+     * 飛行機パイロット操縦中はメニューバーを半透明にする（降りる・同乗のみでは戻す）
+     * @param {boolean} piloting
+     */
+    setMenuBarAircraftPiloting(piloting) {
+        if (!this.menuBar) return;
+        this.menuBar.classList.toggle('aircraft-piloting', !!piloting);
     }
 
     /**

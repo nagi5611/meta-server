@@ -191,6 +191,8 @@ function validateWorldsAircraftPhysics(worlds) {
         thrustAccel: [0.1, 200],
         drag: [0.5, 0.99999],
         yawAccel: [0.05, 40],
+        yawAccelGround: [0.05, 40],
+        yawAccelAir: [0.05, 40],
         pitchAccel: [0.05, 40],
         pitchAccelGround: [0.05, 40],
         pitchAccelAir: [0.05, 40],
