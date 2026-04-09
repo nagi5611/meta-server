@@ -3467,9 +3467,10 @@ function bindEvents() {
      * @param {(ratio: number) => void} [onUploadProgress]
      * @param {() => void} [onUploadBytesSent] リクエストボディの送信完了後（サーバ処理待ち）。GLB のテクスチャリサイズ中など。
      * @param {boolean} [skipSpatialChunk] true のとき GLB の空間チャンク分割をサーバで行わない
+     * @param {boolean} [skipTextureResize] true のとき GLB のテクスチャ長辺縮小を行わない
      * @returns {Promise<{ status: number, text: string, json: object|null }>}
      */
-    function postAdminModelUploadXHR(url, file, onUploadProgress, onUploadBytesSent, skipSpatialChunk) {
+    function postAdminModelUploadXHR(url, file, onUploadProgress, onUploadBytesSent, skipSpatialChunk, skipTextureResize) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', url);
@@ -3497,6 +3498,7 @@ function bindEvents() {
             form.append('model', file);
             form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
             if (skipSpatialChunk) form.append('skipSpatialChunk', '1');
+            if (skipTextureResize) form.append('skipTextureResize', '1');
             xhr.send(form);
         });
     }
@@ -3506,11 +3508,14 @@ function bindEvents() {
      * @param {{ setStatus: (t: string, c?: string) => void }} ui
      * @param {string} fileName
      */
-    function onModelUploadBytesSentIfGlb(ui, fileName) {
+    /**
+     * @param {boolean} [skipTextureResize]
+     */
+    function onModelUploadBytesSentIfGlb(ui, fileName, skipTextureResize) {
         if (!fileName.toLowerCase().endsWith('.glb')) return undefined;
         return () => {
             activeGlbServerPhaseUi = ui;
-            ui.setStatus('リサイズ中…', 'muted');
+            ui.setStatus(skipTextureResize ? 'サーバで保存中…' : 'リサイズ中…', 'muted');
         };
     }
 
@@ -3522,15 +3527,17 @@ function bindEvents() {
      * @param {{ setStatus: (t: string, c?: string) => void }} ui
      * @param {string} fileName
      * @param {boolean} [skipSpatialChunk]
+     * @param {boolean} [skipTextureResize]
      */
-    async function postAdminModelUploadWithPhaseCleanup(url, file, onUploadProgress, ui, fileName, skipSpatialChunk) {
+    async function postAdminModelUploadWithPhaseCleanup(url, file, onUploadProgress, ui, fileName, skipSpatialChunk, skipTextureResize) {
         try {
             return await postAdminModelUploadXHR(
                 url,
                 file,
                 onUploadProgress,
-                onModelUploadBytesSentIfGlb(ui, fileName),
-                skipSpatialChunk
+                onModelUploadBytesSentIfGlb(ui, fileName, skipTextureResize),
+                skipSpatialChunk,
+                skipTextureResize
             );
         } finally {
             if (activeGlbServerPhaseUi === ui) activeGlbServerPhaseUi = null;
@@ -3868,6 +3875,8 @@ function bindEvents() {
 
         const skipChunkEl = document.getElementById('model-upload-skip-chunk');
         const skipSpatialChunk = !!(skipChunkEl && skipChunkEl.checked);
+        const skipTexEl = document.getElementById('model-upload-skip-texture-resize');
+        const skipTextureResize = !!(skipTexEl && skipTexEl.checked);
 
         let ok = 0;
         let skipped = 0;
@@ -3885,7 +3894,9 @@ function bindEvents() {
             let cls = 'ok';
             if (uploadData.textureResize) {
                 const tr = uploadData.textureResize;
-                if (tr.applied) {
+                if (tr.skippedByClient && tr.message) {
+                    msg = tr.message;
+                } else if (tr.applied) {
                     msg = tr.message || 'テクスチャを縮小して保存しました';
                 } else if (tr.error) {
                     msg = tr.error;
@@ -3943,7 +3954,8 @@ function bindEvents() {
                     },
                     ui,
                     name,
-                    skipSpatialChunk
+                    skipSpatialChunk,
+                    skipTextureResize
                 );
 
                 if (xhrRes.status === 409) {
@@ -3973,7 +3985,8 @@ function bindEvents() {
                         },
                         ui,
                         name,
-                        skipSpatialChunk
+                        skipSpatialChunk,
+                        skipTextureResize
                     );
                     if (xhrRes.status === 409) {
                         lastErr = '同名の上書き確認が必要: ' + name;
@@ -4042,7 +4055,8 @@ function bindEvents() {
                             },
                             ui,
                             name,
-                            skipSpatialChunk
+                            skipSpatialChunk,
+                            skipTextureResize
                         );
                         if (xhrRes.status === 409) {
                             lastErr = '同名の上書き確認が必要: ' + name;

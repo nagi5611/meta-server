@@ -4182,10 +4182,20 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         let textureResize = null;
         let spatialChunk = null;
         const skipSpatialChunk = req.body?.skipSpatialChunk === '1' || req.body?.skipSpatialChunk === 'true';
+        const skipTextureResize = req.body?.skipTextureResize === '1' || req.body?.skipTextureResize === 'true';
         if (ext === '.glb') {
-            const pipelineResult = await runGlbTextureResizeQueued(req.file.buffer);
-            outBuffer = pipelineResult.buffer;
-            textureResize = pipelineResult.textureResize;
+            if (skipTextureResize) {
+                outBuffer = req.file.buffer;
+                textureResize = {
+                    applied: false,
+                    skippedByClient: true,
+                    message: 'テクスチャのリサイズを行わず、オリジナルの GLB を保存しました。',
+                };
+            } else {
+                const pipelineResult = await runGlbTextureResizeQueued(req.file.buffer);
+                outBuffer = pipelineResult.buffer;
+                textureResize = pipelineResult.textureResize;
+            }
             if (!skipSpatialChunk) {
                 try {
                     spatialChunk = await runGlbSpatialChunkIfNeeded(outBuffer, {
@@ -4220,6 +4230,9 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         }
         if (skipSpatialChunk && ext === '.glb') {
             payload.spatialChunkSkipped = true;
+        }
+        if (skipTextureResize && ext === '.glb') {
+            payload.textureResizeSkipped = true;
         }
         res.json(payload);
     } catch (err) {

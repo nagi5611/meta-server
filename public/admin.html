@@ -1091,7 +1091,11 @@
                     </label>
                 </div>
             </fieldset>
-            <p id="model-upload-hint-model" class="hint model-upload-hint">GLB はサーバでテクスチャ長辺を最大 1536px に縮小してから保存します（複数アップロード時はサーバ側で順番に処理されます）。</p>
+            <p id="model-upload-hint-model" class="hint model-upload-hint">GLB は既定でサーバがテクスチャ長辺を最大 1536px に縮小してから保存します（複数アップロード時はサーバ側で順番に処理されます）。下のチェックで縮小を省略できます。</p>
+            <div class="model-upload-skip-texture-row prop-row checkbox-row" style="margin-top:10px;">
+                <input type="checkbox" id="model-upload-skip-texture-resize" class="prop-checkbox">
+                <label class="prop-label" for="model-upload-skip-texture-resize">テクスチャをリサイズしない（GLB 内のオリジナル画像のまま保存）</label>
+            </div>
             <div class="model-upload-skip-chunk-row prop-row checkbox-row" style="margin-top:10px;">
                 <input type="checkbox" id="model-upload-skip-chunk" class="prop-checkbox">
                 <label class="prop-label" for="model-upload-skip-chunk">空間チャンク分けをしない（単体 GLB のみ保存。条件を満たしても .chunks.json は作りません）</label>
