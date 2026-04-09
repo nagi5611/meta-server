@@ -870,6 +870,8 @@ const VC_DEBUG_STATS = process.env.VC_DEBUG_STATS === '1';
 // mediasoup Configuration
 // ============================
 const MEDIASOUP_ANNOUNCED_IP = process.env.MEDIASOUP_ANNOUNCED_IP;
+/** 同一 LAN 内クライアント向けの第2 ICE 候補（例: 192.168.0.74）。公衆 MEDIASOUP_ANNOUNCED_IP のみだと家の Wi‑Fi から WebRTC が届かないことがある */
+const MEDIASOUP_ANNOUNCED_LAN_IP = String(process.env.MEDIASOUP_ANNOUNCED_LAN_IP || '').trim();
 const MEDIASOUP_ENABLE_LOCALHOST =
     process.env.MEDIASOUP_ENABLE_LOCALHOST === '1' || process.env.NODE_ENV !== 'production';
 
@@ -879,6 +881,32 @@ if (process.env.NODE_ENV === 'production' && !MEDIASOUP_ANNOUNCED_IP) {
         'External WebRTC clients may fail to connect. ' +
         'Set MEDIASOUP_ANNOUNCED_IP to your public IP or domain (e.g. mmh-virtual.jp).'
     );
+}
+
+/**
+ * mediasoup WebRtcTransport の listenIps（0.0.0.0 + 公衆 announced、任意で LAN・localhost）
+ * @returns {{ ip: string, announcedIp?: string }[]}
+ */
+function buildMediasoupListenIps() {
+    const listenIps = [
+        {
+            ip: '0.0.0.0',
+            announcedIp: MEDIASOUP_ANNOUNCED_IP || undefined,
+        },
+    ];
+    if (MEDIASOUP_ANNOUNCED_LAN_IP) {
+        listenIps.push({
+            ip: MEDIASOUP_ANNOUNCED_LAN_IP,
+            announcedIp: MEDIASOUP_ANNOUNCED_LAN_IP,
+        });
+    }
+    if (MEDIASOUP_ENABLE_LOCALHOST) {
+        listenIps.push({
+            ip: '127.0.0.1',
+            announcedIp: '127.0.0.1',
+        });
+    }
+    return listenIps;
 }
 
 // VC (mediasoup) UDP port range - configurable via .env
@@ -919,24 +947,7 @@ const mediasoupConfig = {
         ],
     },
     webRtcTransport: {
-        listenIps: [
-            {
-                ip: '0.0.0.0',
-                // NOTE:
-                // - For localhost testing you can leave announcedIp undefined.
-                // - For production/public access you should set MEDIASOUP_ANNOUNCED_IP
-                //   (public IP or domain) so clients receive reachable ICE candidates.
-                announcedIp: MEDIASOUP_ANNOUNCED_IP || undefined,
-            },
-            ...(MEDIASOUP_ENABLE_LOCALHOST
-                ? [
-                    {
-                        ip: '127.0.0.1', // Localhost for local testing
-                        announcedIp: '127.0.0.1',
-                    },
-                ]
-                : []),
-        ],
+        listenIps: buildMediasoupListenIps(),
         maxIncomingBitrate: 150000, // 150kbps for audio
         initialAvailableOutgoingBitrate: 600000,
     },
@@ -4861,6 +4872,9 @@ httpServer.listen(PORT, HOST, () => {
         }
         if (!MEDIASOUP_ANNOUNCED_IP && lanIps.length > 0) {
             console.warn(`[VC] MEDIASOUP_ANNOUNCED_IP not set. Set to your LAN IP (e.g. ${lanIps[0]}) for WebRTC/voice/video on LAN.`);
+        }
+        if (MEDIASOUP_ANNOUNCED_LAN_IP) {
+            console.log(`[VC] MEDIASOUP_ANNOUNCED_LAN_IP=${MEDIASOUP_ANNOUNCED_LAN_IP} (extra ICE for same-LAN clients)`);
         }
     }
     if (hasSsl) {
