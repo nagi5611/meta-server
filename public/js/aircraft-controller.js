@@ -349,7 +349,8 @@ export default class AircraftController {
             else if (this._omegaYaw < 0) yawDecel += ph.yawGroundFrictionLeft;
         }
         const yawAccel = this._aircraftGrounded ? ph.yawAccelGround : ph.yawAccelAir;
-        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, yawAccel, ph.yawMaxRate, yawDecel, dt);
+        const yawMaxRate = this._aircraftGrounded ? ph.yawMaxRateGround : ph.yawMaxRateAir;
+        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, yawAccel, yawMaxRate, yawDecel, dt);
         const pitchAccel = this._aircraftGrounded ? ph.pitchAccelGround : ph.pitchAccelAir;
         const pitchMaxRate = this._aircraftGrounded ? ph.pitchMaxRateGround : ph.pitchMaxRateAir;
         this._omegaPitch = this._integrateOmega(pitchIn, this._omegaPitch, pitchAccel, pitchMaxRate, dec, dt);

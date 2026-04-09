@@ -198,6 +198,8 @@ function validateWorldsAircraftPhysics(worlds) {
         pitchAccelAir: [0.05, 40],
         rollAccel: [0.05, 40],
         yawMaxRate: [0.02, 10],
+        yawMaxRateGround: [0.02, 10],
+        yawMaxRateAir: [0.02, 10],
         pitchMaxRate: [0.02, 10],
         pitchMaxRateGround: [0.02, 10],
         pitchMaxRateAir: [0.02, 10],

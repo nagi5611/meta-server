@@ -50,6 +50,10 @@ let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（p
 let lightHelpers = []; // { light, mesh? } for point/spot position drag
 let worldObjectList = []; // 右パネル「オブジェクト一覧」の並び（クリックで選択用）
 let objectListExpanded = { lights: false, models: false, pdfs: false }; // オブジェクト一覧の階層展開状態
+/** @type {{ kind: 'model'|'pdf'|'light', data: object }|null} Ctrl+C で取り込んだオブジェクトスナップショット */
+let worldEditorObjectClipboard = null;
+/** 貼り付け時に X 方向へずらす距離（m） */
+const WORLD_EDITOR_PASTE_OFFSET_X = 1;
 /** ワールド切り替えの非同期競合を防ぐ（新しい選択だけ UI を確定させる） */
 let worldSelectLoadGen = 0;
 let editorGround = null; // 編集プレビュー用の床メッシュ（表示切替用）
@@ -778,6 +782,7 @@ function initScene() {
 
     window.addEventListener('resize', onResize);
     window.addEventListener('keydown', onUndoRedoKeyDown);
+    window.addEventListener('keydown', onWorldEditorClipboardKeyDown);
     canvas.addEventListener('pointerdown', onPointerDown);
 }
 
@@ -933,6 +938,226 @@ function onUndoRedoKeyDown(e) {
     }
 }
 
+/**
+ * 選択中の editGroup 上オブジェクトを buildWorldsFromScene と同じ規則でシリアライズする
+ * @returns {{ kind: 'model'|'pdf'|'light', data: object }|null}
+ */
+function getWorldEditorClipboardPayloadFromSelection() {
+    const obj = selectedObject;
+    if (!obj || !editGroup || obj.parent !== editGroup) return null;
+    if (obj.userData.config && !obj.isLight) {
+        const c = JSON.parse(JSON.stringify(obj.userData.config));
+        c.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+        c.rotation = {
+            x: obj.rotation.x * 180 / Math.PI,
+            y: obj.rotation.y * 180 / Math.PI,
+            z: obj.rotation.z * 180 / Math.PI
+        };
+        c.scale = { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z };
+        if (c.animate) c.animate = { ...c.animate, rotation: c.animate.rotation ? { ...c.animate.rotation } : {} };
+        if (c.teleporter) c.teleporter = { ...c.teleporter };
+        if (c.taiko) c.taiko = { ...c.taiko };
+        if (c.aircraft) {
+            const a = c.aircraft;
+            const ck = a.cockpitOffset || {};
+            const ch = a.chaseOffset || {};
+            c.aircraft = {
+                id: a.id,
+                radius: a.radius,
+                label: a.label,
+                cockpitOffset: { x: ck.x, y: ck.y, z: ck.z },
+                chaseOffset: { x: ch.x, y: ch.y, z: ch.z }
+            };
+        }
+        if (!isObjPath(c.path || '')) delete c.mtlPath;
+        return { kind: 'model', data: c };
+    }
+    if (obj.isMesh && obj.userData.pdfConfig) {
+        const p = JSON.parse(JSON.stringify(obj.userData.pdfConfig));
+        p.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+        p.rotation = {
+            x: obj.rotation.x * 180 / Math.PI,
+            y: obj.rotation.y * 180 / Math.PI,
+            z: obj.rotation.z * 180 / Math.PI
+        };
+        p.scale = { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z };
+        if (p.teleporter) p.teleporter = { ...p.teleporter };
+        return { kind: 'pdf', data: p };
+    }
+    if (obj.isLight && obj.userData.lightConfig && (obj.type === 'AmbientLight' || obj.type === 'DirectionalLight')) {
+        const cfg = { ...obj.userData.lightConfig };
+        cfg.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+        return { kind: 'light', data: cfg };
+    }
+    if (obj.isMesh && obj.userData.lightRef && obj.userData.lightConfig) {
+        const cfg = { ...obj.userData.lightConfig };
+        cfg.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+        return { kind: 'light', data: cfg };
+    }
+    return null;
+}
+
+/**
+ * 貼り付け用にモデル設定の位置をずらし、機体ID・テレポーターIDの衝突を避ける
+ * @param {object} cfg
+ */
+function uniquifyPastedModelConfig(cfg) {
+    const c = cfg;
+    if (c.position) {
+        c.position = {
+            x: (c.position.x || 0) + WORLD_EDITOR_PASTE_OFFSET_X,
+            y: c.position.y || 0,
+            z: c.position.z || 0
+        };
+    }
+    if (c.aircraft && c.aircraft.id) {
+        c.aircraft = { ...c.aircraft, id: `${String(c.aircraft.id)}-paste-${Date.now()}` };
+        const ck = c.aircraft.cockpitOffset || {};
+        const ch = c.aircraft.chaseOffset || {};
+        c.aircraft.cockpitOffset = { x: ck.x ?? 0, y: ck.y ?? 1.2, z: ck.z ?? 0 };
+        c.aircraft.chaseOffset = { x: ch.x ?? 0, y: ch.y ?? 3, z: ch.z ?? 12 };
+    }
+    if (c.teleporter && c.teleporter.id != null && String(c.teleporter.id).length) {
+        c.teleporter = { ...c.teleporter, id: `${String(c.teleporter.id)}-paste-${Date.now()}` };
+    }
+}
+
+/**
+ * Ctrl+V: クリップボードのオブジェクトをシーンに複製する
+ */
+async function pasteWorldEditorClipboard() {
+    if (!selectedWorldId || !worldEditorObjectClipboard || !editGroup) return;
+    pushUndo();
+    const clip = worldEditorObjectClipboard;
+    if (clip.kind === 'light') {
+        const cfg = JSON.parse(JSON.stringify(clip.data));
+        if (cfg.position && typeof cfg.position === 'object') {
+            cfg.position = {
+                x: (Number(cfg.position.x) || 0) + WORLD_EDITOR_PASTE_OFFSET_X,
+                y: Number(cfg.position.y) || 0,
+                z: Number(cfg.position.z) || 0
+            };
+        }
+        const sel = appendWorldLightToEditGroup(cfg);
+        if (sel) selectObject(sel);
+        renderWorldObjectList();
+        return;
+    }
+    if (clip.kind === 'pdf') {
+        const p = JSON.parse(JSON.stringify(clip.data));
+        p.position = {
+            x: (p.position?.x || 0) + WORLD_EDITOR_PASTE_OFFSET_X,
+            y: p.position?.y ?? 2,
+            z: p.position?.z ?? -5
+        };
+        if (p.teleporter && p.teleporter.id != null && String(p.teleporter.id).length) {
+            p.teleporter = { ...p.teleporter, id: `${String(p.teleporter.id)}-paste-${Date.now()}` };
+        }
+        const path = p.path || '';
+        const pos = p.position;
+        const rot = p.rotation || { x: 0, y: 0, z: 0 };
+        const scale = p.scale || { x: 2, y: 2.8, z: 1 };
+        const geom = new THREE.PlaneGeometry(1, 1);
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#404040';
+        ctx.fillRect(0, 0, 128, 128);
+        ctx.fillStyle = '#888';
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('PDF', 64, 64);
+        const tex = new THREE.CanvasTexture(canvas);
+        const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.position.set(pos.x, pos.y, pos.z);
+        mesh.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
+        mesh.scale.set(scale.x, scale.y, scale.z);
+        mesh.userData.pdfConfig = {
+            path,
+            position: { ...pos },
+            rotation: { ...rot },
+            scale: { ...scale },
+            teleporter: p.teleporter ? { ...p.teleporter } : undefined
+        };
+        editGroup.add(mesh);
+        selectObject(mesh);
+        renderWorldObjectList();
+        loadPdfTextureForMesh(mesh, path).catch(() => {});
+        return;
+    }
+    if (clip.kind === 'model') {
+        const cfg = JSON.parse(JSON.stringify(clip.data));
+        uniquifyPastedModelConfig(cfg);
+        const path = cfg.path || '';
+        const mtlPath = isObjPath(path) ? (cfg.mtlPath || '') : '';
+        const cm = String(cfg.chunkManifest || '').trim();
+        try {
+            const { model, triangleCount } = await loadModelFromConfig({
+                path,
+                mtlPath,
+                chunkManifest: cm || undefined
+            });
+            const pos = cfg.position || { x: 0, y: 0, z: 0 };
+            const rot = cfg.rotation || { x: 0, y: 0, z: 0 };
+            const sc = cfg.scale || { x: 1, y: 1, z: 1 };
+            model.position.set(pos.x, pos.y, pos.z);
+            model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
+            model.scale.set(sc.x, sc.y, sc.z);
+            applyModelShadowByTriangleCount(model, triangleCount);
+            model.userData.editId = 'm' + Date.now();
+            model.userData.config = cfg;
+            editGroup.add(model);
+            selectObject(model);
+            renderWorldObjectList();
+        } catch (err) {
+            console.error('[world-edit] paste model failed:', err);
+            alert(err.message || String(err));
+        }
+    }
+}
+
+/**
+ * 管理画面でワールド編集タブが前面か
+ * @returns {boolean}
+ */
+function isWorldEditPanelActive() {
+    const p = document.getElementById('panel-world-edit');
+    return !!(p && p.classList.contains('active'));
+}
+
+/**
+ * Ctrl+C / Ctrl+V（Mac は Meta も）でオブジェクトのコピー・貼り付け
+ * @param {KeyboardEvent} e
+ */
+function onWorldEditorClipboardKeyDown(e) {
+    if (!isWorldEditPanelActive()) return;
+    const tag = e.target && e.target.tagName ? e.target.tagName.toUpperCase() : '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod || e.altKey) return;
+    if (e.code === 'KeyC') {
+        if (!selectedWorldId || !selectedObject || !editGroup) return;
+        if (selectedObject.parent !== editGroup) return;
+        if (selectedObject.userData.lightConfig && (selectedObject.isLight || selectedObject.userData.lightRef)) {
+            syncLightFromPanel({ recordUndo: false });
+        } else if (selectedObject.userData.config || selectedObject.userData.pdfConfig) {
+            syncObjectFromPanel({ recordUndo: false });
+        }
+        const payload = getWorldEditorClipboardPayloadFromSelection();
+        if (!payload) return;
+        e.preventDefault();
+        worldEditorObjectClipboard = payload;
+        return;
+    }
+    if (e.code === 'KeyV') {
+        if (!selectedWorldId || !worldEditorObjectClipboard) return;
+        e.preventDefault();
+        void pasteWorldEditorClipboard();
+    }
+}
+
 function onTransformChange() {
     const obj = transformControls.object;
     if (!obj) return;
@@ -1043,11 +1268,16 @@ function updateLightPanel(meshOrLight) {
     document.getElementById('light-distance-row').style.display = (cfg.type === 'point' || cfg.type === 'spot') ? '' : 'none';
 }
 
-function syncLightFromPanel() {
+/**
+ * ライトパネルの値を選択中オブジェクトに反映する
+ * @param {{ recordUndo?: boolean }} [opts] — recordUndo 省略時は true（従来どおり undo に積む）
+ */
+function syncLightFromPanel(opts) {
+    const recordUndo = !opts || opts.recordUndo !== false;
     if (!selectedObject) return;
     const cfg = selectedObject.userData.lightConfig;
     if (!cfg) return;
-    pushUndo();
+    if (recordUndo) pushUndo();
     const intensity = parseFloat(document.getElementById('light-intensity').value) || 1;
     const colorHex = document.getElementById('light-color').value.trim() || 'ffffff';
     const color = parseInt(colorHex, 16);
@@ -1169,11 +1399,16 @@ function updateObjectPanel(obj) {
     }
 }
 
-function syncObjectFromPanel() {
+/**
+ * オブジェクトパネルの値を選択中に反映する
+ * @param {{ recordUndo?: boolean }} [opts] — recordUndo 省略時は true
+ */
+function syncObjectFromPanel(opts) {
+    const recordUndo = !opts || opts.recordUndo !== false;
     if (!selectedObject) return;
     const c = selectedObject.userData.config || selectedObject.userData.pdfConfig;
     if (!c) return;
-    pushUndo();
+    if (recordUndo) pushUndo();
     selectedObject.position.set(
         parseFloat(document.getElementById('obj-pos-x').value) || 0,
         parseFloat(document.getElementById('obj-pos-y').value) || 0,
@@ -1501,7 +1736,8 @@ function fillWorldAircraftPhysicsForm(world) {
         ['world-aircraft-drag', m.drag],
         ['world-aircraft-yaw-accel-ground', m.yawAccelGround],
         ['world-aircraft-yaw-accel-air', m.yawAccelAir],
-        ['world-aircraft-yaw-max-rate', m.yawMaxRate],
+        ['world-aircraft-yaw-max-rate-ground', m.yawMaxRateGround],
+        ['world-aircraft-yaw-max-rate-air', m.yawMaxRateAir],
         ['world-aircraft-pitch-accel-ground', m.pitchAccelGround],
         ['world-aircraft-pitch-accel-air', m.pitchAccelAir],
         ['world-aircraft-pitch-max-rate-ground', m.pitchMaxRateGround],
@@ -1537,7 +1773,8 @@ function readWorldAircraftPhysicsFromForm() {
         drag: parse('world-aircraft-drag', DEFAULT_AIRCRAFT_PHYSICS.drag),
         yawAccelGround: parse('world-aircraft-yaw-accel-ground', DEFAULT_AIRCRAFT_PHYSICS.yawAccelGround),
         yawAccelAir: parse('world-aircraft-yaw-accel-air', DEFAULT_AIRCRAFT_PHYSICS.yawAccelAir),
-        yawMaxRate: parse('world-aircraft-yaw-max-rate', DEFAULT_AIRCRAFT_PHYSICS.yawMaxRate),
+        yawMaxRateGround: parse('world-aircraft-yaw-max-rate-ground', DEFAULT_AIRCRAFT_PHYSICS.yawMaxRateGround),
+        yawMaxRateAir: parse('world-aircraft-yaw-max-rate-air', DEFAULT_AIRCRAFT_PHYSICS.yawMaxRateAir),
         pitchAccelGround: parse('world-aircraft-pitch-accel-ground', DEFAULT_AIRCRAFT_PHYSICS.pitchAccelGround),
         pitchAccelAir: parse('world-aircraft-pitch-accel-air', DEFAULT_AIRCRAFT_PHYSICS.pitchAccelAir),
         pitchMaxRateGround: parse('world-aircraft-pitch-max-rate-ground', DEFAULT_AIRCRAFT_PHYSICS.pitchMaxRateGround),
@@ -1558,6 +1795,67 @@ function syncWorldAircraftPhysicsFromForm() {
     if (!selectedWorldId || !worlds[selectedWorldId]) return;
     pushUndo();
     worlds[selectedWorldId].aircraftPhysics = readWorldAircraftPhysicsFromForm();
+}
+
+/**
+ * worlds[].lights の1要素と同じ形式で editGroup にライトを追加する（loadWorldIntoScene / 貼り付け共用）
+ * @param {object} cfg
+ * @returns {THREE.Object3D|null} Transform で選択するオブジェクト（point/spot はヘルパーメッシュ）
+ */
+function appendWorldLightToEditGroup(cfg) {
+    if (!cfg || !cfg.type) return null;
+    const color = cfg.color !== undefined ? cfg.color : 0xffffff;
+    const intensity = cfg.intensity !== undefined ? cfg.intensity : 1;
+    let light;
+    if (cfg.type === 'ambient') {
+        light = new THREE.AmbientLight(color, intensity);
+        light.position.set(0, 0, 0);
+        light.userData.lightConfig = { type: 'ambient', intensity, color };
+        editGroup.add(light);
+        lightHelpers.push({ light, mesh: null });
+        return light;
+    }
+    if (cfg.type === 'directional') {
+        light = new THREE.DirectionalLight(color, intensity);
+        if (cfg.position) light.position.set(cfg.position.x, cfg.position.y, cfg.position.z);
+        if (cfg.castShadow) { light.castShadow = true; }
+        light.userData.lightConfig = { type: 'directional', intensity, color, position: cfg.position ? { ...cfg.position } : { x: 50, y: 100, z: 50 }, castShadow: !!cfg.castShadow };
+        editGroup.add(light);
+        lightHelpers.push({ light, mesh: null });
+        return light;
+    }
+    if (cfg.type === 'point') {
+        light = new THREE.PointLight(color, intensity, cfg.distance ?? 0, 2);
+        const pos = cfg.position || { x: 0, y: 5, z: 0 };
+        light.position.set(pos.x, pos.y, pos.z);
+        light.userData.lightConfig = { type: 'point', intensity, color, distance: cfg.distance ?? 50 };
+        editGroup.add(light);
+        const geom = new THREE.SphereGeometry(0.5, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.6 });
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.position.copy(light.position);
+        mesh.userData.lightRef = light;
+        mesh.userData.lightConfig = { type: 'point', intensity, color, distance: cfg.distance ?? 50 };
+        editGroup.add(mesh);
+        lightHelpers.push({ light, mesh });
+        return mesh;
+    }
+    if (cfg.type === 'spot') {
+        light = new THREE.SpotLight(color, intensity, cfg.distance ?? 0, Math.PI / 6, 0, 2);
+        if (cfg.position) light.position.set(cfg.position.x, cfg.position.y, cfg.position.z);
+        light.userData.lightConfig = { type: 'spot', intensity, color, position: cfg.position ? { ...cfg.position } : { x: 0, y: 10, z: 0 }, distance: cfg.distance ?? 50 };
+        editGroup.add(light);
+        const geom = new THREE.SphereGeometry(0.4, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.6 });
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.position.copy(light.position);
+        mesh.userData.lightRef = light;
+        mesh.userData.lightConfig = light.userData.lightConfig;
+        editGroup.add(mesh);
+        lightHelpers.push({ light, mesh });
+        return mesh;
+    }
+    return null;
 }
 
 /**
@@ -1582,58 +1880,8 @@ async function loadWorldIntoScene(world) {
     document.getElementById('object-props').style.display = 'none';
 
     const lights = world.lights || [];
-    lights.forEach((cfg, idx) => {
-        const color = cfg.color !== undefined ? cfg.color : 0xffffff;
-        const intensity = cfg.intensity !== undefined ? cfg.intensity : 1;
-        let light;
-        if (cfg.type === 'ambient') {
-            light = new THREE.AmbientLight(color, intensity);
-            light.position.set(0, 0, 0);
-            light.userData.lightConfig = { type: 'ambient', intensity, color };
-            editGroup.add(light);
-            lightHelpers.push({ light, mesh: null });
-            return;
-        }
-        if (cfg.type === 'directional') {
-            light = new THREE.DirectionalLight(color, intensity);
-            if (cfg.position) light.position.set(cfg.position.x, cfg.position.y, cfg.position.z);
-            if (cfg.castShadow) { light.castShadow = true; }
-            light.userData.lightConfig = { type: 'directional', intensity, color, position: cfg.position ? { ...cfg.position } : { x: 50, y: 100, z: 50 }, castShadow: !!cfg.castShadow };
-            editGroup.add(light);
-            lightHelpers.push({ light, mesh: null });
-            return;
-        }
-        if (cfg.type === 'point') {
-            light = new THREE.PointLight(color, intensity, cfg.distance ?? 0, 2);
-            const pos = cfg.position || { x: 0, y: 5, z: 0 };
-            light.position.set(pos.x, pos.y, pos.z);
-            light.userData.lightConfig = { type: 'point', intensity, color, distance: cfg.distance ?? 50 };
-            editGroup.add(light);
-            const geom = new THREE.SphereGeometry(0.5, 8, 8);
-            const mat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.6 });
-            const mesh = new THREE.Mesh(geom, mat);
-            mesh.position.copy(light.position);
-            mesh.userData.lightRef = light;
-            mesh.userData.lightConfig = { type: 'point', intensity, color, distance: cfg.distance ?? 50 };
-            editGroup.add(mesh);
-            lightHelpers.push({ light, mesh });
-            return;
-        }
-        if (cfg.type === 'spot') {
-            light = new THREE.SpotLight(color, intensity, cfg.distance ?? 0, Math.PI / 6, 0, 2);
-            if (cfg.position) light.position.set(cfg.position.x, cfg.position.y, cfg.position.z);
-            light.userData.lightConfig = { type: 'spot', intensity, color, position: cfg.position ? { ...cfg.position } : { x: 0, y: 10, z: 0 }, distance: cfg.distance ?? 50 };
-            editGroup.add(light);
-            const geom = new THREE.SphereGeometry(0.4, 8, 8);
-            const mat = new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.6 });
-            const mesh = new THREE.Mesh(geom, mat);
-            mesh.position.copy(light.position);
-            mesh.userData.lightRef = light;
-            mesh.userData.lightConfig = light.userData.lightConfig;
-            editGroup.add(mesh);
-            lightHelpers.push({ light, mesh });
-            return;
-        }
+    lights.forEach((lc) => {
+        appendWorldLightToEditGroup(lc);
     });
 
     const pdfs = world.pdfs || [];
@@ -3968,7 +4216,8 @@ function bindEvents() {
         'world-aircraft-drag',
         'world-aircraft-yaw-accel-ground',
         'world-aircraft-yaw-accel-air',
-        'world-aircraft-yaw-max-rate',
+        'world-aircraft-yaw-max-rate-ground',
+        'world-aircraft-yaw-max-rate-air',
         'world-aircraft-pitch-accel-ground',
         'world-aircraft-pitch-accel-air',
         'world-aircraft-pitch-max-rate-ground',

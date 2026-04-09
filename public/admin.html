@@ -792,7 +792,7 @@
                                                 <label class="prop-label" for="world-aircraft-drag">速度維持率（毎フレーム乗算）</label>
                                                 <input type="number" id="world-aircraft-drag" class="prop-input num" step="0.001" min="0.5" max="0.99999">
                                             </div>
-                                            <p class="hint" style="margin-top:6px;">ヨー・ピッチは接地/空中で角加速度を別々に設定可能。ヨー・ロールは最高角速度あり。ロールは姿勢上 ±30° で制限。入力を離すと角速度は angularDecel で減衰します。</p>
+                                            <p class="hint" style="margin-top:6px;">ヨー・ピッチは接地/空中で角加速度・最高角速度を別々に設定可能。ロールは最高角速度あり・姿勢上 ±30° で制限。入力を離すと角速度は angularDecel で減衰します。</p>
                                             <div class="prop-row">
                                                 <label class="prop-label" for="world-aircraft-yaw-accel-ground">ヨー角加速度（接地・ラダー）</label>
                                                 <input type="number" id="world-aircraft-yaw-accel-ground" class="prop-input num" step="0.1" min="0.05"><span class="prop-unit">rad/s²</span>
@@ -802,8 +802,12 @@
                                                 <input type="number" id="world-aircraft-yaw-accel-air" class="prop-input num" step="0.1" min="0.05"><span class="prop-unit">rad/s²</span>
                                             </div>
                                             <div class="prop-row">
-                                                <label class="prop-label" for="world-aircraft-yaw-max-rate">ヨー最高角速度</label>
-                                                <input type="number" id="world-aircraft-yaw-max-rate" class="prop-input num" step="0.05" min="0.02"><span class="prop-unit">rad/s</span>
+                                                <label class="prop-label" for="world-aircraft-yaw-max-rate-ground">ヨー最高角速度（接地・ラダー）</label>
+                                                <input type="number" id="world-aircraft-yaw-max-rate-ground" class="prop-input num" step="0.05" min="0.02"><span class="prop-unit">rad/s</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-yaw-max-rate-air">ヨー最高角速度（空中・ラダー）</label>
+                                                <input type="number" id="world-aircraft-yaw-max-rate-air" class="prop-input num" step="0.05" min="0.02"><span class="prop-unit">rad/s</span>
                                             </div>
                                             <div class="prop-row">
                                                 <label class="prop-label" for="world-aircraft-pitch-accel-ground">ピッチ角加速度（接地）</label>
