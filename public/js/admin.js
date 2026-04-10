@@ -259,6 +259,7 @@ async function loadCharts() {
         renderChartList(charts);
         if (!selectedChartId) clearChartEditor();
         else updateChartBgmRowUi();
+        updateChartPartIoUi();
         statusEl.textContent = '';
     } catch (err) {
         statusEl.textContent = '取得失敗: ' + err.message;
@@ -880,6 +881,17 @@ function updateChartBgmRowUi() {
 }
 
 /**
+ * 編集パート単位のエクスポート・インポートボタンの有効/無効を更新する
+ */
+function updateChartPartIoUi() {
+    const exp = document.getElementById('btn-export-chart-part-json');
+    const imp = document.getElementById('btn-import-chart-part-json');
+    const ok = !!selectedChartId;
+    if (exp) exp.disabled = !ok;
+    if (imp) imp.disabled = !ok;
+}
+
+/**
  * playhead要素を確保して返す
  */
 function ensureChartPreviewPlayheadEl() {
@@ -1194,6 +1206,55 @@ function chartFieldToEditorNotes(chart, field) {
 }
 
 /**
+ * パート単位インポートJSONから notes 配列を取り出す（トップレベル配列・{ notes } を許容）
+ * @param {unknown} root
+ * @returns {unknown[] | null}
+ */
+function extractNotesArrayFromPartImportJson(root) {
+    if (Array.isArray(root)) return root;
+    if (!root || typeof root !== 'object') return null;
+    const o = /** @type {Record<string, unknown>} */ (root);
+    if (Array.isArray(o.notes)) return o.notes;
+    return null;
+}
+
+/**
+ * パート用JSONを解析し、現在の編集パートへノーツを読み込む（サーバーへの保存は別途「保存」）
+ * @param {string} jsonText
+ * @param {HTMLElement | null} statusEl
+ * @returns {{ ok: boolean, message: string }}
+ */
+function importChartPartFromJsonText(jsonText, statusEl) {
+    let parsed;
+    try {
+        parsed = JSON.parse(jsonText);
+    } catch {
+        const msg = 'JSONの解析に失敗しました';
+        if (statusEl) statusEl.textContent = msg;
+        return { ok: false, message: msg };
+    }
+    const arr = extractNotesArrayFromPartImportJson(parsed);
+    if (arr == null) {
+        const msg = 'notes 配列がありません（パート用エクスポートJSON、またはノーツの配列JSONを指定してください）';
+        if (statusEl) statusEl.textContent = msg;
+        return { ok: false, message: msg };
+    }
+    stopChartPreview();
+    flushChartPartSlot();
+    const editorNotes = chartFieldToEditorNotes({ notes: arr }, 'notes');
+    const slot = chartEditingPart - 1;
+    chartPartNoteSlots[slot] = editorNotes;
+    editingNotes = editorNotes.slice();
+    selectedNoteIndex = -1;
+    selectedNoteIndices.clear();
+    renderNotesStrip();
+    updateChartPreviewControlsUI();
+    const msg = `${chartEditingPart}P にノーツを読み込みました（「保存」でサーバーに反映）`;
+    if (statusEl) statusEl.textContent = msg;
+    return { ok: true, message: msg };
+}
+
+/**
  * 現在タブの editingNotes をスロットへ書き戻す
  */
 function flushChartPartSlot() {
@@ -1279,6 +1340,7 @@ function loadChartIntoEditor(chart) {
     if (btnPlayAllParts) btnPlayAllParts.disabled = false;
     invalidateChartBgmPreviewCache();
     updateChartBgmRowUi();
+    updateChartPartIoUi();
     updateChartPreviewControlsUI();
 }
 
@@ -1319,6 +1381,7 @@ function clearChartEditor() {
     if (btnPlayAllParts) btnPlayAllParts.disabled = true;
     invalidateChartBgmPreviewCache();
     updateChartBgmRowUi();
+    updateChartPartIoUi();
     updateChartPreviewControlsUI();
 }
 
@@ -2092,6 +2155,40 @@ function bindChartPanelEvents() {
             } finally {
                 btnImportChart.disabled = false;
                 chartImportInput.value = '';
+            }
+        });
+    }
+
+    const btnExportPart = document.getElementById('btn-export-chart-part-json');
+    const btnImportPart = document.getElementById('btn-import-chart-part-json');
+    const chartPartImportInput = document.getElementById('chart-part-import-json-input');
+    if (btnExportPart) {
+        btnExportPart.addEventListener('click', () => exportCurrentChartPartJson());
+    }
+    if (btnImportPart && chartPartImportInput) {
+        btnImportPart.addEventListener('click', () => {
+            chartPartImportInput.value = '';
+            chartPartImportInput.click();
+        });
+        chartPartImportInput.addEventListener('change', async () => {
+            const file = chartPartImportInput.files && chartPartImportInput.files[0];
+            if (!file) return;
+            if (!selectedChartId) {
+                if (statusEl) statusEl.textContent = '譜面を選択してください';
+                chartPartImportInput.value = '';
+                return;
+            }
+            if (statusEl) statusEl.textContent = 'パートを読み込み中...';
+            btnImportPart.disabled = true;
+            try {
+                const text = await file.text();
+                importChartPartFromJsonText(text, statusEl);
+            } catch (err) {
+                if (statusEl) statusEl.textContent = '読み込み失敗: ' + (err instanceof Error ? err.message : String(err));
+            } finally {
+                btnImportPart.disabled = false;
+                chartPartImportInput.value = '';
+                updateChartPartIoUi();
             }
         });
     }
@@ -3977,6 +4074,36 @@ async function exportChartsJson() {
     } finally {
         if (btn) btn.disabled = false;
     }
+}
+
+/**
+ * 選択中譜面の、現在の編集パート（1P/2P/3Pタブ）のノーツだけをJSONでエクスポートする
+ */
+function exportCurrentChartPartJson() {
+    const statusEl = document.getElementById('chart-status');
+    if (!selectedChartId) {
+        if (statusEl) statusEl.textContent = '譜面を選択してください';
+        return;
+    }
+    flushChartPartSlot();
+    const part = chartEditingPart;
+    const slot = part - 1;
+    const notes = chartPartNoteSlots[slot].map((n) => ({ ...n }));
+    const chartName = (cachedCharts[selectedChartId] && cachedCharts[selectedChartId].name) ? String(cachedCharts[selectedChartId].name) : selectedChartId;
+    const partName = (chartPartNames[part] && String(chartPartNames[part]).trim()) ? String(chartPartNames[part]).trim() : '';
+    const payload = {
+        format: 'metaverse-taiko-chart-part',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        chartId: selectedChartId,
+        chartName,
+        part,
+        partName,
+        notes,
+    };
+    const safeChart = /^[a-zA-Z0-9_-]+$/.test(selectedChartId) ? selectedChartId : 'chart';
+    downloadJson(`${safeChart}_part${part}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`, payload);
+    if (statusEl) statusEl.textContent = `${part}P をエクスポートしました`;
 }
 
 /**

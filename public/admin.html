@@ -930,6 +930,12 @@
                                 </div>
                                 <span class="hint">待機画面のP名の初期値になります（後から待機画面でも変更可）</span>
                             </div>
+                            <div class="btn-row chart-part-io-row" aria-label="編集パート単位のJSON">
+                                <button type="button" id="btn-export-chart-part-json" class="chart-action-btn" disabled>このパートをエクスポート</button>
+                                <input type="file" id="chart-part-import-json-input" accept=".json,application/json" style="display:none" aria-hidden="true">
+                                <button type="button" id="btn-import-chart-part-json" class="chart-action-btn" disabled>このパートにインポート</button>
+                            </div>
+                            <p class="chart-drag-hint" style="margin-top:-6px;margin-bottom:0">表示中の編集パート（1P/2P/3Pタブ）のみ。インポート後は「保存」でサーバーに反映されます。</p>
                             <div class="field-row chart-bgm-row">
                                 <label class="prop-label">BGM</label>
                                 <div class="chart-bgm-controls">
