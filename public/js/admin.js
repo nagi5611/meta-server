@@ -29,6 +29,8 @@ const NOTE_VOLUME_MAX = 3;
 const CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX = 4;
 /** Shift＋連打音量ドラッグ時、周囲の don/ka を引き寄せる距離（16分音符ステップ数） */
 const CHART_ROLL_NEIGHBOR_PULL_RADIUS_STEPS = 12;
+/** 連打「間」マスの音量を離散調整する際の1段階（五線上の1マス相当） */
+const CHART_ROLL_CELL_VOLUME_QUANT_STEP = (NOTE_VOLUME_MAX - NOTE_VOLUME_MIN) / 16;
 
 /**
  * ノーツ音量を 10%〜300% に丸める（未指定は 100%）
@@ -113,18 +115,146 @@ function applyNeighborVolumePullTowardRoll(vRoll, section, bpm) {
 }
 
 /**
- * Shift 時の連打周囲音量連動オプションを組み立てる
- * @param {boolean} shiftKey
- * @param {number} anchorNoteIndex editingNotes 上の roll-start または roll
- * @returns {{ shiftKey: boolean, rollSection: { start: number, end: number } } | undefined}
+ * 音量を連打セル用の離散ステップへ丸める（1マス分相当）
+ * @param {number} v
+ * @returns {number}
  */
-function buildRollVolumeNeighborDragOpts(shiftKey, anchorNoteIndex) {
-    if (!shiftKey) return undefined;
+function quantizeRollCellVolumeStep(v) {
+    const step = Math.max(1e-6, CHART_ROLL_CELL_VOLUME_QUANT_STEP);
+    const q = Math.round((v - NOTE_VOLUME_MIN) / step) * step + NOTE_VOLUME_MIN;
+    return clampNoteVolume(q);
+}
+
+/**
+ * 連打区間内のセル (barIndex,stepIndex) が開始・終了・中間のいずれか
+ * @returns {'start'|'end'|'middle'|'out'}
+ */
+function rollBarCellKind(barIndex, stepIndex, sec, bpm) {
+    const a = barIndex * 16 + stepIndex;
+    const sa = chartEditorAbsStepFromTime(sec.start, bpm);
+    const ea = chartEditorAbsStepFromTime(sec.end, bpm);
+    if (a < sa || a > ea) return 'out';
+    if (a === sa) return 'start';
+    if (a === ea) return 'end';
+    return 'middle';
+}
+
+/**
+ * roll-start / type:roll に rollCellVolumes マップを確保する
+ * @param {{ type?: string, rollCellVolumes?: Record<string, number> }} rs
+ */
+function ensureRollCellVolumesMap(rs) {
+    if (!rs || (rs.type !== 'roll-start' && rs.type !== 'roll')) return;
+    if (!rs.rollCellVolumes || typeof rs.rollCellVolumes !== 'object') rs.rollCellVolumes = {};
+}
+
+/**
+ * 指定小節・ステップに他ノーツがいるか（roll のみ除外インデックス）
+ * @param {Set<number>} ignoreIndices
+ */
+function chartEditorCellOccupiedByOther(barIndex, stepIndex, bpm, ignoreIndices) {
+    const bi = Math.max(0, Number(barIndex) || 0);
+    const si = Math.max(0, Math.min(15, Number(stepIndex) || 0));
+    for (let i = 0; i < editingNotes.length; i++) {
+        if (ignoreIndices.has(i)) continue;
+        const n = editingNotes[i];
+        if (!n) continue;
+        const t = n.type === 'roll' ? (n.startTime ?? 0) : (n.time ?? 0);
+        const p = timeToBarStep(t, bpm);
+        if (p.barIndex === bi && p.stepIndex === si) return true;
+    }
+    return false;
+}
+
+/**
+ * 連打終了を deltaSteps だけ16分移動（正で後ろへ）
+ * @param {number} rollStartIndex
+ * @param {number} rollEndIndex
+ * @param {number} deltaSteps
+ * @param {number} bpm
+ * @returns {boolean}
+ */
+function tryResizeRollEndBySteps(rollStartIndex, rollEndIndex, deltaSteps, bpm) {
+    if (!deltaSteps) return false;
+    const rs = editingNotes[rollStartIndex];
+    const re = editingNotes[rollEndIndex];
+    if (!rs || rs.type !== 'roll-start' || !re || re.type !== 'roll-end') return false;
+    const startAbs = chartEditorAbsStepFromTime(rs.time ?? 0, bpm);
+    const { barIndex: eb, stepIndex: es } = timeToBarStep(re.time ?? 0, bpm);
+    const newEndAbs = eb * 16 + es + deltaSteps;
+    if (newEndAbs <= startAbs) return false;
+    const nb = Math.floor(newEndAbs / 16);
+    const ns = newEndAbs % 16;
+    const ign = new Set([rollStartIndex, rollEndIndex]);
+    if (chartEditorCellOccupiedByOther(nb, ns, bpm, ign)) return false;
+    re.time = barStepToTime(nb, ns, bpm);
+    return true;
+}
+
+/**
+ * 連打開始を deltaSteps だけ16分移動（正で後ろへ）
+ * @returns {boolean}
+ */
+function tryResizeRollStartBySteps(rollStartIndex, rollEndIndex, deltaSteps, bpm) {
+    if (!deltaSteps) return false;
+    const rs = editingNotes[rollStartIndex];
+    const re = editingNotes[rollEndIndex];
+    if (!rs || rs.type !== 'roll-start' || !re || re.type !== 'roll-end') return false;
+    const endAbs = chartEditorAbsStepFromTime(re.time ?? 0, bpm);
+    const { barIndex: sb, stepIndex: ss } = timeToBarStep(rs.time ?? 0, bpm);
+    const newStartAbs = sb * 16 + ss + deltaSteps;
+    if (newStartAbs >= endAbs) return false;
+    if (newStartAbs < 0) return false;
+    const nb = Math.floor(newStartAbs / 16);
+    const ns = newStartAbs % 16;
+    const ign = new Set([rollStartIndex, rollEndIndex]);
+    if (chartEditorCellOccupiedByOther(nb, ns, bpm, ign)) return false;
+    rs.time = barStepToTime(nb, ns, bpm);
+    return true;
+}
+
+/**
+ * Shift＋横方向: 開始を2マス・終了を2マスずつ対称に広げる／縮める
+ * @param {boolean} expand true で開始を2マス前・終了を2マス後へ
+ * @returns {boolean}
+ */
+function trySymmetricResizeRollTwoEachSide(rollStartIndex, rollEndIndex, expand, bpm) {
+    const rs = editingNotes[rollStartIndex];
+    const re = editingNotes[rollEndIndex];
+    if (!rs || rs.type !== 'roll-start' || !re || re.type !== 'roll-end') return false;
+    const d = expand ? 1 : -1;
+    const startDelta = -2 * d;
+    const endDelta = 2 * d;
+    const { barIndex: sb, stepIndex: ss } = timeToBarStep(rs.time ?? 0, bpm);
+    const { barIndex: eb, stepIndex: es } = timeToBarStep(re.time ?? 0, bpm);
+    const newStartAbs = sb * 16 + ss + startDelta;
+    const newEndAbs = eb * 16 + es + endDelta;
+    if (newStartAbs < 0 || newEndAbs <= newStartAbs) return false;
+    const nsb = Math.floor(newStartAbs / 16);
+    const nss = newStartAbs % 16;
+    const neb = Math.floor(newEndAbs / 16);
+    const nes = newEndAbs % 16;
+    const ign = new Set([rollStartIndex, rollEndIndex]);
+    if (chartEditorCellOccupiedByOther(nsb, nss, bpm, ign)) return false;
+    if (chartEditorCellOccupiedByOther(neb, nes, bpm, ign)) return false;
+    rs.time = barStepToTime(nsb, nss, bpm);
+    re.time = barStepToTime(neb, nes, bpm);
+    return true;
+}
+
+/**
+ * Alt 時の連打周囲音量連動オプションを組み立てる（Shift は連打長さ用に空ける）
+ * @param {boolean} altKey
+ * @param {number} anchorNoteIndex editingNotes 上の roll-start または roll
+ * @returns {{ neighborPull: boolean, rollSection: { start: number, end: number } } | undefined}
+ */
+function buildRollVolumeNeighborDragOpts(altKey, anchorNoteIndex) {
+    if (!altKey) return undefined;
     const n = editingNotes[anchorNoteIndex];
     if (!n || (n.type !== 'roll-start' && n.type !== 'roll')) return undefined;
     const sec = getRollSectionsFromNotes(editingNotes).find((x) => x.rollStartIndex === anchorNoteIndex);
     if (!sec) return undefined;
-    return { shiftKey: true, rollSection: { start: sec.start, end: sec.end } };
+    return { neighborPull: true, rollSection: { start: sec.start, end: sec.end } };
 }
 
 /**
@@ -132,7 +262,7 @@ function buildRollVolumeNeighborDragOpts(shiftKey, anchorNoteIndex) {
  * @param {number | number[]} noteIndices 単一インデックスまたは配列
  * @param {number} clientY
  * @param {DOMRect} volumeRect 音量マッピング用の矩形（セルまたは measure-cells と同等の高さ）
- * @param {{ shiftKey?: boolean, rollSection?: { start: number, end: number } } | undefined} [dragOpts] 連打＋Shift で周囲 don/ka を引き寄せる
+ * @param {{ neighborPull?: boolean, rollSection?: { start: number, end: number } } | undefined} [dragOpts] 連打＋Alt で周囲 don/ka を引き寄せる
  */
 function applyChartNoteVolumeFromPointer(noteIndices, clientY, volumeRect, dragOpts) {
     if (!volumeRect) return;
@@ -152,32 +282,127 @@ function applyChartNoteVolumeFromPointer(noteIndices, clientY, volumeRect, dragO
             const el = grid.querySelector(`.note-chip[data-index="${ni}"]`);
             if (el) el.style.height = `${Math.max(4, 16 * vol)}px`;
             if (n.type === 'roll-start' || n.type === 'roll') {
+                const m = n.rollCellVolumes;
                 grid.querySelectorAll(`.note-roll-span-bar[data-roll-start-index="${ni}"]`).forEach((barEl) => {
-                    barEl.style.height = `${Math.max(4, 16 * vol)}px`;
+                    const bi = parseInt(barEl.dataset.cellBarIndex, 10);
+                    const si = parseInt(barEl.dataset.cellStepIndex, 10);
+                    const key = `${bi}:${si}`;
+                    const vv = m && m[key] != null ? clampNoteVolume(Number(m[key])) : vol;
+                    barEl.style.height = `${Math.max(4, 16 * vv)}px`;
                 });
             }
         }
     }
-    if (dragOpts?.shiftKey && dragOpts.rollSection) {
+    if (dragOpts?.neighborPull && dragOpts.rollSection) {
         applyNeighborVolumePullTowardRoll(vol, dragOpts.rollSection, getChartTempo());
     }
 }
 
 /**
- * セル内の連打帯を縦ドラッグで音量編集する
+ * type: roll 1件の開始・終了を16分ステップで移動する
+ * @param {number} rollIndex
+ * @param {number} dStart
+ * @param {number} dEnd
+ * @param {number} bpm
+ * @returns {boolean}
+ */
+function tryResizeCompactRollEdges(rollIndex, dStart, dEnd, bpm) {
+    if (!dStart && !dEnd) return false;
+    const n = editingNotes[rollIndex];
+    if (!n || n.type !== 'roll') return false;
+    const ign = new Set([rollIndex]);
+    const { barIndex: sb, stepIndex: ss } = timeToBarStep(n.startTime ?? 0, bpm);
+    const { barIndex: eb, stepIndex: es } = timeToBarStep(n.endTime ?? n.startTime ?? 0, bpm);
+    const newStartAbs = sb * 16 + ss + dStart;
+    const newEndAbs = eb * 16 + es + dEnd;
+    if (newStartAbs < 0 || newEndAbs <= newStartAbs) return false;
+    const nsb = Math.floor(newStartAbs / 16);
+    const nss = newStartAbs % 16;
+    const neb = Math.floor(newEndAbs / 16);
+    const nes = newEndAbs % 16;
+    if (chartEditorCellOccupiedByOther(nsb, nss, bpm, ign)) return false;
+    if (chartEditorCellOccupiedByOther(neb, nes, bpm, ign)) return false;
+    n.startTime = barStepToTime(nsb, nss, bpm);
+    n.endTime = barStepToTime(neb, nes, bpm);
+    return true;
+}
+
+/**
+ * 横方向1ティック分の連打長さ変更（通常±1マス、Shift で±2マス対称）
+ * @param {{ start: number, end: number, rollStartIndex: number, rollEndIndex?: number }} sec
+ * @param {number} cellBi
+ * @param {number} cellSi
+ * @param {number} directionSign 右へドラッグで +1
+ * @param {boolean} shiftKey
+ * @param {number} bpm
+ * @returns {boolean}
+ */
+function applyRollHorizontalResizeTick(sec, cellBi, cellSi, directionSign, shiftKey, bpm) {
+    const rsi = sec.rollStartIndex;
+    const rei = sec.rollEndIndex != null ? sec.rollEndIndex : rsi;
+    const rs = editingNotes[rsi];
+    if (rs && rs.type === 'roll') {
+        if (shiftKey) {
+            const d = directionSign > 0 ? 1 : -1;
+            return tryResizeCompactRollEdges(rsi, -2 * d, 2 * d, bpm);
+        }
+        const kind = rollBarCellKind(cellBi, cellSi, sec, bpm);
+        if (kind === 'start') {
+            return tryResizeCompactRollEdges(rsi, directionSign > 0 ? 1 : -1, 0, bpm);
+        }
+        return tryResizeCompactRollEdges(rsi, 0, directionSign > 0 ? 1 : -1, bpm);
+    }
+    if (shiftKey) {
+        return trySymmetricResizeRollTwoEachSide(rsi, rei, directionSign > 0, bpm);
+    }
+    const kind = rollBarCellKind(cellBi, cellSi, sec, bpm);
+    if (kind === 'start') {
+        return tryResizeRollStartBySteps(rsi, rei, directionSign > 0 ? 1 : -1, bpm);
+    }
+    return tryResizeRollEndBySteps(rsi, rei, directionSign > 0 ? 1 : -1, bpm);
+}
+
+/**
+ * セル内の連打帯: 縦＝音量（中間はセル別・離散）、横＝長さ（Shift で±2マス対称）、ホイールで中間セル音量を1段階
  * @param {HTMLElement} barEl
- * @param {number} rollStartIndex
+ * @param {{ start: number, end: number, rollStartIndex: number, rollEndIndex?: number }} sec
+ * @param {number} cellBi
+ * @param {number} cellSi
  * @param {HTMLElement} cellEl
  */
-function bindChartRollSpanBarVolumePointer(barEl, rollStartIndex, cellEl) {
+function bindChartRollSpanBarVolumePointer(barEl, sec, cellBi, cellSi, cellEl) {
+    const rollStartIndex = sec.rollStartIndex;
+    barEl.addEventListener('wheel', (e) => {
+        if (rollBarCellKind(cellBi, cellSi, sec, getChartTempo()) !== 'middle') return;
+        e.preventDefault();
+        const rs = editingNotes[rollStartIndex];
+        if (!rs || (rs.type !== 'roll-start' && rs.type !== 'roll')) return;
+        ensureRollCellVolumesMap(rs);
+        const key = `${cellBi}:${cellSi}`;
+        const cur = rs.rollCellVolumes[key] != null
+            ? clampNoteVolume(Number(rs.rollCellVolumes[key]))
+            : getNoteVolumeForEditor(rs);
+        const dir = e.deltaY < 0 ? 1 : -1;
+        const next = quantizeRollCellVolumeStep(cur + dir * CHART_ROLL_CELL_VOLUME_QUANT_STEP);
+        rs.rollCellVolumes[key] = next;
+        flushChartPartSlot();
+        barEl.style.height = `${Math.max(4, 16 * next)}px`;
+    }, { passive: false });
+
     barEl.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         e.stopPropagation();
         const measureCellsRow = cellEl.closest('.measure-cells');
         const startY = e.clientY;
         const startX = e.clientX;
-        let didVolumeDrag = false;
+        let lastX = e.clientX;
+        let didAct = false;
+        /** @type {'none'|'vol'|'len'} */
+        let dragMode = 'none';
+        let accHoriz = 0;
         chartVolumeDragPointerId = e.pointerId;
+        const bpm = getChartTempo();
+        const kindAtDown = rollBarCellKind(cellBi, cellSi, sec, bpm);
         try {
             barEl.setPointerCapture(e.pointerId);
         } catch {
@@ -187,20 +412,65 @@ function bindChartRollSpanBarVolumePointer(barEl, rollStartIndex, cellEl) {
             if (ev.pointerId !== chartVolumeDragPointerId) return;
             const dx = ev.clientX - startX;
             const dy = ev.clientY - startY;
-            if (Math.hypot(dx, dy) < CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX) return;
-            if (!didVolumeDrag) {
-                didVolumeDrag = true;
-                ev.preventDefault();
-                selectedNoteIndex = rollStartIndex;
-                selectedNoteIndices = new Set([rollStartIndex]);
+            if (dragMode === 'none' && Math.hypot(dx, dy) < CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX) return;
+            if (dragMode === 'none') {
+                dragMode = Math.abs(dx) >= Math.abs(dy) ? 'len' : 'vol';
+                if (dragMode === 'len') {
+                    ev.preventDefault();
+                    didAct = true;
+                    selectedNoteIndex = rollStartIndex;
+                    selectedNoteIndices = new Set([rollStartIndex]);
+                }
             }
-            const rect = measureCellsRow?.getBoundingClientRect() || cellEl.getBoundingClientRect();
-            applyChartNoteVolumeFromPointer(
-                [rollStartIndex],
-                ev.clientY,
-                rect,
-                buildRollVolumeNeighborDragOpts(ev.shiftKey, rollStartIndex)
-            );
+            if (dragMode === 'len') {
+                ev.preventDefault();
+                const cw = cellEl.getBoundingClientRect().width;
+                const threshold = Math.max(10, cw * 0.45);
+                accHoriz += ev.clientX - lastX;
+                lastX = ev.clientX;
+                let changed = false;
+                while (accHoriz >= threshold) {
+                    if (applyRollHorizontalResizeTick(sec, cellBi, cellSi, 1, ev.shiftKey, bpm)) changed = true;
+                    accHoriz -= threshold;
+                }
+                while (accHoriz <= -threshold) {
+                    if (applyRollHorizontalResizeTick(sec, cellBi, cellSi, -1, ev.shiftKey, bpm)) changed = true;
+                    accHoriz += threshold;
+                }
+                if (changed) {
+                    flushChartPartSlot();
+                    renderNotesStrip();
+                }
+                return;
+            }
+            if (dragMode === 'vol') {
+                ev.preventDefault();
+                if (!didAct) {
+                    didAct = true;
+                    selectedNoteIndex = rollStartIndex;
+                    selectedNoteIndices = new Set([rollStartIndex]);
+                }
+                const rect = measureCellsRow?.getBoundingClientRect() || cellEl.getBoundingClientRect();
+                if (kindAtDown === 'middle'
+                    && (editingNotes[rollStartIndex]?.type === 'roll-start'
+                        || editingNotes[rollStartIndex]?.type === 'roll')) {
+                    const rsN = editingNotes[rollStartIndex];
+                    ensureRollCellVolumesMap(rsN);
+                    const raw = chartNoteVolumeFromPointerY(ev.clientY, rect);
+                    const v = quantizeRollCellVolumeStep(raw);
+                    const key = `${cellBi}:${cellSi}`;
+                    rsN.rollCellVolumes[key] = v;
+                    flushChartPartSlot();
+                    barEl.style.height = `${Math.max(4, 16 * v)}px`;
+                    return;
+                }
+                applyChartNoteVolumeFromPointer(
+                    [rollStartIndex],
+                    ev.clientY,
+                    rect,
+                    buildRollVolumeNeighborDragOpts(ev.altKey, rollStartIndex)
+                );
+            }
         };
         const onUp = (ev) => {
             if (ev.pointerId !== chartVolumeDragPointerId) return;
@@ -213,7 +483,7 @@ function bindChartRollSpanBarVolumePointer(barEl, rollStartIndex, cellEl) {
                 /* noop */
             }
             chartVolumeDragPointerId = -1;
-            if (didVolumeDrag) {
+            if (didAct) {
                 flushChartPartSlot();
                 renderNotesStrip();
             }
@@ -593,7 +863,7 @@ function getRollSectionsFromNotes(notes) {
             const vol = clampNoteVolume(
                 /** @type {{ volume?: unknown }} */ (n).volume != null ? /** @type {{ volume?: unknown }} */ (n).volume : 1
             );
-            if (e > s) sections.push({ start: s, end: e, volume: vol, rollStartIndex: i });
+            if (e > s) sections.push({ start: s, end: e, volume: vol, rollStartIndex: i, rollEndIndex: i });
         } else if (n.type === 'roll-start') {
             starts.push({ time: n.time ?? 0, volume: getNoteVolumeForEditor(n), rollStartIndex: i });
         } else if (n.type === 'roll-end' && starts.length > 0) {
@@ -603,7 +873,8 @@ function getRollSectionsFromNotes(notes) {
                     start: st.time,
                     end: n.time,
                     volume: st.volume,
-                    rollStartIndex: st.rollStartIndex
+                    rollStartIndex: st.rollStartIndex,
+                    rollEndIndex: i
                 });
             }
         }
@@ -635,6 +906,25 @@ function isMeasureCellOverlappingRollSpan(barIndex, stepIndex, bpm, rollSections
 }
 
 /**
+ * 連打区間内の時刻 t（uniform 秒）に対応するヒット音量（セル別 or 既定）
+ * @param {Array<{ type?: string, time?: number, rollCellVolumes?: Record<string, number> }>} notes
+ * @param {number} rollStartIndex
+ * @param {number} t
+ * @param {number} baseBpm
+ * @returns {number}
+ */
+function lookupRollVolumeAtUniformTimeForPreview(notes, rollStartIndex, t, baseBpm) {
+    const rs = notes[rollStartIndex];
+    if (!rs) return 1;
+    const { barIndex, stepIndex } = timeToBarStepUniformSecs(t, baseBpm);
+    const key = `${barIndex}:${stepIndex}`;
+    const m = rs.rollCellVolumes;
+    if (m && typeof m === 'object' && m[key] != null) return clampNoteVolume(Number(m[key]));
+    if (rs.type === 'roll-start' || rs.type === 'roll') return getNoteVolumeForEditor(rs);
+    return 1;
+}
+
+/**
  * ノーツ配列からプレビュー用の音イベント列を作る（don/ka + roll区間は0.1sごとにdon）
  * @param {Array<{ type?: string, time?: number, volume?: unknown }>} notes
  * @param {number} [partNum=1] 1..3（カスタムヒット音のパート振り分け）
@@ -652,14 +942,16 @@ function buildChartPreviewEventsFromNotes(notes, partNum = 1) {
             }
         }
     }
+    const baseBpm = getChartTempo();
     for (const s of getRollSectionsFromNotes(notes)) {
         const start = Number(s.start ?? 0);
         const end = Number(s.end ?? 0);
-        const rollVol = s.volume != null ? clampNoteVolume(s.volume) : 1;
         if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+        const rsi = s.rollStartIndex;
         const step = 0.1;
         for (let t = start; t < end; t += step) {
-            events.push({ time: t, type: 'don', volume: rollVol, part });
+            const vol = lookupRollVolumeAtUniformTimeForPreview(notes, rsi, t, baseBpm);
+            events.push({ time: t, type: 'don', volume: vol, part });
         }
     }
     events.sort((a, b) => a.time - b.time);
@@ -1523,8 +1815,17 @@ function chartFieldToEditorNotes(chart, field) {
         if (n.type === 'roll' && n.startTime != null && n.endTime != null) {
             const rv = /** @type {{ volume?: unknown }} */ (n).volume;
             const vol = rv != null ? clampNoteVolume(rv) : 1;
+            const rcv = /** @type {{ rollCellVolumes?: unknown }} */ (n).rollCellVolumes;
+            const start = /** @type {{ type: string, time: unknown, volume: number, rollCellVolumes?: Record<string, number> }} */ ({
+                type: 'roll-start',
+                time: n.startTime,
+                volume: vol
+            });
+            if (rcv && typeof rcv === 'object' && !Array.isArray(rcv)) {
+                start.rollCellVolumes = { .../** @type {Record<string, number>} */ (rcv) };
+            }
             return [
-                { type: 'roll-start', time: n.startTime, volume: vol },
+                start,
                 { type: 'roll-end', time: n.endTime }
             ];
         }
@@ -2126,7 +2427,7 @@ function renderNotesStrip() {
                         volumeResizeIndices,
                         ev.clientY,
                         volRect,
-                        buildRollVolumeNeighborDragOpts(ev.shiftKey, idx)
+                        buildRollVolumeNeighborDragOpts(ev.altKey, idx)
                     );
                 };
                 const onUp = (ev) => {
@@ -2172,12 +2473,22 @@ function renderNotesStrip() {
         for (const sec of rollSectionsHighlight) {
             if (!isMeasureCellOverlappingRollSpan(bi, si, bpm, [sec])) continue;
             if (cell.querySelector(`.note-roll-span-bar[data-roll-start-index="${sec.rollStartIndex}"]`)) continue;
-            const v = sec.volume != null ? clampNoteVolume(sec.volume) : 1;
+            const rsNote = editingNotes[sec.rollStartIndex];
+            const baseV = sec.volume != null ? clampNoteVolume(sec.volume) : 1;
+            const cellKey = `${bi}:${si}`;
+            let v = baseV;
+            if (rsNote && (rsNote.type === 'roll-start' || rsNote.type === 'roll')
+                && rsNote.rollCellVolumes && rsNote.rollCellVolumes[cellKey] != null) {
+                v = clampNoteVolume(Number(rsNote.rollCellVolumes[cellKey]));
+            }
             const bar = document.createElement('div');
             bar.className = 'note-roll-span-bar';
             bar.dataset.rollStartIndex = String(sec.rollStartIndex);
+            bar.dataset.cellBarIndex = String(bi);
+            bar.dataset.cellStepIndex = String(si);
             bar.style.height = `${Math.max(4, 16 * v)}px`;
-            bindChartRollSpanBarVolumePointer(bar, sec.rollStartIndex, cell);
+            bar.title = '縦:音量（間のマスはセル別）／横:長さ±1マス／Shift+横:両端±2マス／ホイール:間を1段階／Alt+縦:周囲のドン・カ連動';
+            bindChartRollSpanBarVolumePointer(bar, sec, bi, si, cell);
             cell.insertBefore(bar, cell.firstChild);
         }
     });

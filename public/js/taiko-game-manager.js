@@ -4,7 +4,7 @@
 import { isMobile } from './mobile-utils.js';
 
 /**
- * ノーツ定義: { time: 秒, type: 'don'|'ka', volume?: 0.1〜3 } または { type: 'roll', startTime, endTime, volume?: 0.1〜3 }
+ * ノーツ定義: { time: 秒, type: 'don'|'ka', volume?: 0.1〜3 } または { type: 'roll', startTime, endTime, volume?: 0.1〜3, rollCellVolumes?: Record<string, number> }
  * デモ譜面（固定）。後から外部ファイルに分離可能。
  */
 const DEMO_CHART = [
@@ -79,6 +79,25 @@ function taikoBarSecFromBpm(bpm) {
     const v = Number(bpm);
     if (!Number.isFinite(v) || v <= 0) return 2;
     return (60 / v) * 4;
+}
+
+/**
+ * 譜面エディタと同じベースBPM等間隔グリッド上の秒 → 小節/16分
+ * @param {number} uSec
+ * @param {number} baseBpm
+ * @returns {{ barIndex: number, stepIndex: number }}
+ */
+function taikoUniformTimeToBarStepUniformGrid(uSec, baseBpm) {
+    const t = Math.max(0, Number(uSec) || 0);
+    const sec = taikoBarSecFromBpm(baseBpm);
+    if (sec <= 0) return { barIndex: 0, stepIndex: 0 };
+    const barIndex = Math.floor(t / sec);
+    const within = t - barIndex * sec;
+    const stepSec = sec / 16;
+    let stepIndex = Math.round(within / stepSec);
+    if (stepIndex >= 16) stepIndex = 15;
+    if (stepIndex < 0) stepIndex = 0;
+    return { barIndex, stepIndex };
 }
 
 /**
@@ -468,7 +487,7 @@ class TaikoGameManager {
      */
     _normalizeChart(chart) {
         const result = [];
-        /** @type {Array<{ time: number, volume: number }>} */
+        /** @type {Array<{ time: number, volume: number, rollCellVolumes?: Record<string, number> }>} */
         const starts = [];
         const sorted = [...chart].sort((a, b) => {
             const ta = a.type === 'roll' ? a.startTime : a.time;
@@ -477,19 +496,28 @@ class TaikoGameManager {
         });
         for (const n of sorted) {
             if (n.type === 'roll-start') {
+                const rcv = /** @type {{ rollCellVolumes?: unknown }} */ (n).rollCellVolumes;
+                const cellVol = rcv && typeof rcv === 'object' && !Array.isArray(rcv)
+                    ? { .../** @type {Record<string, number>} */ (rcv) }
+                    : undefined;
                 starts.push({
                     time: n.time,
-                    volume: clampChartNoteVolume(/** @type {{ volume?: unknown }} */ (n).volume)
+                    volume: clampChartNoteVolume(/** @type {{ volume?: unknown }} */ (n).volume),
+                    rollCellVolumes: cellVol
                 });
             } else if (n.type === 'roll-end' && starts.length > 0) {
                 const st = starts.shift();
                 if (n.time > st.time) {
-                    result.push({
+                    const rollNote = {
                         type: 'roll',
                         startTime: st.time,
                         endTime: n.time,
                         volume: st.volume
-                    });
+                    };
+                    if (st.rollCellVolumes && Object.keys(st.rollCellVolumes).length > 0) {
+                        rollNote.rollCellVolumes = st.rollCellVolumes;
+                    }
+                    result.push(rollNote);
                 }
             } else if (n.type !== 'roll-start' && n.type !== 'roll-end') {
                 result.push(n);
@@ -1202,7 +1230,16 @@ class TaikoGameManager {
             const ws = n._wallStart ?? 0;
             const we = n._wallEnd ?? ws;
             if (now >= ws && now <= we) {
-                rollVol = clampChartNoteVolume(n.volume);
+                const st = Number(n.startTime ?? 0);
+                const en = Number(n.endTime ?? st);
+                const uInterp = st + ((now - ws) / Math.max(1e-9, we - ws)) * (en - st);
+                const { barIndex, stepIndex } = taikoUniformTimeToBarStepUniformGrid(
+                    uInterp,
+                    this._chartBaseBpm
+                );
+                const key = `${barIndex}:${stepIndex}`;
+                const cv = n.rollCellVolumes && n.rollCellVolumes[key];
+                rollVol = cv != null ? clampChartNoteVolume(cv) : clampChartNoteVolume(n.volume);
                 return true;
             }
             return false;
