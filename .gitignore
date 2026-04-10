@@ -28,5 +28,8 @@ Thumbs.db
 *.swp
 *.swo
 
+# Cursor: チャットの Plan が自動生成（リポジトリに含めない）
+.cursor/plans/
+
 # Data (DB, JSON - 環境ごとのデータはリポジトリに含めない)
 data/
