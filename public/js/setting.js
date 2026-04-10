@@ -1746,7 +1746,10 @@ function fillWorldAircraftPhysicsForm(world) {
         ['world-aircraft-roll-max-rate', m.rollMaxRate],
         ['world-aircraft-angular-decel', m.angularDecel],
         ['world-aircraft-yaw-ground-friction-left', m.yawGroundFrictionLeft],
-        ['world-aircraft-yaw-ground-friction-right', m.yawGroundFrictionRight]
+        ['world-aircraft-yaw-ground-friction-right', m.yawGroundFrictionRight],
+        ['world-aircraft-ground-tire-lateral-decel', m.groundTireLateralDecel],
+        ['world-aircraft-ground-tire-rolling-decel', m.groundTireRollingDecel],
+        ['world-aircraft-wheel-brake-decel', m.wheelBrakeDecel]
     ];
     for (const [id, v] of ids) {
         const el = document.getElementById(id);
@@ -1783,7 +1786,10 @@ function readWorldAircraftPhysicsFromForm() {
         rollMaxRate: parse('world-aircraft-roll-max-rate', DEFAULT_AIRCRAFT_PHYSICS.rollMaxRate),
         angularDecel: parse('world-aircraft-angular-decel', DEFAULT_AIRCRAFT_PHYSICS.angularDecel),
         yawGroundFrictionLeft: parse('world-aircraft-yaw-ground-friction-left', DEFAULT_AIRCRAFT_PHYSICS.yawGroundFrictionLeft),
-        yawGroundFrictionRight: parse('world-aircraft-yaw-ground-friction-right', DEFAULT_AIRCRAFT_PHYSICS.yawGroundFrictionRight)
+        yawGroundFrictionRight: parse('world-aircraft-yaw-ground-friction-right', DEFAULT_AIRCRAFT_PHYSICS.yawGroundFrictionRight),
+        groundTireLateralDecel: parse('world-aircraft-ground-tire-lateral-decel', DEFAULT_AIRCRAFT_PHYSICS.groundTireLateralDecel),
+        groundTireRollingDecel: parse('world-aircraft-ground-tire-rolling-decel', DEFAULT_AIRCRAFT_PHYSICS.groundTireRollingDecel),
+        wheelBrakeDecel: parse('world-aircraft-wheel-brake-decel', DEFAULT_AIRCRAFT_PHYSICS.wheelBrakeDecel)
     };
     return mergeAircraftPhysicsFromWorld(raw);
 }
@@ -4240,7 +4246,10 @@ function bindEvents() {
         'world-aircraft-roll-max-rate',
         'world-aircraft-angular-decel',
         'world-aircraft-yaw-ground-friction-left',
-        'world-aircraft-yaw-ground-friction-right'
+        'world-aircraft-yaw-ground-friction-right',
+        'world-aircraft-ground-tire-lateral-decel',
+        'world-aircraft-ground-tire-rolling-decel',
+        'world-aircraft-wheel-brake-decel'
     ]) {
         document.getElementById(aircraftInputId)?.addEventListener('change', syncWorldAircraftPhysicsFromForm);
     }

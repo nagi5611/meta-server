@@ -9,8 +9,6 @@ const CLEARANCE_ABOVE_GROUND = 0.5;
 const GROUNDED_Y_TOLERANCE = 0.15;
 /** ワールド YXZ オイラー Z（ロール）の上限 ±30° */
 const MAX_BANK_RAD = Math.PI / 6;
-/** 接地中 Space ブレーキの減速度 (m/s²) */
-const WHEEL_BRAKE_DECEL_MS2 = 32;
 
 /**
  * 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -435,16 +433,35 @@ export default class AircraftController {
                         hx /= lenH;
                         hz /= lenH;
                         let fwdSpeed = this.velocity.x * hx + this.velocity.z * hz;
+                        const rollK = ph.groundTireRollingDecel;
+                        if (rollK > 0) {
+                            const mag = Math.abs(fwdSpeed);
+                            if (mag > 0) {
+                                const ds = Math.min(mag, rollK * dt);
+                                fwdSpeed -= Math.sign(fwdSpeed) * ds;
+                            }
+                        }
                         if (this.keys.brake) {
-                            const step = WHEEL_BRAKE_DECEL_MS2 * dt;
+                            const step = ph.wheelBrakeDecel * dt;
                             const mag = Math.abs(fwdSpeed);
                             if (mag > 0) {
                                 const ds = Math.min(mag, step);
                                 fwdSpeed -= Math.sign(fwdSpeed) * ds;
                             }
                         }
-                        this.velocity.x = hx * fwdSpeed;
-                        this.velocity.z = hz * fwdSpeed;
+                        const latX = this.velocity.x - hx * fwdSpeed;
+                        const latZ = this.velocity.z - hz * fwdSpeed;
+                        const latMag = Math.hypot(latX, latZ);
+                        const latK = ph.groundTireLateralDecel;
+                        if (latK > 0 && latMag > 1e-9) {
+                            const reduce = Math.min(latMag, latK * dt);
+                            const scale = (latMag - reduce) / latMag;
+                            this.velocity.x = hx * fwdSpeed + latX * scale;
+                            this.velocity.z = hz * fwdSpeed + latZ * scale;
+                        } else {
+                            this.velocity.x = hx * fwdSpeed;
+                            this.velocity.z = hz * fwdSpeed;
+                        }
                     } else {
                         this.velocity.x = 0;
                         this.velocity.z = 0;

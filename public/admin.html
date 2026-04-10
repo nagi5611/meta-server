@@ -846,6 +846,19 @@
                                                 <label class="prop-label" for="world-aircraft-yaw-ground-friction-right">接地ヨー摩擦（右/D・角速度正側）</label>
                                                 <input type="number" id="world-aircraft-yaw-ground-friction-right" class="prop-input num" step="0.1" min="0"><span class="prop-unit">rad/s²</span>
                                             </div>
+                                            <p class="hint" style="margin-top:6px;">タイヤ（接地・速度）: 横滑り 0＝従来どおり即時除去。転がり抵抗は前後スピードを常時減衰（ブレーキとは別）。</p>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-ground-tire-lateral-decel">接地タイヤ横滑り減速度（素の横グリップ）</label>
+                                                <input type="number" id="world-aircraft-ground-tire-lateral-decel" class="prop-input num" step="1" min="0"><span class="prop-unit">m/s²</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-ground-tire-rolling-decel">接地タイヤ転がり抵抗（素の前後摩擦）</label>
+                                                <input type="number" id="world-aircraft-ground-tire-rolling-decel" class="prop-input num" step="1" min="0"><span class="prop-unit">m/s²</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-wheel-brake-decel">タイヤブレーキ（接地中 Space）減速度</label>
+                                                <input type="number" id="world-aircraft-wheel-brake-decel" class="prop-input num" step="1" min="0.5"><span class="prop-unit">m/s²</span>
+                                            </div>
                                         </div>
                                     </details>
                                 </section>

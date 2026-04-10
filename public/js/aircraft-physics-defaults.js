@@ -1,6 +1,6 @@
 // public/js/aircraft-physics-defaults.js — 飛行機操縦の数値デフォルト（THREE に依存しない）
 
-/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccelGround: number, yawAccelAir: number, pitchAccelGround: number, pitchAccelAir: number, rollAccel: number, yawMaxRateGround: number, yawMaxRateAir: number, pitchMaxRateGround: number, pitchMaxRateAir: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, sideslipDamping: number, excessClimbDamping: number, gravity: number, liftPerHorizontalSpeed: number }>} */
+/** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccelGround: number, yawAccelAir: number, pitchAccelGround: number, pitchAccelAir: number, rollAccel: number, yawMaxRateGround: number, yawMaxRateAir: number, pitchMaxRateGround: number, pitchMaxRateAir: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, groundTireLateralDecel: number, groundTireRollingDecel: number, wheelBrakeDecel: number, sideslipDamping: number, excessClimbDamping: number, gravity: number, liftPerHorizontalSpeed: number }>} */
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     maxSpeed: 45,
     thrustAccel: 18,
@@ -21,6 +21,15 @@ export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     yawGroundFrictionLeft: 0,
     /** 接地中・ヨー角速度が正（D/右寄り）のときに加算する減速 (rad/s²) */
     yawGroundFrictionRight: 0,
+    /**
+     * 接地タイヤの横滑り減速度 (m/s²)。前進軸に垂直な水平速度を減衰。
+     * 0 のときは従来どおり、横成分を即時に除去（前進方向への射影のみ）。
+     */
+    groundTireLateralDecel: 0,
+    /** 接地タイヤの転がり抵抗 (m/s²)。前後速度を減速。Space ブレーキとは別。0 で無効 */
+    groundTireRollingDecel: 0,
+    /** 接地中・Space タイヤブレーキ時の前後速度減速度 (m/s²) */
+    wheelBrakeDecel: 32,
     /** 空中のみ: 速度の機体前後軸に垂直な成分を exp(-k*dt) で減衰 (1/s)。0 で無効 */
     sideslipDamping: 0,
     /** 空中かつ上向き速度時のみ vy を exp(-k*dt) で減衰 (1/s)。揚力の積み上がりを抑える。0 で無効 */
@@ -82,6 +91,10 @@ export function mergeAircraftPhysicsFromWorld(raw) {
             base[k] = Math.min(10, Math.max(0, v));
         } else if (k === 'angularDecel' || k === 'yawGroundFrictionLeft' || k === 'yawGroundFrictionRight') {
             base[k] = Math.min(30, Math.max(0, v));
+        } else if (k === 'groundTireLateralDecel' || k === 'groundTireRollingDecel') {
+            base[k] = Math.min(500, Math.max(0, v));
+        } else if (k === 'wheelBrakeDecel') {
+            base[k] = Math.min(200, Math.max(0.5, v));
         } else if (k === 'pitchAccelGround' || k === 'pitchAccelAir' || k === 'yawAccelGround' || k === 'yawAccelAir') {
             base[k] = Math.min(40, Math.max(0.05, v));
         } else if (k === 'pitchMaxRateGround' || k === 'pitchMaxRateAir' || k === 'yawMaxRateGround' || k === 'yawMaxRateAir') {
