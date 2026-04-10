@@ -27,6 +27,8 @@ const NOTE_VOLUME_MIN = 0.1;
 const NOTE_VOLUME_MAX = 3;
 /** 縦移動がこの px を超えたら音量ドラッグとみなす（クリック選択と区別） */
 const CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX = 4;
+/** Shift＋連打音量ドラッグ時、周囲の don/ka を引き寄せる距離（16分音符ステップ数） */
+const CHART_ROLL_NEIGHBOR_PULL_RADIUS_STEPS = 12;
 
 /**
  * ノーツ音量を 10%〜300% に丸める（未指定は 100%）
@@ -45,7 +47,7 @@ function clampNoteVolume(v) {
  * @returns {number}
  */
 function getNoteVolumeForEditor(note) {
-    if (!note || (note.type !== 'don' && note.type !== 'ka' && note.type !== 'roll-start')) return 1;
+    if (!note || (note.type !== 'don' && note.type !== 'ka' && note.type !== 'roll-start' && note.type !== 'roll')) return 1;
     return clampNoteVolume(note.volume != null ? note.volume : 1);
 }
 
@@ -64,20 +66,81 @@ function chartNoteVolumeFromPointerY(clientY, cellRect) {
 }
 
 /**
- * ドラッグ中チップのセル内 Y から音量を決め、指定した全ドン・カに同じ volume を適用する
+ * 編集グリッド上の絶対ステップ（小節×16+ステップ）を返す
+ * @param {number} timeSec
+ * @param {number} bpm
+ * @returns {number}
+ */
+function chartEditorAbsStepFromTime(timeSec, bpm) {
+    const { barIndex, stepIndex } = timeToBarStep(timeSec, bpm);
+    return barIndex * 16 + stepIndex;
+}
+
+/**
+ * Shift＋連打音量調整時、近傍の don/ka の音量を連打音量へ重み付きで寄せる
+ * @param {number} vRoll
+ * @param {{ start: number, end: number }} section
+ * @param {number} bpm
+ */
+function applyNeighborVolumePullTowardRoll(vRoll, section, bpm) {
+    const s = Number(section.start);
+    const e = Number(section.end);
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return;
+    const sAbs = chartEditorAbsStepFromTime(s, bpm);
+    const eAbs = chartEditorAbsStepFromTime(e, bpm);
+    const grid = document.getElementById('chart-measures-grid');
+    const r = Math.max(1, CHART_ROLL_NEIGHBOR_PULL_RADIUS_STEPS);
+    for (let i = 0; i < editingNotes.length; i++) {
+        const n = editingNotes[i];
+        if (!n || (n.type !== 'don' && n.type !== 'ka')) continue;
+        const t = Number(n.time ?? 0);
+        if (!Number.isFinite(t)) continue;
+        if (isTimeInRollSection(t)) continue;
+        const nAbs = chartEditorAbsStepFromTime(t, bpm);
+        let dist;
+        if (nAbs < sAbs) dist = sAbs - nAbs;
+        else if (nAbs > eAbs) dist = nAbs - eAbs;
+        else continue;
+        const w = Math.max(0, 1 - dist / r);
+        if (w <= 0) continue;
+        const oldV = getNoteVolumeForEditor(n);
+        n.volume = clampNoteVolume(oldV + w * (vRoll - oldV));
+        if (grid) {
+            const el = grid.querySelector(`.note-chip[data-index="${i}"]`);
+            if (el) el.style.height = `${Math.max(4, 16 * n.volume)}px`;
+        }
+    }
+}
+
+/**
+ * Shift 時の連打周囲音量連動オプションを組み立てる
+ * @param {boolean} shiftKey
+ * @param {number} anchorNoteIndex editingNotes 上の roll-start または roll
+ * @returns {{ shiftKey: boolean, rollSection: { start: number, end: number } } | undefined}
+ */
+function buildRollVolumeNeighborDragOpts(shiftKey, anchorNoteIndex) {
+    if (!shiftKey) return undefined;
+    const n = editingNotes[anchorNoteIndex];
+    if (!n || (n.type !== 'roll-start' && n.type !== 'roll')) return undefined;
+    const sec = getRollSectionsFromNotes(editingNotes).find((x) => x.rollStartIndex === anchorNoteIndex);
+    if (!sec) return undefined;
+    return { shiftKey: true, rollSection: { start: sec.start, end: sec.end } };
+}
+
+/**
+ * ドラッグ中の Y から音量を決め、指定インデックスのノーツに volume を適用する
  * @param {number | number[]} noteIndices 単一インデックスまたは配列
  * @param {number} clientY
- * @param {HTMLElement} chipEl ドラッグ起点のチップ（セル座標の基準）
+ * @param {DOMRect} volumeRect 音量マッピング用の矩形（セルまたは measure-cells と同等の高さ）
+ * @param {{ shiftKey?: boolean, rollSection?: { start: number, end: number } } | undefined} [dragOpts] 連打＋Shift で周囲 don/ka を引き寄せる
  */
-function applyChartNoteVolumeFromPointer(noteIndices, clientY, chipEl) {
-    const cell = chipEl.parentElement;
-    if (!cell) return;
-    const rect = cell.getBoundingClientRect();
-    const vol = clampNoteVolume(chartNoteVolumeFromPointerY(clientY, rect));
+function applyChartNoteVolumeFromPointer(noteIndices, clientY, volumeRect, dragOpts) {
+    if (!volumeRect) return;
+    const vol = clampNoteVolume(chartNoteVolumeFromPointerY(clientY, volumeRect));
     const list = Array.isArray(noteIndices) ? noteIndices : [noteIndices];
     for (const ni of list) {
         const n = editingNotes[ni];
-        if (!n || (n.type !== 'don' && n.type !== 'ka' && n.type !== 'roll-start')) continue;
+        if (!n || (n.type !== 'don' && n.type !== 'ka' && n.type !== 'roll-start' && n.type !== 'roll')) continue;
         n.volume = vol;
     }
     flushChartPartSlot();
@@ -85,11 +148,80 @@ function applyChartNoteVolumeFromPointer(noteIndices, clientY, chipEl) {
     if (grid) {
         for (const ni of list) {
             const n = editingNotes[ni];
-            if (!n || (n.type !== 'don' && n.type !== 'ka' && n.type !== 'roll-start')) continue;
+            if (!n || (n.type !== 'don' && n.type !== 'ka' && n.type !== 'roll-start' && n.type !== 'roll')) continue;
             const el = grid.querySelector(`.note-chip[data-index="${ni}"]`);
             if (el) el.style.height = `${Math.max(4, 16 * vol)}px`;
+            if (n.type === 'roll-start' || n.type === 'roll') {
+                grid.querySelectorAll(`.note-roll-span-bar[data-roll-start-index="${ni}"]`).forEach((barEl) => {
+                    barEl.style.height = `${Math.max(4, 16 * vol)}px`;
+                });
+            }
         }
     }
+    if (dragOpts?.shiftKey && dragOpts.rollSection) {
+        applyNeighborVolumePullTowardRoll(vol, dragOpts.rollSection, getChartTempo());
+    }
+}
+
+/**
+ * セル内の連打帯を縦ドラッグで音量編集する
+ * @param {HTMLElement} barEl
+ * @param {number} rollStartIndex
+ * @param {HTMLElement} cellEl
+ */
+function bindChartRollSpanBarVolumePointer(barEl, rollStartIndex, cellEl) {
+    barEl.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        const measureCellsRow = cellEl.closest('.measure-cells');
+        const startY = e.clientY;
+        const startX = e.clientX;
+        let didVolumeDrag = false;
+        chartVolumeDragPointerId = e.pointerId;
+        try {
+            barEl.setPointerCapture(e.pointerId);
+        } catch {
+            /* noop */
+        }
+        const onMove = (ev) => {
+            if (ev.pointerId !== chartVolumeDragPointerId) return;
+            const dx = ev.clientX - startX;
+            const dy = ev.clientY - startY;
+            if (Math.hypot(dx, dy) < CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX) return;
+            if (!didVolumeDrag) {
+                didVolumeDrag = true;
+                ev.preventDefault();
+                selectedNoteIndex = rollStartIndex;
+                selectedNoteIndices = new Set([rollStartIndex]);
+            }
+            const rect = measureCellsRow?.getBoundingClientRect() || cellEl.getBoundingClientRect();
+            applyChartNoteVolumeFromPointer(
+                [rollStartIndex],
+                ev.clientY,
+                rect,
+                buildRollVolumeNeighborDragOpts(ev.shiftKey, rollStartIndex)
+            );
+        };
+        const onUp = (ev) => {
+            if (ev.pointerId !== chartVolumeDragPointerId) return;
+            barEl.removeEventListener('pointermove', onMove);
+            barEl.removeEventListener('pointerup', onUp);
+            barEl.removeEventListener('pointercancel', onUp);
+            try {
+                barEl.releasePointerCapture(ev.pointerId);
+            } catch {
+                /* noop */
+            }
+            chartVolumeDragPointerId = -1;
+            if (didVolumeDrag) {
+                flushChartPartSlot();
+                renderNotesStrip();
+            }
+        };
+        barEl.addEventListener('pointermove', onMove);
+        barEl.addEventListener('pointerup', onUp);
+        barEl.addEventListener('pointercancel', onUp);
+    });
 }
 /** マルチプレイ用 1P/2P/3P の切替（1..3） */
 let chartEditingPart = 1;
@@ -442,31 +574,38 @@ function getChartPreviewDurationSec() {
 }
 
 /**
- * ノーツ配列から連打区間 [{start, end}, ...] を算出
+ * ノーツ配列から連打区間 [{start, end, volume, rollStartIndex}, ...] を算出
  * @param {Array<{ type?: string, time?: number, startTime?: number, endTime?: number }>} notes
  */
 function getRollSectionsFromNotes(notes) {
-    const sorted = [...notes].sort((a, b) => {
-        const ta = a.type === 'roll' ? a.startTime : a.time;
-        const tb = b.type === 'roll' ? b.startTime : b.time;
+    const sorted = notes.map((n, i) => ({ n, i })).sort((a, b) => {
+        const ta = a.n.type === 'roll' ? a.n.startTime : a.n.time;
+        const tb = b.n.type === 'roll' ? b.n.startTime : b.n.time;
         return (ta ?? 0) - (tb ?? 0);
     });
     const sections = [];
-    /** @type {Array<{ time: number, volume: number }>} */
+    /** @type {Array<{ time: number, volume: number, rollStartIndex: number }>} */
     const starts = [];
-    for (const n of sorted) {
+    for (const { n, i } of sorted) {
         if (n.type === 'roll') {
             const s = n.startTime ?? 0;
             const e = n.endTime ?? n.startTime ?? 0;
             const vol = clampNoteVolume(
                 /** @type {{ volume?: unknown }} */ (n).volume != null ? /** @type {{ volume?: unknown }} */ (n).volume : 1
             );
-            if (e > s) sections.push({ start: s, end: e, volume: vol });
+            if (e > s) sections.push({ start: s, end: e, volume: vol, rollStartIndex: i });
         } else if (n.type === 'roll-start') {
-            starts.push({ time: n.time ?? 0, volume: getNoteVolumeForEditor(n) });
+            starts.push({ time: n.time ?? 0, volume: getNoteVolumeForEditor(n), rollStartIndex: i });
         } else if (n.type === 'roll-end' && starts.length > 0) {
             const st = starts.shift();
-            if (n.time > st.time) sections.push({ start: st.time, end: n.time, volume: st.volume });
+            if (n.time > st.time) {
+                sections.push({
+                    start: st.time,
+                    end: n.time,
+                    volume: st.volume,
+                    rollStartIndex: st.rollStartIndex
+                });
+            }
         }
     }
     return sections;
@@ -1905,9 +2044,6 @@ function renderNotesStrip() {
         for (let stepIndex = 0; stepIndex < 16; stepIndex++) {
             const cell = document.createElement('div');
             cell.className = 'measure-cell';
-            if (isMeasureCellOverlappingRollSpan(barIndex, stepIndex, bpm, rollSectionsHighlight)) {
-                cell.classList.add('measure-cell-roll-span');
-            }
             cell.dataset.barIndex = String(barIndex);
             cell.dataset.stepIndex = String(stepIndex);
             cells.appendChild(cell);
@@ -1944,7 +2080,7 @@ function renderNotesStrip() {
                 : note.type === 'roll-start' ? 'S'
                     : note.type === 'roll-end' ? 'E'
                         : 'D';
-        if (note.type === 'don' || note.type === 'ka' || note.type === 'roll-start') {
+        if (note.type === 'don' || note.type === 'ka' || note.type === 'roll-start' || note.type === 'roll') {
             const vol = getNoteVolumeForEditor(note);
             chip.style.height = `${Math.max(4, 16 * vol)}px`;
             chip.addEventListener('pointerdown', (e) => {
@@ -1953,7 +2089,7 @@ function renderNotesStrip() {
                 const idx = parseInt(chip.dataset.index, 10);
                 const volEditableInSelection = [...selectedNoteIndices].filter((i) => {
                     const n = editingNotes[i];
-                    return n && (n.type === 'don' || n.type === 'ka' || n.type === 'roll-start');
+                    return n && (n.type === 'don' || n.type === 'ka' || n.type === 'roll-start' || n.type === 'roll');
                 });
                 const volumeResizeIndices = (selectedNoteIndices.has(idx) && volEditableInSelection.length > 0)
                     ? volEditableInSelection
@@ -1980,7 +2116,18 @@ function renderNotesStrip() {
                             selectedNoteIndices = new Set([idx]);
                         }
                     }
-                    applyChartNoteVolumeFromPointer(volumeResizeIndices, ev.clientY, chip);
+                    const nMove = editingNotes[idx];
+                    const volRect = (nMove && (nMove.type === 'roll-start' || nMove.type === 'roll'))
+                        ? (chip.closest('.measure-cells')?.getBoundingClientRect()
+                            ?? chip.parentElement?.getBoundingClientRect())
+                        : chip.parentElement?.getBoundingClientRect();
+                    if (!volRect) return;
+                    applyChartNoteVolumeFromPointer(
+                        volumeResizeIndices,
+                        ev.clientY,
+                        volRect,
+                        buildRollVolumeNeighborDragOpts(ev.shiftKey, idx)
+                    );
                 };
                 const onUp = (ev) => {
                     if (ev.pointerId !== chartVolumeDragPointerId) return;
@@ -2017,6 +2164,22 @@ function renderNotesStrip() {
         }
         cell.innerHTML = '';
         cell.appendChild(chip);
+    });
+
+    cellMap.forEach((cell) => {
+        const bi = parseInt(cell.dataset.barIndex, 10);
+        const si = parseInt(cell.dataset.stepIndex, 10);
+        for (const sec of rollSectionsHighlight) {
+            if (!isMeasureCellOverlappingRollSpan(bi, si, bpm, [sec])) continue;
+            if (cell.querySelector(`.note-roll-span-bar[data-roll-start-index="${sec.rollStartIndex}"]`)) continue;
+            const v = sec.volume != null ? clampNoteVolume(sec.volume) : 1;
+            const bar = document.createElement('div');
+            bar.className = 'note-roll-span-bar';
+            bar.dataset.rollStartIndex = String(sec.rollStartIndex);
+            bar.style.height = `${Math.max(4, 16 * v)}px`;
+            bindChartRollSpanBarVolumePointer(bar, sec.rollStartIndex, cell);
+            cell.insertBefore(bar, cell.firstChild);
+        }
     });
 
     if (btnRemove) btnRemove.disabled = selectedNoteIndex < 0;
@@ -2854,7 +3017,7 @@ function bindChartPanelEvents() {
         gridEl.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
             // ノーツチップ上は範囲選択にしない（ドン・カの音量ドラッグと DOM 再生成の競合を防ぐ）
-            if (e.target.closest('.note-chip')) return;
+            if (e.target.closest('.note-chip') || e.target.closest('.note-roll-span-bar')) return;
             const cell = e.target.closest('.measure-cell');
             if (!cell) return;
             if (!selectedChartId) return;

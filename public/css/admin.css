@@ -1603,6 +1603,24 @@ body.admin-dark .chart-panel .chart-playback-bpm-label {
     gap: 0;
 }
 
+.chart-panel .note-roll-span-bar {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    width: 100%;
+    box-sizing: border-box;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: rgba(249, 168, 37, 0.85);
+    border: 1px solid rgba(180, 120, 20, 0.6);
+    pointer-events: auto;
+    touch-action: none;
+    cursor: ns-resize;
+    min-height: 4px;
+    z-index: 1;
+}
+
 .chart-panel .measure-cell {
     position: relative;
     height: 58px;
@@ -1652,6 +1670,7 @@ body.admin-dark .chart-panel .chart-playback-bpm-label {
     min-height: 4px;
     height: 16px;
     transform: translate(-50%, -50%);
+    z-index: 2;
     touch-action: none;
     border-radius: 999px;
     display: inline-flex;
@@ -3434,6 +3453,11 @@ body.admin-dark .chart-panel .measure-cell.measure-cell-roll-span {
     background:
         linear-gradient(to bottom, transparent 0%, transparent 16%, rgba(255,255,255,0.45) 16%, rgba(255,255,255,0.45) 17%, transparent 17%, transparent 33%, rgba(255,255,255,0.45) 33%, rgba(255,255,255,0.45) 34%, transparent 34%, transparent 50%, rgba(255,255,255,0.45) 50%, rgba(255,255,255,0.45) 51%, transparent 51%, transparent 67%, rgba(255,255,255,0.45) 67%, rgba(255,255,255,0.45) 68%, transparent 68%, transparent 84%, rgba(255,255,255,0.45) 84%, rgba(255,255,255,0.45) 85%, transparent 85%, transparent 100%),
         rgba(255, 193, 7, 0.28);
+}
+
+body.admin-dark .chart-panel .note-roll-span-bar {
+    background: rgba(255, 193, 7, 0.55);
+    border-color: rgba(230, 180, 80, 0.55);
 }
 
 body.admin-dark .chart-panel .measure-cell:nth-child(4n) {
