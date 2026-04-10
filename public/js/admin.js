@@ -98,6 +98,12 @@ let chartPartNoteSlots = [[], [], []];
 /** 選択中譜面のパート名（1..3） */
 let chartPartNames = { 1: '', 2: '', 3: '' };
 
+/** ヒット音MP3インポート直前の帯インデックス(0–4)と don|ka */
+let chartHitSoundPending = { bucket: 0, kind: /** @type {'don'|'ka'} */ ('don') };
+
+/** ノーツ音量10〜300%を5等分した帯の表示ラベル（サーバー・ゲームと同順） */
+const HIT_SOUND_VOLUME_BAND_LABELS = ['0〜20%', '20〜40%', '40〜60%', '60〜80%', '80〜100%'];
+
 /**
  * 「編集パート」タブ（1P/2P/3P）の表示名を更新する
  */
@@ -260,6 +266,7 @@ async function loadCharts() {
         if (!selectedChartId) clearChartEditor();
         else updateChartBgmRowUi();
         updateChartPartIoUi();
+        renderChartPartHitSoundCells();
         statusEl.textContent = '';
     } catch (err) {
         statusEl.textContent = '取得失敗: ' + err.message;
@@ -892,6 +899,75 @@ function updateChartPartIoUi() {
 }
 
 /**
+ * ヒット音テーブル行を一度だけ生成する
+ */
+function ensureChartHitSoundTableBuilt() {
+    const tb = document.getElementById('chart-hit-sound-tbody');
+    if (!tb || tb.dataset.built === '1') return;
+    tb.innerHTML = '';
+    for (let b = 0; b < 5; b++) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <th scope="row">${HIT_SOUND_VOLUME_BAND_LABELS[b]}</th>
+            <td>
+                <span class="chart-hit-filename" id="chart-hit-filename-don-${b}">—</span>
+                <div class="chart-hit-btn-row">
+                    <button type="button" class="chart-action-btn chart-hit-import" data-bucket="${b}" data-kind="don">MP3</button>
+                    <button type="button" class="chart-action-btn chart-hit-remove" data-bucket="${b}" data-kind="don" disabled>削除</button>
+                </div>
+            </td>
+            <td>
+                <span class="chart-hit-filename" id="chart-hit-filename-ka-${b}">—</span>
+                <div class="chart-hit-btn-row">
+                    <button type="button" class="chart-action-btn chart-hit-import" data-bucket="${b}" data-kind="ka">MP3</button>
+                    <button type="button" class="chart-action-btn chart-hit-remove" data-bucket="${b}" data-kind="ka" disabled>削除</button>
+                </div>
+            </td>`;
+        tb.appendChild(tr);
+    }
+    tb.dataset.built = '1';
+}
+
+/**
+ * 編集中パートのヒット音割当表示を更新する
+ */
+function renderChartPartHitSoundCells() {
+    ensureChartHitSoundTableBuilt();
+    const section = document.getElementById('chart-hit-sounds-section');
+    const c = selectedChartId ? cachedCharts[selectedChartId] : null;
+    if (section) {
+        const ok = !!selectedChartId;
+        section.style.opacity = ok ? '1' : '0.45';
+        section.style.pointerEvents = ok ? '' : 'none';
+    }
+    const part = chartEditingPart;
+    const ph = c && c.partHitSounds && typeof c.partHitSounds === 'object'
+        ? /** @type {Record<string, unknown>} */ (c.partHitSounds)[String(part)]
+        : null;
+    const arr = Array.isArray(ph) ? ph : [];
+    for (let b = 0; b < 5; b++) {
+        const raw = arr[b];
+        const cell = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
+        const donName = cell.donOriginalName != null ? String(cell.donOriginalName) : '';
+        const kaName = cell.kaOriginalName != null ? String(cell.kaOriginalName) : '';
+        const donHas = cell.donVersion != null && Number.isFinite(Number(cell.donVersion));
+        const kaHas = cell.kaVersion != null && Number.isFinite(Number(cell.kaVersion));
+        const elDon = document.getElementById(`chart-hit-filename-don-${b}`);
+        const elKa = document.getElementById(`chart-hit-filename-ka-${b}`);
+        if (elDon) elDon.textContent = donHas ? donName || 'ドン MP3' : '—';
+        if (elKa) elKa.textContent = kaHas ? kaName || 'カッ MP3' : '—';
+        const tb = document.getElementById('chart-hit-sound-tbody');
+        if (tb) {
+            tb.querySelectorAll(`button.chart-hit-remove[data-bucket="${b}"]`).forEach((btn) => {
+                const k = btn.getAttribute('data-kind');
+                const has = k === 'ka' ? kaHas : donHas;
+                /** @type {HTMLButtonElement} */ (btn).disabled = !selectedChartId || !has;
+            });
+        }
+    }
+}
+
+/**
  * playhead要素を確保して返す
  */
 function ensureChartPreviewPlayheadEl() {
@@ -1278,6 +1354,7 @@ function setChartEditingPart(part) {
     });
     renderNotesStrip();
     updateChartPreviewControlsUI();
+    renderChartPartHitSoundCells();
 }
 
 /**
@@ -1341,6 +1418,7 @@ function loadChartIntoEditor(chart) {
     invalidateChartBgmPreviewCache();
     updateChartBgmRowUi();
     updateChartPartIoUi();
+    renderChartPartHitSoundCells();
     updateChartPreviewControlsUI();
 }
 
@@ -1382,6 +1460,7 @@ function clearChartEditor() {
     invalidateChartBgmPreviewCache();
     updateChartBgmRowUi();
     updateChartPartIoUi();
+    renderChartPartHitSoundCells();
     updateChartPreviewControlsUI();
 }
 
@@ -2189,6 +2268,99 @@ function bindChartPanelEvents() {
                 btnImportPart.disabled = false;
                 chartPartImportInput.value = '';
                 updateChartPartIoUi();
+            }
+        });
+    }
+
+    ensureChartHitSoundTableBuilt();
+    const chartHitSoundFileInput = document.getElementById('chart-hit-sound-file-input');
+    const chartHitSoundTbody = document.getElementById('chart-hit-sound-tbody');
+    if (chartHitSoundTbody) {
+        chartHitSoundTbody.addEventListener('click', async (e) => {
+            const t = /** @type {HTMLElement} */ (e.target);
+            const imp = t.closest && t.closest('.chart-hit-import');
+            const rem = t.closest && t.closest('.chart-hit-remove');
+            if (imp instanceof HTMLButtonElement) {
+                if (!selectedChartId) {
+                    if (statusEl) statusEl.textContent = '譜面を選択してください';
+                    return;
+                }
+                const b = Number(imp.dataset.bucket);
+                const k = imp.dataset.kind === 'ka' ? 'ka' : 'don';
+                if (![0, 1, 2, 3, 4].includes(b)) return;
+                chartHitSoundPending = { bucket: b, kind: k };
+                if (chartHitSoundFileInput) {
+                    chartHitSoundFileInput.value = '';
+                    chartHitSoundFileInput.click();
+                }
+                return;
+            }
+            if (rem instanceof HTMLButtonElement) {
+                if (!rem.disabled && selectedChartId) {
+                    const b = Number(rem.dataset.bucket);
+                    const k = rem.dataset.kind === 'ka' ? 'ka' : 'don';
+                    if (![0, 1, 2, 3, 4].includes(b)) return;
+                    if (!confirm(`この帯の${k === 'ka' ? 'カッ' : 'ドン'}ヒット音を削除しますか？`)) return;
+                    if (statusEl) statusEl.textContent = '削除中...';
+                    try {
+                        const q = `part=${encodeURIComponent(String(chartEditingPart))}&bucket=${encodeURIComponent(String(b))}&kind=${encodeURIComponent(k)}`;
+                        const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId) + '/part-hit-sound?' + q, {
+                            method: 'DELETE',
+                            credentials: 'include'
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) {
+                            if (statusEl) statusEl.textContent = data.error || '削除に失敗しました';
+                            return;
+                        }
+                        if (data.chart) cachedCharts[selectedChartId] = data.chart;
+                        if (statusEl) statusEl.textContent = 'ヒット音を削除しました';
+                        renderChartPartHitSoundCells();
+                    } catch (err) {
+                        if (statusEl) statusEl.textContent = '削除失敗: ' + (err instanceof Error ? err.message : String(err));
+                    }
+                }
+            }
+        });
+    }
+    if (chartHitSoundFileInput) {
+        chartHitSoundFileInput.addEventListener('change', async () => {
+            const file = chartHitSoundFileInput.files && chartHitSoundFileInput.files[0];
+            if (!file || !selectedChartId) {
+                chartHitSoundFileInput.value = '';
+                return;
+            }
+            const lower = (file.name || '').toLowerCase();
+            if (!lower.endsWith('.mp3')) {
+                if (statusEl) statusEl.textContent = 'MP3ファイルを選択してください';
+                chartHitSoundFileInput.value = '';
+                return;
+            }
+            const { bucket, kind } = chartHitSoundPending;
+            if (statusEl) statusEl.textContent = 'ヒット音をアップロード中...';
+            const fd = new FormData();
+            fd.append('sound', file);
+            fd.append('part', String(chartEditingPart));
+            fd.append('bucket', String(bucket));
+            fd.append('kind', kind);
+            try {
+                const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId) + '/part-hit-sound', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'include'
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    if (statusEl) statusEl.textContent = data.error || 'ヒット音のアップロードに失敗しました';
+                    return;
+                }
+                if (data.chart) cachedCharts[selectedChartId] = data.chart;
+                if (statusEl) statusEl.textContent = 'ヒット音を設定しました';
+                renderChartPartHitSoundCells();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'アップロード失敗: ' + (err instanceof Error ? err.message : String(err));
+            } finally {
+                chartHitSoundFileInput.value = '';
             }
         });
     }

@@ -57,6 +57,20 @@ function clampChartNoteVolume(v) {
     return Math.min(3, Math.max(0.1, x));
 }
 
+/** ヒット音カスタム用: 音量倍率(0.1〜3)をノーツ表示スケールの0〜100%に換算し、5段階(各20%)の帯インデックス0〜4へ */
+const HIT_SOUND_BUCKET_COUNT = 5;
+
+/**
+ * @param {number} volumeMultiplier
+ * @returns {number}
+ */
+function taikoVolumeToHitBucket(volumeMultiplier) {
+    const x = clampChartNoteVolume(volumeMultiplier);
+    const pct = ((x - 0.1) / (3 - 0.1)) * 100;
+    const b = Math.floor(pct / (100 / HIT_SOUND_BUCKET_COUNT));
+    return Math.min(HIT_SOUND_BUCKET_COUNT - 1, Math.max(0, b));
+}
+
 /**
  * BPM から 4/4 の1小節の秒数
  * @param {number} bpm
@@ -167,6 +181,13 @@ class TaikoGameManager {
         this._hitSoundBuffers = null;
         /** @type {Promise<void> | null} */
         this._hitSoundDecodePromise = null;
+
+        /** @type {Map<string, AudioBuffer>} chartId|part|bucket|kind → デコード済みヒット音 */
+        this._hitSoundCustomCache = new Map();
+        /** @type {string | null} */
+        this._hitChartId = null;
+        /** @type {number} 1..3 */
+        this._hitPartIndex = 1;
     }
 
     /** WebAudioコンテキストを確保して返す（ユーザー操作後に resume すること） */
@@ -378,7 +399,9 @@ class TaikoGameManager {
                         difficulty: c.difficulty,
                         endTime: c.endTime,
                         tempo: c.tempo,
-                        measureBpms: c.measureBpms
+                        measureBpms: c.measureBpms,
+                        partHitSounds: c.partHitSounds,
+                        playPart: 1
                     };
                     this._startGamePlay(notes.length ? notes : DEMO_CHART, meta);
                 });
@@ -397,7 +420,7 @@ class TaikoGameManager {
     /**
      * 選んだ譜面でゲームを開始する
      * @param {Array<{time:number, type:string}>} chart - 譜面
-     * @param {{ id: string, name: string, difficulty?: number, endTime?: number, tempo?: number, measureBpms?: Record<string, number> | null } | null} meta - 曲メタ（選曲時）
+     * @param {{ id: string, name: string, difficulty?: number, endTime?: number, tempo?: number, measureBpms?: Record<string, number> | null, partHitSounds?: Record<string, unknown>, playPart?: number } | null} meta - 曲メタ（選曲時）
      * @param {{ startAtPerfSec?: number } | undefined} [opts]
      */
     _startGamePlay(chart, meta, opts) {
@@ -414,6 +437,11 @@ class TaikoGameManager {
             : {};
         this._chart = this._applyWallTimesToChart(this._normalizeChart(chart));
         this._chartMeta = meta || null;
+        this._hitSoundCustomCache.clear();
+        this._hitChartId = meta && meta.id ? String(meta.id) : null;
+        const pp = meta && meta.playPart != null ? Number(meta.playPart) : 1;
+        this._hitPartIndex = Number.isFinite(pp) ? Math.min(3, Math.max(1, Math.floor(pp))) : 1;
+        this._preloadCustomHitSoundsFromMeta(meta);
         this._score = 0;
         const donKaCount = this._chart.filter((n) => n.type !== 'roll').length;
         this._maxScore = donKaCount * 100;
@@ -860,7 +888,9 @@ class TaikoGameManager {
                     difficulty: c?.difficulty,
                     endTime: c?.endTime,
                     tempo: c?.tempo,
-                    measureBpms: c?.measureBpms
+                    measureBpms: c?.measureBpms,
+                    partHitSounds: c?.partHitSounds,
+                    playPart: part
                 };
                 this._startGamePlay(notes, meta, { startAtPerfSec });
             } catch (e) {
@@ -950,6 +980,87 @@ class TaikoGameManager {
     }
 
     /**
+     * 譜面メタの partHitSounds から、現在パートのカスタムヒット音を先読みする
+     * @param {{ partHitSounds?: unknown, id?: string } | null} meta
+     */
+    _preloadCustomHitSoundsFromMeta(meta) {
+        const chartId = this._hitChartId;
+        const part = this._hitPartIndex;
+        const ph = meta && meta.partHitSounds;
+        if (!chartId || !ph || typeof ph !== 'object') return;
+        const arr = /** @type {Record<string, unknown>} */ (ph)[String(part)];
+        if (!Array.isArray(arr)) return;
+        const ctx = this._ensureBgmAudioCtx();
+        if (!ctx) return;
+        (async () => {
+            for (let b = 0; b < HIT_SOUND_BUCKET_COUNT; b++) {
+                const cell = arr[b];
+                if (!cell || typeof cell !== 'object') continue;
+                const dv = /** @type {{ donVersion?: unknown }} */ (cell).donVersion;
+                const kv = /** @type {{ kaVersion?: unknown }} */ (cell).kaVersion;
+                if (dv != null && Number.isFinite(Number(dv))) {
+                    await this._loadOneCustomHitSound(chartId, part, b, 'don', Number(dv)).catch(() => {});
+                }
+                if (kv != null && Number.isFinite(Number(kv))) {
+                    await this._loadOneCustomHitSound(chartId, part, b, 'ka', Number(kv)).catch(() => {});
+                }
+            }
+        })();
+    }
+
+    /**
+     * @param {string} chartId
+     * @param {number} part
+     * @param {number} bucket
+     * @param {'don'|'ka'} kind
+     * @param {number} ver
+     * @returns {Promise<void>}
+     */
+    async _loadOneCustomHitSound(chartId, part, bucket, kind, ver) {
+        const key = `${chartId}|${part}|${bucket}|${kind}`;
+        if (this._hitSoundCustomCache.has(key)) return;
+        const ctx = this._ensureBgmAudioCtx();
+        if (!ctx) return;
+        const url = `/chart-bgm/${encodeURIComponent(chartId)}/hits/p${part}-b${bucket}-${kind}.mp3?v=${encodeURIComponent(String(ver))}`;
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const ab = await res.arrayBuffer();
+        const buf = await ctx.decodeAudioData(ab.slice(0));
+        this._hitSoundCustomCache.set(key, buf);
+    }
+
+    /**
+     * @param {'don'|'ka'} type
+     * @param {number} bucket
+     * @returns {AudioBuffer | null}
+     */
+    _getCustomHitBuffer(type, bucket) {
+        if (!this._hitChartId) return null;
+        const kind = type === 'ka' ? 'ka' : 'don';
+        const k = `${this._hitChartId}|${this._hitPartIndex}|${bucket}|${kind}`;
+        return this._hitSoundCustomCache.get(k) || null;
+    }
+
+    /**
+     * @param {AudioBuffer} buf
+     * @param {number} gainValue
+     */
+    _playDecodedHitBuffer(buf, gainValue) {
+        const ctx = this._ensureBgmAudioCtx();
+        if (!ctx || !buf) return false;
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+        const v = clampChartNoteVolume(gainValue);
+        const src = ctx.createBufferSource();
+        const gain = ctx.createGain();
+        src.buffer = buf;
+        gain.gain.value = v;
+        src.connect(gain);
+        gain.connect(ctx.destination);
+        src.start();
+        return true;
+    }
+
+    /**
      * ドン／カのデコード済みバッファを確保する（BGM と同じ AudioContext を使用）
      * @returns {Promise<void>}
      */
@@ -981,6 +1092,11 @@ class TaikoGameManager {
      */
     _playHitSound(type, volumeMultiplier = 1) {
         const v = clampChartNoteVolume(volumeMultiplier);
+        const bucket = taikoVolumeToHitBucket(volumeMultiplier);
+        const customBuf = this._getCustomHitBuffer(type, bucket);
+        if (customBuf) {
+            if (this._playDecodedHitBuffer(customBuf, v)) return;
+        }
         const playWithBuffer = () => {
             const ctx = this._ensureBgmAudioCtx();
             if (!ctx || !this._hitSoundBuffers?.don || !this._hitSoundBuffers?.ka) return false;

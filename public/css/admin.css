@@ -1260,6 +1260,38 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     margin-bottom: 10px;
 }
 
+.chart-panel .chart-hit-sound-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 6px;
+}
+
+.chart-panel .chart-hit-sound-table th,
+.chart-panel .chart-hit-sound-table td {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    padding: 6px 8px;
+    vertical-align: top;
+}
+
+body.admin-dark .chart-panel .chart-hit-sound-table th,
+body.admin-dark .chart-panel .chart-hit-sound-table td {
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.chart-panel .chart-hit-sound-table .chart-hit-filename {
+    display: block;
+    margin-bottom: 4px;
+    word-break: break-all;
+    line-height: 1.35;
+}
+
+.chart-panel .chart-hit-sound-table .chart-hit-btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
 .chart-panel .chart-bgm-row {
     align-items: flex-start;
 }

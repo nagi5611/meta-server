@@ -3875,6 +3875,27 @@ app.put('/admin/charts/:id', (req, res) => {
     }
 });
 
+/**
+ * 譜面ヒット音（パート×音量帯×don|ka）用: partHitSounds の配列を 5 要素に揃える
+ * @param {Record<string, unknown>} chart
+ */
+function ensurePartHitSoundsShape(chart) {
+    if (!chart.partHitSounds || typeof chart.partHitSounds !== 'object') {
+        chart.partHitSounds = {};
+    }
+    const ph = /** @type {Record<string, unknown>} */ (chart.partHitSounds);
+    for (let p = 1; p <= 3; p++) {
+        const k = String(p);
+        if (!Array.isArray(ph[k])) {
+            ph[k] = [];
+        }
+        const arr = /** @type {unknown[]} */ (ph[k]);
+        while (arr.length < 5) {
+            arr.push({});
+        }
+    }
+}
+
 app.delete('/admin/charts/:id', (req, res) => {
     const id = req.params.id;
     const charts = readCharts();
@@ -3887,6 +3908,17 @@ app.delete('/admin/charts/:id', (req, res) => {
         if (fs.existsSync(bgmPath)) fs.unlinkSync(bgmPath);
     } catch (e) {
         console.warn('DELETE chart BGM file:', e?.message || e);
+    }
+    const hitDir = path.join(CHART_BGM_DIR, id);
+    try {
+        if (fs.existsSync(hitDir)) {
+            const st = fs.statSync(hitDir);
+            if (st.isDirectory()) {
+                fs.rmSync(hitDir, { recursive: true, force: true });
+            }
+        }
+    } catch (e) {
+        console.warn('DELETE chart hit sounds dir:', e?.message || e);
     }
     try {
         writeCharts(charts);
@@ -3941,6 +3973,95 @@ app.delete('/admin/charts/:id/bgm', (req, res) => {
     } catch (err) {
         console.error('DELETE /admin/charts/:id/bgm error:', err);
         res.status(500).json({ error: 'BGMの削除に失敗しました' });
+    }
+});
+
+/** パート(1–3)×音量帯(0–4)×don|ka のヒット音MP3をアップロード */
+app.post('/admin/charts/:id/part-hit-sound', uploadChartBgm.single('sound'), (req, res) => {
+    const id = req.params.id;
+    if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+        return res.status(400).json({ error: 'Invalid chart id' });
+    }
+    if (!req.file || !req.file.buffer) {
+        return res.status(400).json({ error: 'MP3を選択してください（フィールド名: sound）' });
+    }
+    const part = Number(req.body.part);
+    const bucket = Number(req.body.bucket);
+    const kind = String(req.body.kind || '').toLowerCase();
+    if (![1, 2, 3].includes(part) || ![0, 1, 2, 3, 4].includes(bucket) || (kind !== 'don' && kind !== 'ka')) {
+        return res.status(400).json({ error: 'part(1-3), bucket(0-4), kind(don|ka) が不正です' });
+    }
+    const charts = readCharts();
+    if (!charts[id]) {
+        return res.status(404).json({ error: 'Chart not found' });
+    }
+    try {
+        const hitDir = path.join(CHART_BGM_DIR, id, 'hits');
+        fs.mkdirSync(hitDir, { recursive: true });
+        const fname = `p${part}-b${bucket}-${kind}.mp3`;
+        fs.writeFileSync(path.join(hitDir, fname), req.file.buffer);
+        ensurePartHitSoundsShape(charts[id]);
+        const ph = /** @type {Record<string, Array<Record<string, unknown>>>} */ (charts[id].partHitSounds);
+        const arr = ph[String(part)];
+        const cell = { ...(arr[bucket] || {}) };
+        const ver = Date.now();
+        const orig = path.basename(req.file.originalname || `${kind}.mp3`);
+        const oname = orig.length > 200 ? orig.slice(0, 200) : orig;
+        if (kind === 'don') {
+            cell.donVersion = ver;
+            cell.donOriginalName = oname;
+        } else {
+            cell.kaVersion = ver;
+            cell.kaOriginalName = oname;
+        }
+        arr[bucket] = cell;
+        writeCharts(charts);
+        res.json({ success: true, chart: charts[id] });
+    } catch (err) {
+        console.error('POST /admin/charts/:id/part-hit-sound error:', err);
+        res.status(500).json({ error: 'ヒット音の保存に失敗しました' });
+    }
+});
+
+app.delete('/admin/charts/:id/part-hit-sound', (req, res) => {
+    const id = req.params.id;
+    if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+        return res.status(400).json({ error: 'Invalid chart id' });
+    }
+    const part = Number(req.query.part);
+    const bucket = Number(req.query.bucket);
+    const kind = String(req.query.kind || '').toLowerCase();
+    if (![1, 2, 3].includes(part) || ![0, 1, 2, 3, 4].includes(bucket) || (kind !== 'don' && kind !== 'ka')) {
+        return res.status(400).json({ error: 'part(1-3), bucket(0-4), kind(don|ka) が不正です' });
+    }
+    const charts = readCharts();
+    if (!charts[id]) {
+        return res.status(404).json({ error: 'Chart not found' });
+    }
+    const fpath = path.join(CHART_BGM_DIR, id, 'hits', `p${part}-b${bucket}-${kind}.mp3`);
+    try {
+        if (fs.existsSync(fpath)) fs.unlinkSync(fpath);
+    } catch (e) {
+        console.warn('DELETE part-hit-sound file:', e?.message || e);
+    }
+    try {
+        ensurePartHitSoundsShape(charts[id]);
+        const ph = /** @type {Record<string, Array<Record<string, unknown>>>} */ (charts[id].partHitSounds);
+        const arr = ph[String(part)];
+        const cell = { ...(arr[bucket] || {}) };
+        if (kind === 'don') {
+            delete cell.donVersion;
+            delete cell.donOriginalName;
+        } else {
+            delete cell.kaVersion;
+            delete cell.kaOriginalName;
+        }
+        arr[bucket] = cell;
+        writeCharts(charts);
+        res.json({ success: true, chart: charts[id] });
+    } catch (err) {
+        console.error('DELETE /admin/charts/:id/part-hit-sound error:', err);
+        res.status(500).json({ error: 'ヒット音の削除に失敗しました' });
     }
 });
 

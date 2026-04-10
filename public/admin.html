@@ -936,6 +936,21 @@
                                 <button type="button" id="btn-import-chart-part-json" class="chart-action-btn" disabled>このパートにインポート</button>
                             </div>
                             <p class="chart-drag-hint" style="margin-top:-6px;margin-bottom:0">表示中の編集パート（1P/2P/3Pタブ）のみ。インポート後は「保存」でサーバーに反映されます。</p>
+                            <div class="field-row chart-hit-sounds-section" id="chart-hit-sounds-section">
+                                <label class="prop-label">ヒット音（パート×ノーツの大きさ帯）</label>
+                                <p class="chart-drag-hint" style="margin:0 0 8px">ノーツ音量10〜300%を5段階（各約20%幅）に分け、現在の編集パート（1P/2P/3Pタブ）ごとにドン・カッ用MP3を割り当てます。未設定の帯は従来の効果音が鳴ります。</p>
+                                <table class="chart-hit-sound-table" aria-label="ヒット音の大きさ帯">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">大きさ（音量）</th>
+                                            <th scope="col">ドン</th>
+                                            <th scope="col">カッ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="chart-hit-sound-tbody"></tbody>
+                                </table>
+                                <input type="file" id="chart-hit-sound-file-input" accept=".mp3,audio/mpeg,audio/mp3" style="display:none" aria-hidden="true">
+                            </div>
                             <div class="field-row chart-bgm-row">
                                 <label class="prop-label">BGM</label>
                                 <div class="chart-bgm-controls">
