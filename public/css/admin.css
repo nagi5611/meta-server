@@ -1613,6 +1613,13 @@ body.admin-dark .chart-panel .chart-playback-bpm-label {
         #fff;
 }
 
+/* 連打開始〜終了ノーツの時刻範囲に重なるセル（五線譜線は維持） */
+.chart-panel .measure-cell.measure-cell-roll-span {
+    background:
+        linear-gradient(to bottom, transparent 0%, transparent 16%, rgba(0,0,0,0.55) 16%, rgba(0,0,0,0.55) 17%, transparent 17%, transparent 33%, rgba(0,0,0,0.55) 33%, rgba(0,0,0,0.55) 34%, transparent 34%, transparent 50%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.55) 51%, transparent 51%, transparent 67%, rgba(0,0,0,0.55) 67%, rgba(0,0,0,0.55) 68%, transparent 68%, transparent 84%, rgba(0,0,0,0.55) 84%, rgba(0,0,0,0.55) 85%, transparent 85%, transparent 100%),
+        rgba(255, 235, 59, 0.4);
+}
+
 .chart-panel .measure-cell.range-selected {
     background:
         linear-gradient(to bottom, transparent 0%, transparent 16%, rgba(0,0,0,0.55) 16%, rgba(0,0,0,0.55) 17%, transparent 17%, transparent 33%, rgba(0,0,0,0.55) 33%, rgba(0,0,0,0.55) 34%, transparent 34%, transparent 50%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.55) 51%, transparent 51%, transparent 67%, rgba(0,0,0,0.55) 67%, rgba(0,0,0,0.55) 68%, transparent 68%, transparent 84%, rgba(0,0,0,0.55) 84%, rgba(0,0,0,0.55) 85%, transparent 85%, transparent 100%),
@@ -3422,6 +3429,13 @@ body.admin-dark .chart-panel .measure-cell {
         linear-gradient(to bottom, transparent 0%, transparent 16%, rgba(255,255,255,0.45) 16%, rgba(255,255,255,0.45) 17%, transparent 17%, transparent 33%, rgba(255,255,255,0.45) 33%, rgba(255,255,255,0.45) 34%, transparent 34%, transparent 50%, rgba(255,255,255,0.45) 50%, rgba(255,255,255,0.45) 51%, transparent 51%, transparent 67%, rgba(255,255,255,0.45) 67%, rgba(255,255,255,0.45) 68%, transparent 68%, transparent 84%, rgba(255,255,255,0.45) 84%, rgba(255,255,255,0.45) 85%, transparent 85%, transparent 100%),
         #1f1e19;
 }
+
+body.admin-dark .chart-panel .measure-cell.measure-cell-roll-span {
+    background:
+        linear-gradient(to bottom, transparent 0%, transparent 16%, rgba(255,255,255,0.45) 16%, rgba(255,255,255,0.45) 17%, transparent 17%, transparent 33%, rgba(255,255,255,0.45) 33%, rgba(255,255,255,0.45) 34%, transparent 34%, transparent 50%, rgba(255,255,255,0.45) 50%, rgba(255,255,255,0.45) 51%, transparent 51%, transparent 67%, rgba(255,255,255,0.45) 67%, rgba(255,255,255,0.45) 68%, transparent 68%, transparent 84%, rgba(255,255,255,0.45) 84%, rgba(255,255,255,0.45) 85%, transparent 85%, transparent 100%),
+        rgba(255, 193, 7, 0.28);
+}
+
 body.admin-dark .chart-panel .measure-cell:nth-child(4n) {
     border-right-color: #3d3a33;
 }

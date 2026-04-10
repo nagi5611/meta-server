@@ -18,7 +18,7 @@ let chartPanelInitialized = false;
 let selectedChartId = null;
 /** 譜面一覧のキャッシュ（renderChartList/selectChart で参照） */
 let cachedCharts = {};
-/** 編集中のノーツ配列（{ time, type, volume? }[] または { type:'roll', startTime, endTime }[]）。譜面編集エリアと同期 */
+/** 編集中のノーツ配列（don/ka: volume、連打は開始チップ roll-start に volume）。譜面編集エリアと同期 */
 let editingNotes = [];
 /** 譜面エディタ: ノーツ音量ドラッグ中の pointerId。-1 はなし */
 let chartVolumeDragPointerId = -1;
@@ -40,12 +40,12 @@ function clampNoteVolume(v) {
 }
 
 /**
- * エディタ表示・保存用の音量（don/ka のみ。既定 1）
+ * エディタ表示・保存用の音量（don/ka/連打開始。既定 1）
  * @param {{ type?: string, volume?: unknown } | null | undefined} note
  * @returns {number}
  */
 function getNoteVolumeForEditor(note) {
-    if (!note || (note.type !== 'don' && note.type !== 'ka')) return 1;
+    if (!note || (note.type !== 'don' && note.type !== 'ka' && note.type !== 'roll-start')) return 1;
     return clampNoteVolume(note.volume != null ? note.volume : 1);
 }
 
@@ -77,7 +77,7 @@ function applyChartNoteVolumeFromPointer(noteIndices, clientY, chipEl) {
     const list = Array.isArray(noteIndices) ? noteIndices : [noteIndices];
     for (const ni of list) {
         const n = editingNotes[ni];
-        if (!n || (n.type !== 'don' && n.type !== 'ka')) continue;
+        if (!n || (n.type !== 'don' && n.type !== 'ka' && n.type !== 'roll-start')) continue;
         n.volume = vol;
     }
     flushChartPartSlot();
@@ -85,7 +85,7 @@ function applyChartNoteVolumeFromPointer(noteIndices, clientY, chipEl) {
     if (grid) {
         for (const ni of list) {
             const n = editingNotes[ni];
-            if (!n || (n.type !== 'don' && n.type !== 'ka')) continue;
+            if (!n || (n.type !== 'don' && n.type !== 'ka' && n.type !== 'roll-start')) continue;
             const el = grid.querySelector(`.note-chip[data-index="${ni}"]`);
             if (el) el.style.height = `${Math.max(4, 16 * vol)}px`;
         }
@@ -103,6 +103,19 @@ let chartHitSoundPending = { bucket: 0, kind: /** @type {'don'|'ka'} */ ('don') 
 
 /** ノーツ音量10〜300%を5等分した帯の表示ラベル（サーバー・ゲームと同順） */
 const HIT_SOUND_VOLUME_BAND_LABELS = ['0〜20%', '20〜40%', '40〜60%', '60〜80%', '80〜100%'];
+
+/**
+ * プレビュー・ヒット音帯判定用（taiko-game-manager の taikoVolumeToHitBucket と同式）
+ * @param {number} volumeMultiplier
+ * @returns {number} 0..4
+ */
+function chartVolumeToHitBucketForPreview(volumeMultiplier) {
+    const n = HIT_SOUND_VOLUME_BAND_LABELS.length;
+    const x = clampNoteVolume(volumeMultiplier);
+    const pct = ((x - NOTE_VOLUME_MIN) / (NOTE_VOLUME_MAX - NOTE_VOLUME_MIN)) * 100;
+    const b = Math.floor(pct / (100 / n));
+    return Math.min(n - 1, Math.max(0, b));
+}
 
 /**
  * 「編集パート」タブ（1P/2P/3P）の表示名を更新する
@@ -169,6 +182,8 @@ let chartPreviewAudioBuffers = {
     don: null,
     ka: null
 };
+/** プレビュー用カスタムヒット音 key: chartId|part|bucket|don|ka */
+let chartPreviewHitSoundBuffers = new Map();
 /** プレビュー用BGMデコード済みバッファ（chartId:bgmVersion で無効化） */
 let chartPreviewBgmCache = { key: '', buffer: /** @type {AudioBuffer | null} */ (null) };
 
@@ -437,45 +452,75 @@ function getRollSectionsFromNotes(notes) {
         return (ta ?? 0) - (tb ?? 0);
     });
     const sections = [];
+    /** @type {Array<{ time: number, volume: number }>} */
     const starts = [];
     for (const n of sorted) {
         if (n.type === 'roll') {
             const s = n.startTime ?? 0;
             const e = n.endTime ?? n.startTime ?? 0;
-            if (e > s) sections.push({ start: s, end: e });
+            const vol = clampNoteVolume(
+                /** @type {{ volume?: unknown }} */ (n).volume != null ? /** @type {{ volume?: unknown }} */ (n).volume : 1
+            );
+            if (e > s) sections.push({ start: s, end: e, volume: vol });
         } else if (n.type === 'roll-start') {
-            starts.push(n.time);
+            starts.push({ time: n.time ?? 0, volume: getNoteVolumeForEditor(n) });
         } else if (n.type === 'roll-end' && starts.length > 0) {
-            const start = starts.shift();
-            if (n.time > start) sections.push({ start, end: n.time });
+            const st = starts.shift();
+            if (n.time > st.time) sections.push({ start: st.time, end: n.time, volume: st.volume });
         }
     }
     return sections;
 }
 
 /**
+ * 編集グリッドの1セル（16分の時間幅）が連打区間と重なるか
+ * @param {number} barIndex
+ * @param {number} stepIndex
+ * @param {number} bpm
+ * @param {Array<{ start: number, end: number }>} rollSections
+ * @returns {boolean}
+ */
+function isMeasureCellOverlappingRollSpan(barIndex, stepIndex, bpm, rollSections) {
+    if (!rollSections || rollSections.length === 0) return false;
+    const t0 = barStepToTime(barIndex, stepIndex, bpm);
+    const stepSec = getBarSec(bpm) / 16;
+    const t1 = t0 + stepSec;
+    for (const s of rollSections) {
+        const a = Number(s.start ?? 0);
+        const b = Number(s.end ?? 0);
+        if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) continue;
+        /* [t0,t1) と [a,b] が交わる（終了ノーツのセル左端＝b も含む） */
+        if (t1 > a && t0 <= b) return true;
+    }
+    return false;
+}
+
+/**
  * ノーツ配列からプレビュー用の音イベント列を作る（don/ka + roll区間は0.1sごとにdon）
  * @param {Array<{ type?: string, time?: number, volume?: unknown }>} notes
- * @returns {Array<{ time: number, type: 'don'|'ka', volume: number }>}
+ * @param {number} [partNum=1] 1..3（カスタムヒット音のパート振り分け）
+ * @returns {Array<{ time: number, type: 'don'|'ka', volume: number, part: number }>}
  */
-function buildChartPreviewEventsFromNotes(notes) {
+function buildChartPreviewEventsFromNotes(notes, partNum = 1) {
+    const part = Math.min(3, Math.max(1, Number(partNum) || 1));
     const events = [];
     for (const n of notes) {
         if (!n) continue;
         if (n.type === 'don' || n.type === 'ka') {
             const t = Number(n.time ?? 0);
             if (Number.isFinite(t) && t >= 0) {
-                events.push({ time: t, type: n.type, volume: getNoteVolumeForEditor(n) });
+                events.push({ time: t, type: n.type, volume: getNoteVolumeForEditor(n), part });
             }
         }
     }
     for (const s of getRollSectionsFromNotes(notes)) {
         const start = Number(s.start ?? 0);
         const end = Number(s.end ?? 0);
+        const rollVol = s.volume != null ? clampNoteVolume(s.volume) : 1;
         if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
         const step = 0.1;
         for (let t = start; t < end; t += step) {
-            events.push({ time: t, type: 'don', volume: 1 });
+            events.push({ time: t, type: 'don', volume: rollVol, part });
         }
     }
     events.sort((a, b) => a.time - b.time);
@@ -484,10 +529,10 @@ function buildChartPreviewEventsFromNotes(notes) {
 
 /**
  * editingNotes からプレビュー用の音イベント列を作る（don/ka + roll区間は0.1sごとにdon）
- * @returns {Array<{ time: number, type: 'don'|'ka', volume: number }>}
+ * @returns {Array<{ time: number, type: 'don'|'ka', volume: number, part: number }>}
  */
 function buildChartPreviewEvents() {
-    return buildChartPreviewEventsFromNotes(editingNotes);
+    return buildChartPreviewEventsFromNotes(editingNotes, chartEditingPart);
 }
 
 /**
@@ -496,7 +541,7 @@ function buildChartPreviewEvents() {
 function buildChartPreviewEventsAllParts() {
     const merged = [];
     for (let p = 0; p < 3; p++) {
-        merged.push(...buildChartPreviewEventsFromNotes(chartPartNoteSlots[p] || []));
+        merged.push(...buildChartPreviewEventsFromNotes(chartPartNoteSlots[p] || [], p + 1));
     }
     merged.sort((a, b) => a.time - b.time);
     return merged;
@@ -704,7 +749,7 @@ function fillPlaybackNoteChipsInGrid(gridEl, notes) {
                 : note.type === 'roll-start' ? 'S'
                     : note.type === 'roll-end' ? 'E'
                         : 'D';
-        if (note.type === 'don' || note.type === 'ka') {
+        if (note.type === 'don' || note.type === 'ka' || note.type === 'roll-start') {
             const vol = getNoteVolumeForEditor(note);
             chip.style.height = `${Math.max(4, 16 * vol)}px`;
         }
@@ -830,6 +875,62 @@ async function ensureChartPreviewAudioLoaded() {
 }
 
 /**
+ * 選択中譜面のカスタムヒット音をプレビュー用にデコードする（毎回キャッシュを捨てて取り直す）
+ * @param {string} chartId
+ * @returns {Promise<void>}
+ */
+async function preloadChartPreviewCustomHitSounds(chartId) {
+    chartPreviewHitSoundBuffers.clear();
+    if (!chartId || !chartPreviewAudioCtx) return;
+    const c = cachedCharts[chartId];
+    const ph = c && c.partHitSounds && typeof c.partHitSounds === 'object'
+        ? /** @type {Record<string, unknown>} */ (c.partHitSounds)
+        : null;
+    if (!ph) return;
+    for (let part = 1; part <= 3; part++) {
+        const arr = ph[String(part)];
+        if (!Array.isArray(arr)) continue;
+        for (let b = 0; b < HIT_SOUND_VOLUME_BAND_LABELS.length; b++) {
+            const cell = arr[b];
+            if (!cell || typeof cell !== 'object') continue;
+            const o = /** @type {Record<string, unknown>} */ (cell);
+            const load = async (/** @type {'don'|'ka'} */ kind, ver) => {
+                const key = `${chartId}|${part}|${b}|${kind}`;
+                const url = `/chart-bgm/${encodeURIComponent(chartId)}/hits/p${part}-b${b}-${kind}.mp3?v=${encodeURIComponent(String(ver))}`;
+                const res = await fetch(url, { credentials: 'same-origin' });
+                if (!res.ok) return;
+                const ab = await res.arrayBuffer();
+                const buf = await chartPreviewAudioCtx.decodeAudioData(ab.slice(0));
+                chartPreviewHitSoundBuffers.set(key, buf);
+            };
+            if (o.donVersion != null && Number.isFinite(Number(o.donVersion))) {
+                await load('don', Number(o.donVersion)).catch(() => {});
+            }
+            if (o.kaVersion != null && Number.isFinite(Number(o.kaVersion))) {
+                await load('ka', Number(o.kaVersion)).catch(() => {});
+            }
+        }
+    }
+}
+
+/**
+ * プレビュー1音分のバッファ（カスタムがあればそれ、なければ既定 don/ka）
+ * @param {string} chartId
+ * @param {number} part 1..3
+ * @param {'don'|'ka'} evType
+ * @param {number} volumeMultiplier
+ * @returns {AudioBuffer | null}
+ */
+function pickPreviewHitAudioBuffer(chartId, part, evType, volumeMultiplier) {
+    const kind = evType === 'ka' ? 'ka' : 'don';
+    const bucket = chartVolumeToHitBucketForPreview(volumeMultiplier);
+    const key = `${chartId}|${part}|${bucket}|${kind}`;
+    const custom = chartPreviewHitSoundBuffers.get(key);
+    if (custom) return custom;
+    return kind === 'ka' ? chartPreviewAudioBuffers.ka : chartPreviewAudioBuffers.don;
+}
+
+/**
  * 選択中譜面のBGMを AudioBuffer にデコードする（未設定なら null）
  * @returns {Promise<AudioBuffer | null>}
  */
@@ -860,6 +961,7 @@ async function ensureChartPreviewBgmDecoded() {
  */
 function invalidateChartBgmPreviewCache() {
     chartPreviewBgmCache = { key: '', buffer: null };
+    chartPreviewHitSoundBuffers.clear();
 }
 
 /**
@@ -1046,7 +1148,7 @@ function updateChartPreviewControlsUI() {
 
 /**
  * プレビュー用イベント列を再生する（音 + 緑バー）
- * @param {Array<{ time: number, type: 'don'|'ka', volume?: number }>} events
+ * @param {Array<{ time: number, type: 'don'|'ka', volume?: number, part?: number }>} events
  * @param {number} totalDur
  * @param {number} [startFromSec=0]
  * @param {{ allPartsLayout?: boolean }} [options]
@@ -1061,6 +1163,12 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
     } catch (e) {
         if (statusEl) statusEl.textContent = 'プレビュー音の読み込みに失敗: ' + e.message;
         return;
+    }
+
+    try {
+        await preloadChartPreviewCustomHitSounds(selectedChartId);
+    } catch {
+        /* カスタム無し・取得失敗時は既定音のみ */
     }
 
     /** @type {AudioBuffer | null} */
@@ -1115,12 +1223,14 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
         }
     }
     for (const ev of events) {
-        const buf = ev.type === 'don' ? chartPreviewAudioBuffers.don : chartPreviewAudioBuffers.ka;
+        const part = ev.part != null ? Math.min(3, Math.max(1, Math.floor(Number(ev.part)))) : chartEditingPart;
+        const vol = clampNoteVolume(ev.volume != null ? ev.volume : 1);
+        const buf = pickPreviewHitAudioBuffer(selectedChartId, part, ev.type === 'ka' ? 'ka' : 'don', vol);
         if (!buf) continue;
         const t = Number(ev.time ?? 0);
         if (!Number.isFinite(t) || t < startSec || t > totalDur + 0.001) continue;
         const gain = chartPreviewAudioCtx.createGain();
-        gain.gain.value = clampNoteVolume(ev.volume != null ? ev.volume : 1);
+        gain.gain.value = vol;
         const src = chartPreviewAudioCtx.createBufferSource();
         src.buffer = buf;
         src.connect(gain);
@@ -1272,8 +1382,10 @@ function chartFieldToEditorNotes(chart, field) {
     let notes = Array.isArray(chart[field]) ? chart[field].slice() : [];
     return notes.flatMap((n) => {
         if (n.type === 'roll' && n.startTime != null && n.endTime != null) {
+            const rv = /** @type {{ volume?: unknown }} */ (n).volume;
+            const vol = rv != null ? clampNoteVolume(rv) : 1;
             return [
-                { type: 'roll-start', time: n.startTime },
+                { type: 'roll-start', time: n.startTime, volume: vol },
                 { type: 'roll-end', time: n.endTime }
             ];
         }
@@ -1578,6 +1690,8 @@ function renderNotesStrip() {
     const defaultMeasures = 16;
     const totalMeasures = Math.max(endMeasures ?? defaultMeasures, maxBarFromNotes, 1);
 
+    const rollSectionsHighlight = getRollSectionsFromNotes(editingNotes);
+
     grid.innerHTML = '';
     for (let barIndex = 0; barIndex < totalMeasures; barIndex++) {
         const card = document.createElement('div');
@@ -1791,6 +1905,9 @@ function renderNotesStrip() {
         for (let stepIndex = 0; stepIndex < 16; stepIndex++) {
             const cell = document.createElement('div');
             cell.className = 'measure-cell';
+            if (isMeasureCellOverlappingRollSpan(barIndex, stepIndex, bpm, rollSectionsHighlight)) {
+                cell.classList.add('measure-cell-roll-span');
+            }
             cell.dataset.barIndex = String(barIndex);
             cell.dataset.stepIndex = String(stepIndex);
             cells.appendChild(cell);
@@ -1827,19 +1944,19 @@ function renderNotesStrip() {
                 : note.type === 'roll-start' ? 'S'
                     : note.type === 'roll-end' ? 'E'
                         : 'D';
-        if (note.type === 'don' || note.type === 'ka') {
+        if (note.type === 'don' || note.type === 'ka' || note.type === 'roll-start') {
             const vol = getNoteVolumeForEditor(note);
             chip.style.height = `${Math.max(4, 16 * vol)}px`;
             chip.addEventListener('pointerdown', (e) => {
                 if (e.button !== 0) return;
                 e.stopPropagation();
                 const idx = parseInt(chip.dataset.index, 10);
-                const donKaInSelection = [...selectedNoteIndices].filter((i) => {
+                const volEditableInSelection = [...selectedNoteIndices].filter((i) => {
                     const n = editingNotes[i];
-                    return n && (n.type === 'don' || n.type === 'ka');
+                    return n && (n.type === 'don' || n.type === 'ka' || n.type === 'roll-start');
                 });
-                const volumeResizeIndices = (selectedNoteIndices.has(idx) && donKaInSelection.length > 0)
-                    ? donKaInSelection
+                const volumeResizeIndices = (selectedNoteIndices.has(idx) && volEditableInSelection.length > 0)
+                    ? volEditableInSelection
                     : [idx];
                 const startY = e.clientY;
                 const startX = e.clientX;
@@ -2653,7 +2770,11 @@ function bindChartPanelEvents() {
                     return nbi === bi && nsi === si;
                 });
                 if (replaceIndex >= 0) {
-                    editingNotes[replaceIndex] = { type, time: qTime };
+                    const prev = editingNotes[replaceIndex];
+                    const keepVol = type === 'roll-start' && prev && prev.type === 'roll-start' && prev.volume != null
+                        ? { volume: prev.volume }
+                        : {};
+                    editingNotes[replaceIndex] = { type, time: qTime, ...keepVol };
                 } else {
                     editingNotes.push({ type, time: qTime });
                 }

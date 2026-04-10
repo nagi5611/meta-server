@@ -4,7 +4,7 @@
 import { isMobile } from './mobile-utils.js';
 
 /**
- * ノーツ定義: { time: 秒, type: 'don'|'ka', volume?: 0.1〜3 } または { type: 'roll', startTime: 秒, endTime: 秒 }
+ * ノーツ定義: { time: 秒, type: 'don'|'ka', volume?: 0.1〜3 } または { type: 'roll', startTime, endTime, volume?: 0.1〜3 }
  * デモ譜面（固定）。後から外部ファイルに分離可能。
  */
 const DEMO_CHART = [
@@ -468,6 +468,7 @@ class TaikoGameManager {
      */
     _normalizeChart(chart) {
         const result = [];
+        /** @type {Array<{ time: number, volume: number }>} */
         const starts = [];
         const sorted = [...chart].sort((a, b) => {
             const ta = a.type === 'roll' ? a.startTime : a.time;
@@ -476,10 +477,20 @@ class TaikoGameManager {
         });
         for (const n of sorted) {
             if (n.type === 'roll-start') {
-                starts.push(n.time);
+                starts.push({
+                    time: n.time,
+                    volume: clampChartNoteVolume(/** @type {{ volume?: unknown }} */ (n).volume)
+                });
             } else if (n.type === 'roll-end' && starts.length > 0) {
-                const start = starts.shift();
-                if (n.time > start) result.push({ type: 'roll', startTime: start, endTime: n.time });
+                const st = starts.shift();
+                if (n.time > st.time) {
+                    result.push({
+                        type: 'roll',
+                        startTime: st.time,
+                        endTime: n.time,
+                        volume: st.volume
+                    });
+                }
             } else if (n.type !== 'roll-start' && n.type !== 'roll-end') {
                 result.push(n);
             }
@@ -1185,13 +1196,21 @@ class TaikoGameManager {
         }
 
         const now = this._now();
-        const inRoll = this._chart.some(
-            (n) => n.type === 'roll' && now >= (n._wallStart ?? 0) && now <= (n._wallEnd ?? n._wallStart ?? 0)
-        );
+        let rollVol = 1;
+        const inRoll = this._chart.some((n) => {
+            if (n.type !== 'roll') return false;
+            const ws = n._wallStart ?? 0;
+            const we = n._wallEnd ?? ws;
+            if (now >= ws && now <= we) {
+                rollVol = clampChartNoteVolume(n.volume);
+                return true;
+            }
+            return false;
+        });
         if (inRoll) {
             this._rollCount++;
-            this._playHitSound(type, 1);
-            this._playHitSound(type, 1);
+            this._playHitSound(type, rollVol);
+            this._playHitSound(type, rollVol);
             this._showRollHitEffect();
         } else {
             this._playHitSound(type, 1);
@@ -1349,6 +1368,9 @@ class TaikoGameManager {
                     const widthPx = Math.max(40, (duration / NOTE_TRAVEL_TIME) * laneSpan);
                     el.style.width = widthPx + 'px';
                     el.style.boxSizing = 'border-box';
+                    const rvm = clampChartNoteVolume(note.volume);
+                    el.style.transform = `translateY(-50%) scale(${rvm})`;
+                    el.style.transformOrigin = 'center center';
                     this._notesContainer?.appendChild(el);
                     this._activeNotes.push({
                         el,
