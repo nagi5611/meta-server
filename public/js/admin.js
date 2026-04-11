@@ -1034,6 +1034,7 @@ async function loadCharts() {
         if (!selectedChartId) clearChartEditor();
         else {
             updateChartBgmRowUi();
+            updateChartPartBgmRowUi();
             void refreshChartBgmWaveformForSelectedChart();
         }
         updateChartPartIoUi();
@@ -1716,28 +1717,84 @@ function pickPreviewHitAudioBuffer(chartId, part, evType, volumeMultiplier) {
 }
 
 /**
+ * 譜面オブジェクトからパート用BGMメタ（version / originalName）を取る
+ * @param {Record<string, unknown>|null|undefined} c
+ * @param {number} part 1..3
+ * @returns {{ version: number, originalName?: string } | null}
+ */
+function getChartPartBgmMeta(c, part) {
+    const key = String(part);
+    const root = c && c.partBgm && typeof c.partBgm === 'object' ? /** @type {Record<string, unknown>} */ (c.partBgm) : null;
+    if (!root) return null;
+    const cell = root[key];
+    if (!cell || typeof cell !== 'object') return null;
+    const o = /** @type {Record<string, unknown>} */ (cell);
+    const ver = o.version != null ? Number(o.version) : NaN;
+    if (!Number.isFinite(ver)) return null;
+    return {
+        version: ver,
+        originalName: o.originalName != null ? String(o.originalName) : ''
+    };
+}
+
+/**
+ * 単一パートのプレビュー用に解決したBGMキャッシュキー（パート専用が無ければ曲のBGM）
+ * @param {string|null|undefined} chartId
+ * @param {Record<string, unknown>|null|undefined} c
+ * @returns {string}
+ */
+function getResolvedChartBgmCacheKeyForPartPreview(chartId, c) {
+    if (!chartId || !c) return '';
+    const p = chartEditingPart;
+    const pb = getChartPartBgmMeta(c, p);
+    if (pb) return `${chartId}:p${p}:${pb.version}`;
+    if (c.bgmVersion != null) return `${chartId}:main:${c.bgmVersion}`;
+    return '';
+}
+
+/**
  * 選択中譜面のBGMを AudioBuffer にデコードする（未設定なら null）
+ * @param {{ track?: 'main' | 'part' }} [options] main=曲のMP3のみ。part=編集中パート用MP3、無ければ曲のBGMにフォールバック
  * @returns {Promise<AudioBuffer | null>}
  */
-async function ensureChartPreviewBgmDecoded() {
+async function ensureChartPreviewBgmDecoded(options = {}) {
+    const track = options.track === 'main' ? 'main' : 'part';
     const chartId = selectedChartId;
     const c = chartId && cachedCharts[chartId];
-    if (!c || c.bgmVersion == null) {
-        return null;
+    if (!c) return null;
+
+    let cacheKey = '';
+    let url = '';
+
+    if (track === 'main') {
+        if (c.bgmVersion == null) return null;
+        cacheKey = `${chartId}:main:${c.bgmVersion}`;
+        url = `/chart-bgm/${encodeURIComponent(chartId)}.mp3?v=${encodeURIComponent(String(c.bgmVersion))}`;
+    } else {
+        const p = chartEditingPart;
+        const pb = getChartPartBgmMeta(c, p);
+        if (pb) {
+            cacheKey = `${chartId}:p${p}:${pb.version}`;
+            url = `/chart-bgm/${encodeURIComponent(chartId)}-p${p}.mp3?v=${encodeURIComponent(String(pb.version))}`;
+        } else if (c.bgmVersion != null) {
+            cacheKey = `${chartId}:main:${c.bgmVersion}`;
+            url = `/chart-bgm/${encodeURIComponent(chartId)}.mp3?v=${encodeURIComponent(String(c.bgmVersion))}`;
+        } else {
+            return null;
+        }
     }
-    const key = `${chartId}:${c.bgmVersion}`;
-    if (chartPreviewBgmCache.key === key && chartPreviewBgmCache.buffer) {
+
+    if (chartPreviewBgmCache.key === cacheKey && chartPreviewBgmCache.buffer) {
         return chartPreviewBgmCache.buffer;
     }
     if (!chartPreviewAudioCtx) {
         chartPreviewAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
-    const url = `/chart-bgm/${encodeURIComponent(chartId)}.mp3?v=${encodeURIComponent(String(c.bgmVersion))}`;
     const res = await fetch(url, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('BGMの取得に失敗しました');
     const ab = await res.arrayBuffer();
     const buf = await chartPreviewAudioCtx.decodeAudioData(ab.slice(0));
-    chartPreviewBgmCache = { key, buffer: buf };
+    chartPreviewBgmCache = { key: cacheKey, buffer: buf };
     return buf;
 }
 
@@ -1785,9 +1842,7 @@ function paintAllMeasureBgmWaveformCanvases() {
     const buf = chartPreviewBgmCache.buffer;
     const cacheKey = chartPreviewBgmCache.key;
     const c = selectedChartId ? cachedCharts[selectedChartId] : null;
-    const expectKey = c && selectedChartId && c.bgmVersion != null
-        ? `${selectedChartId}:${c.bgmVersion}`
-        : '';
+    const expectKey = c && selectedChartId ? getResolvedChartBgmCacheKeyForPartPreview(selectedChartId, c) : '';
     const bufOk = !!(buf && buf.length > 0 && expectKey && cacheKey === expectKey);
     const duration = bufOk ? buf.duration : 0;
     const sr = bufOk ? buf.sampleRate : 0;
@@ -1999,12 +2054,13 @@ async function refreshChartBgmWaveformForSelectedChart() {
     const fnEl = document.getElementById('chart-bgm-waveform-filename');
     const durEl = document.getElementById('chart-bgm-waveform-duration');
     const c = selectedChartId && cachedCharts[selectedChartId];
-    if (!wrap || !c || c.bgmVersion == null) {
+    const resolvedKey = c && selectedChartId ? getResolvedChartBgmCacheKeyForPartPreview(selectedChartId, c) : '';
+    if (!wrap || !c || !resolvedKey) {
         hideChartBgmWaveformUi();
         return;
     }
     try {
-        const buf = await ensureChartPreviewBgmDecoded();
+        const buf = await ensureChartPreviewBgmDecoded({ track: 'part' });
         if (!buf || buf.length === 0) {
             hideChartBgmWaveformUi();
             return;
@@ -2016,7 +2072,10 @@ async function refreshChartBgmWaveformForSelectedChart() {
         );
         chartBgmWaveformPeaks = buildChartBgmWaveformPeaks(buf, Math.floor(wPx * 2));
         if (fnEl) {
-            const name = c.bgmOriginalName ? String(c.bgmOriginalName) : 'BGM.mp3';
+            const pb = getChartPartBgmMeta(c, chartEditingPart);
+            const name = pb
+                ? (pb.originalName ? pb.originalName : `${chartEditingPart}P BGM.mp3`)
+                : (c.bgmOriginalName ? String(c.bgmOriginalName) : 'BGM.mp3');
             fnEl.textContent = name;
         }
         if (durEl) durEl.textContent = formatChartBgmWaveformDuration(buf.duration);
@@ -2070,6 +2129,32 @@ function updateChartBgmRowUi() {
         if (btnRemove) btnRemove.disabled = false;
     } else {
         statusEl.textContent = '未設定（MP3をインポート）';
+        if (btnRemove) btnRemove.disabled = true;
+    }
+}
+
+/**
+ * パート用BGM行（現在の編集パート）の表示を更新する
+ */
+function updateChartPartBgmRowUi() {
+    const statusEl = document.getElementById('chart-part-bgm-status');
+    const btnImport = document.getElementById('btn-chart-part-bgm-import');
+    const btnRemove = document.getElementById('btn-chart-part-bgm-remove');
+    const c = selectedChartId && cachedCharts[selectedChartId];
+    if (!statusEl) return;
+    if (!selectedChartId || !c) {
+        statusEl.textContent = '譜面を選択してください';
+        if (btnImport) btnImport.disabled = true;
+        if (btnRemove) btnRemove.disabled = true;
+        return;
+    }
+    if (btnImport) btnImport.disabled = false;
+    const meta = getChartPartBgmMeta(c, chartEditingPart);
+    if (meta) {
+        statusEl.textContent = meta.originalName ? meta.originalName : 'MP3設定済み';
+        if (btnRemove) btnRemove.disabled = false;
+    } else {
+        statusEl.textContent = '未設定（曲のBGMにフォールバック）';
         if (btnRemove) btnRemove.disabled = true;
     }
 }
@@ -2236,12 +2321,13 @@ function updateChartPreviewControlsUI() {
  * @param {Array<{ time: number, type: 'don'|'ka', volume?: number, part?: number }>} events
  * @param {number} totalDur
  * @param {number} [startFromSec=0]
- * @param {{ allPartsLayout?: boolean, audioMode?: 'all'|'notesOnly'|'bgmOnly' }} [options]
+ * @param {{ allPartsLayout?: boolean, audioMode?: 'all'|'notesOnly'|'bgmOnly', bgmTrack?: 'main'|'part' }} [options]
  */
 async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, options = {}) {
     if (!selectedChartId) return;
     const allPartsLayout = Boolean(options.allPartsLayout);
     const audioMode = options.audioMode === 'notesOnly' || options.audioMode === 'bgmOnly' ? options.audioMode : 'all';
+    const bgmTrack = options.bgmTrack === 'main' ? 'main' : 'part';
     stopChartPreview();
     const runToken = chartPreviewCancelToken;
     const statusEl = document.getElementById('chart-status');
@@ -2270,11 +2356,18 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
     let bgmBuffer = null;
     if (audioMode !== 'notesOnly') {
         try {
-            bgmBuffer = await ensureChartPreviewBgmDecoded();
+            bgmBuffer = await ensureChartPreviewBgmDecoded({ track: bgmTrack });
         } catch (e) {
             bgmBuffer = null;
-            if (statusEl && cachedCharts[selectedChartId]?.bgmVersion != null && audioMode === 'all') {
-                statusEl.textContent = 'BGMを再生できません（ドン・カのみ再生）';
+            if (statusEl && audioMode === 'all') {
+                const cc = cachedCharts[selectedChartId];
+                let expected = false;
+                if (cc) {
+                    expected = bgmTrack === 'main'
+                        ? cc.bgmVersion != null
+                        : (getChartPartBgmMeta(cc, chartEditingPart) != null || cc.bgmVersion != null);
+                }
+                if (expected) statusEl.textContent = 'BGMを再生できません（ドン・カのみ再生）';
             }
         }
     }
@@ -2394,7 +2487,7 @@ async function playChartPreview(startFromSec = 0, options = {}) {
     const events = buildChartPreviewEvents();
     const totalDur = getChartPreviewDurationSec();
     const audioMode = options.audioMode === 'notesOnly' || options.audioMode === 'bgmOnly' ? options.audioMode : 'all';
-    await runChartPreviewPlayback(events, totalDur, startFromSec, { audioMode });
+    await runChartPreviewPlayback(events, totalDur, startFromSec, { audioMode, bgmTrack: 'part' });
 }
 
 /**
@@ -2405,7 +2498,7 @@ async function playChartPreviewAllParts(startFromSec = 0) {
     flushChartPartSlot();
     const events = buildChartPreviewEventsAllParts();
     const totalDur = getChartPreviewDurationSecAllParts();
-    await runChartPreviewPlayback(events, totalDur, startFromSec, { allPartsLayout: true });
+    await runChartPreviewPlayback(events, totalDur, startFromSec, { allPartsLayout: true, bgmTrack: 'main' });
 }
 
 /**
@@ -2608,6 +2701,8 @@ function setChartEditingPart(part) {
     renderNotesStrip();
     updateChartPreviewControlsUI();
     renderChartPartHitSoundCells();
+    updateChartPartBgmRowUi();
+    void refreshChartBgmWaveformForSelectedChart();
 }
 
 /**
@@ -2671,6 +2766,7 @@ function loadChartIntoEditor(chart) {
     if (btnPlayAllParts) btnPlayAllParts.disabled = false;
     invalidateChartBgmPreviewCache();
     updateChartBgmRowUi();
+    updateChartPartBgmRowUi();
     updateChartPartIoUi();
     renderChartPartHitSoundCells();
     updateChartPreviewControlsUI();
@@ -2781,6 +2877,7 @@ function clearChartEditor() {
     if (btnPlayAllParts) btnPlayAllParts.disabled = true;
     invalidateChartBgmPreviewCache();
     updateChartBgmRowUi();
+    updateChartPartBgmRowUi();
     updateChartPartIoUi();
     renderChartPartHitSoundCells();
     updateChartPreviewControlsUI();
@@ -4091,8 +4188,90 @@ function bindChartPanelEvents() {
                 }
                 invalidateChartBgmPreviewCache();
                 updateChartBgmRowUi();
-                hideChartBgmWaveformUi();
+                void refreshChartBgmWaveformForSelectedChart();
                 if (statusEl) statusEl.textContent = 'BGMを削除しました';
+            } catch (e) {
+                if (statusEl) statusEl.textContent = '削除失敗: ' + (e instanceof Error ? e.message : String(e));
+            }
+        });
+    }
+
+    const btnChartPartBgmImport = document.getElementById('btn-chart-part-bgm-import');
+    const btnChartPartBgmRemove = document.getElementById('btn-chart-part-bgm-remove');
+    const chartPartBgmFileInput = document.getElementById('chart-part-bgm-file-input');
+    if (btnChartPartBgmImport && chartPartBgmFileInput) {
+        btnChartPartBgmImport.addEventListener('click', () => {
+            chartPartBgmFileInput.value = '';
+            chartPartBgmFileInput.click();
+        });
+        chartPartBgmFileInput.addEventListener('change', async () => {
+            const file = chartPartBgmFileInput.files && chartPartBgmFileInput.files[0];
+            if (!file || !selectedChartId) return;
+            const lower = (file.name || '').toLowerCase();
+            if (!lower.endsWith('.mp3')) {
+                if (statusEl) statusEl.textContent = 'MP3ファイルを選択してください';
+                chartPartBgmFileInput.value = '';
+                return;
+            }
+            if (statusEl) statusEl.textContent = 'パート用BGMをアップロード中...';
+            btnChartPartBgmImport.disabled = true;
+            const fd = new FormData();
+            fd.append('bgm', file);
+            try {
+                const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId) + '/bgm/part/' + encodeURIComponent(String(chartEditingPart)), {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'include'
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    if (statusEl) statusEl.textContent = data.error || 'パートBGMのアップロードに失敗しました';
+                    return;
+                }
+                if (data.chart) {
+                    cachedCharts[selectedChartId] = data.chart;
+                    invalidateChartBgmPreviewCache();
+                    updateChartPartBgmRowUi();
+                    void refreshChartBgmWaveformForSelectedChart();
+                }
+                if (statusEl) statusEl.textContent = 'パート用BGMを設定しました';
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'アップロード失敗: ' + (err instanceof Error ? err.message : String(err));
+            } finally {
+                chartPartBgmFileInput.value = '';
+                updateChartPartBgmRowUi();
+                btnChartPartBgmImport.disabled = !selectedChartId;
+            }
+        });
+    }
+    if (btnChartPartBgmRemove) {
+        btnChartPartBgmRemove.addEventListener('click', async () => {
+            if (!selectedChartId) return;
+            if (!confirm(`${chartEditingPart}P のパート用BGMを削除しますか？`)) return;
+            try {
+                const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId) + '/bgm/part/' + encodeURIComponent(String(chartEditingPart)), {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    if (statusEl) statusEl.textContent = data.error || '削除に失敗しました';
+                    return;
+                }
+                if (data.chart) {
+                    cachedCharts[selectedChartId] = data.chart;
+                } else {
+                    const ch = cachedCharts[selectedChartId];
+                    if (ch && ch.partBgm && typeof ch.partBgm === 'object') {
+                        const pb = /** @type {Record<string, unknown>} */ (ch.partBgm);
+                        delete pb[String(chartEditingPart)];
+                        if (Object.keys(pb).length === 0) delete ch.partBgm;
+                    }
+                }
+                invalidateChartBgmPreviewCache();
+                updateChartPartBgmRowUi();
+                void refreshChartBgmWaveformForSelectedChart();
+                if (statusEl) statusEl.textContent = 'パート用BGMを削除しました';
             } catch (e) {
                 if (statusEl) statusEl.textContent = '削除失敗: ' + (e instanceof Error ? e.message : String(e));
             }

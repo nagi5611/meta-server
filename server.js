@@ -3909,6 +3909,14 @@ app.delete('/admin/charts/:id', (req, res) => {
     } catch (e) {
         console.warn('DELETE chart BGM file:', e?.message || e);
     }
+    for (const p of [1, 2, 3]) {
+        const partPath = path.join(CHART_BGM_DIR, `${id}-p${p}.mp3`);
+        try {
+            if (fs.existsSync(partPath)) fs.unlinkSync(partPath);
+        } catch (e) {
+            console.warn('DELETE chart part BGM file:', e?.message || e);
+        }
+    }
     const hitDir = path.join(CHART_BGM_DIR, id);
     try {
         if (fs.existsSync(hitDir)) {
@@ -3973,6 +3981,73 @@ app.delete('/admin/charts/:id/bgm', (req, res) => {
     } catch (err) {
         console.error('DELETE /admin/charts/:id/bgm error:', err);
         res.status(500).json({ error: 'BGMの削除に失敗しました' });
+    }
+});
+
+/** 1P〜3P 用プレビューBGM（譜面ID-p{1|2|3}.mp3） */
+app.post('/admin/charts/:id/bgm/part/:partNum', uploadChartBgm.single('bgm'), (req, res) => {
+    const id = req.params.id;
+    const partNum = Number(req.params.partNum);
+    if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+        return res.status(400).json({ error: 'Invalid chart id' });
+    }
+    if (![1, 2, 3].includes(partNum)) {
+        return res.status(400).json({ error: 'part は 1〜3 を指定してください' });
+    }
+    if (!req.file || !req.file.buffer) {
+        return res.status(400).json({ error: 'MP3ファイルを選択してください（フィールド名: bgm）' });
+    }
+    const charts = readCharts();
+    if (!charts[id]) {
+        return res.status(404).json({ error: 'Chart not found' });
+    }
+    try {
+        fs.writeFileSync(path.join(CHART_BGM_DIR, `${id}-p${partNum}.mp3`), req.file.buffer);
+        const orig = path.basename(req.file.originalname || 'bgm.mp3');
+        if (!charts[id].partBgm || typeof charts[id].partBgm !== 'object') {
+            charts[id].partBgm = {};
+        }
+        const pb = /** @type {Record<string, unknown>} */ (charts[id].partBgm);
+        pb[String(partNum)] = {
+            version: Date.now(),
+            originalName: orig.length > 200 ? orig.slice(0, 200) : orig
+        };
+        writeCharts(charts);
+        res.json({ success: true, chart: charts[id] });
+    } catch (err) {
+        console.error('POST /admin/charts/:id/bgm/part/:partNum error:', err);
+        res.status(500).json({ error: 'パートBGMの保存に失敗しました' });
+    }
+});
+
+app.delete('/admin/charts/:id/bgm/part/:partNum', (req, res) => {
+    const id = req.params.id;
+    const partNum = Number(req.params.partNum);
+    if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+        return res.status(400).json({ error: 'Invalid chart id' });
+    }
+    if (![1, 2, 3].includes(partNum)) {
+        return res.status(400).json({ error: 'part は 1〜3 を指定してください' });
+    }
+    const charts = readCharts();
+    if (!charts[id]) {
+        return res.status(404).json({ error: 'Chart not found' });
+    }
+    try {
+        const partPath = path.join(CHART_BGM_DIR, `${id}-p${partNum}.mp3`);
+        if (fs.existsSync(partPath)) fs.unlinkSync(partPath);
+        if (charts[id].partBgm && typeof charts[id].partBgm === 'object') {
+            const pb = /** @type {Record<string, unknown>} */ (charts[id].partBgm);
+            delete pb[String(partNum)];
+            if (Object.keys(pb).length === 0) {
+                delete charts[id].partBgm;
+            }
+        }
+        writeCharts(charts);
+        res.json({ success: true, chart: charts[id] });
+    } catch (err) {
+        console.error('DELETE /admin/charts/:id/bgm/part/:partNum error:', err);
+        res.status(500).json({ error: 'パートBGMの削除に失敗しました' });
     }
 });
 

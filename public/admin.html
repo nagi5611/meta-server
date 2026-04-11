@@ -931,6 +931,16 @@
                                 </div>
                                 <span class="hint">待機画面のP名の初期値になります（後から待機画面でも変更可）</span>
                             </div>
+                            <div class="field-row chart-part-bgm-row">
+                                <label class="prop-label">パート用BGM</label>
+                                <div class="chart-bgm-controls">
+                                    <input type="file" id="chart-part-bgm-file-input" accept=".mp3,audio/mpeg,audio/mp3" style="display:none" aria-hidden="true">
+                                    <span id="chart-part-bgm-status" class="chart-bgm-status">譜面を選択してください</span>
+                                    <button type="button" id="btn-chart-part-bgm-import" class="chart-action-btn" disabled>MP3をインポート</button>
+                                    <button type="button" id="btn-chart-part-bgm-remove" class="chart-action-btn" disabled>削除</button>
+                                </div>
+                                <span class="hint">現在の編集パート用。プレビュー／小節再生で使用。未設定時は下の「曲のBGM」にフォールバックします。</span>
+                            </div>
                             <div class="btn-row chart-part-io-row" aria-label="編集パート単位のJSON">
                                 <button type="button" id="btn-export-chart-part-json" class="chart-action-btn" disabled>このパートをエクスポート</button>
                                 <input type="file" id="chart-part-import-json-input" accept=".json,application/json" style="display:none" aria-hidden="true">
@@ -953,13 +963,14 @@
                                 <input type="file" id="chart-hit-sound-file-input" accept=".mp3,audio/mpeg,audio/mp3" style="display:none" aria-hidden="true">
                             </div>
                             <div class="field-row chart-bgm-row">
-                                <label class="prop-label">BGM</label>
+                                <label class="prop-label">曲のBGM</label>
                                 <div class="chart-bgm-controls">
                                     <input type="file" id="chart-bgm-file-input" accept=".mp3,audio/mpeg,audio/mp3" style="display:none" aria-hidden="true">
                                     <span id="chart-bgm-status" class="chart-bgm-status">譜面を選択してください</span>
                                     <button type="button" id="btn-chart-bgm-import" class="chart-action-btn" disabled>MP3をインポート</button>
                                     <button type="button" id="btn-chart-bgm-remove" class="chart-action-btn" disabled>BGMを削除</button>
                                 </div>
+                                <span class="hint">まとめて再生（1P〜3P同時プレビュー）で使用。ゲーム本番のBGMにもなります。</span>
                             </div>
                             <div class="btn-row">
                                 <button type="button" id="btn-chart-play-all-parts" class="chart-action-btn" disabled title="1P〜3Pを同時にプレビュー（表示は再生位置の4小節）">現在地から再生</button>
