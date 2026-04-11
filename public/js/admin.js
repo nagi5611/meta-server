@@ -2227,11 +2227,12 @@ function updateChartPreviewControlsUI() {
  * @param {Array<{ time: number, type: 'don'|'ka', volume?: number, part?: number }>} events
  * @param {number} totalDur
  * @param {number} [startFromSec=0]
- * @param {{ allPartsLayout?: boolean }} [options]
+ * @param {{ allPartsLayout?: boolean, audioMode?: 'all'|'notesOnly'|'bgmOnly' }} [options]
  */
 async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, options = {}) {
     if (!selectedChartId) return;
     const allPartsLayout = Boolean(options.allPartsLayout);
+    const audioMode = options.audioMode === 'notesOnly' || options.audioMode === 'bgmOnly' ? options.audioMode : 'all';
     stopChartPreview();
     const runToken = chartPreviewCancelToken;
     const statusEl = document.getElementById('chart-status');
@@ -2258,12 +2259,14 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
 
     /** @type {AudioBuffer | null} */
     let bgmBuffer = null;
-    try {
-        bgmBuffer = await ensureChartPreviewBgmDecoded();
-    } catch (e) {
-        bgmBuffer = null;
-        if (statusEl && cachedCharts[selectedChartId]?.bgmVersion != null) {
-            statusEl.textContent = 'BGMを再生できません（ドン・カのみ再生）';
+    if (audioMode !== 'notesOnly') {
+        try {
+            bgmBuffer = await ensureChartPreviewBgmDecoded();
+        } catch (e) {
+            bgmBuffer = null;
+            if (statusEl && cachedCharts[selectedChartId]?.bgmVersion != null && audioMode === 'all') {
+                statusEl.textContent = 'BGMを再生できません（ドン・カのみ再生）';
+            }
         }
     }
     if (runToken !== chartPreviewCancelToken) {
@@ -2300,7 +2303,7 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
     const baseTime = chartPreviewAudioCtx.currentTime + 0.05;
 
     const sources = [];
-    if (bgmBuffer && bgmBuffer.duration > 0) {
+    if (audioMode !== 'notesOnly' && bgmBuffer && bgmBuffer.duration > 0) {
         const sliceStartWall = Math.min(Math.max(0, wallStart), Math.max(0, bgmBuffer.duration - 1e-6));
         const maxFromSlice = Math.max(0, bgmBuffer.duration - sliceStartWall);
         const bgmPlayLen = Math.min(playDurationWall, maxFromSlice);
@@ -2315,22 +2318,24 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
             sources.push(bgmSrc);
         }
     }
-    for (const ev of events) {
-        const part = ev.part != null ? Math.min(3, Math.max(1, Math.floor(Number(ev.part)))) : chartEditingPart;
-        const vol = clampNoteVolume(ev.volume != null ? ev.volume : 1);
-        const buf = pickPreviewHitAudioBuffer(selectedChartId, part, ev.type === 'ka' ? 'ka' : 'don', vol);
-        if (!buf) continue;
-        const t = Number(ev.time ?? 0);
-        if (!Number.isFinite(t) || t < startSec || t > totalDur + 0.001) continue;
-        const gain = chartPreviewAudioCtx.createGain();
-        gain.gain.value = vol;
-        const src = chartPreviewAudioCtx.createBufferSource();
-        src.buffer = buf;
-        src.connect(gain);
-        gain.connect(chartPreviewAudioCtx.destination);
-        const evWall = wallAtUniform(t);
-        src.start(baseTime + (evWall - wallStart));
-        sources.push(src);
+    if (audioMode !== 'bgmOnly') {
+        for (const ev of events) {
+            const part = ev.part != null ? Math.min(3, Math.max(1, Math.floor(Number(ev.part)))) : chartEditingPart;
+            const vol = clampNoteVolume(ev.volume != null ? ev.volume : 1);
+            const buf = pickPreviewHitAudioBuffer(selectedChartId, part, ev.type === 'ka' ? 'ka' : 'don', vol);
+            if (!buf) continue;
+            const t = Number(ev.time ?? 0);
+            if (!Number.isFinite(t) || t < startSec || t > totalDur + 0.001) continue;
+            const gain = chartPreviewAudioCtx.createGain();
+            gain.gain.value = vol;
+            const src = chartPreviewAudioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(gain);
+            gain.connect(chartPreviewAudioCtx.destination);
+            const evWall = wallAtUniform(t);
+            src.start(baseTime + (evWall - wallStart));
+            sources.push(src);
+        }
     }
 
     if (runToken !== chartPreviewCancelToken) {
@@ -2374,11 +2379,13 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
 /**
  * プレビュー再生（現在編集中パートのみ）
  * @param {number} [startFromSec=0] 曲頭からの秒。指定時はその位置から終端まで再生
+ * @param {{ audioMode?: 'all'|'notesOnly'|'bgmOnly' }} [options] all=ノーツ+BGM、notesOnly=ヒット音のみ、bgmOnly=BGMのみ
  */
-async function playChartPreview(startFromSec = 0) {
+async function playChartPreview(startFromSec = 0, options = {}) {
     const events = buildChartPreviewEvents();
     const totalDur = getChartPreviewDurationSec();
-    await runChartPreviewPlayback(events, totalDur, startFromSec);
+    const audioMode = options.audioMode === 'notesOnly' || options.audioMode === 'bgmOnly' ? options.audioMode : 'all';
+    await runChartPreviewPlayback(events, totalDur, startFromSec, { audioMode });
 }
 
 /**
@@ -2847,11 +2854,14 @@ function renderNotesStrip() {
         const header = document.createElement('div');
         header.className = 'measure-header staff-header';
 
+        const playHost = document.createElement('div');
+        playHost.className = 'measure-preview-play-host';
+
         const previewPlayBtn = document.createElement('button');
         previewPlayBtn.type = 'button';
         previewPlayBtn.className = 'measure-preview-play-btn';
-        previewPlayBtn.setAttribute('aria-label', `第${barIndex + 1}小節からプレビュー`);
-        previewPlayBtn.title = 'この小節からプレビュー';
+        previewPlayBtn.setAttribute('aria-label', `第${barIndex + 1}小節からすべて再生`);
+        previewPlayBtn.title = 'すべて再生（クリック）。ホバーでノーツのみ／曲のみも選択可';
         previewPlayBtn.innerHTML = '<i class="bi bi-play-fill" aria-hidden="true"></i>';
         previewPlayBtn.disabled = !selectedChartId;
         previewPlayBtn.addEventListener('click', (e) => {
@@ -2861,7 +2871,41 @@ function renderNotesStrip() {
             const t0 = barStepToTime(barIndex, 0, getChartTempo());
             playChartPreview(t0);
         });
-        header.appendChild(previewPlayBtn);
+        playHost.appendChild(previewPlayBtn);
+
+        const playMenu = document.createElement('div');
+        playMenu.className = 'measure-preview-play-menu';
+        playMenu.setAttribute('role', 'group');
+        playMenu.setAttribute('aria-label', `第${barIndex + 1}小節の再生`);
+
+        /**
+         * 小節メニュー用: 指定モードでその小節頭からプレビュー再生する
+         * @param {'all'|'notesOnly'|'bgmOnly'} mode
+         */
+        const startMeasurePreview = (mode) => {
+            if (!selectedChartId) return;
+            const t0 = barStepToTime(barIndex, 0, getChartTempo());
+            playChartPreview(t0, { audioMode: mode });
+        };
+
+        const mkMenuBtn = (label, mode) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'measure-preview-play-menu-item';
+            b.textContent = label;
+            b.disabled = !selectedChartId;
+            b.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                startMeasurePreview(mode);
+            });
+            return b;
+        };
+        playMenu.appendChild(mkMenuBtn('すべて再生', 'all'));
+        playMenu.appendChild(mkMenuBtn('ノーツを再生', 'notesOnly'));
+        playMenu.appendChild(mkMenuBtn('曲を再生', 'bgmOnly'));
+        playHost.appendChild(playMenu);
+        header.appendChild(playHost);
 
         const rowIndex = Math.floor(barIndex / 4);
         const isFirstInRow = barIndex % 4 === 0;

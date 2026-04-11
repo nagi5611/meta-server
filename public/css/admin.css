@@ -1520,6 +1520,59 @@ body.admin-dark .chart-panel .measure-spec-row {
     letter-spacing: 0.3px;
 }
 
+.chart-panel .measure-preview-play-host {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.chart-panel .measure-preview-play-menu {
+    display: none;
+    position: absolute;
+    z-index: 40;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 7.5rem;
+    padding: 6px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    background: #fff;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+.chart-panel .measure-preview-play-host:hover .measure-preview-play-menu,
+.chart-panel .measure-preview-play-host:focus-within .measure-preview-play-menu {
+    display: flex;
+}
+
+.chart-panel .measure-preview-play-menu-item {
+    margin: 0;
+    padding: 5px 8px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 4px;
+    background: #f7f7f7;
+    color: #333;
+    font-size: 11px;
+    line-height: 1.25;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.chart-panel .measure-preview-play-menu-item:hover:not(:disabled) {
+    background: #e3f2fd;
+    border-color: #1565c0;
+    color: #0d47a1;
+}
+
+.chart-panel .measure-preview-play-menu-item:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: #999;
+}
+
 .chart-panel .measure-preview-play-btn {
     flex: 0 0 auto;
     width: 30px;
@@ -3511,6 +3564,24 @@ body.admin-dark .chart-panel .measure-preview-play-btn {
 body.admin-dark .chart-panel .measure-preview-play-btn:hover:not(:disabled) {
     background: #2d3d47;
     border-color: #7eb8da;
+}
+
+body.admin-dark .chart-panel .measure-preview-play-menu {
+    background: #25231d;
+    border-color: #3d3a33;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+body.admin-dark .chart-panel .measure-preview-play-menu-item {
+    background: #1a1814;
+    border-color: #3d3a33;
+    color: #e6e4df;
+}
+
+body.admin-dark .chart-panel .measure-preview-play-menu-item:hover:not(:disabled) {
+    background: #2d3d47;
+    border-color: #7eb8da;
+    color: #e8f4fc;
 }
 body.admin-dark .chart-panel .measure-cell {
     border-right-color: rgba(255,255,255,0.10);
