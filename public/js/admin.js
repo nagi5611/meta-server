@@ -488,10 +488,59 @@ function findRollStartIndexByAnchorTime(anchorTime) {
 }
 
 /**
+ * 連打感セル選択キー（アンカー時刻|小節:ステップ）
+ * @param {number} anchorTime
+ * @param {number} cellBi
+ * @param {number} cellSi
+ * @returns {string}
+ */
+function chartRollFeelSelectionKey(anchorTime, cellBi, cellSi) {
+    return `${Number(anchorTime)}|${cellBi}:${cellSi}`;
+}
+
+/**
+ * 絶対16分レンジ内で連打区間と重なるマスを連打感選択キーにまとめる
+ * @param {number} fromBar
+ * @param {number} fromStep
+ * @param {number} toBar
+ * @param {number} toStep
+ * @param {number} bpm
+ * @returns {Set<string>}
+ */
+function getRollFeelCellKeysInAbsRange(fromBar, fromStep, toBar, toStep, bpm) {
+    const keys = new Set();
+    const a = (Math.max(0, Number(fromBar) || 0) * 16) + Math.max(0, Math.min(15, Number(fromStep) || 0));
+    const b = (Math.max(0, Number(toBar) || 0) * 16) + Math.max(0, Math.min(15, Number(toStep) || 0));
+    const minAbs = Math.min(a, b);
+    const maxAbs = Math.max(a, b);
+    const sections = getRollSectionsFromNotes(editingNotes);
+    const stepSec = getBarSec(bpm) / 16;
+    for (let abs = minAbs; abs <= maxAbs; abs++) {
+        const bi = Math.floor(abs / 16);
+        const si = abs % 16;
+        const t0 = barStepToTime(bi, si, bpm);
+        const t1 = t0 + stepSec;
+        for (const sec of sections) {
+            const rs = editingNotes[sec.rollStartIndex];
+            if (!rs || (rs.type !== 'roll-start' && rs.type !== 'roll')) continue;
+            const ra = Number(sec.start ?? 0);
+            const rb = Number(sec.end ?? 0);
+            if (!Number.isFinite(ra) || !Number.isFinite(rb) || rb <= ra) continue;
+            if (t1 > ra && t0 <= rb) {
+                const anchor = rs.type === 'roll' ? Number(rs.startTime ?? 0) : Number(rs.time ?? 0);
+                keys.add(chartRollFeelSelectionKey(anchor, bi, si));
+                break;
+            }
+        }
+    }
+    return keys;
+}
+
+/**
  * 連打帯の数値%入力モードの状態だけを消す
  */
 function clearChartRollFeelDigitInput() {
-    chartRollFeelInputFocus = null;
+    chartRollFeelSelectionKeys.clear();
     chartRollFeelInputBuffer = '';
 }
 
@@ -500,37 +549,36 @@ function clearChartRollFeelDigitInput() {
  */
 function syncChartRollFeelHintStatus() {
     const st = document.getElementById('chart-status');
-    if (!st || !chartRollFeelInputFocus) return;
+    if (!st || chartRollFeelSelectionKeys.size === 0) return;
+    const n = chartRollFeelSelectionKeys.size;
     if (chartRollFeelInputBuffer) {
-        st.textContent = `連打感: ${chartRollFeelInputBuffer}%（Enter で確定、Esc でやめる）`;
+        st.textContent = `連打感（${n}マス）: ${chartRollFeelInputBuffer}%（Enter で確定、Esc でやめる）`;
     } else {
-        st.textContent = '連打感: 0〜300の整数（%）入力後 Enter（Esc でやめる）';
+        st.textContent = `連打感 ${n}マス選択中 — 0〜300の整数（%）入力後 Enter（Esc でやめる）`;
     }
 }
 
 /**
- * 連打帯フォーカス中のバッファを % として解釈し適用する（Enter 確定）
+ * 連打感選択中のバッファを % として解釈し、選択マスすべてに適用する（Enter 確定）
  */
 function applyChartRollFeelPercentFromBuffer() {
     const st = document.getElementById('chart-status');
-    if (!chartRollFeelInputFocus) {
-        clearChartRollFeelDigitInput();
-        return;
-    }
-    const { rollAnchorTime, cellBi, cellSi } = chartRollFeelInputFocus;
+    const keysSnapshot = [...chartRollFeelSelectionKeys];
     const raw = chartRollFeelInputBuffer.trim();
-    clearChartRollFeelDigitInput();
-    const rollStartIndex = findRollStartIndexByAnchorTime(rollAnchorTime);
-    if (rollStartIndex < 0) {
-        if (st) st.textContent = '連打ノーツが見つかりません（帯をクリックし直してください）';
+    if (keysSnapshot.length === 0) {
+        chartRollFeelInputBuffer = '';
         renderNotesStrip();
         return;
     }
     if (raw === '') {
-        if (st) st.textContent = '';
+        chartRollFeelInputBuffer = '';
+        syncChartRollFeelHintStatus();
         renderNotesStrip();
         return;
     }
+    chartRollFeelInputBuffer = '';
+    chartRollFeelSelectionKeys.clear();
+    const keysToApply = keysSnapshot;
     const pct = parseInt(raw, 10);
     if (!Number.isFinite(pct) || pct < 0 || pct > 300) {
         if (st) st.textContent = '0〜300の整数を入力してください';
@@ -538,29 +586,41 @@ function applyChartRollFeelPercentFromBuffer() {
         return;
     }
     const vol = pct === 0 ? NOTE_VOLUME_MIN : clampNoteVolume(pct / 100);
-    const rs = editingNotes[rollStartIndex];
-    if (!rs || (rs.type !== 'roll-start' && rs.type !== 'roll')) {
-        renderNotesStrip();
-        return;
-    }
     const bpm = getChartTempo();
-    const sec = getRollSectionsFromNotes(editingNotes).find((s) => s.rollStartIndex === rollStartIndex);
-    if (!sec) {
-        renderNotesStrip();
-        return;
-    }
-    const kind = rollBarCellKind(cellBi, cellSi, sec, bpm);
-    if (kind === 'middle') {
-        ensureRollCellVolumesMap(rs);
-        const key = `${cellBi}:${cellSi}`;
-        rs.rollCellVolumes[key] = vol;
-    } else {
-        rs.volume = vol;
+    let applied = 0;
+    for (const selKey of keysToApply) {
+        const pipe = selKey.indexOf('|');
+        if (pipe < 0) continue;
+        const anchor = Number(selKey.slice(0, pipe));
+        const rest = selKey.slice(pipe + 1);
+        const colon = rest.indexOf(':');
+        if (colon < 0) continue;
+        const cellBi = parseInt(rest.slice(0, colon), 10);
+        const cellSi = parseInt(rest.slice(colon + 1), 10);
+        if (!Number.isFinite(anchor) || !Number.isFinite(cellBi) || !Number.isFinite(cellSi)) continue;
+        const rollStartIndex = findRollStartIndexByAnchorTime(anchor);
+        if (rollStartIndex < 0) continue;
+        const rs = editingNotes[rollStartIndex];
+        if (!rs || (rs.type !== 'roll-start' && rs.type !== 'roll')) continue;
+        const sec = getRollSectionsFromNotes(editingNotes).find((s) => s.rollStartIndex === rollStartIndex);
+        if (!sec) continue;
+        const kind = rollBarCellKind(cellBi, cellSi, sec, bpm);
+        if (kind === 'middle') {
+            ensureRollCellVolumesMap(rs);
+            rs.rollCellVolumes[`${cellBi}:${cellSi}`] = vol;
+        } else {
+            rs.volume = vol;
+        }
+        applied += 1;
     }
     if (st) {
-        st.textContent = pct === 0
-            ? '連打感を最小（10%）に設定しました'
-            : `連打感を ${pct}% に設定しました`;
+        if (applied <= 0) {
+            st.textContent = '連打ノーツに適用できませんでした（選択し直してください）';
+        } else if (pct === 0) {
+            st.textContent = `連打感を最小（10%）に設定しました（${applied}マス）`;
+        } else {
+            st.textContent = `連打感を ${pct}% に設定しました（${applied}マス）`;
+        }
     }
     flushChartPartSlot();
     renderNotesStrip();
@@ -608,11 +668,9 @@ function bindChartRollSpanBarVolumePointer(barEl, sec, cellBi, cellSi, cellEl) {
         e.stopPropagation();
         const rsDown = editingNotes[rollStartIndex];
         const anchorDown = rsDown && (rsDown.type === 'roll' ? Number(rsDown.startTime ?? 0) : Number(rsDown.time ?? 0));
-        const sameDigitFocus = chartRollFeelInputFocus
-            && chartRollFeelInputFocus.rollAnchorTime === anchorDown
-            && chartRollFeelInputFocus.cellBi === cellBi
-            && chartRollFeelInputFocus.cellSi === cellSi;
-        if (chartRollFeelInputFocus && !sameDigitFocus) {
+        const mySelKey = chartRollFeelSelectionKey(anchorDown, cellBi, cellSi);
+        const sameDigitFocus = chartRollFeelSelectionKeys.size === 1 && chartRollFeelSelectionKeys.has(mySelKey);
+        if (chartRollFeelSelectionKeys.size > 0 && !sameDigitFocus) {
             clearChartRollFeelDigitInput();
             const st0 = document.getElementById('chart-status');
             if (st0 && /^連打感:/.test(st0.textContent)) st0.textContent = '';
@@ -753,7 +811,8 @@ function bindChartRollSpanBarVolumePointer(barEl, sec, cellBi, cellSi, cellEl) {
                 const rsUp = editingNotes[rollStartIndex];
                 if (rsUp && (rsUp.type === 'roll-start' || rsUp.type === 'roll')) {
                     const rollAnchorTime = rsUp.type === 'roll' ? Number(rsUp.startTime ?? 0) : Number(rsUp.time ?? 0);
-                    chartRollFeelInputFocus = { rollAnchorTime, cellBi, cellSi };
+                    chartRollFeelSelectionKeys.clear();
+                    chartRollFeelSelectionKeys.add(chartRollFeelSelectionKey(rollAnchorTime, cellBi, cellSi));
                     chartRollFeelInputBuffer = '';
                     selectedNoteIndex = rollStartIndex;
                     selectedNoteIndices = new Set([rollStartIndex]);
@@ -808,8 +867,8 @@ function updateChartPartTabLabels() {
 let selectedNoteIndex = -1;
 /** 譜面編集エリアで範囲選択中のノーツ索引（複数選択） */
 let selectedNoteIndices = new Set();
-/** 連打帯クリック後の数値%入力: roll-start/roll の開始時刻で譜面ソート後も同一連打を特定 */
-let chartRollFeelInputFocus = /** @type {{ rollAnchorTime: number, cellBi: number, cellSi: number } | null} */ (null);
+/** 連打感のマス選択（キーは chartRollFeelSelectionKey） */
+let chartRollFeelSelectionKeys = /** @type {Set<string>} */ (new Set());
 /** 連打感%入力中の数字バッファ（最大3桁） */
 let chartRollFeelInputBuffer = '';
 /** コピーされたノーツ（範囲選択/単体選択）を保持する内部クリップボード */
@@ -2825,16 +2884,13 @@ function renderNotesStrip() {
             }
             const bar = document.createElement('div');
             const anchorAt = rsNote?.type === 'roll' ? Number(rsNote.startTime ?? 0) : Number(rsNote?.time ?? 0);
-            const digitFocusHere = Boolean(chartRollFeelInputFocus
-                && chartRollFeelInputFocus.rollAnchorTime === anchorAt
-                && chartRollFeelInputFocus.cellBi === bi
-                && chartRollFeelInputFocus.cellSi === si);
-            bar.className = 'note-roll-span-bar' + (digitFocusHere ? ' chart-roll-feel-digit-focus' : '');
+            const rollFeelSelectedHere = chartRollFeelSelectionKeys.has(chartRollFeelSelectionKey(anchorAt, bi, si));
+            bar.className = 'note-roll-span-bar' + (rollFeelSelectedHere ? ' chart-roll-feel-digit-focus' : '');
             bar.dataset.rollStartIndex = String(sec.rollStartIndex);
             bar.dataset.cellBarIndex = String(bi);
             bar.dataset.cellStepIndex = String(si);
             bar.style.height = `${Math.max(4, 16 * v)}px`;
-            bar.title = '縦:音量（間はセル別、Shift+縦は±2マスをガウス風に補間）／横:長さ±1マス／Shift+横:両端±2マス／ホイール（Shiftは同様）／Alt+縦:周囲のドン・カ連動／クリックのみ: 0〜300の数字→Enterで%指定';
+            bar.title = '縦:音量（間はセル別、Shift+縦は±2マスをガウス風に補間）／横:長さ±1マス／Shift+横:両端±2マス／ホイール（Shiftは同様）／Alt+縦:周囲のドン・カ連動／クリックのみ: 数値→Enterで%指定／譜面グリッドで Shift+ドラッグ: 矩形内の連打感マスを範囲選択';
             bindChartRollSpanBarVolumePointer(bar, sec, bi, si, cell);
             cell.insertBefore(bar, cell.firstChild);
         }
@@ -3493,7 +3549,7 @@ function bindChartPanelEvents() {
     function handleChartRollFeelKeydown(e) {
         const chartPanel = document.getElementById('panel-chart');
         if (!chartPanel || !chartPanel.classList.contains('active')) return;
-        if (!chartRollFeelInputFocus) return;
+        if (chartRollFeelSelectionKeys.size === 0) return;
         if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(document.activeElement.tagName)) return;
         const st = document.getElementById('chart-status');
         if (e.key >= '0' && e.key <= '9') {
@@ -3550,7 +3606,6 @@ function bindChartPanelEvents() {
             return;
         }
         if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-        if (chartRollFeelInputFocus) return;
         e.preventDefault();
         if (selectedNoteIndices && selectedNoteIndices.size > 0) {
             const indices = [...selectedNoteIndices]
@@ -3576,7 +3631,7 @@ function bindChartPanelEvents() {
         if (!chartPanel || !chartPanel.classList.contains('active')) return;
         if (!selectedChartId) return;
         if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-        if (chartRollFeelInputFocus) {
+        if (chartRollFeelSelectionKeys.size > 0) {
             e.preventDefault();
             return;
         }
@@ -3712,6 +3767,8 @@ function bindChartPanelEvents() {
         let selecting = false;
         let startCell = null;
         let lastCell = null;
+        /** Shift+ドラッグ時は矩形内の連打感マスのみ選択（通常はノーツの範囲選択） */
+        let rangeSelectRollFeelOnly = false;
 
         function clearRangeHighlight() {
             gridEl.querySelectorAll('.measure-cell.range-selected').forEach((c) => c.classList.remove('range-selected'));
@@ -3734,29 +3791,45 @@ function bindChartPanelEvents() {
                 const inRange = abs >= minAbs && abs <= maxAbs;
                 cell.classList.toggle('range-selected', inRange);
             });
-            selectedNoteIndices = getNoteIndicesInAbsStepRange(aBar, aStep, bBar, bStep);
-            selectedNoteIndex = -1;
+            const bpmRh = getChartTempo();
+            if (rangeSelectRollFeelOnly) {
+                chartRollFeelSelectionKeys = getRollFeelCellKeysInAbsRange(aBar, aStep, bBar, bStep, bpmRh);
+                selectedNoteIndices = new Set();
+                selectedNoteIndex = -1;
+                syncChartRollFeelHintStatus();
+            } else {
+                selectedNoteIndices = getNoteIndicesInAbsStepRange(aBar, aStep, bBar, bStep);
+                selectedNoteIndex = -1;
+            }
             renderNotesStrip();
         }
 
         gridEl.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
-            // ノーツチップ上は範囲選択にしない（ドン・カの音量ドラッグと DOM 再生成の競合を防ぐ）
-            if (e.target.closest('.note-chip') || e.target.closest('.note-roll-span-bar')) return;
+            if (!e.shiftKey && e.target.closest('.note-chip')) return;
+            if (!e.shiftKey && e.target.closest('.note-roll-span-bar')) return;
             const cell = e.target.closest('.measure-cell');
             if (!cell) return;
             if (!selectedChartId) return;
+            rangeSelectRollFeelOnly = e.shiftKey;
             selecting = true;
             startCell = cell;
             lastCell = cell;
             clearRangeHighlight();
-            selectedNoteIndices = getNoteIndicesInAbsStepRange(
-                parseInt(cell.dataset.barIndex, 10),
-                parseInt(cell.dataset.stepIndex, 10),
-                parseInt(cell.dataset.barIndex, 10),
-                parseInt(cell.dataset.stepIndex, 10)
-            );
-            selectedNoteIndex = -1;
+            const ab = parseInt(cell.dataset.barIndex, 10);
+            const as = parseInt(cell.dataset.stepIndex, 10);
+            if (rangeSelectRollFeelOnly) {
+                chartRollFeelSelectionKeys = getRollFeelCellKeysInAbsRange(ab, as, ab, as, getChartTempo());
+                selectedNoteIndices = new Set();
+                selectedNoteIndex = -1;
+                syncChartRollFeelHintStatus();
+            } else {
+                clearChartRollFeelDigitInput();
+                const stRg = document.getElementById('chart-status');
+                if (stRg && /^連打感:/.test(stRg.textContent)) stRg.textContent = '';
+                selectedNoteIndices = getNoteIndicesInAbsStepRange(ab, as, ab, as);
+                selectedNoteIndex = -1;
+            }
             renderNotesStrip();
             e.preventDefault();
         });
@@ -3774,6 +3847,7 @@ function bindChartPanelEvents() {
         document.addEventListener('mouseup', () => {
             if (!selecting) return;
             selecting = false;
+            rangeSelectRollFeelOnly = false;
         });
 
         gridEl.addEventListener('contextmenu', (e) => {
