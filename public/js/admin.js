@@ -1738,209 +1738,51 @@ async function ensureChartPreviewBgmDecoded() {
 function invalidateChartBgmPreviewCache() {
     chartPreviewBgmCache = { key: '', buffer: null };
     chartPreviewHitSoundBuffers.clear();
-    clearChartBgmSpectrogramCache();
 }
 
 /** 譜面エディタ下部の BGM 波形用ピーク列（正規化 0〜1） */
 let chartBgmWaveformPeaks = /** @type {Float32Array | null} */ (null);
 /** 波形キャンバスのリサイズ監視 */
 let chartBgmWaveformResizeObserver = /** @type {ResizeObserver | null} */ (null);
-/** 小節下スペクトル用テクスチャとメタ */
-let chartBgmSpectrogramCache = {
-    key: '',
-    /** @type {HTMLCanvasElement | null} */
-    texture: null,
-    cols: 0,
-    rows: 0,
-    duration: 0
-};
-/** chart-measures-scroll のリサイズで小節スペクトルを再描画 */
+/** chart-measures-scroll のリサイズで小節下波形を再描画 */
 let chartMeasureSpecResizeObserver = /** @type {ResizeObserver | null} */ (null);
 
 /**
- * BGM から算出したスペクトログラムテクスチャを破棄する
+ * 小節下ストリップ用にキャンバス中央へ水平軸を描く
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} w
+ * @param {number} h
+ * @param {number} dpr
  */
-function clearChartBgmSpectrogramCache() {
-    chartBgmSpectrogramCache = { key: '', texture: null, cols: 0, rows: 0, duration: 0 };
+function strokeChartMeasureWaveMidAxis(ctx, w, h, dpr) {
+    const midY = h * 0.5;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.78)';
+    ctx.lineWidth = Math.max(1, dpr);
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(0, midY);
+    ctx.lineTo(w, midY);
+    ctx.stroke();
+    ctx.restore();
 }
 
 /**
- * i を logN ビット反転したインデックスを返す
- * @param {number} i
- * @param {number} logN
+ * 各小節カード下の canvas に、実時間区間の BGM をミラー波形（時間軸）で描く
  */
-function reverseBits32(i, logN) {
-    let x = i >>> 0;
-    let y = 0;
-    for (let k = 0; k < logN; k++) {
-        y = (y << 1) | (x & 1);
-        x >>= 1;
-    }
-    return y >>> 0;
-}
-
-/**
- * radix-2 Cooley-Tukey FFT（実部・虚部を in-place で更新）。n は 2 の冪。
- * @param {Float32Array} real
- * @param {Float32Array} imag
- */
-function fftRadix2InPlace(real, imag) {
-    const n = real.length;
-    if (n < 2 || (n & (n - 1)) !== 0) return;
-    const logN = Math.round(Math.log2(n));
-    for (let i = 0; i < n; i++) {
-        const j = reverseBits32(i, logN);
-        if (j > i) {
-            let t = real[i];
-            real[i] = real[j];
-            real[j] = t;
-            t = imag[i];
-            imag[i] = imag[j];
-            imag[j] = t;
-        }
-    }
-    for (let len = 2; len <= n; len <<= 1) {
-        const halfLen = len >> 1;
-        const ang = (-2 * Math.PI) / len;
-        const wStepR = Math.cos(ang);
-        const wStepI = Math.sin(ang);
-        for (let i = 0; i < n; i += len) {
-            let wR = 1;
-            let wI = 0;
-            for (let j2 = 0; j2 < halfLen; j2++) {
-                const u = i + j2;
-                const v = u + halfLen;
-                const tR = wR * real[v] - wI * imag[v];
-                const tI = wR * imag[v] + wI * real[v];
-                real[v] = real[u] - tR;
-                imag[v] = imag[u] - tI;
-                real[u] += tR;
-                imag[u] += tI;
-                const nWR = wR * wStepR - wI * wStepI;
-                wI = wR * wStepI + wI * wStepR;
-                wR = nWR;
-            }
-        }
-    }
-}
-
-/**
- * AudioBuffer をモノラル Float32 にまとめる
- * @param {AudioBuffer} buffer
- * @returns {Float32Array}
- */
-function mixAudioBufferToMonoFloat32(buffer) {
-    const n = buffer.length;
-    const nCh = Math.max(1, buffer.numberOfChannels);
-    const out = new Float32Array(n);
-    for (let c = 0; c < nCh; c++) {
-        const ch = buffer.getChannelData(c);
-        for (let i = 0; i < n; i++) out[i] += ch[i];
-    }
-    if (nCh > 1) {
-        const inv = 1 / nCh;
-        for (let i = 0; i < n; i++) out[i] *= inv;
-    }
-    return out;
-}
-
-/**
- * BGM 全体の低解像度スペクトログラムを 1 枚の canvas に焼く（小節ごとに切り出して表示）
- * @param {AudioBuffer} buffer
- * @param {string} cacheKey
- */
-function rebuildChartBgmSpectrogramIfNeeded(buffer, cacheKey) {
-    if (!buffer || buffer.length < 128) {
-        clearChartBgmSpectrogramCache();
-        return;
-    }
-    if (
-        chartBgmSpectrogramCache.key === cacheKey
-        && chartBgmSpectrogramCache.texture
-        && Math.abs(chartBgmSpectrogramCache.duration - buffer.duration) < 1e-5
-    ) {
-        return;
-    }
-    const fftN = 128;
-    const rows = 18;
-    const mono = mixAudioBufferToMonoFloat32(buffer);
-    const len = mono.length;
-    const cols = Math.min(2000, Math.max(48, Math.floor(buffer.duration * 48)));
-    const hop = Math.max(1, Math.floor((len - fftN) / Math.max(1, cols - 1)));
-    const half = fftN >> 1;
-    const kMax = half - 1;
-    const re = new Float32Array(fftN);
-    const im = new Float32Array(fftN);
-    const mag = new Float32Array(rows * cols);
-    for (let c = 0; c < cols; c++) {
-        const off = Math.min(Math.max(0, len - fftN), c * hop);
-        for (let j = 0; j < fftN; j++) {
-            const hann = 0.5 * (1 - Math.cos((2 * Math.PI * j) / (fftN - 1 || 1)));
-            re[j] = mono[off + j] * hann;
-            im[j] = 0;
-        }
-        fftRadix2InPlace(re, im);
-        for (let r = 0; r < rows; r++) {
-            const t0 = r / rows;
-            const t1 = (r + 1) / rows;
-            const k0 = Math.max(1, Math.floor(Math.pow(kMax, t0)));
-            const k1 = Math.max(k0 + 1, Math.min(kMax + 1, Math.ceil(Math.pow(kMax, t1))));
-            let acc = 0;
-            let cnt = 0;
-            for (let k = k0; k < k1; k++) {
-                acc += Math.hypot(re[k], im[k]) / fftN;
-                cnt++;
-            }
-            const v = cnt > 0 ? acc / cnt : 0;
-            mag[r * cols + c] = v;
-        }
-    }
-    const sorted = Float32Array.from(mag);
-    sorted.sort();
-    const refIdx = Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * 0.93)));
-    const refMag = Math.max(sorted[refIdx], sorted[sorted.length - 1] * 0.25, 1e-7);
-    const inv = 1 / refMag;
-    const gamma = 0.42;
-    const canvas = document.createElement('canvas');
-    canvas.width = cols;
-    canvas.height = rows;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-        clearChartBgmSpectrogramCache();
-        return;
-    }
-    const img = ctx.createImageData(cols, rows);
-    for (let y = 0; y < rows; y++) {
-        for (let x = 0; x < cols; x++) {
-            const freqRow = rows - 1 - y;
-            const raw = mag[freqRow * cols + x] * inv;
-            const v = Math.pow(Math.min(1, raw), gamma);
-            const p = (y * cols + x) * 4;
-            img.data[p] = Math.floor(22 + v * 100);
-            img.data[p + 1] = Math.floor(50 + v * 205);
-            img.data[p + 2] = Math.floor(78 + v * 177);
-            img.data[p + 3] = 255;
-        }
-    }
-    ctx.putImageData(img, 0, 0);
-    chartBgmSpectrogramCache = {
-        key: cacheKey,
-        texture: canvas,
-        cols,
-        rows,
-        duration: buffer.duration
-    };
-}
-
-/**
- * 各小節カード下の canvas に、実時間区間 [wall0,wall1) に対応するスペクトルを描く
- */
-function paintAllMeasureSpectrogramCanvases() {
+function paintAllMeasureBgmWaveformCanvases() {
     const grid = document.getElementById('chart-measures-grid');
     if (!grid) return;
+    const buf = chartPreviewBgmCache.buffer;
+    const cacheKey = chartPreviewBgmCache.key;
+    const c = selectedChartId ? cachedCharts[selectedChartId] : null;
+    const expectKey = c && selectedChartId && c.bgmVersion != null
+        ? `${selectedChartId}:${c.bgmVersion}`
+        : '';
+    const bufOk = !!(buf && buf.length > 0 && expectKey && cacheKey === expectKey);
+    const duration = bufOk ? buf.duration : 0;
+    const sr = bufOk ? buf.sampleRate : 0;
     const bpm = getChartTempo();
-    const tex = chartBgmSpectrogramCache.texture;
-    const { cols, rows, duration } = chartBgmSpectrogramCache;
     const list = grid.querySelectorAll('canvas.measure-spec-canvas');
     list.forEach((canvas) => {
         const barIndex = Number(canvas.dataset.barIndex);
@@ -1957,16 +1799,12 @@ function paintAllMeasureSpectrogramCanvases() {
         }
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
-        if (!tex || !cols || duration <= 0) {
-            ctx.fillStyle = '#0f1c32';
-            ctx.fillRect(0, 0, w, h);
-            const mid = h * 0.5;
-            ctx.strokeStyle = 'rgba(0, 255, 200, 0.4)';
-            ctx.lineWidth = Math.max(1, dpr);
-            ctx.beginPath();
-            ctx.moveTo(0, mid);
-            ctx.lineTo(w, mid);
-            ctx.stroke();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.fillStyle = '#0f1c32';
+        ctx.fillRect(0, 0, w, h);
+        if (!bufOk || duration <= 0 || sr <= 0) {
+            strokeChartMeasureWaveMidAxis(ctx, w, h, dpr);
             return;
         }
         const u0 = barStepToTime(barIndex, 0, bpm);
@@ -1975,31 +1813,49 @@ function paintAllMeasureSpectrogramCanvases() {
         let w1 = wallAtUniform(u1);
         w0 = Math.max(0, Math.min(duration, w0));
         w1 = Math.max(0, Math.min(duration, w1));
-        if (w1 <= w0 + 1e-6) {
-            ctx.fillStyle = '#0f1c32';
-            ctx.fillRect(0, 0, w, h);
-            const mid = h * 0.5;
-            ctx.strokeStyle = 'rgba(0, 255, 200, 0.4)';
-            ctx.lineWidth = Math.max(1, dpr);
-            ctx.beginPath();
-            ctx.moveTo(0, mid);
-            ctx.lineTo(w, mid);
-            ctx.stroke();
+        if (w1 <= w0 + 1e-9) {
+            strokeChartMeasureWaveMidAxis(ctx, w, h, dpr);
             return;
         }
-        const sx = (w0 / duration) * cols;
-        const sw = Math.max(1, ((w1 - w0) / duration) * cols);
-        ctx.imageSmoothingEnabled = true;
-        ctx.fillStyle = '#0f1c32';
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(tex, sx, 0, sw, rows, 0, 0, w, h);
-        const mid = h * 0.5;
-        ctx.strokeStyle = 'rgba(0, 255, 200, 0.55)';
-        ctx.lineWidth = Math.max(1, dpr);
-        ctx.beginPath();
-        ctx.moveTo(0, mid);
-        ctx.lineTo(w, mid);
-        ctx.stroke();
+        const s0 = Math.max(0, Math.min(buf.length - 1, Math.floor(w0 * sr)));
+        const s1 = Math.max(s0 + 1, Math.min(buf.length, Math.ceil(w1 * sr)));
+        const span = s1 - s0;
+        const nCh = buf.numberOfChannels;
+        const peaks = new Float32Array(w);
+        for (let px = 0; px < w; px++) {
+            const a = s0 + Math.floor((px / w) * span);
+            const b = s0 + Math.floor(((px + 1) / w) * span);
+            const bEx = Math.max(a + 1, b);
+            let m = 0;
+            for (let si = a; si < bEx; si++) {
+                let sum = 0;
+                for (let ch = 0; ch < nCh; ch++) {
+                    sum += Math.abs(buf.getChannelData(ch)[si]);
+                }
+                const mix = sum / nCh;
+                if (mix > m) m = mix;
+            }
+            peaks[px] = m;
+        }
+        let mx = 0;
+        for (let px = 0; px < w; px++) {
+            if (peaks[px] > mx) mx = peaks[px];
+        }
+        const inv = mx > 1e-12 ? 1 / mx : 0;
+        const midY = h * 0.5;
+        const ampMax = Math.max(2 * dpr, midY - 2 * dpr);
+        ctx.fillStyle = '#5effd4';
+        ctx.globalAlpha = 1;
+        for (let px = 0; px < w; px++) {
+            const n = peaks[px] * inv;
+            const amp = n * ampMax;
+            if (amp < 0.08 * dpr) continue;
+            const half = Math.max(0.5 * dpr, amp);
+            const top = midY - half;
+            const barH = Math.max(1, half * 2);
+            ctx.fillRect(px, top, 1, barH);
+        }
+        strokeChartMeasureWaveMidAxis(ctx, w, h, dpr);
     });
 }
 
@@ -2118,7 +1974,6 @@ function paintChartBgmWaveformCanvas() {
  */
 function hideChartBgmWaveformUi() {
     chartBgmWaveformPeaks = null;
-    clearChartBgmSpectrogramCache();
     const wrap = document.getElementById('chart-bgm-waveform-wrap');
     const fn = document.getElementById('chart-bgm-waveform-filename');
     const dur = document.getElementById('chart-bgm-waveform-duration');
@@ -2151,7 +2006,6 @@ async function refreshChartBgmWaveformForSelectedChart() {
             Math.floor(scrollEl?.getBoundingClientRect().width || 0) || wrap.offsetWidth || 600
         );
         chartBgmWaveformPeaks = buildChartBgmWaveformPeaks(buf, Math.floor(wPx * 2));
-        rebuildChartBgmSpectrogramIfNeeded(buf, `${selectedChartId}:${c.bgmVersion}`);
         if (fnEl) {
             const name = c.bgmOriginalName ? String(c.bgmOriginalName) : 'BGM.mp3';
             fnEl.textContent = name;
@@ -2160,7 +2014,7 @@ async function refreshChartBgmWaveformForSelectedChart() {
         wrap.hidden = false;
         requestAnimationFrame(() => {
             paintChartBgmWaveformCanvas();
-            paintAllMeasureSpectrogramCanvases();
+            paintAllMeasureBgmWaveformCanvases();
         });
     } catch {
         hideChartBgmWaveformUi();
@@ -3339,7 +3193,7 @@ function renderNotesStrip() {
 
     if (btnRemove) btnRemove.disabled = selectedNoteIndex < 0;
     updateChartPalette(false);
-    requestAnimationFrame(() => paintAllMeasureSpectrogramCanvases());
+    requestAnimationFrame(() => paintAllMeasureBgmWaveformCanvases());
 }
 
 /**
@@ -3893,7 +3747,7 @@ function bindChartPanelEvents() {
     const measureScroll = document.getElementById('chart-measures-scroll');
     if (measureScroll && typeof ResizeObserver !== 'undefined' && !chartMeasureSpecResizeObserver) {
         chartMeasureSpecResizeObserver = new ResizeObserver(() => {
-            requestAnimationFrame(() => paintAllMeasureSpectrogramCanvases());
+            requestAnimationFrame(() => paintAllMeasureBgmWaveformCanvases());
         });
         chartMeasureSpecResizeObserver.observe(measureScroll);
     }
