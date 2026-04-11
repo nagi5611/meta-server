@@ -1487,6 +1487,26 @@ body.admin-dark .chart-panel .chart-playback-bpm-label {
     overflow: hidden;
 }
 
+.chart-panel .measure-spec-row {
+    display: block;
+    width: 100%;
+    height: 10px;
+    line-height: 0;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    background: #0a1520;
+}
+
+.chart-panel .measure-spec-canvas {
+    display: block;
+    width: 100%;
+    height: 10px;
+    vertical-align: top;
+}
+
+body.admin-dark .chart-panel .measure-spec-row {
+    border-top-color: rgba(255, 255, 255, 0.08);
+}
+
 .chart-panel .measure-header {
     display: flex;
     align-items: center;
