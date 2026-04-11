@@ -2779,6 +2779,30 @@ function barStepToTime(barIndex, stepIndex, bpm) {
 }
 
 /**
+ * 編集グリッド上のノーツ表示用: 小節・16分マスは床取りし、マス内の位置 [0,1) を返す（半コマずれの描画用）
+ * @param {number} timeSec
+ * @param {number} bpm
+ * @returns {{ barIndex: number, stepIndex: number, frac: number }}
+ */
+function editorTimeToBarStepAndFrac(timeSec, bpm) {
+    const t = Math.max(0, Number(timeSec) || 0);
+    const b = Number.isFinite(Number(bpm)) && Number(bpm) > 0 ? Number(bpm) : getChartTempo();
+    const sec = getBarSec(b);
+    if (sec <= 0) return { barIndex: 0, stepIndex: 0, frac: 0 };
+    const barIndex = Math.floor(t / sec);
+    const within = t - barIndex * sec;
+    const stepSec = sec / 16;
+    if (stepSec <= 0) return { barIndex: 0, stepIndex: 0, frac: 0 };
+    const stepFloat = Math.min(within / stepSec, 16 - 1e-9);
+    const stepIndex = Math.min(15, Math.max(0, Math.floor(stepFloat)));
+    let frac = stepFloat - stepIndex;
+    if (!Number.isFinite(frac)) frac = 0;
+    if (frac < 0) frac = 0;
+    if (frac >= 1) frac = 1 - 1e-6;
+    return { barIndex, stepIndex, frac };
+}
+
+/**
  * 譜面編集エリアを小節グリッドで再描画する（4/4・1小節16分割）
  */
 function renderNotesStrip() {
@@ -3050,7 +3074,7 @@ function renderNotesStrip() {
 
     editingNotes.forEach((note, i) => {
         const time = note.type === 'roll' ? (note.startTime ?? 0) : (note.time ?? 0);
-        const { barIndex, stepIndex } = timeToBarStep(time, bpm);
+        const { barIndex, stepIndex, frac } = editorTimeToBarStepAndFrac(time, bpm);
         const key = `${barIndex}:${stepIndex}`;
         const cell = cellMap.get(key);
         if (!cell) return;
@@ -3071,6 +3095,9 @@ function renderNotesStrip() {
                 : note.type === 'roll-start' ? 'S'
                     : note.type === 'roll-end' ? 'E'
                         : 'D';
+        const leftPct = (frac + 1) * 50;
+        chip.style.left = `${leftPct}%`;
+        chip.style.transform = 'translate(-50%, -50%)';
         if (note.type === 'don' || note.type === 'ka' || note.type === 'roll-start' || note.type === 'roll') {
             const vol = getNoteVolumeForEditor(note);
             chip.style.height = `${Math.max(4, 16 * vol)}px`;
