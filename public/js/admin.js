@@ -879,8 +879,9 @@ let chartClipboard = null;
 let lastRenderedChartBpm = null;
 /** 譜面グリッド再描画を次の animation frame に1回にまとめる */
 let chartNotesStripRafId = 0;
-/** 小節下 BGM 波形 canvas の再描画 rAF */
-let chartMeasureWaveformPaintRafId = 0;
+/** 小節下 measure-spec 波形の遅延描画用（グリッド再構築のたびに即描画しない） */
+let chartMeasureWaveformIdleTimer = 0;
+const CHART_MEASURE_WAVEFORM_IDLE_MS = 240;
 /** 小節ヘッダ BPM 入力のデバウンス（ms） */
 let chartMeasureBpmInputDebounceTimer = 0;
 /** ベーステンポ入力のデバウンス（ms） */
@@ -898,14 +899,25 @@ function scheduleRenderNotesStrip() {
 }
 
 /**
- * 小節下波形の再描画を次フレーム1回にまとめる（連続再描画時の二重描画を抑える）
+ * 小節下 measure-spec の BGM 波形を、操作が落ち着いてから1回だけ描く（毎回の全 canvas 更新を避ける）
  */
-function schedulePaintMeasureWaveformAfterGrid() {
-    if (chartMeasureWaveformPaintRafId) return;
-    chartMeasureWaveformPaintRafId = requestAnimationFrame(() => {
-        chartMeasureWaveformPaintRafId = 0;
+function schedulePaintMeasureWaveformIdle() {
+    if (chartMeasureWaveformIdleTimer) clearTimeout(chartMeasureWaveformIdleTimer);
+    chartMeasureWaveformIdleTimer = setTimeout(() => {
+        chartMeasureWaveformIdleTimer = 0;
         paintAllMeasureBgmWaveformCanvases();
-    });
+    }, CHART_MEASURE_WAVEFORM_IDLE_MS);
+}
+
+/**
+ * BGM デコード直後など、小節下波形を即描画する（待ちの遅延描画はキャンセル）
+ */
+function flushPaintMeasureWaveformNow() {
+    if (chartMeasureWaveformIdleTimer) {
+        clearTimeout(chartMeasureWaveformIdleTimer);
+        chartMeasureWaveformIdleTimer = 0;
+    }
+    paintAllMeasureBgmWaveformCanvases();
 }
 
 /** 譜面ストリップ: 1秒あたりのピクセル数（ホイールで拡大縮小） */
@@ -2113,7 +2125,7 @@ async function refreshChartBgmWaveformForSelectedChart() {
         wrap.hidden = false;
         requestAnimationFrame(() => {
             paintChartBgmWaveformCanvas();
-            paintAllMeasureBgmWaveformCanvases();
+            flushPaintMeasureWaveformNow();
         });
     } catch {
         hideChartBgmWaveformUi();
@@ -3028,10 +3040,6 @@ function renderNotesStrip() {
         cancelAnimationFrame(chartNotesStripRafId);
         chartNotesStripRafId = 0;
     }
-    if (chartMeasureWaveformPaintRafId) {
-        cancelAnimationFrame(chartMeasureWaveformPaintRafId);
-        chartMeasureWaveformPaintRafId = 0;
-    }
     const grid = document.getElementById('chart-measures-grid');
     const btnRemove = document.getElementById('btn-remove-selected-note');
     if (!grid) return;
@@ -3554,7 +3562,7 @@ function renderNotesStrip() {
 
     if (btnRemove) btnRemove.disabled = selectedNoteIndex < 0;
     updateChartPalette(false);
-    schedulePaintMeasureWaveformAfterGrid();
+    schedulePaintMeasureWaveformIdle();
 }
 
 /**
@@ -4335,7 +4343,7 @@ function bindChartPanelEvents() {
     const measureScroll = document.getElementById('chart-measures-scroll');
     if (measureScroll && typeof ResizeObserver !== 'undefined' && !chartMeasureSpecResizeObserver) {
         chartMeasureSpecResizeObserver = new ResizeObserver(() => {
-            requestAnimationFrame(() => paintAllMeasureBgmWaveformCanvases());
+            schedulePaintMeasureWaveformIdle();
         });
         chartMeasureSpecResizeObserver.observe(measureScroll);
     }
