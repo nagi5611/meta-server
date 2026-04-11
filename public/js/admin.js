@@ -742,7 +742,7 @@ function bindChartRollSpanBarVolumePointer(barEl, sec, cellBi, cellSi, cellEl) {
                 }
                 if (changed) {
                     flushChartPartSlot();
-                    renderNotesStrip();
+                    scheduleRenderNotesStrip();
                 }
                 return;
             }
@@ -877,6 +877,37 @@ let chartRollFeelInputBuffer = '';
 let chartClipboard = null;
 /** BPM入力の変更前後でグリッド位置を維持するため、直近の描画BPMを保持する */
 let lastRenderedChartBpm = null;
+/** 譜面グリッド再描画を次の animation frame に1回にまとめる */
+let chartNotesStripRafId = 0;
+/** 小節下 BGM 波形 canvas の再描画 rAF */
+let chartMeasureWaveformPaintRafId = 0;
+/** 小節ヘッダ BPM 入力のデバウンス（ms） */
+let chartMeasureBpmInputDebounceTimer = 0;
+/** ベーステンポ入力のデバウンス（ms） */
+let chartTempoInputDebounceTimer = 0;
+
+/**
+ * 譜面グリッドの再描画を次フレームに1回にまとめる（ドラッグ・連打リサイズなど高頻度用）
+ */
+function scheduleRenderNotesStrip() {
+    if (chartNotesStripRafId) return;
+    chartNotesStripRafId = requestAnimationFrame(() => {
+        chartNotesStripRafId = 0;
+        renderNotesStrip();
+    });
+}
+
+/**
+ * 小節下波形の再描画を次フレーム1回にまとめる（連続再描画時の二重描画を抑える）
+ */
+function schedulePaintMeasureWaveformAfterGrid() {
+    if (chartMeasureWaveformPaintRafId) return;
+    chartMeasureWaveformPaintRafId = requestAnimationFrame(() => {
+        chartMeasureWaveformPaintRafId = 0;
+        paintAllMeasureBgmWaveformCanvases();
+    });
+}
+
 /** 譜面ストリップ: 1秒あたりのピクセル数（ホイールで拡大縮小） */
 let chartPixelsPerSecond = 60;
 /** 譜面の表示時間範囲（秒）。ノーツの最大時間を下回らないよう render 内で拡張 */
@@ -2993,6 +3024,14 @@ function editorTimeToBarStepAndFrac(timeSec, bpm) {
  * 譜面編集エリアを小節グリッドで再描画する（4/4・1小節16分割）
  */
 function renderNotesStrip() {
+    if (chartNotesStripRafId) {
+        cancelAnimationFrame(chartNotesStripRafId);
+        chartNotesStripRafId = 0;
+    }
+    if (chartMeasureWaveformPaintRafId) {
+        cancelAnimationFrame(chartMeasureWaveformPaintRafId);
+        chartMeasureWaveformPaintRafId = 0;
+    }
     const grid = document.getElementById('chart-measures-grid');
     const btnRemove = document.getElementById('btn-remove-selected-note');
     if (!grid) return;
@@ -3136,20 +3175,27 @@ function renderNotesStrip() {
         }
         bpmInput.title = 'この小節のBPM（空欄でベースBPMに追従）';
         bpmInput.addEventListener('input', () => {
-            const v = bpmInput.value.trim();
-            if (v === '') {
-                if (chartMeasureBpms && Object.prototype.hasOwnProperty.call(chartMeasureBpms, key)) {
-                    delete chartMeasureBpms[key];
-                }
-                bpmInput.dataset.overridden = 'false';
-                renderNotesStrip();
-                return;
+            if (chartMeasureBpmInputDebounceTimer) {
+                clearTimeout(chartMeasureBpmInputDebounceTimer);
+                chartMeasureBpmInputDebounceTimer = 0;
             }
-            const n = Number(v);
-            if (!Number.isFinite(n) || n < 1 || n > 500) return;
-            chartMeasureBpms[key] = Math.floor(n);
-            bpmInput.dataset.overridden = 'true';
-            renderNotesStrip();
+            chartMeasureBpmInputDebounceTimer = setTimeout(() => {
+                chartMeasureBpmInputDebounceTimer = 0;
+                const v = bpmInput.value.trim();
+                if (v === '') {
+                    if (chartMeasureBpms && Object.prototype.hasOwnProperty.call(chartMeasureBpms, key)) {
+                        delete chartMeasureBpms[key];
+                    }
+                    bpmInput.dataset.overridden = 'false';
+                    renderNotesStrip();
+                    return;
+                }
+                const n = Number(v);
+                if (!Number.isFinite(n) || n < 1 || n > 500) return;
+                chartMeasureBpms[key] = Math.floor(n);
+                bpmInput.dataset.overridden = 'true';
+                renderNotesStrip();
+            }, 100);
         });
         bpmWrap.appendChild(bpmInput);
         header.appendChild(bpmWrap);
@@ -3375,7 +3421,7 @@ function renderNotesStrip() {
                     if (tryMoveSelectedNotesHorizontally(d, { halfStep: true })) {
                         appliedHalfAccum = rawHalf;
                         flushChartPartSlot();
-                        renderNotesStrip();
+                        scheduleRenderNotesStrip();
                     }
                 };
                 const onWinUpWrap = () => {
@@ -3508,7 +3554,7 @@ function renderNotesStrip() {
 
     if (btnRemove) btnRemove.disabled = selectedNoteIndex < 0;
     updateChartPalette(false);
-    requestAnimationFrame(() => paintAllMeasureBgmWaveformCanvases());
+    schedulePaintMeasureWaveformAfterGrid();
 }
 
 /**
@@ -3803,7 +3849,7 @@ function tryMoveSelectedNotesHalfStep(deltaHalfSteps) {
         selectedNoteIndex = [...selectedNoteIndices][0];
     }
 
-    renderNotesStrip();
+    scheduleRenderNotesStrip();
     return true;
 }
 
@@ -3882,7 +3928,7 @@ function tryMoveSelectedNotesHorizontally(delta, options) {
         selectedNoteIndex = [...selectedNoteIndices][0];
     }
 
-    renderNotesStrip();
+    scheduleRenderNotesStrip();
     return true;
 }
 
@@ -4577,11 +4623,18 @@ function bindChartPanelEvents() {
         const tempoEl = document.getElementById('chart-edit-tempo');
         if (tempoEl) {
             tempoEl.addEventListener('input', () => {
-                const oldBpm = lastRenderedChartBpm ?? getChartTempo();
-                const newBpm = getChartTempo();
-                retimeEditingNotesKeepGridPositionVarBpm(oldBpm, newBpm);
-                renderNotesStrip();
-                updateChartPreviewControlsUI();
+                if (chartTempoInputDebounceTimer) {
+                    clearTimeout(chartTempoInputDebounceTimer);
+                    chartTempoInputDebounceTimer = 0;
+                }
+                chartTempoInputDebounceTimer = setTimeout(() => {
+                    chartTempoInputDebounceTimer = 0;
+                    const oldBpm = lastRenderedChartBpm ?? getChartTempo();
+                    const newBpm = getChartTempo();
+                    retimeEditingNotesKeepGridPositionVarBpm(oldBpm, newBpm);
+                    renderNotesStrip();
+                    updateChartPreviewControlsUI();
+                }, 100);
             });
         }
     }
@@ -4625,7 +4678,6 @@ function bindChartPanelEvents() {
                 selectedNoteIndices = getNoteIndicesInAbsStepRange(aBar, aStep, bBar, bStep);
                 selectedNoteIndex = -1;
             }
-            renderNotesStrip();
         }
 
         gridEl.addEventListener('mousedown', (e) => {
@@ -4672,6 +4724,7 @@ function bindChartPanelEvents() {
             if (!selecting) return;
             selecting = false;
             rangeSelectRollFeelOnly = false;
+            renderNotesStrip();
         });
 
         gridEl.addEventListener('contextmenu', (e) => {
