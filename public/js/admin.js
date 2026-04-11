@@ -3091,18 +3091,81 @@ function renderNotesStrip() {
                 const startY = e.clientY;
                 const startX = e.clientX;
                 let didVolumeDrag = false;
+                /** @type {'pending'|'volume'|'hslide'|'done'} */
+                let noteDragMode = 'pending';
+                let appliedHalfAccum = 0;
+                const cellEl = chip.closest('.measure-cell');
                 chartVolumeDragPointerId = e.pointerId;
                 try {
                     chip.setPointerCapture(e.pointerId);
                 } catch {
                     /* noop */
                 }
+                const hSlideIndices = (selectedNoteIndices.has(idx) && selectedNoteIndices.size > 0)
+                    ? [...selectedNoteIndices].filter((i) => {
+                        const n = editingNotes[i];
+                        return n && (n.type === 'don' || n.type === 'ka' || n.type === 'roll-start' || n.type === 'roll');
+                    })
+                    : [idx];
+                const moveIndices = hSlideIndices.length > 0 ? hSlideIndices : [idx];
+                let hslideWinActive = false;
+                const removeWinHSlide = () => {
+                    window.removeEventListener('pointermove', onWinMove, true);
+                    window.removeEventListener('pointerup', onWinUpWrap, true);
+                    window.removeEventListener('pointercancel', onWinUpWrap, true);
+                };
+                const onWinMove = (ev) => {
+                    if (noteDragMode !== 'hslide') return;
+                    const cw = cellEl?.getBoundingClientRect().width || 24;
+                    const halfPx = Math.max(4, cw * 0.5);
+                    const rawHalf = Math.round((ev.clientX - startX) / halfPx);
+                    const d = rawHalf - appliedHalfAccum;
+                    if (d === 0) return;
+                    if (tryMoveSelectedNotesHorizontally(d, { halfStep: true })) {
+                        appliedHalfAccum = rawHalf;
+                        flushChartPartSlot();
+                        renderNotesStrip();
+                    }
+                };
+                const onWinUpWrap = () => {
+                    if (!hslideWinActive) return;
+                    hslideWinActive = false;
+                    removeWinHSlide();
+                    chartVolumeDragPointerId = -1;
+                    noteDragMode = 'done';
+                    flushChartPartSlot();
+                    renderNotesStrip();
+                };
                 const onMove = (ev) => {
                     if (ev.pointerId !== chartVolumeDragPointerId) return;
                     const dx = ev.clientX - startX;
                     const dy = ev.clientY - startY;
-                    if (Math.hypot(dx, dy) < CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX) return;
-                    if (!didVolumeDrag) {
+                    if (noteDragMode === 'pending' && Math.hypot(dx, dy) >= CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX) {
+                        if ((ev.ctrlKey || ev.metaKey) && Math.abs(dx) > Math.abs(dy)) {
+                            noteDragMode = 'hslide';
+                            ev.preventDefault();
+                            clearChartRollFeelDigitInput();
+                            const stH = document.getElementById('chart-status');
+                            if (stH && /^連打感:/.test(stH.textContent)) stH.textContent = '';
+                            selectedNoteIndex = idx;
+                            selectedNoteIndices = new Set(moveIndices);
+                            chip.removeEventListener('pointermove', onMove);
+                            chip.removeEventListener('pointerup', onUp);
+                            chip.removeEventListener('pointercancel', onUp);
+                            try {
+                                chip.releasePointerCapture(ev.pointerId);
+                            } catch {
+                                /* noop */
+                            }
+                            chartVolumeDragPointerId = -1;
+                            hslideWinActive = true;
+                            window.addEventListener('pointermove', onWinMove, true);
+                            window.addEventListener('pointerup', onWinUpWrap, true);
+                            window.addEventListener('pointercancel', onWinUpWrap, true);
+                            onWinMove(ev);
+                            return;
+                        }
+                        noteDragMode = 'volume';
                         didVolumeDrag = true;
                         ev.preventDefault();
                         clearChartRollFeelDigitInput();
@@ -3113,6 +3176,7 @@ function renderNotesStrip() {
                             selectedNoteIndices = new Set([idx]);
                         }
                     }
+                    if (noteDragMode !== 'volume') return;
                     const nMove = editingNotes[idx];
                     const volRect = (nMove && (nMove.type === 'roll-start' || nMove.type === 'roll'))
                         ? (chip.closest('.measure-cells')?.getBoundingClientRect()
@@ -3362,12 +3426,147 @@ function getNoteEditorAbsStep(note) {
 }
 
 /**
- * 選択中のノーツをグリッド上で左右に1マス移動する。移動先に別ノーツがある場合は何もしない。
+ * ノーツ配列で、timeToBarStep の丸め後に同一セルへ重なる単一時刻ノーツがないか検査する
+ * @param {Array<Record<string, unknown>>} notes
+ * @param {number} bpm
+ * @returns {boolean} 重なりがあれば true
+ */
+function chartEditorHasTimelineCellConflict(notes, bpm) {
+    /** @type {Map<string, number>} */
+    const cellToOwner = new Map();
+    for (let i = 0; i < notes.length; i++) {
+        const n = notes[i];
+        if (!n) continue;
+        /**
+         * @param {number} barIndex
+         * @param {number} stepIndex
+         * @returns {boolean} 他ノーツと衝突
+         */
+        const push = (barIndex, stepIndex) => {
+            const k = `${barIndex}:${stepIndex}`;
+            const prev = cellToOwner.get(k);
+            if (prev != null && prev !== i) return true;
+            cellToOwner.set(k, i);
+            return false;
+        };
+        if (n.type === 'don' || n.type === 'ka' || n.type === 'roll-start' || n.type === 'roll-end') {
+            const { barIndex, stepIndex } = timeToBarStep(Number(n.time ?? 0), bpm);
+            if (push(barIndex, stepIndex)) return true;
+        } else if (n.type === 'roll') {
+            const s = Number(n.startTime ?? 0);
+            const e = Number(n.endTime ?? n.startTime ?? 0);
+            const a = timeToBarStep(s, bpm);
+            const b = timeToBarStep(e, bpm);
+            if (push(a.barIndex, a.stepIndex)) return true;
+            if (push(b.barIndex, b.stepIndex)) return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * 選択中のノーツを 16 分の半コマ分（グリッド時間で 1/32 拍）だけ平行移動する
+ * @param {number} deltaHalfSteps 正で右、負で左（半コマ単位の整数）
+ * @returns {boolean}
+ */
+function tryMoveSelectedNotesHalfStep(deltaHalfSteps) {
+    if (!deltaHalfSteps) return false;
+    clearChartRollFeelDigitInput();
+    const indices = selectedNoteIndices.size > 0
+        ? [...selectedNoteIndices].filter((i) => Number.isInteger(i) && i >= 0 && i < editingNotes.length)
+        : (selectedNoteIndex >= 0 ? [selectedNoteIndex] : []);
+    if (indices.length === 0) return false;
+
+    const bpm = getChartTempo();
+    const secPerBar = getBarSec(bpm);
+    const dt = (secPerBar / 32) * deltaHalfSteps;
+    if (!Number.isFinite(dt) || dt === 0) return false;
+
+    const mut = editingNotes.map((n) => (n ? { ...n } : n));
+    for (const i of indices) {
+        const n = mut[i];
+        if (!n) continue;
+        if (n.type === 'roll') {
+            const s = Number(n.startTime ?? 0);
+            const e = Number(n.endTime ?? n.startTime ?? 0);
+            n.startTime = s + dt;
+            n.endTime = e + dt;
+        } else {
+            n.time = Number(n.time ?? 0) + dt;
+        }
+    }
+    for (const i of indices) {
+        const n = mut[i];
+        if (!n) continue;
+        const t0 = n.type === 'roll' ? Number(n.startTime ?? 0) : Number(n.time ?? 0);
+        if (t0 < 0) return false;
+    }
+    if (chartEditorHasTimelineCellConflict(mut, bpm)) return false;
+
+    let maxBar = 0;
+    for (const n of mut) {
+        if (!n) continue;
+        if (n.type === 'roll') {
+            const e = Number(n.endTime ?? n.startTime ?? 0);
+            const s = Number(n.startTime ?? 0);
+            maxBar = Math.max(maxBar, timeToBarStep(e, bpm).barIndex, timeToBarStep(s, bpm).barIndex);
+        } else if (n.type === 'don' || n.type === 'ka' || n.type === 'roll-start' || n.type === 'roll-end') {
+            maxBar = Math.max(maxBar, timeToBarStep(Number(n.time ?? 0), bpm).barIndex);
+        }
+    }
+    const endEl = document.getElementById('chart-edit-end-time');
+    if (endEl) {
+        const cur = endEl.value !== '' ? Number(endEl.value) : NaN;
+        const curMeasures = Number.isFinite(cur) ? Math.max(1, Math.floor(cur)) : null;
+        const needMeasures = Math.max(1, maxBar + 1);
+        if (curMeasures == null || curMeasures < needMeasures) {
+            endEl.value = String(needMeasures);
+        }
+    }
+
+    const selectedRefs = indices.map((i) => editingNotes[i]);
+    for (const i of indices) {
+        const src = mut[i];
+        const dst = editingNotes[i];
+        if (!src || !dst) continue;
+        if (src.type === 'roll') {
+            dst.startTime = src.startTime;
+            dst.endTime = src.endTime;
+        } else {
+            dst.time = src.time;
+        }
+    }
+
+    editingNotes.sort((a, b) => {
+        const ta = a.type === 'roll' ? a.startTime : a.time;
+        const tb = b.type === 'roll' ? b.startTime : b.time;
+        return (ta ?? 0) - (tb ?? 0);
+    });
+
+    selectedNoteIndices = new Set();
+    selectedNoteIndex = -1;
+    for (let i = 0; i < editingNotes.length; i++) {
+        if (selectedRefs.includes(editingNotes[i])) selectedNoteIndices.add(i);
+    }
+    if (selectedNoteIndices.size === 1) {
+        selectedNoteIndex = [...selectedNoteIndices][0];
+    }
+
+    renderNotesStrip();
+    return true;
+}
+
+/**
+ * 選択中のノーツをグリッド上で左右に1マス（16分）移動する。移動先に別ノーツがある場合は何もしない。
  * @param {number} delta -1 で左、+1 で右
+ * @param {{ halfStep?: boolean } | undefined} [options] Ctrl+半コマ移動時は halfStep: true（delta は半コマの個数）
  * @returns {boolean} 移動したら true
  */
-function tryMoveSelectedNotesHorizontally(delta) {
+function tryMoveSelectedNotesHorizontally(delta, options) {
     if (!delta) return false;
+    if (options && options.halfStep) {
+        return tryMoveSelectedNotesHalfStep(delta);
+    }
     clearChartRollFeelDigitInput();
     const indices = selectedNoteIndices.size > 0
         ? [...selectedNoteIndices].filter((i) => Number.isInteger(i) && i >= 0 && i < editingNotes.length)
@@ -3954,7 +4153,8 @@ function bindChartPanelEvents() {
         if (!hasSelection) return;
         e.preventDefault();
         const delta = e.key === 'ArrowRight' ? 1 : -1;
-        tryMoveSelectedNotesHorizontally(delta);
+        const halfStep = !!(e.ctrlKey || e.metaKey);
+        tryMoveSelectedNotesHorizontally(delta, { halfStep });
     });
 
     const scrollEl = document.getElementById('chart-measures-scroll');
