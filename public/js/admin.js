@@ -1023,7 +1023,10 @@ async function loadCharts() {
         cachedCharts = charts;
         renderChartList(charts);
         if (!selectedChartId) clearChartEditor();
-        else updateChartBgmRowUi();
+        else {
+            updateChartBgmRowUi();
+            void refreshChartBgmWaveformForSelectedChart();
+        }
         updateChartPartIoUi();
         renderChartPartHitSoundCells();
         statusEl.textContent = '';
@@ -1737,6 +1740,170 @@ function invalidateChartBgmPreviewCache() {
     chartPreviewHitSoundBuffers.clear();
 }
 
+/** 譜面エディタ下部の BGM 波形用ピーク列（正規化 0〜1） */
+let chartBgmWaveformPeaks = /** @type {Float32Array | null} */ (null);
+/** 波形キャンバスのリサイズ監視 */
+let chartBgmWaveformResizeObserver = /** @type {ResizeObserver | null} */ (null);
+
+/**
+ * 秒を mm:ss.s（秒の下1桁）表記にする（波形下の曲長表示用）
+ * @param {number} sec
+ * @returns {string}
+ */
+function formatChartBgmWaveformDuration(sec) {
+    const t = Number(sec);
+    if (!Number.isFinite(t) || t < 0) return '00:00.0';
+    const m = Math.floor(t / 60);
+    const s = t - m * 60;
+    const whole = Math.floor(s);
+    const tenth = Math.min(9, Math.floor((s - whole) * 10 + 1e-6));
+    const pad2 = (n) => String(n).padStart(2, '0');
+    return `${pad2(m)}:${pad2(whole)}.${tenth}`;
+}
+
+/**
+ * AudioBuffer から波形バー用のピーク列を作る（全チャンネル合成の最大絶対値）
+ * @param {AudioBuffer} buffer
+ * @param {number} barCount
+ * @returns {Float32Array}
+ */
+function buildChartBgmWaveformPeaks(buffer, barCount) {
+    const nCh = Math.max(1, buffer.numberOfChannels);
+    const len = buffer.length;
+    const bars = Math.max(32, Math.min(8000, Math.floor(barCount)));
+    const peaks = new Float32Array(bars);
+    if (len <= 0) return peaks;
+    const block = len / bars;
+    for (let b = 0; b < bars; b++) {
+        const start = Math.floor(b * block);
+        const end = Math.min(len, Math.max(start + 1, Math.floor((b + 1) * block)));
+        let max = 0;
+        for (let i = start; i < end; i++) {
+            let sum = 0;
+            for (let c = 0; c < nCh; c++) {
+                const v = buffer.getChannelData(c)[i];
+                sum += Math.abs(v);
+            }
+            const mix = sum / nCh;
+            if (mix > max) max = mix;
+        }
+        peaks[b] = max;
+    }
+    let norm = 0;
+    for (let i = 0; i < bars; i++) {
+        if (peaks[i] > norm) norm = peaks[i];
+    }
+    if (norm > 1e-8) {
+        for (let i = 0; i < bars; i++) peaks[i] /= norm;
+    }
+    return peaks;
+}
+
+/**
+ * chartBgmWaveformPeaks を現在のキャンバスサイズで描画する（ミラー波形）
+ */
+function paintChartBgmWaveformCanvas() {
+    const wrap = document.getElementById('chart-bgm-waveform-wrap');
+    const canvas = document.getElementById('chart-bgm-waveform-canvas');
+    if (!wrap || !canvas || wrap.hidden || !chartBgmWaveformPeaks || chartBgmWaveformPeaks.length < 2) return;
+    const rect = wrap.getBoundingClientRect();
+    const wCss = Math.max(1, Math.floor(rect.width));
+    const hCss = Math.max(1, Math.floor(rect.height));
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.floor(wCss * dpr);
+    const h = Math.floor(hCss * dpr);
+    if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const grd = ctx.createLinearGradient(0, 0, 0, h);
+    grd.addColorStop(0, '#0a1528');
+    grd.addColorStop(0.5, '#102238');
+    grd.addColorStop(1, '#0c1830');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, w, h);
+    const mid = h / 2;
+    const peaks = chartBgmWaveformPeaks;
+    const n = peaks.length;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = dpr;
+    ctx.beginPath();
+    ctx.moveTo(dpr * 0.5, 0);
+    ctx.lineTo(dpr * 0.5, h);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0, 255, 220, 0.45)';
+    ctx.beginPath();
+    ctx.moveTo(w - dpr * 0.5, 0);
+    ctx.lineTo(w - dpr * 0.5, h);
+    ctx.stroke();
+    ctx.strokeStyle = '#39ffc8';
+    ctx.lineWidth = Math.max(1, dpr);
+    const amp = mid * 0.92;
+    for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * (w - 1);
+        const a = peaks[i];
+        const y1 = mid - a * amp;
+        const y2 = mid + a * amp;
+        if (y2 - y1 < dpr) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, y1);
+        ctx.lineTo(x, y2);
+        ctx.stroke();
+    }
+}
+
+/**
+ * BGM 波形 UI を非表示にし状態をクリアする
+ */
+function hideChartBgmWaveformUi() {
+    chartBgmWaveformPeaks = null;
+    const wrap = document.getElementById('chart-bgm-waveform-wrap');
+    const fn = document.getElementById('chart-bgm-waveform-filename');
+    const dur = document.getElementById('chart-bgm-waveform-duration');
+    if (wrap) wrap.hidden = true;
+    if (fn) fn.textContent = '';
+    if (dur) dur.textContent = '';
+}
+
+/**
+ * 選択中譜面に BGM があるときサーバーからデコードして波形を表示する
+ */
+async function refreshChartBgmWaveformForSelectedChart() {
+    const wrap = document.getElementById('chart-bgm-waveform-wrap');
+    const fnEl = document.getElementById('chart-bgm-waveform-filename');
+    const durEl = document.getElementById('chart-bgm-waveform-duration');
+    const c = selectedChartId && cachedCharts[selectedChartId];
+    if (!wrap || !c || c.bgmVersion == null) {
+        hideChartBgmWaveformUi();
+        return;
+    }
+    try {
+        const buf = await ensureChartPreviewBgmDecoded();
+        if (!buf || buf.length === 0) {
+            hideChartBgmWaveformUi();
+            return;
+        }
+        const scrollEl = document.getElementById('chart-measures-scroll');
+        const wPx = Math.max(
+            200,
+            Math.floor(scrollEl?.getBoundingClientRect().width || 0) || wrap.offsetWidth || 600
+        );
+        chartBgmWaveformPeaks = buildChartBgmWaveformPeaks(buf, Math.floor(wPx * 2));
+        if (fnEl) {
+            const name = c.bgmOriginalName ? String(c.bgmOriginalName) : 'BGM.mp3';
+            fnEl.textContent = name;
+        }
+        if (durEl) durEl.textContent = formatChartBgmWaveformDuration(buf.duration);
+        wrap.hidden = false;
+        requestAnimationFrame(() => paintChartBgmWaveformCanvas());
+    } catch {
+        hideChartBgmWaveformUi();
+    }
+}
+
 let chartSaveToastTimer = 0;
 
 /**
@@ -2309,6 +2476,7 @@ function setChartEditingPart(part) {
  * @param {{ id: string, name?: string, notes?: unknown[], notes2?: unknown[], notes3?: unknown[], difficulty?: number|string|null, tempo?: number|null }} chart
  */
 function loadChartIntoEditor(chart) {
+    hideChartBgmWaveformUi();
     const nameEl = document.getElementById('chart-edit-name');
     const difficultyEl = document.getElementById('chart-edit-difficulty');
     const tempoEl = document.getElementById('chart-edit-tempo');
@@ -2367,6 +2535,7 @@ function loadChartIntoEditor(chart) {
     updateChartPartIoUi();
     renderChartPartHitSoundCells();
     updateChartPreviewControlsUI();
+    void refreshChartBgmWaveformForSelectedChart();
 }
 
 /**
@@ -2409,6 +2578,7 @@ function clearChartEditor() {
     updateChartPartIoUi();
     renderChartPartHitSoundCells();
     updateChartPreviewControlsUI();
+    hideChartBgmWaveformUi();
 }
 
 /**
@@ -3396,6 +3566,7 @@ function bindChartPanelEvents() {
                     cachedCharts[selectedChartId] = data.chart;
                     invalidateChartBgmPreviewCache();
                     updateChartBgmRowUi();
+                    void refreshChartBgmWaveformForSelectedChart();
                 }
                 if (statusEl) statusEl.textContent = 'BGMを設定しました';
             } catch (err) {
@@ -3431,11 +3602,20 @@ function bindChartPanelEvents() {
                 }
                 invalidateChartBgmPreviewCache();
                 updateChartBgmRowUi();
+                hideChartBgmWaveformUi();
                 if (statusEl) statusEl.textContent = 'BGMを削除しました';
             } catch (e) {
                 if (statusEl) statusEl.textContent = '削除失敗: ' + (e instanceof Error ? e.message : String(e));
             }
         });
+    }
+
+    const wfWrap = document.getElementById('chart-bgm-waveform-wrap');
+    if (wfWrap && typeof ResizeObserver !== 'undefined' && !chartBgmWaveformResizeObserver) {
+        chartBgmWaveformResizeObserver = new ResizeObserver(() => {
+            requestAnimationFrame(() => paintChartBgmWaveformCanvas());
+        });
+        chartBgmWaveformResizeObserver.observe(wfWrap);
     }
 
     const btnSave = document.getElementById('btn-save-chart');
