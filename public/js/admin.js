@@ -16,6 +16,8 @@ let worldEditInitialized = false;
 let chartPanelInitialized = false;
 /** 譜面作成パネルで選択中の譜面ID */
 let selectedChartId = null;
+/** 「保存」済みとみなす譜面 PUT ペイロードの JSON 文字列（未選択・エディタクリア時は ''） */
+let chartEditorSavedPayloadJson = '';
 /** 譜面一覧のキャッシュ（renderChartList/selectChart で参照） */
 let cachedCharts = {};
 /** 編集中のノーツ配列（don/ka: volume、連打は開始チップ roll-start に volume）。譜面編集エリアと同期 */
@@ -937,6 +939,13 @@ const LOGIN_USERS_PAGE_SIZE = 50;
  * ワールド編集パネルは初表示時に setting.js を動的 import して init する。
  */
 function switchPanel(panelId) {
+    const activePanel = document.querySelector('.admin-panel.active');
+    const currentPanelId = activePanel ? activePanel.id : null;
+    if (currentPanelId === 'panel-chart' && panelId !== 'panel-chart' && isChartEditorDirty()) {
+        if (!confirm('譜面を編集中です（未保存の変更があります）。このまま別の画面に移動しますか？')) {
+            return;
+        }
+    }
     document.querySelectorAll('.admin-panel').forEach((el) => el.classList.remove('active'));
     document.querySelectorAll('.admin-nav-item').forEach((el) => el.classList.remove('active'));
     const panel = document.getElementById(panelId);
@@ -2473,6 +2482,12 @@ function renderChartList(charts) {
  * @param {string} id
  */
 function selectChart(id) {
+    if (id === selectedChartId) return;
+    if (isChartEditorDirty()) {
+        if (!confirm('譜面を編集中です（未保存の変更があります）。別の譜面に切り替えますか？')) {
+            return;
+        }
+    }
     stopChartPreview();
     clearChartRollFeelDigitInput();
     selectedChartId = id;
@@ -2660,6 +2675,73 @@ function loadChartIntoEditor(chart) {
     renderChartPartHitSoundCells();
     updateChartPreviewControlsUI();
     void refreshChartBgmWaveformForSelectedChart();
+    commitChartEditorSavedBaseline();
+}
+
+/**
+ * 「保存」ボタンと同じ内容の譜面 PUT 用ペイロードを組み立てる（譜面未選択時は null）
+ * @returns {{ name: string, notes: unknown[], notes2: unknown[], notes3: unknown[], partNames: { 1: string, 2: string, 3: string }, difficulty: string | null, tempo: number | null, endTime: number | null, measureBpms: Record<string, number> } | null}
+ */
+function getChartEditorPutPayload() {
+    if (!selectedChartId) return null;
+    const nameEl = document.getElementById('chart-edit-name');
+    const difficultyEl = document.getElementById('chart-edit-difficulty');
+    const tempoEl = document.getElementById('chart-edit-tempo');
+    const endTimeEl = document.getElementById('chart-edit-end-time');
+    const name = nameEl ? nameEl.value.trim() : '';
+    const difficulty = difficultyEl && difficultyEl.value ? difficultyEl.value : null;
+    const tempo = tempoEl && tempoEl.value ? Number(tempoEl.value) : null;
+    const endMeasures = endTimeEl && endTimeEl.value !== '' ? Number(endTimeEl.value) : null;
+    const bpm = tempo != null && Number.isFinite(tempo) ? tempo : getChartTempo();
+    const endTime = endMeasures != null && Number.isFinite(endMeasures)
+        ? Math.max(1, Math.floor(endMeasures)) * getBarSec(bpm)
+        : null;
+    flushChartPartSlot();
+    const n1 = chartPartNoteSlots[0];
+    const n2 = chartPartNoteSlots[1];
+    const n3 = chartPartNoteSlots[2];
+    const pn1 = document.getElementById('chart-part-name-1')?.value?.trim?.() || '';
+    const pn2 = document.getElementById('chart-part-name-2')?.value?.trim?.() || '';
+    const pn3 = document.getElementById('chart-part-name-3')?.value?.trim?.() || '';
+    const partNames = { 1: pn1.slice(0, 20), 2: pn2.slice(0, 20), 3: pn3.slice(0, 20) };
+    return {
+        name: name || selectedChartId,
+        notes: n1,
+        notes2: n2,
+        notes3: n3,
+        partNames,
+        difficulty,
+        tempo,
+        endTime,
+        measureBpms: { ...chartMeasureBpms }
+    };
+}
+
+/**
+ * 譜面 PUT 相当オブジェクトの JSON 文字列（ダーティ判定用）
+ * @returns {string}
+ */
+function chartEditorPutPayloadJson() {
+    const p = getChartEditorPutPayload();
+    return p ? JSON.stringify(p) : '';
+}
+
+/**
+ * 直近の保存／読み込み時点のペイロードを現在の編集内容で記録する
+ */
+function commitChartEditorSavedBaseline() {
+    chartEditorSavedPayloadJson = chartEditorPutPayloadJson();
+}
+
+/**
+ * 譜面パネルで未保存の編集があるか
+ * @returns {boolean}
+ */
+function isChartEditorDirty() {
+    if (!selectedChartId) return false;
+    const panel = document.getElementById('panel-chart');
+    if (!panel || panel.dataset.hasChart !== 'true') return false;
+    return chartEditorPutPayloadJson() !== chartEditorSavedPayloadJson;
 }
 
 /**
@@ -2703,6 +2785,7 @@ function clearChartEditor() {
     renderChartPartHitSoundCells();
     updateChartPreviewControlsUI();
     hideChartBgmWaveformUi();
+    chartEditorSavedPayloadJson = '';
 }
 
 /**
@@ -3742,6 +3825,9 @@ function bindChartPanelEvents() {
 
     if (btnAdd) {
         btnAdd.addEventListener('click', async () => {
+            if (isChartEditorDirty() && !confirm('譜面を編集中です（未保存の変更があります）。新しい譜面の追加を続けますか？')) {
+                return;
+            }
             const id = prompt('譜面ID（英数字・アンダースコア・ハイフン）', 'chart_' + Date.now());
             if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) return;
             statusEl.textContent = '追加中...';
@@ -3758,7 +3844,10 @@ function bindChartPanelEvents() {
                 }
                 statusEl.textContent = '追加しました';
                 selectedChartId = id;
-                loadCharts();
+                await loadCharts();
+                if (cachedCharts[id]) {
+                    loadChartIntoEditor(cachedCharts[id]);
+                }
             } catch (err) {
                 statusEl.textContent = '追加失敗: ' + err.message;
             }
@@ -3775,6 +3864,10 @@ function bindChartPanelEvents() {
         chartImportInput.addEventListener('change', async () => {
             const file = chartImportInput.files && chartImportInput.files[0];
             if (!file) return;
+            if (isChartEditorDirty() && !confirm('譜面を編集中です（未保存の変更があります）。JSON のインポートを続けますか？')) {
+                chartImportInput.value = '';
+                return;
+            }
             if (statusEl) statusEl.textContent = 'インポート中...';
             btnImportChart.disabled = true;
             try {
@@ -4026,44 +4119,17 @@ function bindChartPanelEvents() {
     if (btnSave) {
         btnSave.addEventListener('click', async () => {
             if (!selectedChartId) return;
-            const nameEl = document.getElementById('chart-edit-name');
-            const difficultyEl = document.getElementById('chart-edit-difficulty');
-            const tempoEl = document.getElementById('chart-edit-tempo');
-            const endTimeEl = document.getElementById('chart-edit-end-time');
-            const name = nameEl ? nameEl.value.trim() : '';
-            const difficulty = difficultyEl && difficultyEl.value ? difficultyEl.value : null;
-            const tempo = tempoEl && tempoEl.value ? Number(tempoEl.value) : null;
-            const endMeasures = endTimeEl && endTimeEl.value !== '' ? Number(endTimeEl.value) : null;
-            const bpm = tempo != null && Number.isFinite(tempo) ? tempo : getChartTempo();
-            const endTime = endMeasures != null && Number.isFinite(endMeasures)
-                ? Math.max(1, Math.floor(endMeasures)) * getBarSec(bpm)
-                : null;
+            const payload = getChartEditorPutPayload();
+            if (!payload) return;
+            chartPartNames = { ...payload.partNames };
+            updateChartPartTabLabels();
             statusEl.textContent = '保存中...';
             statusEl.classList.remove('success', 'error');
-            flushChartPartSlot();
-            const n1 = chartPartNoteSlots[0];
-            const n2 = chartPartNoteSlots[1];
-            const n3 = chartPartNoteSlots[2];
-            const pn1 = document.getElementById('chart-part-name-1')?.value?.trim?.() || '';
-            const pn2 = document.getElementById('chart-part-name-2')?.value?.trim?.() || '';
-            const pn3 = document.getElementById('chart-part-name-3')?.value?.trim?.() || '';
-            chartPartNames = { 1: pn1.slice(0, 20), 2: pn2.slice(0, 20), 3: pn3.slice(0, 20) };
-            updateChartPartTabLabels();
             try {
                 const res = await fetch('/admin/charts/' + encodeURIComponent(selectedChartId), {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: name || selectedChartId,
-                        notes: n1,
-                        notes2: n2,
-                        notes3: n3,
-                        partNames: chartPartNames,
-                        difficulty,
-                        tempo,
-                        endTime,
-                        measureBpms: chartMeasureBpms
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
@@ -4076,16 +4142,10 @@ function bindChartPanelEvents() {
                 showChartSaveToast('保存しました');
                 cachedCharts[selectedChartId] = {
                     ...cachedCharts[selectedChartId],
-                    name: name || selectedChartId,
-                    notes: n1,
-                    notes2: n2,
-                    notes3: n3,
-                    partNames: chartPartNames,
-                    difficulty,
-                    tempo,
-                    endTime,
+                    ...payload,
                     measureBpms: chartMeasureBpms
                 };
+                commitChartEditorSavedBaseline();
                 renderChartList(cachedCharts);
             } catch (err) {
                 statusEl.classList.add('error');
@@ -4484,6 +4544,12 @@ document.addEventListener('DOMContentLoaded', () => {
     import('/js/service-worker-register.js')
         .then((m) => m.registerMetaverseServiceWorker())
         .catch(() => {});
+
+    window.addEventListener('beforeunload', (e) => {
+        if (!isChartEditorDirty()) return;
+        e.preventDefault();
+        e.returnValue = '';
+    });
 
     const savedTheme = localStorage.getItem(ADMIN_THEME_KEY);
     applyAdminTheme(savedTheme === 'dark');
