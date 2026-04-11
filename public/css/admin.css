@@ -1621,6 +1621,13 @@ body.admin-dark .chart-panel .chart-playback-bpm-label {
     z-index: 1;
 }
 
+.chart-panel .note-roll-span-bar.chart-roll-feel-digit-focus {
+    outline: 2px solid #1565c0;
+    outline-offset: 1px;
+    box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.22);
+    z-index: 2;
+}
+
 .chart-panel .measure-cell {
     position: relative;
     height: 58px;
@@ -3458,6 +3465,11 @@ body.admin-dark .chart-panel .measure-cell.measure-cell-roll-span {
 body.admin-dark .chart-panel .note-roll-span-bar {
     background: rgba(255, 193, 7, 0.55);
     border-color: rgba(230, 180, 80, 0.55);
+}
+
+body.admin-dark .chart-panel .note-roll-span-bar.chart-roll-feel-digit-focus {
+    outline-color: #64b5f6;
+    box-shadow: 0 0 0 2px rgba(100, 181, 246, 0.35);
 }
 
 body.admin-dark .chart-panel .measure-cell:nth-child(4n) {
