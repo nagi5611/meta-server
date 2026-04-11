@@ -31,6 +31,8 @@ const CHART_NOTE_VOLUME_DRAG_THRESHOLD_PX = 4;
 const CHART_ROLL_NEIGHBOR_PULL_RADIUS_STEPS = 12;
 /** 連打「間」マスの音量を離散調整する際の1段階（五線上の1マス相当） */
 const CHART_ROLL_CELL_VOLUME_QUANT_STEP = (NOTE_VOLUME_MAX - NOTE_VOLUME_MIN) / 16;
+/** Shift 時、ドラッグ中の間マスから左右に引き寄せる連打間マス数（各側） */
+const CHART_ROLL_MIDDLE_NEIGHBOR_RADIUS_STEPS = 2;
 
 /**
  * ノーツ音量を 10%〜300% に丸める（未指定は 100%）
@@ -140,34 +142,44 @@ function rollBarCellKind(barIndex, stepIndex, sec, bpm) {
 }
 
 /**
- * 連打の開始・終了マス以外（間）のセルキー "bar:step" の一覧
+ * 連打「間」かつ中心セルから±radiusSteps 以内のセルキー（開始・終了マスは含めない）
  * @param {{ start: number, end: number }} sec
  * @param {number} bpm
+ * @param {number} centerBi
+ * @param {number} centerSi
+ * @param {number} [radiusSteps=2]
  * @returns {string[]}
  */
-function getRollMiddleCellKeysForSection(sec, bpm) {
+function getRollMiddleNeighborKeysAround(sec, bpm, centerBi, centerSi, radiusSteps = CHART_ROLL_MIDDLE_NEIGHBOR_RADIUS_STEPS) {
     const sa = chartEditorAbsStepFromTime(sec.start, bpm);
     const ea = chartEditorAbsStepFromTime(sec.end, bpm);
+    const curAbs = centerBi * 16 + centerSi;
+    const r = Math.max(0, Number(radiusSteps) || 0);
     /** @type {string[]} */
     const keys = [];
-    for (let a = sa + 1; a < ea; a++) {
+    for (let d = -r; d <= r; d++) {
+        const a = curAbs + d;
+        if (a <= sa || a >= ea) continue;
         keys.push(`${Math.floor(a / 16)}:${a % 16}`);
     }
     return keys;
 }
 
 /**
- * 連打「間」の全マスに同じ音量を書き込み、該当バーの高さを更新する
+ * 連打「間」の左右±radius マスだけ同じ音量にし、該当バーの高さを更新する
  * @param {{ type?: string, rollCellVolumes?: Record<string, number> }} rs
  * @param {{ start: number, end: number, rollStartIndex: number }} sec
  * @param {number} bpm
  * @param {number} volume
+ * @param {number} centerBi
+ * @param {number} centerSi
  */
-function applyUniformVolumeToRollMiddleCells(rs, sec, bpm, volume) {
+function applyUniformVolumeToRollMiddleNeighbors(rs, sec, bpm, volume, centerBi, centerSi) {
     if (!rs || (rs.type !== 'roll-start' && rs.type !== 'roll')) return;
     ensureRollCellVolumesMap(rs);
     const qv = quantizeRollCellVolumeStep(volume);
-    const keys = getRollMiddleCellKeysForSection(sec, bpm);
+    const keys = getRollMiddleNeighborKeysAround(sec, bpm, centerBi, centerSi, CHART_ROLL_MIDDLE_NEIGHBOR_RADIUS_STEPS);
+    const keySet = new Set(keys);
     for (const key of keys) {
         rs.rollCellVolumes[key] = qv;
     }
@@ -177,7 +189,8 @@ function applyUniformVolumeToRollMiddleCells(rs, sec, bpm, volume) {
     grid.querySelectorAll(`.note-roll-span-bar[data-roll-start-index="${sec.rollStartIndex}"]`).forEach((el) => {
         const bi = parseInt(el.dataset.cellBarIndex, 10);
         const si = parseInt(el.dataset.cellStepIndex, 10);
-        if (rollBarCellKind(bi, si, sec, bpm) === 'middle') {
+        const k = `${bi}:${si}`;
+        if (keySet.has(k)) {
             el.style.height = `${Math.max(4, 16 * qv)}px`;
         }
     });
@@ -429,9 +442,9 @@ function bindChartRollSpanBarVolumePointer(barEl, sec, cellBi, cellSi, cellEl) {
             : getNoteVolumeForEditor(rs);
         const dir = e.deltaY < 0 ? 1 : -1;
         const next = quantizeRollCellVolumeStep(cur + dir * CHART_ROLL_CELL_VOLUME_QUANT_STEP);
-        const midKeys = getRollMiddleCellKeysForSection(sec, bpmW);
-        if (e.shiftKey && midKeys.length > 0) {
-            applyUniformVolumeToRollMiddleCells(rs, sec, bpmW, next);
+        const neighKeys = getRollMiddleNeighborKeysAround(sec, bpmW, cellBi, cellSi);
+        if (e.shiftKey && neighKeys.length > 0) {
+            applyUniformVolumeToRollMiddleNeighbors(rs, sec, bpmW, next, cellBi, cellSi);
         } else {
             rs.rollCellVolumes[key] = next;
             flushChartPartSlot();
@@ -507,8 +520,9 @@ function bindChartRollSpanBarVolumePointer(barEl, sec, cellBi, cellSi, cellEl) {
                     const rsN = editingNotes[rollStartIndex];
                     const raw = chartNoteVolumeFromPointerY(ev.clientY, rect);
                     const v = quantizeRollCellVolumeStep(raw);
-                    if (ev.shiftKey && getRollMiddleCellKeysForSection(sec, bpm).length > 0) {
-                        applyUniformVolumeToRollMiddleCells(rsN, sec, bpm, v);
+                    const neighKeys = getRollMiddleNeighborKeysAround(sec, bpm, cellBi, cellSi);
+                    if (ev.shiftKey && neighKeys.length > 0) {
+                        applyUniformVolumeToRollMiddleNeighbors(rsN, sec, bpm, v, cellBi, cellSi);
                     } else {
                         ensureRollCellVolumesMap(rsN);
                         const key = `${cellBi}:${cellSi}`;
@@ -2541,7 +2555,7 @@ function renderNotesStrip() {
             bar.dataset.cellBarIndex = String(bi);
             bar.dataset.cellStepIndex = String(si);
             bar.style.height = `${Math.max(4, 16 * v)}px`;
-            bar.title = '縦:音量（間はセル別、Shift+縦で間を一括）／横:長さ±1マス／Shift+横:両端±2マス／ホイール:間1段階（Shiftで間一括）／Alt+縦:周囲のドン・カ連動';
+            bar.title = '縦:音量（間はセル別、Shift+縦で左右±2マスの間のみ一括）／横:長さ±1マス／Shift+横:両端±2マス／ホイール:間1段階（Shiftで±2マス）／Alt+縦:周囲のドン・カ連動';
             bindChartRollSpanBarVolumePointer(bar, sec, bi, si, cell);
             cell.insertBefore(bar, cell.firstChild);
         }
