@@ -1490,16 +1490,16 @@ body.admin-dark .chart-panel .chart-playback-bpm-label {
 .chart-panel .measure-spec-row {
     display: block;
     width: 100%;
-    height: 10px;
+    height: 30px;
     line-height: 0;
     border-top: 1px solid rgba(0, 0, 0, 0.06);
-    background: #0a1520;
+    background: #0f1c32;
 }
 
 .chart-panel .measure-spec-canvas {
     display: block;
     width: 100%;
-    height: 10px;
+    height: 30px;
     vertical-align: top;
 }
 

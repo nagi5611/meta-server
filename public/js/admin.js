@@ -1862,16 +1862,16 @@ function rebuildChartBgmSpectrogramIfNeeded(buffer, cacheKey) {
         return;
     }
     const fftN = 128;
-    const rows = 10;
+    const rows = 18;
     const mono = mixAudioBufferToMonoFloat32(buffer);
     const len = mono.length;
     const cols = Math.min(2000, Math.max(48, Math.floor(buffer.duration * 48)));
     const hop = Math.max(1, Math.floor((len - fftN) / Math.max(1, cols - 1)));
     const half = fftN >> 1;
+    const kMax = half - 1;
     const re = new Float32Array(fftN);
     const im = new Float32Array(fftN);
     const mag = new Float32Array(rows * cols);
-    let globalMax = 1e-8;
     for (let c = 0; c < cols; c++) {
         const off = Math.min(Math.max(0, len - fftN), c * hop);
         for (let j = 0; j < fftN; j++) {
@@ -1883,21 +1883,24 @@ function rebuildChartBgmSpectrogramIfNeeded(buffer, cacheKey) {
         for (let r = 0; r < rows; r++) {
             const t0 = r / rows;
             const t1 = (r + 1) / rows;
-            const k0 = Math.max(1, Math.floor(Math.pow(half - 1, t0)));
-            const k1 = Math.max(k0 + 1, Math.min(half, Math.ceil(Math.pow(half - 1, t1))));
+            const k0 = Math.max(1, Math.floor(Math.pow(kMax, t0)));
+            const k1 = Math.max(k0 + 1, Math.min(kMax + 1, Math.ceil(Math.pow(kMax, t1))));
             let acc = 0;
             let cnt = 0;
             for (let k = k0; k < k1; k++) {
-                acc += Math.hypot(re[k], im[k]);
+                acc += Math.hypot(re[k], im[k]) / fftN;
                 cnt++;
             }
             const v = cnt > 0 ? acc / cnt : 0;
             mag[r * cols + c] = v;
-            if (v > globalMax) globalMax = v;
         }
     }
-    const inv = 1 / globalMax;
-    const gamma = 0.55;
+    const sorted = Float32Array.from(mag);
+    sorted.sort();
+    const refIdx = Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * 0.93)));
+    const refMag = Math.max(sorted[refIdx], sorted[sorted.length - 1] * 0.25, 1e-7);
+    const inv = 1 / refMag;
+    const gamma = 0.42;
     const canvas = document.createElement('canvas');
     canvas.width = cols;
     canvas.height = rows;
@@ -1910,11 +1913,12 @@ function rebuildChartBgmSpectrogramIfNeeded(buffer, cacheKey) {
     for (let y = 0; y < rows; y++) {
         for (let x = 0; x < cols; x++) {
             const freqRow = rows - 1 - y;
-            const v = Math.pow(Math.min(1, mag[freqRow * cols + x] * inv + 1e-6), gamma);
+            const raw = mag[freqRow * cols + x] * inv;
+            const v = Math.pow(Math.min(1, raw), gamma);
             const p = (y * cols + x) * 4;
-            img.data[p] = Math.floor(12 + v * 48);
-            img.data[p + 1] = Math.floor(28 + v * 200);
-            img.data[p + 2] = Math.floor(48 + v * 180);
+            img.data[p] = Math.floor(22 + v * 100);
+            img.data[p + 1] = Math.floor(50 + v * 205);
+            img.data[p + 2] = Math.floor(78 + v * 177);
             img.data[p + 3] = 255;
         }
     }
@@ -1926,7 +1930,6 @@ function rebuildChartBgmSpectrogramIfNeeded(buffer, cacheKey) {
         rows,
         duration: buffer.duration
     };
-    void sr;
 }
 
 /**
@@ -1944,7 +1947,7 @@ function paintAllMeasureSpectrogramCanvases() {
         if (!Number.isFinite(barIndex)) return;
         const wrap = canvas.closest('.measure-spec-row');
         const wCss = Math.max(1, Math.floor((wrap && wrap.clientWidth) || canvas.clientWidth || 120));
-        const hCss = 10;
+        const hCss = 30;
         const dpr = Math.min(2, window.devicePixelRatio || 1);
         const w = Math.floor(wCss * dpr);
         const h = Math.floor(hCss * dpr);
@@ -1955,8 +1958,15 @@ function paintAllMeasureSpectrogramCanvases() {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         if (!tex || !cols || duration <= 0) {
-            ctx.fillStyle = '#0c1524';
+            ctx.fillStyle = '#0f1c32';
             ctx.fillRect(0, 0, w, h);
+            const mid = h * 0.5;
+            ctx.strokeStyle = 'rgba(0, 255, 200, 0.4)';
+            ctx.lineWidth = Math.max(1, dpr);
+            ctx.beginPath();
+            ctx.moveTo(0, mid);
+            ctx.lineTo(w, mid);
+            ctx.stroke();
             return;
         }
         const u0 = barStepToTime(barIndex, 0, bpm);
@@ -1966,15 +1976,30 @@ function paintAllMeasureSpectrogramCanvases() {
         w0 = Math.max(0, Math.min(duration, w0));
         w1 = Math.max(0, Math.min(duration, w1));
         if (w1 <= w0 + 1e-6) {
-            ctx.fillStyle = '#0c1524';
+            ctx.fillStyle = '#0f1c32';
             ctx.fillRect(0, 0, w, h);
+            const mid = h * 0.5;
+            ctx.strokeStyle = 'rgba(0, 255, 200, 0.4)';
+            ctx.lineWidth = Math.max(1, dpr);
+            ctx.beginPath();
+            ctx.moveTo(0, mid);
+            ctx.lineTo(w, mid);
+            ctx.stroke();
             return;
         }
         const sx = (w0 / duration) * cols;
         const sw = Math.max(1, ((w1 - w0) / duration) * cols);
         ctx.imageSmoothingEnabled = true;
-        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = '#0f1c32';
+        ctx.fillRect(0, 0, w, h);
         ctx.drawImage(tex, sx, 0, sw, rows, 0, 0, w, h);
+        const mid = h * 0.5;
+        ctx.strokeStyle = 'rgba(0, 255, 200, 0.55)';
+        ctx.lineWidth = Math.max(1, dpr);
+        ctx.beginPath();
+        ctx.moveTo(0, mid);
+        ctx.lineTo(w, mid);
+        ctx.stroke();
     });
 }
 
