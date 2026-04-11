@@ -3504,6 +3504,29 @@ body.admin-dark .chart-panel .status-text {
     color: #9c9992;
 }
 
+/* 譜面保存完了などの短い通知（画面下部） */
+.admin-chart-save-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    z-index: 10050;
+    max-width: min(90vw, 420px);
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    color: #fff;
+    background: #2e7d32;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+    pointer-events: none;
+    text-align: center;
+}
+body.admin-dark .admin-chart-save-toast {
+    background: #1b5e20;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+}
+
 @media (max-width: 768px) {
     .stats-grid {
         grid-template-columns: repeat(2, 1fr);

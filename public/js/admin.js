@@ -735,6 +735,8 @@ let chartPreviewAudioBuffers = {
 let chartPreviewHitSoundBuffers = new Map();
 /** プレビュー用BGMデコード済みバッファ（chartId:bgmVersion で無効化） */
 let chartPreviewBgmCache = { key: '', buffer: /** @type {AudioBuffer | null} */ (null) };
+/** プレビュー停止・再開時に runChartPreviewPlayback の await 後続を打ち切る */
+let chartPreviewCancelToken = 0;
 
 /** ログインユーザー一覧の現在ページ（1始まり） */
 let currentLoginUsersPage = 1;
@@ -1542,6 +1544,25 @@ function invalidateChartBgmPreviewCache() {
     chartPreviewHitSoundBuffers.clear();
 }
 
+let chartSaveToastTimer = 0;
+
+/**
+ * 譜面保存成功など短いメッセージを画面下部に表示する
+ * @param {string} message
+ */
+function showChartSaveToast(message) {
+    const el = document.getElementById('admin-chart-save-toast');
+    if (!el) return;
+    el.textContent = message;
+    el.hidden = false;
+    if (chartSaveToastTimer) clearTimeout(chartSaveToastTimer);
+    chartSaveToastTimer = setTimeout(() => {
+        chartSaveToastTimer = 0;
+        el.hidden = true;
+        el.textContent = '';
+    }, 2800);
+}
+
 /**
  * BGM行の表示を更新する
  */
@@ -1735,6 +1756,7 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
     if (!selectedChartId) return;
     const allPartsLayout = Boolean(options.allPartsLayout);
     stopChartPreview();
+    const runToken = chartPreviewCancelToken;
     const statusEl = document.getElementById('chart-status');
     try {
         await ensureChartPreviewAudioLoaded();
@@ -1742,11 +1764,19 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
         if (statusEl) statusEl.textContent = 'プレビュー音の読み込みに失敗: ' + e.message;
         return;
     }
+    if (runToken !== chartPreviewCancelToken) {
+        updateChartPreviewControlsUI();
+        return;
+    }
 
     try {
         await preloadChartPreviewCustomHitSounds(selectedChartId);
     } catch {
         /* カスタム無し・取得失敗時は既定音のみ */
+    }
+    if (runToken !== chartPreviewCancelToken) {
+        updateChartPreviewControlsUI();
+        return;
     }
 
     /** @type {AudioBuffer | null} */
@@ -1758,6 +1788,10 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
         if (statusEl && cachedCharts[selectedChartId]?.bgmVersion != null) {
             statusEl.textContent = 'BGMを再生できません（ドン・カのみ再生）';
         }
+    }
+    if (runToken !== chartPreviewCancelToken) {
+        updateChartPreviewControlsUI();
+        return;
     }
 
     const startSec = Math.min(Math.max(0, Number(startFromSec) || 0), totalDur);
@@ -1776,6 +1810,10 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
 
     if (!chartPreviewAudioCtx) return;
     if (chartPreviewAudioCtx.state === 'suspended') await chartPreviewAudioCtx.resume();
+    if (runToken !== chartPreviewCancelToken) {
+        updateChartPreviewControlsUI();
+        return;
+    }
 
     if (allPartsLayout) {
         enterChartMultiPartPlaybackView();
@@ -1816,6 +1854,15 @@ async function runChartPreviewPlayback(events, totalDur, startFromSec = 0, optio
         const evWall = wallAtUniform(t);
         src.start(baseTime + (evWall - wallStart));
         sources.push(src);
+    }
+
+    if (runToken !== chartPreviewCancelToken) {
+        for (const s of sources) {
+            try { s.stop(); } catch { /* noop */ }
+            try { s.disconnect(); } catch { /* noop */ }
+        }
+        updateChartPreviewControlsUI();
+        return;
     }
 
     chartPreviewState.playing = true;
@@ -1872,15 +1919,20 @@ async function playChartPreviewAllParts(startFromSec = 0) {
  * プレビュー停止
  */
 function stopChartPreview() {
+    chartPreviewCancelToken++;
     const wasAllParts = chartPreviewState.allPartsPlayback;
     if (chartPreviewState.rafId) cancelAnimationFrame(chartPreviewState.rafId);
     chartPreviewState.rafId = 0;
     if (chartPreviewState.sources && chartPreviewState.sources.length > 0) {
         for (const s of chartPreviewState.sources) {
             try { s.stop(); } catch { /* noop */ }
+            try { s.disconnect(); } catch { /* noop */ }
         }
     }
     chartPreviewState.sources = [];
+    if (chartPreviewAudioCtx && chartPreviewAudioCtx.state === 'running') {
+        try { chartPreviewAudioCtx.suspend(); } catch { /* noop */ }
+    }
     chartPreviewState.playing = false;
     chartPreviewState.startedAtPerfMs = 0;
     chartPreviewState.startOffsetSec = 0;
@@ -3198,6 +3250,7 @@ function bindChartPanelEvents() {
                 ? Math.max(1, Math.floor(endMeasures)) * getBarSec(bpm)
                 : null;
             statusEl.textContent = '保存中...';
+            statusEl.classList.remove('success', 'error');
             flushChartPartSlot();
             const n1 = chartPartNoteSlots[0];
             const n2 = chartPartNoteSlots[1];
@@ -3225,10 +3278,13 @@ function bindChartPanelEvents() {
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
+                    statusEl.classList.add('error');
                     statusEl.textContent = data.error || res.statusText;
                     return;
                 }
+                statusEl.classList.add('success');
                 statusEl.textContent = '保存しました';
+                showChartSaveToast('保存しました');
                 cachedCharts[selectedChartId] = {
                     ...cachedCharts[selectedChartId],
                     name: name || selectedChartId,
@@ -3243,6 +3299,7 @@ function bindChartPanelEvents() {
                 };
                 renderChartList(cachedCharts);
             } catch (err) {
+                statusEl.classList.add('error');
                 statusEl.textContent = '保存失敗: ' + err.message;
             }
         });
