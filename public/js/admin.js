@@ -1847,10 +1847,14 @@ async function ensureChartPreviewBgmDecoded(options = {}) {
 function invalidateChartBgmPreviewCache() {
     chartPreviewBgmCache = { key: '', buffer: null };
     chartPreviewHitSoundBuffers.clear();
+    chartBgmWaveformPeaks = null;
+    chartBgmWaveformPeaksCacheKey = '';
 }
 
 /** 譜面エディタ下部の BGM 波形用ピーク列（正規化 0〜1） */
 let chartBgmWaveformPeaks = /** @type {Float32Array | null} */ (null);
+/** chartBgmWaveformPeaks を build したときの getResolvedChartBgmCacheKeyForPartPreview と一致させ、同じ BGM ではピーク再計算しない */
+let chartBgmWaveformPeaksCacheKey = '';
 /** 波形キャンバスのリサイズ監視 */
 let chartBgmWaveformResizeObserver = /** @type {ResizeObserver | null} */ (null);
 /** chart-measures-scroll のリサイズで小節下波形を再描画 */
@@ -2081,6 +2085,7 @@ function paintChartBgmWaveformCanvas() {
  */
 function hideChartBgmWaveformUi() {
     chartBgmWaveformPeaks = null;
+    chartBgmWaveformPeaksCacheKey = '';
     const wrap = document.getElementById('chart-bgm-waveform-wrap');
     const fn = document.getElementById('chart-bgm-waveform-filename');
     const dur = document.getElementById('chart-bgm-waveform-duration');
@@ -2102,6 +2107,29 @@ async function refreshChartBgmWaveformForSelectedChart() {
         hideChartBgmWaveformUi();
         return;
     }
+    const bufCached = chartPreviewBgmCache.buffer;
+    if (
+        chartBgmWaveformPeaksCacheKey === resolvedKey
+        && chartBgmWaveformPeaks
+        && chartBgmWaveformPeaks.length >= 2
+        && chartPreviewBgmCache.key === resolvedKey
+        && bufCached
+        && bufCached.length > 0
+    ) {
+        if (fnEl) {
+            const pb = getChartPartBgmMeta(c, chartEditingPart);
+            const name = pb
+                ? (pb.originalName ? pb.originalName : `${chartEditingPart}P BGM.mp3`)
+                : (c.bgmOriginalName ? String(c.bgmOriginalName) : 'BGM.mp3');
+            fnEl.textContent = name;
+        }
+        if (durEl) durEl.textContent = formatChartBgmWaveformDuration(bufCached.duration);
+        wrap.hidden = false;
+        requestAnimationFrame(() => {
+            paintChartBgmWaveformCanvas();
+        });
+        return;
+    }
     try {
         const buf = await ensureChartPreviewBgmDecoded({ track: 'part' });
         if (!buf || buf.length === 0) {
@@ -2114,6 +2142,7 @@ async function refreshChartBgmWaveformForSelectedChart() {
             Math.floor(scrollEl?.getBoundingClientRect().width || 0) || wrap.offsetWidth || 600
         );
         chartBgmWaveformPeaks = buildChartBgmWaveformPeaks(buf, Math.floor(wPx * 2));
+        chartBgmWaveformPeaksCacheKey = resolvedKey;
         if (fnEl) {
             const pb = getChartPartBgmMeta(c, chartEditingPart);
             const name = pb
