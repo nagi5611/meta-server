@@ -20,6 +20,10 @@ let selectedChartId = null;
 let chartEditorSavedPayloadJson = '';
 /** 譜面一覧のキャッシュ（renderChartList/selectChart で参照） */
 let cachedCharts = {};
+/** loadCharts 同時実行時、古い完了でオーバーレイを閉じないための世代 */
+let chartListLoadGen = 0;
+/** selectChart 連打時の同様の世代 */
+let chartSelectLoadGen = 0;
 /** 編集中のノーツ配列（don/ka: volume、連打は開始チップ roll-start に volume）。譜面編集エリアと同期 */
 let editingNotes = [];
 /** 譜面エディタ: ノーツ音量ドラッグ中の pointerId。-1 はなし */
@@ -1062,23 +1066,55 @@ function applyAdminTheme(isDark) {
 }
 
 /**
+ * 譜面パネル用の全画面ブロック風オーバーレイ（ワールド編集と同様）
+ * @param {boolean} show
+ * @param {string} [message]
+ */
+function setChartEditLoader(show, message) {
+    const ov = document.getElementById('chart-edit-loading-overlay');
+    if (!ov) return;
+    const msgEl = ov.querySelector('.chart-edit-loading-message');
+    if (message != null && msgEl) msgEl.textContent = message;
+    if (show) {
+        ov.classList.add('show');
+        ov.setAttribute('aria-hidden', 'false');
+    } else {
+        ov.classList.remove('show');
+        ov.setAttribute('aria-hidden', 'true');
+    }
+}
+
+/**
+ * 譜面オーバーレイ表示中に文言だけ差し替える
+ * @param {string} message
+ */
+function setChartEditLoaderMessage(message) {
+    const msgEl = document.querySelector('#chart-edit-loading-overlay .chart-edit-loading-message');
+    if (msgEl) msgEl.textContent = message;
+}
+
+/**
  * 譜面一覧を取得して表示する
  */
 async function loadCharts() {
     const statusEl = document.getElementById('chart-status');
     const listEl = document.getElementById('chart-list');
     if (!listEl) return;
+    const gen = ++chartListLoadGen;
+    setChartEditLoader(true, '譜面一覧を読み込んでいます…');
     try {
         const res = await fetch('/admin/charts');
         if (!res.ok) throw new Error(res.statusText);
         const charts = await res.json();
+        if (gen !== chartListLoadGen) return;
         cachedCharts = charts;
         renderChartList(charts);
         if (!selectedChartId) clearChartEditor();
         else {
             updateChartBgmRowUi();
             updateChartPartBgmRowUi();
-            void refreshChartBgmWaveformForSelectedChart();
+            setChartEditLoaderMessage('音声ファイルを読み込んでいます…');
+            await refreshChartBgmWaveformForSelectedChart({ externalLoader: true });
         }
         updateChartPartIoUi();
         renderChartPartHitSoundCells();
@@ -1086,6 +1122,8 @@ async function loadCharts() {
     } catch (err) {
         statusEl.textContent = '取得失敗: ' + err.message;
         listEl.innerHTML = '';
+    } finally {
+        if (gen === chartListLoadGen) setChartEditLoader(false);
     }
 }
 
@@ -2096,8 +2134,10 @@ function hideChartBgmWaveformUi() {
 
 /**
  * 選択中譜面に BGM があるときサーバーからデコードして波形を表示する
+ * @param {{ externalLoader?: boolean }} [options] true のとき呼び出し側がオーバーレイ表示済み。デコード〜ピーク計算の間だけ文言を更新する
  */
-async function refreshChartBgmWaveformForSelectedChart() {
+async function refreshChartBgmWaveformForSelectedChart(options = {}) {
+    const externalLoader = options.externalLoader === true;
     const wrap = document.getElementById('chart-bgm-waveform-wrap');
     const fnEl = document.getElementById('chart-bgm-waveform-filename');
     const durEl = document.getElementById('chart-bgm-waveform-duration');
@@ -2130,12 +2170,20 @@ async function refreshChartBgmWaveformForSelectedChart() {
         });
         return;
     }
+    let openedLoader = false;
+    if (!externalLoader) {
+        setChartEditLoader(true, '音声ファイルを読み込んでいます…');
+        openedLoader = true;
+    } else {
+        setChartEditLoaderMessage('音声ファイルを読み込んでいます…');
+    }
     try {
         const buf = await ensureChartPreviewBgmDecoded({ track: 'part' });
         if (!buf || buf.length === 0) {
             hideChartBgmWaveformUi();
             return;
         }
+        setChartEditLoaderMessage('スペクトル化中…');
         const scrollEl = document.getElementById('chart-measures-scroll');
         const wPx = Math.max(
             200,
@@ -2158,6 +2206,8 @@ async function refreshChartBgmWaveformForSelectedChart() {
         });
     } catch {
         hideChartBgmWaveformUi();
+    } finally {
+        if (openedLoader) setChartEditLoader(false);
     }
 }
 
@@ -2660,11 +2710,24 @@ function selectChart(id) {
     const btnDelete = document.getElementById('btn-delete-chart');
     if (btnDelete) btnDelete.disabled = !id;
     renderChartList(cachedCharts);
-    if (c) {
-        loadChartIntoEditor(c);
-    } else {
-        clearChartEditor();
-    }
+    const myGen = ++chartSelectLoadGen;
+    setChartEditLoader(true, '譜面を読み込んでいます…');
+    requestAnimationFrame(() => {
+        requestAnimationFrame(async () => {
+            try {
+                if (myGen !== chartSelectLoadGen) return;
+                if (c) {
+                    loadChartIntoEditor(c, { skipBgmWaveform: true });
+                    setChartEditLoaderMessage('音声ファイルを読み込んでいます…');
+                    await refreshChartBgmWaveformForSelectedChart({ externalLoader: true });
+                } else {
+                    clearChartEditor();
+                }
+            } finally {
+                if (myGen === chartSelectLoadGen) setChartEditLoader(false);
+            }
+        });
+    });
 }
 
 /**
@@ -2774,14 +2837,18 @@ function setChartEditingPart(part) {
     updateChartPreviewControlsUI();
     renderChartPartHitSoundCells();
     updateChartPartBgmRowUi();
-    void refreshChartBgmWaveformForSelectedChart();
+    void (async () => {
+        await refreshChartBgmWaveformForSelectedChart();
+    })();
 }
 
 /**
  * 譜面を右側の編集エリアに読み込む
  * @param {{ id: string, name?: string, notes?: unknown[], notes2?: unknown[], notes3?: unknown[], difficulty?: number|string|null, tempo?: number|null }} chart
+ * @param {{ skipBgmWaveform?: boolean }} [options] true のとき BGM 波形の再取得は呼び出し側で行う
  */
-function loadChartIntoEditor(chart) {
+function loadChartIntoEditor(chart, options = {}) {
+    const skipBgmWaveform = options.skipBgmWaveform === true;
     hideChartBgmWaveformUi();
     const nameEl = document.getElementById('chart-edit-name');
     const difficultyEl = document.getElementById('chart-edit-difficulty');
@@ -2842,7 +2909,9 @@ function loadChartIntoEditor(chart) {
     updateChartPartIoUi();
     renderChartPartHitSoundCells();
     updateChartPreviewControlsUI();
-    void refreshChartBgmWaveformForSelectedChart();
+    if (!skipBgmWaveform) {
+        void refreshChartBgmWaveformForSelectedChart();
+    }
     commitChartEditorSavedBaseline();
 }
 
@@ -4026,7 +4095,7 @@ function bindChartPanelEvents() {
                 selectedChartId = id;
                 await loadCharts();
                 if (cachedCharts[id]) {
-                    loadChartIntoEditor(cachedCharts[id]);
+                    loadChartIntoEditor(cachedCharts[id], { skipBgmWaveform: true });
                 }
             } catch (err) {
                 statusEl.textContent = '追加失敗: ' + err.message;
@@ -4060,7 +4129,7 @@ function bindChartPanelEvents() {
                     await loadCharts();
                     if (statusEl) statusEl.textContent = message;
                     if (lastId && cachedCharts[lastId]) {
-                        loadChartIntoEditor(cachedCharts[lastId]);
+                        loadChartIntoEditor(cachedCharts[lastId], { skipBgmWaveform: true });
                     }
                 }
             } catch (err) {

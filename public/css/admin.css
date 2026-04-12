@@ -196,6 +196,88 @@ body.admin-dark .world-edit-loading-message {
     color: #e6e4df;
 }
 
+/* 譜面作成パネル: ワールド編集と同様の読み込みオーバーレイ */
+.admin-panel.chart-panel {
+    position: relative;
+}
+
+.chart-edit-loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.78);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    pointer-events: auto;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+
+.chart-edit-loading-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.chart-edit-loading-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 28px 36px;
+    border-radius: 12px;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.1);
+    max-width: min(360px, 90vw);
+    text-align: center;
+}
+
+.chart-edit-loading-spinner {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 3px solid #e3f2fd;
+    border-top-color: #1565c0;
+    animation: chart-edit-spin 0.75s linear infinite;
+}
+
+@keyframes chart-edit-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.chart-edit-loading-message {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    line-height: 1.45;
+}
+
+body.admin-dark .chart-edit-loading-overlay {
+    background: rgba(15, 14, 12, 0.82);
+}
+
+body.admin-dark .chart-edit-loading-panel {
+    background: #1f1e1a;
+    border-color: #3d3a34;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+body.admin-dark .chart-edit-loading-spinner {
+    border-color: #2d2a24;
+    border-top-color: #7eb8da;
+}
+
+body.admin-dark .chart-edit-loading-message {
+    color: #e6e4df;
+}
+
 .admin-panel-world-edit .viewer {
     position: absolute;
     inset: 0;
@@ -1531,11 +1613,11 @@ body.admin-dark .chart-panel .measure-spec-row {
     z-index: 40;
     top: 100%;
     left: 0;
-    margin-top: 4px;
+    /* margin だとボタンとメニューの隙間がホバー対象外になりメニューが閉じる。padding で同じ見た目の余白を確保する */
     flex-direction: column;
     gap: 4px;
     min-width: 7.5rem;
-    padding: 6px;
+    padding: 10px 6px 6px 6px;
     border-radius: 6px;
     border: 1px solid rgba(0, 0, 0, 0.15);
     background: #fff;
