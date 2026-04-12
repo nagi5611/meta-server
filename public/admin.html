@@ -1142,7 +1142,18 @@
                     </label>
                 </div>
             </fieldset>
-            <p id="model-upload-hint-model" class="hint model-upload-hint">GLB は既定でサーバがテクスチャ長辺を最大 1536px に縮小してから保存します（複数アップロード時はサーバ側で順番に処理されます）。下のチェックで縮小を省略できます。</p>
+            <p id="model-upload-hint-model" class="hint model-upload-hint">GLB はサーバでテクスチャの縦横を指定の上限まで縮小してから保存します（長辺・短辺それぞれが上限、縦横比は維持。複数アップロード時はサーバ側で順番に処理）。下のチェックで縮小を省略できます。</p>
+            <div class="model-upload-texture-max-edge-row prop-row" style="margin-top:10px;">
+                <label class="prop-label" for="model-upload-texture-max-edge">テクスチャ長辺の上限（px）</label>
+                <select id="model-upload-texture-max-edge" class="prop-input" aria-describedby="model-upload-hint-model">
+                    <option value="512">512</option>
+                    <option value="1024">1024</option>
+                    <option value="1536" selected>1536（既定）</option>
+                    <option value="2048">2048</option>
+                    <option value="4096">4096</option>
+                    <option value="8192">8192</option>
+                </select>
+            </div>
             <div class="model-upload-skip-texture-row prop-row checkbox-row" style="margin-top:10px;">
                 <input type="checkbox" id="model-upload-skip-texture-resize" class="prop-checkbox">
                 <label class="prop-label" for="model-upload-skip-texture-resize">テクスチャをリサイズしない（GLB 内のオリジナル画像のまま保存）</label>

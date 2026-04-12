@@ -3372,6 +3372,14 @@ function bindEvents() {
         modelUploadCloseBtn.style.display = modelUploadModalBusy ? 'none' : '';
     }
 
+    /** 「リサイズしない」チェック時は長辺上限セレクトを無効化する */
+    function syncModelUploadTextureEdgeControlState() {
+        const skipTexEl = document.getElementById('model-upload-skip-texture-resize');
+        const edgeEl = document.getElementById('model-upload-texture-max-edge');
+        if (!edgeEl) return;
+        edgeEl.disabled = !!(skipTexEl && skipTexEl.checked);
+    }
+
     /** アップロード種別に応じてモーダル内の説明と 3D 専用ブロックの表示を切り替える */
     function syncModelUploadKindUI() {
         const kind = document.querySelector('input[name="model-upload-kind"]:checked')?.value || 'model';
@@ -3379,11 +3387,14 @@ function bindEvents() {
         const hModel = document.getElementById('model-upload-hint-model');
         const hPdf = document.getElementById('model-upload-hint-pdf');
         const hHdr = document.getElementById('model-upload-hint-hdr');
+        const textureEdgeRow = document.querySelector('.model-upload-texture-max-edge-row');
         const show3d = kind === 'model';
         if (block3d) block3d.hidden = !show3d;
         if (hModel) hModel.hidden = kind !== 'model';
         if (hPdf) hPdf.hidden = kind !== 'pdf';
         if (hHdr) hHdr.hidden = kind !== 'hdr';
+        if (textureEdgeRow) textureEdgeRow.hidden = kind !== 'model';
+        syncModelUploadTextureEdgeControlState();
     }
 
     /** PDF アップロード結果をパネルと（モーダル表示中なら）モーダル下部にも出す */
@@ -3415,6 +3426,9 @@ function bindEvents() {
     for (const el of document.querySelectorAll('input[name="model-upload-kind"]')) {
         el.addEventListener('change', () => syncModelUploadKindUI());
     }
+    document.getElementById('model-upload-skip-texture-resize')?.addEventListener('change', () => {
+        syncModelUploadTextureEdgeControlState();
+    });
     syncModelUploadKindUI();
 
     /** サーバ側 GLB キュー表示のポーリングを止める */
@@ -3474,9 +3488,18 @@ function bindEvents() {
      * @param {() => void} [onUploadBytesSent] リクエストボディの送信完了後（サーバ処理待ち）。GLB のテクスチャリサイズ中など。
      * @param {boolean} [skipSpatialChunk] true のとき GLB の空間チャンク分割をサーバで行わない
      * @param {boolean} [skipTextureResize] true のとき GLB のテクスチャ長辺縮小を行わない
+     * @param {string} [textureMaxEdgeStr] 縮小する場合の長辺上限（px）の数字文字列
      * @returns {Promise<{ status: number, text: string, json: object|null }>}
      */
-    function postAdminModelUploadXHR(url, file, onUploadProgress, onUploadBytesSent, skipSpatialChunk, skipTextureResize) {
+    function postAdminModelUploadXHR(
+        url,
+        file,
+        onUploadProgress,
+        onUploadBytesSent,
+        skipSpatialChunk,
+        skipTextureResize,
+        textureMaxEdgeStr
+    ) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', url);
@@ -3505,6 +3528,7 @@ function bindEvents() {
             form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
             if (skipSpatialChunk) form.append('skipSpatialChunk', '1');
             if (skipTextureResize) form.append('skipTextureResize', '1');
+            else if (textureMaxEdgeStr) form.append('textureMaxEdge', textureMaxEdgeStr);
             xhr.send(form);
         });
     }
@@ -3534,8 +3558,18 @@ function bindEvents() {
      * @param {string} fileName
      * @param {boolean} [skipSpatialChunk]
      * @param {boolean} [skipTextureResize]
+     * @param {string} [textureMaxEdgeStr]
      */
-    async function postAdminModelUploadWithPhaseCleanup(url, file, onUploadProgress, ui, fileName, skipSpatialChunk, skipTextureResize) {
+    async function postAdminModelUploadWithPhaseCleanup(
+        url,
+        file,
+        onUploadProgress,
+        ui,
+        fileName,
+        skipSpatialChunk,
+        skipTextureResize,
+        textureMaxEdgeStr
+    ) {
         try {
             return await postAdminModelUploadXHR(
                 url,
@@ -3543,7 +3577,8 @@ function bindEvents() {
                 onUploadProgress,
                 onModelUploadBytesSentIfGlb(ui, fileName, skipTextureResize),
                 skipSpatialChunk,
-                skipTextureResize
+                skipTextureResize,
+                textureMaxEdgeStr
             );
         } finally {
             if (activeGlbServerPhaseUi === ui) activeGlbServerPhaseUi = null;
@@ -3633,6 +3668,7 @@ function bindEvents() {
         const modelKindRadio = document.querySelector('input[name="model-upload-kind"][value="model"]');
         if (modelKindRadio) modelKindRadio.checked = true;
         syncModelUploadKindUI();
+        syncModelUploadTextureEdgeControlState();
         modelUploadModalBusy = false;
         syncModelUploadCloseButtonVisibility();
         setModelUploadModalOpen(true);
@@ -3883,6 +3919,11 @@ function bindEvents() {
         const skipSpatialChunk = !!(skipChunkEl && skipChunkEl.checked);
         const skipTexEl = document.getElementById('model-upload-skip-texture-resize');
         const skipTextureResize = !!(skipTexEl && skipTexEl.checked);
+        const textureMaxEdgeEl = document.getElementById('model-upload-texture-max-edge');
+        const textureMaxEdgeStr =
+            !skipTextureResize && textureMaxEdgeEl && !textureMaxEdgeEl.disabled
+                ? String(textureMaxEdgeEl.value).trim()
+                : '';
 
         let ok = 0;
         let skipped = 0;
@@ -3961,7 +4002,8 @@ function bindEvents() {
                     ui,
                     name,
                     skipSpatialChunk,
-                    skipTextureResize
+                    skipTextureResize,
+                    textureMaxEdgeStr
                 );
 
                 if (xhrRes.status === 409) {
@@ -3992,7 +4034,8 @@ function bindEvents() {
                         ui,
                         name,
                         skipSpatialChunk,
-                        skipTextureResize
+                        skipTextureResize,
+                        textureMaxEdgeStr
                     );
                     if (xhrRes.status === 409) {
                         lastErr = '同名の上書き確認が必要: ' + name;
@@ -4062,7 +4105,8 @@ function bindEvents() {
                             ui,
                             name,
                             skipSpatialChunk,
-                            skipTextureResize
+                            skipTextureResize,
+                            textureMaxEdgeStr
                         );
                         if (xhrRes.status === 409) {
                             lastErr = '同名の上書き確認が必要: ' + name;

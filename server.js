@@ -14,7 +14,11 @@ import * as mediasoup from 'mediasoup';
 import { initDb, verifyStudent, verifyTeacher, registerStudent, registerTeacher, listStudents, listTeachers, updateStudent, updateTeacher, deleteStudent, deleteTeacher } from './db/users.js';
 import { initUserSessionsDb, insertSession, getLatestSessionByUsername, getSessionsPaginated } from './db/user-sessions.js';
 import { STORAGE_PATHS, validateAndPrepareStoragePaths } from './config/storage-paths.js';
-import { runGlbTextureResizeQueued, getModelUploadQueueStats } from './lib/glb-texture-resize.js';
+import {
+    runGlbTextureResizeQueued,
+    getModelUploadQueueStats,
+    parseTextureMaxEdgeFromUploadBody,
+} from './lib/glb-texture-resize.js';
 import { runGlbSpatialChunkIfNeeded } from './lib/glb-spatial-chunk.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -4382,6 +4386,14 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         let spatialChunk = null;
         const skipSpatialChunk = req.body?.skipSpatialChunk === '1' || req.body?.skipSpatialChunk === 'true';
         const skipTextureResize = req.body?.skipTextureResize === '1' || req.body?.skipTextureResize === 'true';
+        let textureMaxEdgeParsed = null;
+        if (ext === '.glb' && !skipTextureResize) {
+            const parsed = parseTextureMaxEdgeFromUploadBody(req.body?.textureMaxEdge);
+            if (!parsed.ok) {
+                return res.status(400).json({ error: parsed.error });
+            }
+            textureMaxEdgeParsed = parsed.value;
+        }
         if (ext === '.glb') {
             if (skipTextureResize) {
                 outBuffer = req.file.buffer;
@@ -4391,7 +4403,9 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
                     message: 'テクスチャのリサイズを行わず、オリジナルの GLB を保存しました。',
                 };
             } else {
-                const pipelineResult = await runGlbTextureResizeQueued(req.file.buffer);
+                const pipelineResult = await runGlbTextureResizeQueued(req.file.buffer, {
+                    maxEdgePx: textureMaxEdgeParsed,
+                });
                 outBuffer = pipelineResult.buffer;
                 textureResize = pipelineResult.textureResize;
             }
