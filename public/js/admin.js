@@ -1624,6 +1624,7 @@ function fillPlaybackNoteChipsInGrid(gridEl, notes) {
                 : note.type === 'roll-start' ? 'S'
                     : note.type === 'roll-end' ? 'E'
                         : 'D';
+        chip.style.left = '50%';
         if (note.type === 'don' || note.type === 'ka' || note.type === 'roll-start') {
             const vol = getNoteVolumeForEditor(note);
             chip.style.height = `${Math.max(4, 16 * vol)}px`;
@@ -3609,7 +3610,8 @@ function renderNotesStrip() {
                 : note.type === 'roll-start' ? 'S'
                     : note.type === 'roll-end' ? 'E'
                         : 'D';
-        const leftPct = (frac + 1) * 50;
+        // マス左を 0%・右端を 100% とし、frac はマス内の時間位置（0〜1）で線形配置（半コマずれが中央基準より直感的）
+        const leftPct = Math.max(0, Math.min(100, frac * 100));
         chip.style.left = `${leftPct}%`;
         chip.style.transform = 'translate(-50%, -50%)';
         if (note.type === 'don' || note.type === 'ka' || note.type === 'roll-start' || note.type === 'roll') {
@@ -3659,7 +3661,8 @@ function renderNotesStrip() {
                     if (noteDragMode !== 'hslide') return;
                     const cw = cellEl?.getBoundingClientRect().width || 24;
                     const halfPx = Math.max(4, cw * 0.5);
-                    const rawHalf = Math.round((ev.clientX - startX) / halfPx);
+                    // 四捨五入よりゼロ方向への切り捨て（ドラッグ開始付近でのブレを抑える）
+                    const rawHalf = Math.trunc((ev.clientX - startX) / halfPx);
                     const d = rawHalf - appliedHalfAccum;
                     if (d === 0) return;
                     if (tryMoveSelectedNotesHorizontally(d, { halfStep: true })) {
