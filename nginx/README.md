@@ -38,7 +38,7 @@
 
 ## アップロードサイズ
 
-`server.js` では譜面 BGM など **最大約 80MB**、3D モデルアップロードは **最大 200MB** のため、設定例では `client_max_body_size 200m` としています。
+`server.js` では譜面 BGM など **最大約 80MB**、3D モデルアップロードは **最大 500MB** のため、設定例では `client_max_body_size 500m` としています。
 
 ## インストール（Ubuntu 例）
 

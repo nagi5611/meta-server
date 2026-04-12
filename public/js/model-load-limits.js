@@ -6,7 +6,7 @@
 export const MODEL_MAX_BYTES_OBJ = 55 * 1024 * 1024;
 
 /** GLB / glTF バイナリ（アップロード上限・nginx / server.js の multer と揃える） */
-export const MODEL_MAX_BYTES_GLTF = 200 * 1024 * 1024;
+export const MODEL_MAX_BYTES_GLTF = 500 * 1024 * 1024;
 
 /** 三角面数の読み込み拒否上限（実質無制限） */
 export const MODEL_MAX_TRIANGLES_TOTAL = Number.MAX_SAFE_INTEGER;

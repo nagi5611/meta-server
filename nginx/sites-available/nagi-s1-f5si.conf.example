@@ -15,7 +15,7 @@ server {
     server_name nagi-s1.f5.si;
 
     # 管理画面の 3D モデル等（multipart）用。未指定だと nginx 既定 1m で 413 になる
-    client_max_body_size 200m;
+    client_max_body_size 500m;
 
     include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
 

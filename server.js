@@ -603,7 +603,7 @@ const MODEL_UPLOAD_EXTS = new Set(['.glb', '.obj', '.mtl', '.png', '.jpg', '.jpe
 /** 3D モデル一式アップロード（GLB 大容量など）。nginx client_max_body_size と揃える */
 const upload = multer({
     storage: uploadStorage,
-    limits: { fileSize: 200 * 1024 * 1024 },
+    limits: { fileSize: 500 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         const ext = path.extname(file.originalname || '').toLowerCase();
         cb(null, MODEL_UPLOAD_EXTS.has(ext));

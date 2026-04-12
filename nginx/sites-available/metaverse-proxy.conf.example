@@ -43,7 +43,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/meta.mmh-virtual.jp/privkey.pem;
     # 複数ドメインを1枚の証明書（SAN）にまとめた場合は、両 server ブロックで同じパスを指す
 
-    client_max_body_size 200m;
+    client_max_body_size 500m;
 
     include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
 
@@ -65,7 +65,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/metair.mmh-virtual.jp/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/metair.mmh-virtual.jp/privkey.pem;
 
-    client_max_body_size 200m;
+    client_max_body_size 500m;
 
     include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
 

@@ -33,7 +33,7 @@ server {
     listen [::]:80;
     server_name nagi-s1.f5.si;
 
-    client_max_body_size 100m;
+    client_max_body_size 500m;
 
     include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
 
@@ -73,7 +73,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/meta.mmh-virtual.jp/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/meta.mmh-virtual.jp/privkey.pem;
 
-    client_max_body_size 100m;
+    client_max_body_size 500m;
 
     include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
 
@@ -94,7 +94,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/meta.mmh-virtual.jp/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/meta.mmh-virtual.jp/privkey.pem;
 
-    client_max_body_size 200m;
+    client_max_body_size 500m;
 
     include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
 
