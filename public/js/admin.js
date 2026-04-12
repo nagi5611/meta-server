@@ -886,6 +886,14 @@ let chartNotesStripRafId = 0;
 /** 小節下 measure-spec 波形の遅延描画用（グリッド再構築のたびに即描画しない） */
 let chartMeasureWaveformIdleTimer = 0;
 const CHART_MEASURE_WAVEFORM_IDLE_MS = 240;
+/** 小節下波形: 直近で全描画したときの「タイミング署名」（BPM/小節BPM/BGM/パート）。ノーツのみの変更では変わらない */
+let lastMeasureStripWaveformChartId = null;
+let lastMeasureStripWaveformTimingSig = '';
+let lastMeasureStripWaveformTotalMeasures = 0;
+/** 小節下波形: 正規化ピーク列のキャッシュ（キー barIndex:pixelW）。タイミング署名が変わると破棄 */
+let measureStripWavePeaksCacheSig = '';
+/** @type {Map<string, Float32Array>} */
+const measureStripWaveNormPeaks = new Map();
 /** 小節ヘッダ BPM 入力のデバウンス（ms） */
 let chartMeasureBpmInputDebounceTimer = 0;
 /** ベーステンポ入力のデバウンス（ms） */
@@ -1887,6 +1895,7 @@ function invalidateChartBgmPreviewCache() {
     chartPreviewHitSoundBuffers.clear();
     chartBgmWaveformPeaks = null;
     chartBgmWaveformPeaksCacheKey = '';
+    clearMeasureStripWaveformPeaksCache();
 }
 
 /** 譜面エディタ下部の BGM 波形用ピーク列（正規化 0〜1） */
@@ -1919,11 +1928,70 @@ function strokeChartMeasureWaveMidAxis(ctx, w, h, dpr) {
 }
 
 /**
- * 各小節カード下の canvas に、実時間区間の BGM をミラー波形（時間軸）で描く
+ * 小節下波形の「タイミング」が変わったか判定する署名（ノーツ位置は含めない）
+ * @returns {string}
  */
-function paintAllMeasureBgmWaveformCanvases() {
-    const grid = document.getElementById('chart-measures-grid');
-    if (!grid) return;
+function buildMeasureStripWaveformTimingSignature() {
+    const cid = selectedChartId || '';
+    const c = cid && cachedCharts[cid] ? cachedCharts[cid] : null;
+    const bgmKey = c && cid ? getResolvedChartBgmCacheKeyForPartPreview(cid, c) : '';
+    const tempo = getChartTempo();
+    const m = chartMeasureBpms && typeof chartMeasureBpms === 'object' ? chartMeasureBpms : {};
+    const keys = Object.keys(m)
+        .map((k) => Number(k))
+        .filter((n) => Number.isFinite(n))
+        .sort((a, b) => a - b);
+    const mp = keys.map((k) => `${k}:${m[String(k)]}`).join(',');
+    return `${cid}|${chartEditingPart}|${tempo}|${mp}|${bgmKey}`;
+}
+
+/**
+ * タイミング署名が変わったら小節下波形のピークキャッシュを捨てる
+ * @param {string} timingSig
+ */
+function syncMeasureStripPeaksCacheSignature(timingSig) {
+    if (timingSig !== measureStripWavePeaksCacheSig) {
+        measureStripWavePeaksCacheSig = timingSig;
+        measureStripWaveNormPeaks.clear();
+    }
+}
+
+/** 小節下波形ピークキャッシュを全破棄（BGM差し替え・譜面クリア時） */
+function clearMeasureStripWaveformPeaksCache() {
+    measureStripWavePeaksCacheSig = '';
+    measureStripWaveNormPeaks.clear();
+}
+
+/**
+ * 正規化済みピーク列からミラー棒を描く
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} w
+ * @param {number} h
+ * @param {number} dpr
+ * @param {Float32Array} normPeaks 各列 0〜1
+ */
+function drawMeasureStripBarsFromNorm(ctx, w, h, dpr, normPeaks) {
+    const midY = h * 0.5;
+    const ampMax = Math.max(2 * dpr, midY - 2 * dpr);
+    ctx.fillStyle = '#5effd4';
+    ctx.globalAlpha = 1;
+    for (let px = 0; px < w; px++) {
+        const n = normPeaks[px];
+        const amp = n * ampMax;
+        if (amp < 0.08 * dpr) continue;
+        const half = Math.max(0.5 * dpr, amp);
+        const top = midY - half;
+        const barH = Math.max(1, half * 2);
+        ctx.fillRect(px, top, 1, barH);
+    }
+    strokeChartMeasureWaveMidAxis(ctx, w, h, dpr);
+}
+
+/**
+ * 小節下の1キャンバスだけ BGM ミラー波形を描く
+ * @param {HTMLCanvasElement} canvas
+ */
+function paintOneMeasureBgmWaveformCanvas(canvas) {
     const buf = chartPreviewBgmCache.buffer;
     const cacheKey = chartPreviewBgmCache.key;
     const c = selectedChartId ? cachedCharts[selectedChartId] : null;
@@ -1932,79 +2000,145 @@ function paintAllMeasureBgmWaveformCanvases() {
     const duration = bufOk ? buf.duration : 0;
     const sr = bufOk ? buf.sampleRate : 0;
     const bpm = getChartTempo();
-    const list = grid.querySelectorAll('canvas.measure-spec-canvas');
-    list.forEach((canvas) => {
-        const barIndex = Number(canvas.dataset.barIndex);
-        if (!Number.isFinite(barIndex)) return;
-        const wrap = canvas.closest('.measure-spec-row');
-        const wCss = Math.max(1, Math.floor((wrap && wrap.clientWidth) || canvas.clientWidth || 120));
-        const hCss = 30;
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
-        const w = Math.floor(wCss * dpr);
-        const h = Math.floor(hCss * dpr);
-        if (canvas.width !== w || canvas.height !== h) {
-            canvas.width = w;
-            canvas.height = h;
-        }
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.imageSmoothingEnabled = false;
-        ctx.fillStyle = '#0f1c32';
-        ctx.fillRect(0, 0, w, h);
-        if (!bufOk || duration <= 0 || sr <= 0) {
-            strokeChartMeasureWaveMidAxis(ctx, w, h, dpr);
-            return;
-        }
-        const u0 = barStepToTime(barIndex, 0, bpm);
-        const u1 = barStepToTime(barIndex + 1, 0, bpm);
-        let w0 = wallAtUniform(u0);
-        let w1 = wallAtUniform(u1);
-        w0 = Math.max(0, Math.min(duration, w0));
-        w1 = Math.max(0, Math.min(duration, w1));
-        if (w1 <= w0 + 1e-9) {
-            strokeChartMeasureWaveMidAxis(ctx, w, h, dpr);
-            return;
-        }
-        const s0 = Math.max(0, Math.min(buf.length - 1, Math.floor(w0 * sr)));
-        const s1 = Math.max(s0 + 1, Math.min(buf.length, Math.ceil(w1 * sr)));
-        const span = s1 - s0;
-        const nCh = buf.numberOfChannels;
-        const peaks = new Float32Array(w);
-        for (let px = 0; px < w; px++) {
-            const a = s0 + Math.floor((px / w) * span);
-            const b = s0 + Math.floor(((px + 1) / w) * span);
-            const bEx = Math.max(a + 1, b);
-            let m = 0;
-            for (let si = a; si < bEx; si++) {
-                let sum = 0;
-                for (let ch = 0; ch < nCh; ch++) {
-                    sum += Math.abs(buf.getChannelData(ch)[si]);
-                }
-                const mix = sum / nCh;
-                if (mix > m) m = mix;
-            }
-            peaks[px] = m;
-        }
-        let mx = 0;
-        for (let px = 0; px < w; px++) {
-            if (peaks[px] > mx) mx = peaks[px];
-        }
-        const inv = mx > 1e-12 ? 1 / mx : 0;
-        const midY = h * 0.5;
-        const ampMax = Math.max(2 * dpr, midY - 2 * dpr);
-        ctx.fillStyle = '#5effd4';
-        ctx.globalAlpha = 1;
-        for (let px = 0; px < w; px++) {
-            const n = peaks[px] * inv;
-            const amp = n * ampMax;
-            if (amp < 0.08 * dpr) continue;
-            const half = Math.max(0.5 * dpr, amp);
-            const top = midY - half;
-            const barH = Math.max(1, half * 2);
-            ctx.fillRect(px, top, 1, barH);
-        }
+    const barIndex = Number(canvas.dataset.barIndex);
+    if (!Number.isFinite(barIndex)) return;
+    const wrap = canvas.closest('.measure-spec-row');
+    const wCss = Math.max(1, Math.floor((wrap && wrap.clientWidth) || canvas.clientWidth || 120));
+    const hCss = 30;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.floor(wCss * dpr);
+    const h = Math.floor(hCss * dpr);
+    if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = '#0f1c32';
+    ctx.fillRect(0, 0, w, h);
+    if (!bufOk || duration <= 0 || sr <= 0) {
         strokeChartMeasureWaveMidAxis(ctx, w, h, dpr);
+        return;
+    }
+    const timingSig = buildMeasureStripWaveformTimingSignature();
+    syncMeasureStripPeaksCacheSignature(timingSig);
+    const barWKey = `${barIndex}:${w}`;
+    const cachedNorm = measureStripWaveNormPeaks.get(barWKey);
+    if (cachedNorm && cachedNorm.length === w) {
+        drawMeasureStripBarsFromNorm(ctx, w, h, dpr, cachedNorm);
+        return;
+    }
+    const u0 = barStepToTime(barIndex, 0, bpm);
+    const u1 = barStepToTime(barIndex + 1, 0, bpm);
+    let w0 = wallAtUniform(u0);
+    let w1 = wallAtUniform(u1);
+    w0 = Math.max(0, Math.min(duration, w0));
+    w1 = Math.max(0, Math.min(duration, w1));
+    if (w1 <= w0 + 1e-9) {
+        strokeChartMeasureWaveMidAxis(ctx, w, h, dpr);
+        return;
+    }
+    const s0 = Math.max(0, Math.min(buf.length - 1, Math.floor(w0 * sr)));
+    const s1 = Math.max(s0 + 1, Math.min(buf.length, Math.ceil(w1 * sr)));
+    const span = s1 - s0;
+    const nCh = buf.numberOfChannels;
+    const peaks = new Float32Array(w);
+    for (let px = 0; px < w; px++) {
+        const a = s0 + Math.floor((px / w) * span);
+        const b = s0 + Math.floor(((px + 1) / w) * span);
+        const bEx = Math.max(a + 1, b);
+        let mxv = 0;
+        for (let si = a; si < bEx; si++) {
+            let sum = 0;
+            for (let ch = 0; ch < nCh; ch++) {
+                sum += Math.abs(buf.getChannelData(ch)[si]);
+            }
+            const mix = sum / nCh;
+            if (mix > mxv) mxv = mix;
+        }
+        peaks[px] = mxv;
+    }
+    let mx = 0;
+    for (let px = 0; px < w; px++) {
+        if (peaks[px] > mx) mx = peaks[px];
+    }
+    const inv = mx > 1e-12 ? 1 / mx : 0;
+    const normPeaks = new Float32Array(w);
+    for (let px = 0; px < w; px++) {
+        normPeaks[px] = peaks[px] * inv;
+    }
+    measureStripWaveNormPeaks.set(barWKey, normPeaks);
+    drawMeasureStripBarsFromNorm(ctx, w, h, dpr, normPeaks);
+}
+
+/**
+ * 小節インデックスが [fromBar, toBar] のキャンバスのみ波形を描く（末尾に小節が増えたとき用）
+ * @param {number} fromBar
+ * @param {number} toBar
+ */
+function paintMeasureStripWaveformBarRange(fromBar, toBar) {
+    const grid = document.getElementById('chart-measures-grid');
+    if (!grid) return;
+    if (!Number.isFinite(fromBar) || !Number.isFinite(toBar) || fromBar > toBar) return;
+    grid.querySelectorAll('canvas.measure-spec-canvas').forEach((canvas) => {
+        const bi = Number(canvas.dataset.barIndex);
+        if (!Number.isFinite(bi)) return;
+        if (bi < fromBar || bi > toBar) return;
+        paintOneMeasureBgmWaveformCanvas(canvas);
+    });
+}
+
+/**
+ * 全小節下 canvas に BGM ミラー波形を描き、直近描画用の署名を更新する
+ */
+function paintAllMeasureBgmWaveformCanvases() {
+    const grid = document.getElementById('chart-measures-grid');
+    if (!grid) return;
+    grid.querySelectorAll('canvas.measure-spec-canvas').forEach((canvas) => {
+        paintOneMeasureBgmWaveformCanvas(canvas);
+    });
+    lastMeasureStripWaveformChartId = selectedChartId || null;
+    lastMeasureStripWaveformTimingSig = buildMeasureStripWaveformTimingSignature();
+    lastMeasureStripWaveformTotalMeasures = grid.querySelectorAll('canvas.measure-spec-canvas').length;
+}
+
+/**
+ * renderNotesStrip 後: BPM/BGM/パートが変わったときだけ全再描画、小節数だけ増えたら末尾のみ描画
+ * @param {number} totalMeasures
+ */
+function maybeScheduleMeasureStripWaveform(totalMeasures) {
+    const tm = Math.max(0, Math.floor(Number(totalMeasures) || 0));
+    const cid = selectedChartId || '';
+    if (cid !== lastMeasureStripWaveformChartId) {
+        lastMeasureStripWaveformChartId = cid;
+        lastMeasureStripWaveformTimingSig = '';
+        lastMeasureStripWaveformTotalMeasures = 0;
+    }
+    const sig = buildMeasureStripWaveformTimingSignature();
+    if (sig !== lastMeasureStripWaveformTimingSig) {
+        lastMeasureStripWaveformTimingSig = sig;
+        lastMeasureStripWaveformTotalMeasures = tm;
+        schedulePaintMeasureWaveformIdle();
+        return;
+    }
+    if (tm > lastMeasureStripWaveformTotalMeasures) {
+        const fromBar = lastMeasureStripWaveformTotalMeasures;
+        lastMeasureStripWaveformTotalMeasures = tm;
+        requestAnimationFrame(() => {
+            paintMeasureStripWaveformBarRange(fromBar, tm - 1);
+        });
+        return;
+    }
+    if (tm < lastMeasureStripWaveformTotalMeasures) {
+        lastMeasureStripWaveformTotalMeasures = tm;
+        schedulePaintMeasureWaveformIdle();
+        return;
+    }
+    // ノーツ操作などでグリッドだけ作り直された場合: AudioBuffer の再サンプリングはピークキャッシュで省略
+    requestAnimationFrame(() => {
+        paintAllMeasureBgmWaveformCanvases();
     });
 }
 
@@ -2985,6 +3119,10 @@ function isChartEditorDirty() {
  * 編集エリアをクリアする（譜面未選択時）
  */
 function clearChartEditor() {
+    lastMeasureStripWaveformChartId = null;
+    lastMeasureStripWaveformTimingSig = '';
+    lastMeasureStripWaveformTotalMeasures = 0;
+    clearMeasureStripWaveformPeaksCache();
     const nameEl = document.getElementById('chart-edit-name');
     const difficultyEl = document.getElementById('chart-edit-difficulty');
     const tempoEl = document.getElementById('chart-edit-tempo');
@@ -3660,7 +3798,7 @@ function renderNotesStrip() {
 
     if (btnRemove) btnRemove.disabled = selectedNoteIndex < 0;
     updateChartPalette(false);
-    schedulePaintMeasureWaveformIdle();
+    maybeScheduleMeasureStripWaveform(totalMeasures);
 }
 
 /**
