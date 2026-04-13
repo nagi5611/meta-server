@@ -2079,6 +2079,36 @@ a.admin-menu-link:hover {
         z-index: 10;
     }
 
+    /* GLB アニメ等: ジャンプの上にインタラクト（タップで E 相当） */
+    .mobile-interact-btn {
+        position: fixed;
+        right: 35px;
+        bottom: 148px;
+        width: 96px;
+        height: 56px;
+        padding: 0 8px;
+        border: 2px solid #00c853;
+        border-radius: 28px;
+        background: rgba(0, 255, 136, 0.92);
+        color: #000;
+        font-size: 15px;
+        font-weight: 700;
+        cursor: pointer;
+        z-index: 955;
+        box-shadow: 0 2px 12px rgba(0, 200, 100, 0.35);
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        pointer-events: auto;
+        line-height: 1.15;
+        max-width: min(120px, 32vw);
+        white-space: normal;
+        text-align: center;
+    }
+
+    .mobile-interact-btn:active {
+        transform: scale(0.96);
+    }
+
     .mobile-jump-btn {
         position: fixed;
         right: 35px;

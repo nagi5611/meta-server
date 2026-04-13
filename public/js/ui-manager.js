@@ -22,6 +22,10 @@ class UIManager {
         this._aircraftHudExit = null;
         /** @type {(() => void)|null} */
         this._aircraftHudCamera = null;
+        /** @type {HTMLElement|null} */
+        this.mobileInteractBtn = null;
+        /** @type {(() => void)|null} */
+        this._mobileInteractAction = null;
         this.init();
     }
 
@@ -124,6 +128,55 @@ class UIManager {
         this.worldLoadPct = document.getElementById('world-load-pct');
 
         this.menuBar = document.getElementById('menu-bar');
+
+        this.mobileInteractBtn = document.getElementById('mobile-interact-btn');
+        if (this.mobileInteractBtn && !this.mobileInteractBtn.dataset.wiredInteract) {
+            this.mobileInteractBtn.dataset.wiredInteract = '1';
+            const triggerInteract = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this._mobileInteractAction) this._mobileInteractAction();
+            };
+            this.mobileInteractBtn.addEventListener('click', triggerInteract);
+            this.mobileInteractBtn.addEventListener('touchend', triggerInteract, { passive: false });
+        }
+    }
+
+    /**
+     * モバイル用インタラクトボタン押下時（E キー相当）
+     * @param {(() => void) | null} fn
+     */
+    setMobileInteractAction(fn) {
+        this._mobileInteractAction = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * モバイル用インタラクトボタンを表示（GLB アニメ近接など）
+     * @param {string} [hintLabel] - title / aria-label 用（ワールド設定のラベル）
+     */
+    showMobileInteractButton(hintLabel) {
+        if (!this.mobileInteractBtn) return;
+        if (this.teleportPrompt) this.teleportPrompt.style.display = 'none';
+        const hint = (hintLabel && String(hintLabel).trim()) || 'アニメーションを再生';
+        if (this.mobileInteractBtn.style.display === 'block' && this.mobileInteractBtn.getAttribute('title') === hint) {
+            return;
+        }
+        this.mobileInteractBtn.textContent = 'インタラクト';
+        this.mobileInteractBtn.setAttribute('title', hint);
+        this.mobileInteractBtn.setAttribute('aria-label', hint);
+        this.mobileInteractBtn.setAttribute('aria-hidden', 'false');
+        this.mobileInteractBtn.style.display = 'block';
+    }
+
+    /**
+     * モバイル用インタラクトボタンを隠す
+     */
+    hideMobileInteractButton() {
+        if (!this.mobileInteractBtn) return;
+        this.mobileInteractBtn.style.display = 'none';
+        this.mobileInteractBtn.setAttribute('aria-hidden', 'true');
+        this.mobileInteractBtn.removeAttribute('title');
+        this.mobileInteractBtn.removeAttribute('aria-label');
     }
 
     /**
@@ -191,7 +244,7 @@ class UIManager {
      */
     showTeleportPrompt(destinationName) {
         if (!this.teleportPrompt) return;
-
+        this.hideMobileInteractButton();
         this.teleportPrompt.textContent = `テレポート - ${destinationName}`;
         this.teleportPrompt.style.display = 'block';
     }
@@ -203,6 +256,7 @@ class UIManager {
         if (!this.teleportPrompt) return;
 
         this.teleportPrompt.style.display = 'none';
+        this.hideMobileInteractButton();
     }
 
     /**
@@ -210,7 +264,7 @@ class UIManager {
      */
     showTaikoPrompt() {
         if (!this.teleportPrompt) return;
-
+        this.hideMobileInteractButton();
         this.teleportPrompt.textContent = '[E] 太鼓をたたく';
         this.teleportPrompt.style.display = 'block';
     }
@@ -220,7 +274,7 @@ class UIManager {
      */
     showPdfPrompt() {
         if (!this.teleportPrompt) return;
-
+        this.hideMobileInteractButton();
         this.teleportPrompt.textContent = 'PDFを表示';
         this.teleportPrompt.style.display = 'block';
     }
@@ -231,6 +285,7 @@ class UIManager {
      */
     showGlbAnimInteractPrompt(label) {
         if (!this.teleportPrompt) return;
+        this.hideMobileInteractButton();
         this.teleportPrompt.textContent = label || '[E] アニメーション';
         this.teleportPrompt.style.display = 'block';
     }
@@ -339,6 +394,7 @@ class UIManager {
      */
     showAircraftBoardPrompt(label, mode = 'pilot') {
         if (!this.aircraftBoardPrompt) return;
+        this.hideMobileInteractButton();
         const name = (label || '').trim();
         const verb = mode === 'passenger' ? '同乗する' : '操縦する';
         const t = name ? `${name} — ${verb}` : verb;

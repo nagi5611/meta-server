@@ -237,6 +237,9 @@ class MetaverseApp {
             if (!zone || !zone.model) return;
             this.sceneManager.playGlbInteractAnimation(zone.model, zone.clipName);
         });
+        this.uiManager.setMobileInteractAction(() => {
+            if (this.teleportManager) this.teleportManager.handleTeleport();
+        });
 
         // Load initial world: URL ?world= / #world= が有効なら優先、なければ lobby または先頭
         const defaultWorldId = this.worldManager.getWorld('lobby') ? 'lobby' : (this.worldManager.getAllWorlds()[0]?.id || 'lobby');
@@ -1006,7 +1009,11 @@ class MetaverseApp {
                 this.uiManager.showPdfPrompt();
             } else if (this.teleportManager && this.teleportManager.nearestGlbInteractZone) {
                 this.uiManager.hideAircraftBoardPrompt();
-                this.uiManager.showGlbAnimInteractPrompt(this.teleportManager.nearestGlbInteractZone.label);
+                if (this.isMobileMode) {
+                    this.uiManager.showMobileInteractButton(this.teleportManager.nearestGlbInteractZone.label);
+                } else {
+                    this.uiManager.showGlbAnimInteractPrompt(this.teleportManager.nearestGlbInteractZone.label);
+                }
             } else if (this.teleportManager && this.teleportManager.nearestZone) {
                 this.uiManager.hideAircraftBoardPrompt();
                 this.uiManager.showTeleportPrompt(this.teleportManager.nearestZone.label);
