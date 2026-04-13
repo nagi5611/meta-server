@@ -14,6 +14,7 @@ import * as mediasoup from 'mediasoup';
 import { initDb, verifyStudent, verifyTeacher, registerStudent, registerTeacher, listStudents, listTeachers, updateStudent, updateTeacher, deleteStudent, deleteTeacher } from './db/users.js';
 import { initUserSessionsDb, insertSession, getLatestSessionByUsername, getSessionsPaginated } from './db/user-sessions.js';
 import { STORAGE_PATHS, validateAndPrepareStoragePaths } from './config/storage-paths.js';
+import { MODEL_UPLOAD_MAX_BYTES } from './lib/model-upload-max-bytes.js';
 import {
     runGlbTextureResizeQueued,
     getModelUploadQueueStats,
@@ -608,7 +609,7 @@ const MODEL_UPLOAD_EXTS = new Set(['.glb', '.obj', '.mtl', '.png', '.jpg', '.jpe
 /** 3D モデル一式アップロード（GLB 大容量など）。nginx client_max_body_size と揃える */
 const upload = multer({
     storage: uploadStorage,
-    limits: { fileSize: 500 * 1024 * 1024 },
+    limits: { fileSize: MODEL_UPLOAD_MAX_BYTES },
     fileFilter: (req, file, cb) => {
         const ext = path.extname(file.originalname || '').toLowerCase();
         cb(null, MODEL_UPLOAD_EXTS.has(ext));
