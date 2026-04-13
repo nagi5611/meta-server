@@ -63,6 +63,10 @@ class SceneManager {
         this.animatedModels = []; // Track models with animations
         this.teleporters = []; // Track teleporter models
         this.taikos = []; // Track taiko drum models
+        /** @type {{ model: THREE.Object3D, mixer: THREE.AnimationMixer }[]} ワールド GLB 用 AnimationMixer */
+        this._gltfMixers = [];
+        /** @type {{ model: THREE.Object3D, clipName: string, radius: number, label: string, access: string }[]} TeleportManager 登録用 */
+        this._glbInteractConfigs = [];
         /** @type {object[]} 飛行機スロット（ワールドロード時に登録） */
         this.aircraftSlots = [];
         /** Lights added for current world (removed on clearWorld) */
@@ -707,6 +711,8 @@ class SceneManager {
                 this._registerAircraftSlot(model, config.aircraft, position);
             }
 
+            this._registerGlbWorldInteract(model, config);
+
             loadedCount++;
             console.log(`Loaded model ${loadedCount}/${modelConfigs.length}: ${modelPath}`);
             console.log(`  Position: (${position.x}, ${position.y}, ${position.z})`);
@@ -922,7 +928,12 @@ class SceneManager {
                     const loader = createGLTFLoaderWithDraco();
                     loader.load(
                         url,
-                        (gltf) => resolve(gltf.scene),
+                        (gltf) => {
+                            const root = gltf.scene;
+                            const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
+                            if (anims.length) root.userData.gltfClips = anims;
+                            resolve(root);
+                        },
                         (xhr) => {
                             const denom = xhr.total > 0 ? xhr.total : fileBudget;
                             const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
@@ -1475,6 +1486,9 @@ class SceneManager {
         this.taikos = [];
         this.aircraftSlots = [];
         this.animatedModels = [];
+        this._gltfMixers.forEach(({ mixer }) => mixer.stopAllAction());
+        this._gltfMixers = [];
+        this._glbInteractConfigs = [];
 
         console.log('World cleared');
     }
@@ -1528,6 +1542,85 @@ class SceneManager {
      */
     getTaikos() {
         return this.taikos;
+    }
+
+    /**
+     * TeleportManager に渡す GLB インタラクト登録情報（worldId は呼び出し側で付与）
+     * @returns {{ model: THREE.Object3D, clipName: string, radius: number, label: string, access: string }[]}
+     */
+    getGlbInteractConfigs() {
+        return this._glbInteractConfigs.map((c) => ({
+            model: c.model,
+            clipName: c.clipName,
+            radius: c.radius,
+            label: c.label,
+            access: c.access
+        }));
+    }
+
+    /**
+     * 近接インタラクトで GLB のクリップを再生する
+     * @param {THREE.Object3D} model
+     * @param {string} clipName
+     */
+    playGlbInteractAnimation(model, clipName) {
+        const mixer = model && model.userData ? model.userData.worldGltfMixer : null;
+        const clips = model && model.userData ? model.userData.gltfClips : null;
+        if (!mixer || !clips || !clips.length) return;
+        const cn = String(clipName || '').trim();
+        const clip = clips.find((c) => c.name === cn);
+        if (!clip) return;
+        mixer.stopAllAction();
+        const act = mixer.clipAction(clip);
+        act.reset();
+        act.setLoop(THREE.LoopOnce, 1);
+        act.clampWhenFinished = true;
+        act.fadeIn(0.12).play();
+    }
+
+    /**
+     * ワールド GLB の AnimationMixer を進める
+     * @param {number} deltaSeconds
+     */
+    updateGltfAnimationMixers(deltaSeconds) {
+        const d = typeof deltaSeconds === 'number' && Number.isFinite(deltaSeconds)
+            ? Math.min(0.1, Math.max(0, deltaSeconds))
+            : 0;
+        this._gltfMixers.forEach(({ mixer }) => mixer.update(d));
+    }
+
+    /**
+     * glbInteract 設定に応じてミキサーと近接登録用エントリを作る
+     * @param {THREE.Object3D} model
+     * @param {object} config
+     */
+    _registerGlbWorldInteract(model, config) {
+        const gi = config && config.glbInteract;
+        if (!gi) return;
+        const clipName = String(gi.clipName || '').trim();
+        if (!clipName) return;
+        const clips = model.userData.gltfClips;
+        if (!clips || !clips.length) {
+            console.warn(`[SceneManager] glbInteract がありますが GLB にアニメーションがありません: ${config.path || ''}`);
+            return;
+        }
+        if (!clips.some((c) => c.name === clipName)) {
+            console.warn(`[SceneManager] glbInteract.clipName「${clipName}」が GLB に存在しません`);
+            return;
+        }
+        const mixer = new THREE.AnimationMixer(model);
+        model.userData.worldGltfMixer = mixer;
+        this._gltfMixers.push({ model, mixer });
+        const rad = typeof gi.radius === 'number' && Number.isFinite(gi.radius) && gi.radius > 0 ? gi.radius : 3;
+        const labelRaw = gi.label != null ? String(gi.label).trim() : '';
+        const label = labelRaw || `[E] ${clipName}`;
+        this._glbInteractConfigs.push({
+            model,
+            clipName,
+            radius: rad,
+            label,
+            access: gi.access || 'public'
+        });
     }
 
     onWindowResize() {

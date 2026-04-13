@@ -226,6 +226,16 @@ class UIManager {
     }
 
     /**
+     * GLB アニメーション用インタラクト（文言はワールド設定の label をそのまま表示）
+     * @param {string} label
+     */
+    showGlbAnimInteractPrompt(label) {
+        if (!this.teleportPrompt) return;
+        this.teleportPrompt.textContent = label || '[E] アニメーション';
+        this.teleportPrompt.style.display = 'block';
+    }
+
+    /**
      * Update player count display
      * @param {number} count - Number of players
      */

@@ -233,6 +233,10 @@ class MetaverseApp {
             document.exitPointerLock();
             this.characterController.resetMovement();
         });
+        this.teleportManager.setGlbInteractPlayHandler((zone) => {
+            if (!zone || !zone.model) return;
+            this.sceneManager.playGlbInteractAnimation(zone.model, zone.clipName);
+        });
 
         // Load initial world: URL ?world= / #world= が有効なら優先、なければ lobby または先頭
         const defaultWorldId = this.worldManager.getWorld('lobby') ? 'lobby' : (this.worldManager.getAllWorlds()[0]?.id || 'lobby');
@@ -249,6 +253,7 @@ class MetaverseApp {
                 // Setup teleport zones after world is loaded
                 this.updateTeleportZones();
                 this.updateTaikoZones();
+                this.updateGlbInteractZones();
                 resolve();
             });
         });
@@ -732,6 +737,23 @@ class MetaverseApp {
         console.log(`Setting up ${taikos.length} taiko zones for world: ${currentWorldId}`);
     }
 
+    updateGlbInteractZones() {
+        const currentWorldId = this.worldManager.getCurrentWorldId();
+        this.teleportManager.clearGlbInteractZonesForWorld(currentWorldId);
+        const cfgs = this.sceneManager.getGlbInteractConfigs();
+        cfgs.forEach((cfg) => {
+            this.teleportManager.addGlbInteractZone({
+                model: cfg.model,
+                radius: cfg.radius,
+                clipName: cfg.clipName,
+                label: cfg.label,
+                worldId: currentWorldId,
+                access: cfg.access
+            });
+        });
+        console.log(`Setting up ${cfgs.length} GLB interact zones for world: ${currentWorldId}`);
+    }
+
     async onWorldChanged(world) {
         console.log(`World changed to: ${world.id}`);
 
@@ -763,6 +785,7 @@ class MetaverseApp {
         // Update teleport and taiko zones for new world
         this.updateTeleportZones();
         this.updateTaikoZones();
+        this.updateGlbInteractZones();
 
         // VC: Change to new room (cleanup old, join new)
         if (this.voiceChatManager && this.voiceChatManager.isJoined) {
@@ -815,6 +838,7 @@ class MetaverseApp {
             });
             this.updateTeleportZones();
             this.updateTaikoZones();
+            this.updateGlbInteractZones();
             this.networkManager.changeWorld(worldId);
             // VC room change is handled by vc-room-changed from server
         }
@@ -980,6 +1004,9 @@ class MetaverseApp {
             } else if (this.nearbyPdfPath) {
                 this.uiManager.hideAircraftBoardPrompt();
                 this.uiManager.showPdfPrompt();
+            } else if (this.teleportManager && this.teleportManager.nearestGlbInteractZone) {
+                this.uiManager.hideAircraftBoardPrompt();
+                this.uiManager.showGlbAnimInteractPrompt(this.teleportManager.nearestGlbInteractZone.label);
             } else if (this.teleportManager && this.teleportManager.nearestZone) {
                 this.uiManager.hideAircraftBoardPrompt();
                 this.uiManager.showTeleportPrompt(this.teleportManager.nearestZone.label);
@@ -997,6 +1024,7 @@ class MetaverseApp {
 
         // Always update animations and render (even when hidden for smooth transition)
         this.sceneManager.updateAnimations();
+        this.sceneManager.updateGltfAnimationMixers(deltaTime);
         if (this.playerManager) this.playerManager.updateAnimations(deltaTime);
 
         // Update chat (emoji positions)

@@ -34,6 +34,11 @@ class TeleportManager {
         this.teleportCallback = null;
         /** @type {(() => boolean)|null} E キー時に true を返すとテレポート等を行わない（飛行機搭乗用） */
         this._tryAircraftBoard = null;
+        /** @type {((zone: { model: import('three').Object3D, clipName: string }) => void) | null} */
+        this._glbInteractPlayHandler = null;
+        /** @type {{ model: import('three').Object3D, radius: number, clipName: string, label: string, worldId: string, access: string }[]} */
+        this.glbInteractZones = [];
+        this.nearestGlbInteractZone = null;
 
         // Listen for E key
         this.setupKeyListener();
@@ -89,6 +94,39 @@ class TeleportManager {
      */
     setAircraftBoardHandler(fn) {
         this._tryAircraftBoard = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * GLB 近接インタラクトで E キーが押されたとき、再生処理へ渡す
+     * @param {((zone: { model: import('three').Object3D, clipName: string }) => void) | null} fn
+     */
+    setGlbInteractPlayHandler(fn) {
+        this._glbInteractPlayHandler = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * ワールド用 GLB インタラクトゾーンを登録（同一 worldId の既存分は呼び出し側で削除）
+     * @param {{ model: import('three').Object3D, radius: number, clipName: string, label: string, worldId: string, access?: string }} zone
+     */
+    addGlbInteractZone(zone) {
+        if (!zone || !zone.model || !zone.clipName || !zone.worldId) return;
+        this.glbInteractZones.push({
+            model: zone.model,
+            radius: typeof zone.radius === 'number' && Number.isFinite(zone.radius) ? zone.radius : 3,
+            clipName: String(zone.clipName),
+            label: zone.label || `[E] ${zone.clipName}`,
+            worldId: zone.worldId,
+            access: zone.access || 'public'
+        });
+    }
+
+    /**
+     * 指定ワールドの GLB インタラクトゾーンを削除
+     * @param {string} worldId
+     */
+    clearGlbInteractZonesForWorld(worldId) {
+        this.glbInteractZones = this.glbInteractZones.filter((z) => z.worldId !== worldId);
+        this.nearestGlbInteractZone = null;
     }
 
     addTaikoZone(zone) {
@@ -201,6 +239,28 @@ class TeleportManager {
             }
         });
         this.nearestTaikoZone = closestTaiko || null;
+
+        let closestGlb = null;
+        let closestGlbDist = Infinity;
+        const wp = playerPosition;
+        this.glbInteractZones.forEach((z) => {
+            if (z.worldId !== currentWorldId) return;
+            if (!canUseTeleporter(z.access, this.userRole)) return;
+            if (!z.model) return;
+            z.model.updateMatrixWorld(true);
+            const p = z._worldPos || (z._worldPos = new THREE.Vector3());
+            z.model.getWorldPosition(p);
+            const dx = wp.x - p.x;
+            const dy = wp.y - p.y;
+            const dz = wp.z - p.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            const rad = z.radius || 3;
+            if (dist < rad && dist < closestGlbDist) {
+                closestGlbDist = dist;
+                closestGlb = z;
+            }
+        });
+        this.nearestGlbInteractZone = closestGlb || null;
     }
 
     /**
@@ -239,7 +299,7 @@ class TeleportManager {
         if (this._tryAircraftBoard && this._tryAircraftBoard()) {
             return;
         }
-        // 優先度: 太鼓 > PDF > テレポート
+        // 優先度: 太鼓 > PDF > GLBインタラクト > テレポート
         if (this.nearestTaikoZone && this.openTaikoGame) {
             this.uiManager.hideTeleportPrompt();
             this.openTaikoGame(this.nearestTaikoZone);
@@ -249,6 +309,11 @@ class TeleportManager {
         if (pdfPath && this.openPdfViewer) {
             this.uiManager.hideTeleportPrompt();
             this.openPdfViewer(pdfPath);
+            return;
+        }
+        if (this.nearestGlbInteractZone && this._glbInteractPlayHandler) {
+            this.uiManager.hideTeleportPrompt();
+            this._glbInteractPlayHandler(this.nearestGlbInteractZone);
             return;
         }
         if (!this.nearestZone) return;
@@ -276,6 +341,8 @@ class TeleportManager {
         this.lastAutoTeleportZoneKey = '';
         this.lastContactTeleportZoneKey = '';
         this.clearTaikoZones();
+        this.glbInteractZones = [];
+        this.nearestGlbInteractZone = null;
         this.uiManager.hideTeleportPrompt();
     }
 

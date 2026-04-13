@@ -54,6 +54,9 @@ let objectListExpanded = { lights: false, models: false, pdfs: false }; // オ�
 let worldEditorObjectClipboard = null;
 /** 貼り付け時に X 方向へずらす距離（m） */
 const WORLD_EDITOR_PASTE_OFFSET_X = 1;
+/** エディタ上の GLB プレビュー用 AnimationMixer（dispose / 破棄時に削除） */
+const editorGltfPreviewMixers = new Set();
+let editorAnimLastT = typeof performance !== 'undefined' ? performance.now() : 0;
 /** ワールド切り替えの非同期競合を防ぐ（新しい選択だけ UI を確定させる） */
 let worldSelectLoadGen = 0;
 let editorGround = null; // 編集プレビュー用の床メッシュ（表示切替用）
@@ -255,9 +258,34 @@ function getEditorPixelRatio() {
 }
 
 /**
+ * エディタ上で GLB のクリップを試聴再生する
+ * @param {THREE.Object3D} model
+ * @param {string} clipName
+ */
+function playEditorGltfClipPreview(model, clipName) {
+    if (!model || !model.userData.editorGltfClips) return;
+    const clips = model.userData.editorGltfClips;
+    const cn = String(clipName || '').trim();
+    const clip = clips.find((c) => c.name === cn);
+    if (!clip) return;
+    let mixer = model.userData.editorGltfMixer;
+    if (!mixer) {
+        mixer = new THREE.AnimationMixer(model);
+        model.userData.editorGltfMixer = mixer;
+        editorGltfPreviewMixers.add(mixer);
+    }
+    mixer.stopAllAction();
+    const act = mixer.clipAction(clip);
+    act.reset();
+    act.setLoop(THREE.LoopOnce, 1);
+    act.clampWhenFinished = true;
+    act.fadeIn(0.12).play();
+}
+
+/**
  * ワールド用モデル 1 件を読み込み（サイズ・ポリゴン上限あり）
  * @param {{ path: string, mtlPath?: string, chunkManifest?: string }} config
- * @returns {Promise<{ model: THREE.Object3D, triangleCount: number }>}
+ * @returns {Promise<{ model: THREE.Object3D, triangleCount: number, gltfAnimations?: THREE.AnimationClip[] }>}
  */
 async function loadModelFromConfig(config) {
     const path = config.path || '';
@@ -308,7 +336,7 @@ async function loadModelFromConfig(config) {
                 `ポリゴンが多すぎます（約 ${totalTris.toLocaleString()} 三角）。上限約 ${MODEL_MAX_TRIANGLES_TOTAL.toLocaleString()} 三角です。`
             );
         }
-        return { model: anchor, triangleCount: totalTris };
+        return { model: anchor, triangleCount: totalTris, gltfAnimations: [] };
     }
 
     const url = buildEncodedModelUrl(path);
@@ -324,7 +352,18 @@ async function loadModelFromConfig(config) {
         if (!isObjPath(path)) {
             const gltfLoader = new GLTFLoader();
             gltfLoader.setDRACOLoader(getEditorDracoLoader());
-            gltfLoader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+            gltfLoader.load(
+                url,
+                (gltf) => {
+                    const root = gltf.scene;
+                    const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
+                    if (anims.length) root.userData.editorGltfClips = anims;
+                    else delete root.userData.editorGltfClips;
+                    resolve(root);
+                },
+                undefined,
+                reject
+            );
             return;
         }
 
@@ -363,7 +402,8 @@ async function loadModelFromConfig(config) {
             `ポリゴンが多すぎます（約 ${triangleCount.toLocaleString()} 三角）。上限約 ${MODEL_MAX_TRIANGLES_TOTAL.toLocaleString()} 三角です。`
         );
     }
-    return { model, triangleCount };
+    const gltfAnimations = model.userData.editorGltfClips || [];
+    return { model, triangleCount, gltfAnimations };
 }
 
 /**
@@ -387,6 +427,12 @@ function applyModelShadowByTriangleCount(model, triangleCount) {
  */
 function disposeObjectTree(obj) {
     obj.traverse((o) => {
+        if (o.userData.editorGltfMixer) {
+            o.userData.editorGltfMixer.stopAllAction();
+            editorGltfPreviewMixers.delete(o.userData.editorGltfMixer);
+            delete o.userData.editorGltfMixer;
+        }
+        delete o.userData.editorGltfClips;
         if (o.geometry) o.geometry.dispose();
         if (o.material) {
             const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -969,6 +1015,7 @@ function getWorldEditorClipboardPayloadFromSelection() {
                 chaseOffset: { x: ch.x, y: ch.y, z: ch.z }
             };
         }
+        if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
         if (!isObjPath(c.path || '')) delete c.mtlPath;
         return { kind: 'model', data: c };
     }
@@ -1306,6 +1353,74 @@ function updateVehicleAircraftFieldsVisibility() {
     wrap.style.display = sel.value === 'airplane' ? 'block' : 'none';
 }
 
+/**
+ * GLB クリップ一覧とインタラクト設定 UI を選択オブジェクトに合わせる
+ * @param {THREE.Object3D} obj
+ */
+function updateGlbAnimInteractPanel(obj) {
+    const block = document.getElementById('object-props-glb-anim');
+    const listEl = document.getElementById('obj-glb-anim-list');
+    const hintEl = document.getElementById('obj-glb-anim-hint');
+    const enableEl = document.getElementById('obj-glb-interact-enable');
+    const fieldsEl = document.getElementById('obj-glb-interact-fields');
+    const clipSel = document.getElementById('obj-glb-interact-clip');
+    if (!block || !listEl || !enableEl || !fieldsEl || !clipSel) return;
+    if (!obj || !obj.userData.config) {
+        block.style.display = 'none';
+        return;
+    }
+    const c = obj.userData.config;
+    const path = String(c.path || '');
+    const isSingleGlb = path.toLowerCase().endsWith('.glb') && !String(c.chunkManifest || '').trim();
+    const clips = obj.userData.editorGltfClips;
+    if (!isSingleGlb || !clips || !clips.length) {
+        block.style.display = 'none';
+        return;
+    }
+    block.style.display = '';
+    if (hintEl) hintEl.style.display = '';
+    listEl.innerHTML = '';
+    clips.forEach((clip) => {
+        const row = document.createElement('div');
+        row.className = 'prop-row';
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '8px';
+        row.style.flexWrap = 'wrap';
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'prop-label';
+        nameSpan.style.margin = '0';
+        nameSpan.style.flex = '1';
+        nameSpan.style.minWidth = '120px';
+        nameSpan.textContent = clip.name || '(無名)';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'インタラクト相当で再生';
+        btn.dataset.glbPreviewClip = clip.name || '';
+        row.appendChild(nameSpan);
+        row.appendChild(btn);
+        listEl.appendChild(row);
+    });
+    const gi = c.glbInteract;
+    enableEl.checked = !!(gi && gi.clipName);
+    fieldsEl.style.display = enableEl.checked ? '' : 'none';
+    clipSel.innerHTML = '';
+    clips.forEach((clip) => {
+        const opt = document.createElement('option');
+        const nm = clip.name || '';
+        opt.value = nm;
+        opt.textContent = nm || '(無名)';
+        clipSel.appendChild(opt);
+    });
+    const curClip = gi && gi.clipName ? String(gi.clipName) : (clips[0] ? String(clips[0].name || '') : '');
+    if (curClip && Array.from(clipSel.options).some((o) => o.value === curClip)) clipSel.value = curClip;
+    else if (clipSel.options.length) clipSel.selectedIndex = 0;
+    document.getElementById('obj-glb-interact-radius').value = gi && gi.radius != null ? gi.radius : 3;
+    document.getElementById('obj-glb-interact-label').value = gi && gi.label != null ? gi.label : '';
+    const accEl = document.getElementById('obj-glb-interact-access');
+    if (accEl) accEl.value = gi && gi.access ? gi.access : 'public';
+}
+
 function updateObjectPanel(obj) {
     if (!obj) return;
     const c = obj.userData.config || obj.userData.pdfConfig;
@@ -1386,6 +1501,7 @@ function updateObjectPanel(obj) {
             document.getElementById('obj-ac-chase-z').value = 12;
         }
         updateVehicleAircraftFieldsVisibility();
+        updateGlbAnimInteractPanel(obj);
     } else if (obj.userData.pdfConfig) {
         const tp = c.teleporter;
         document.getElementById('obj-teleporter').checked = !!tp;
@@ -1396,6 +1512,8 @@ function updateObjectPanel(obj) {
         document.getElementById('obj-tp-access').value = tp && tp.access ? tp.access : 'public';
         document.getElementById('obj-tp-auto-teleport').checked = !!(tp && tp.autoTeleport);
         document.getElementById('obj-tp-auto-contact-teleport').checked = !!(tp && tp.autoTeleportOnContact);
+        const gb = document.getElementById('object-props-glb-anim');
+        if (gb) gb.style.display = 'none';
     }
 }
 
@@ -1521,6 +1639,25 @@ function syncObjectFromPanel(opts) {
         } else {
             delete c.aircraft;
         }
+        const glbEn = document.getElementById('obj-glb-interact-enable');
+        if (glbEn && glbEn.checked) {
+            const clipEl = document.getElementById('obj-glb-interact-clip');
+            const clipName = clipEl && clipEl.value ? String(clipEl.value).trim() : '';
+            if (clipName) {
+                const accEl = document.getElementById('obj-glb-interact-access');
+                const labelRaw = (document.getElementById('obj-glb-interact-label').value || '').trim();
+                c.glbInteract = {
+                    clipName,
+                    radius: parseFloat(document.getElementById('obj-glb-interact-radius').value) || 3,
+                    label: labelRaw,
+                    access: accEl && accEl.value ? accEl.value : 'public'
+                };
+            } else {
+                delete c.glbInteract;
+            }
+        } else {
+            delete c.glbInteract;
+        }
     } else if (selectedObject.userData.pdfConfig) {
         if (document.getElementById('obj-teleporter').checked) {
             const accessEl = document.getElementById('obj-tp-access');
@@ -1607,6 +1744,7 @@ function buildWorldsFromScene() {
                             chaseOffset: { x: ch.x, y: ch.y, z: ch.z }
                         };
                     }
+                    if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
                     if (!isObjPath(c.path || '')) delete c.mtlPath;
                     w.models.push(c);
                 }
@@ -2022,6 +2160,11 @@ async function loadWorldIntoScene(world) {
 
 function animate() {
     requestAnimationFrame(animate);
+    const now = performance.now();
+    let dt = (now - editorAnimLastT) / 1000;
+    editorAnimLastT = now;
+    if (dt > 0.1) dt = 0.1;
+    editorGltfPreviewMixers.forEach((m) => m.update(dt));
     lightHelpers.forEach(({ light, mesh }) => {
         if (mesh) light.position.copy(mesh.position);
     });
@@ -2852,6 +2995,23 @@ function bindEvents() {
         document.getElementById(acId)?.addEventListener('change', syncObjectFromPanel);
     }
 
+    document.getElementById('object-props')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-glb-preview-clip]');
+        if (!btn || !selectedObject || !selectedObject.userData.config) return;
+        const name = btn.getAttribute('data-glb-preview-clip');
+        playEditorGltfClipPreview(selectedObject, name);
+    });
+    document.getElementById('obj-glb-interact-enable')?.addEventListener('change', () => {
+        const fields = document.getElementById('obj-glb-interact-fields');
+        const en = document.getElementById('obj-glb-interact-enable');
+        if (fields && en) fields.style.display = en.checked ? '' : 'none';
+        syncObjectFromPanel();
+    });
+    document.getElementById('obj-glb-interact-clip')?.addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-glb-interact-radius')?.addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-glb-interact-label')?.addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-glb-interact-access')?.addEventListener('change', syncObjectFromPanel);
+
     document.getElementById('btn-save').addEventListener('click', async () => {
         const status = document.getElementById('save-status');
         status.textContent = '';
@@ -3380,6 +3540,19 @@ function bindEvents() {
         edgeEl.disabled = !!(skipTexEl && skipTexEl.checked);
     }
 
+    /** GLB オブジェクト分割 ON のときは空間チャンクをスキップ扱いに固定する */
+    function syncModelUploadSplitObjectsChunkRow() {
+        const splitEl = document.getElementById('model-upload-split-objects');
+        const chunkEl = document.getElementById('model-upload-skip-chunk');
+        if (!chunkEl) return;
+        if (splitEl && splitEl.checked) {
+            chunkEl.checked = true;
+            chunkEl.disabled = true;
+        } else {
+            chunkEl.disabled = false;
+        }
+    }
+
     /** アップロード種別に応じてモーダル内の説明と 3D 専用ブロックの表示を切り替える */
     function syncModelUploadKindUI() {
         const kind = document.querySelector('input[name="model-upload-kind"]:checked')?.value || 'model';
@@ -3395,6 +3568,7 @@ function bindEvents() {
         if (hHdr) hHdr.hidden = kind !== 'hdr';
         if (textureEdgeRow) textureEdgeRow.hidden = kind !== 'model';
         syncModelUploadTextureEdgeControlState();
+        syncModelUploadSplitObjectsChunkRow();
     }
 
     /** PDF アップロード結果をパネルと（モーダル表示中なら）モーダル下部にも出す */
@@ -3428,6 +3602,9 @@ function bindEvents() {
     }
     document.getElementById('model-upload-skip-texture-resize')?.addEventListener('change', () => {
         syncModelUploadTextureEdgeControlState();
+    });
+    document.getElementById('model-upload-split-objects')?.addEventListener('change', () => {
+        syncModelUploadSplitObjectsChunkRow();
     });
     syncModelUploadKindUI();
 
@@ -3489,6 +3666,7 @@ function bindEvents() {
      * @param {boolean} [skipSpatialChunk] true のとき GLB の空間チャンク分割をサーバで行わない
      * @param {boolean} [skipTextureResize] true のとき GLB のテクスチャ長辺縮小を行わない
      * @param {string} [textureMaxEdgeStr] 縮小する場合の長辺上限（px）の数字文字列
+     * @param {boolean} [splitGlbByObjects] true のとき GLB をオブジェクト単位で複数ファイルに分割
      * @returns {Promise<{ status: number, text: string, json: object|null }>}
      */
     function postAdminModelUploadXHR(
@@ -3498,7 +3676,8 @@ function bindEvents() {
         onUploadBytesSent,
         skipSpatialChunk,
         skipTextureResize,
-        textureMaxEdgeStr
+        textureMaxEdgeStr,
+        splitGlbByObjects
     ) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
@@ -3529,6 +3708,7 @@ function bindEvents() {
             if (skipSpatialChunk) form.append('skipSpatialChunk', '1');
             if (skipTextureResize) form.append('skipTextureResize', '1');
             else if (textureMaxEdgeStr) form.append('textureMaxEdge', textureMaxEdgeStr);
+            if (splitGlbByObjects) form.append('splitGlbByObjects', '1');
             xhr.send(form);
         });
     }
@@ -3559,6 +3739,7 @@ function bindEvents() {
      * @param {boolean} [skipSpatialChunk]
      * @param {boolean} [skipTextureResize]
      * @param {string} [textureMaxEdgeStr]
+     * @param {boolean} [splitGlbByObjects]
      */
     async function postAdminModelUploadWithPhaseCleanup(
         url,
@@ -3568,7 +3749,8 @@ function bindEvents() {
         fileName,
         skipSpatialChunk,
         skipTextureResize,
-        textureMaxEdgeStr
+        textureMaxEdgeStr,
+        splitGlbByObjects
     ) {
         try {
             return await postAdminModelUploadXHR(
@@ -3578,7 +3760,8 @@ function bindEvents() {
                 onModelUploadBytesSentIfGlb(ui, fileName, skipTextureResize),
                 skipSpatialChunk,
                 skipTextureResize,
-                textureMaxEdgeStr
+                textureMaxEdgeStr,
+                splitGlbByObjects
             );
         } finally {
             if (activeGlbServerPhaseUi === ui) activeGlbServerPhaseUi = null;
@@ -3916,7 +4099,10 @@ function bindEvents() {
         }
 
         const skipChunkEl = document.getElementById('model-upload-skip-chunk');
-        const skipSpatialChunk = !!(skipChunkEl && skipChunkEl.checked);
+        const splitObjectsEl = document.getElementById('model-upload-split-objects');
+        const splitGlbByObjects = !!(splitObjectsEl && splitObjectsEl.checked);
+        const skipSpatialChunkParam =
+            !!(skipChunkEl && skipChunkEl.checked) || splitGlbByObjects;
         const skipTexEl = document.getElementById('model-upload-skip-texture-resize');
         const skipTextureResize = !!(skipTexEl && skipTexEl.checked);
         const textureMaxEdgeEl = document.getElementById('model-upload-texture-max-edge');
@@ -3953,6 +4139,12 @@ function bindEvents() {
             }
             if (uploadData.chunkManifest) {
                 msg += ` チャンク: worlds.json の models に chunkManifest「${uploadData.chunkManifest}」を追加してください（単体 GLB も保存済み）。`;
+            }
+            if (uploadData.objectSplit?.applied && Array.isArray(uploadData.splitFiles)) {
+                msg += ` オブジェクト分割: ${uploadData.splitFiles.length} ファイル（${uploadData.splitFiles.join('、')}）。`;
+            } else if (uploadData.objectSplit && uploadData.objectSplit.applied === false) {
+                const r = uploadData.objectSplit.reason || '';
+                msg += ` オブジェクト分割は未実施（${r}）。単体 GLB を保存しました。`;
             }
             if (uploadData.spatialChunkSkipped) {
                 msg += ' 空間チャンク分けはスキップしました（単体 GLB のみ。chunkManifest は不要です）。';
@@ -4001,9 +4193,10 @@ function bindEvents() {
                     },
                     ui,
                     name,
-                    skipSpatialChunk,
+                    skipSpatialChunkParam,
                     skipTextureResize,
-                    textureMaxEdgeStr
+                    textureMaxEdgeStr,
+                    splitGlbByObjects
                 );
 
                 if (xhrRes.status === 409) {
@@ -4033,9 +4226,10 @@ function bindEvents() {
                         },
                         ui,
                         name,
-                        skipSpatialChunk,
+                        skipSpatialChunkParam,
                         skipTextureResize,
-                        textureMaxEdgeStr
+                        textureMaxEdgeStr,
+                        splitGlbByObjects
                     );
                     if (xhrRes.status === 409) {
                         lastErr = '同名の上書き確認が必要: ' + name;
@@ -4052,7 +4246,15 @@ function bindEvents() {
                 }
                 const uploadData = xhrRes.json;
                 if (!uploadData.success || !uploadData.filename) throw new Error('アップロード応答が不正です');
-                const inv = [encodeAssetPathToUrlPath('models/' + uploadData.filename)];
+                /** @type {string[]} */
+                const inv = [];
+                if (uploadData.objectSplit?.applied && Array.isArray(uploadData.splitFiles)) {
+                    for (const f of uploadData.splitFiles) {
+                        inv.push(encodeAssetPathToUrlPath(`models/${f}`));
+                    }
+                } else {
+                    inv.push(encodeAssetPathToUrlPath('models/' + uploadData.filename));
+                }
                 if (uploadData.chunkManifest) {
                     inv.push(encodeAssetPathToUrlPath(uploadData.chunkManifest));
                 }
@@ -4104,9 +4306,10 @@ function bindEvents() {
                             },
                             ui,
                             name,
-                            skipSpatialChunk,
+                            skipSpatialChunkParam,
                             skipTextureResize,
-                            textureMaxEdgeStr
+                            textureMaxEdgeStr,
+                            splitGlbByObjects
                         );
                         if (xhrRes.status === 409) {
                             lastErr = '同名の上書き確認が必要: ' + name;
@@ -4121,7 +4324,15 @@ function bindEvents() {
                         if (!uploadDataRetry.success || !uploadDataRetry.filename) {
                             throw new Error('アップロード応答が不正です');
                         }
-                        const invR = [encodeAssetPathToUrlPath('models/' + uploadDataRetry.filename)];
+                        /** @type {string[]} */
+                        const invR = [];
+                        if (uploadDataRetry.objectSplit?.applied && Array.isArray(uploadDataRetry.splitFiles)) {
+                            for (const f of uploadDataRetry.splitFiles) {
+                                invR.push(encodeAssetPathToUrlPath(`models/${f}`));
+                            }
+                        } else {
+                            invR.push(encodeAssetPathToUrlPath('models/' + uploadDataRetry.filename));
+                        }
                         if (uploadDataRetry.chunkManifest) {
                             invR.push(encodeAssetPathToUrlPath(uploadDataRetry.chunkManifest));
                         }

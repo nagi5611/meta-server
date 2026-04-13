@@ -20,6 +20,7 @@ import {
     parseTextureMaxEdgeFromUploadBody,
 } from './lib/glb-texture-resize.js';
 import { runGlbSpatialChunkIfNeeded } from './lib/glb-spatial-chunk.js';
+import { runGlbObjectSplitFromBuffer, listObjectSplitFilesForBase } from './lib/glb-object-split.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -4374,7 +4375,13 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         return res.status(400).json({ error: 'File type not allowed for model upload' });
     }
     const destPath = path.join(MODELS_DIR, filename);
-    if (fs.existsSync(destPath) && req.query.confirm !== '1') {
+    const splitGlbByObjects = req.body?.splitGlbByObjects === '1' || req.body?.splitGlbByObjects === 'true';
+    const basenameNoExt = path.basename(filename, ext);
+    const existingObjSplits = ext === '.glb' ? listObjectSplitFilesForBase(MODELS_DIR, basenameNoExt) : [];
+    const uploadConflict =
+        fs.existsSync(destPath) ||
+        (splitGlbByObjects && ext === '.glb' && existingObjSplits.length > 0);
+    if (uploadConflict && req.query.confirm !== '1') {
         return res.status(409).json({ error: 'file_exists', filename });
     }
     try {
@@ -4384,7 +4391,10 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         let outBuffer = req.file.buffer;
         let textureResize = null;
         let spatialChunk = null;
+        let objectSplit = null;
+        let multiSplit = false;
         const skipSpatialChunk = req.body?.skipSpatialChunk === '1' || req.body?.skipSpatialChunk === 'true';
+        const skipSpatialChunkEffective = skipSpatialChunk || splitGlbByObjects;
         const skipTextureResize = req.body?.skipTextureResize === '1' || req.body?.skipTextureResize === 'true';
         let textureMaxEdgeParsed = null;
         if (ext === '.glb' && !skipTextureResize) {
@@ -4409,7 +4419,38 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
                 outBuffer = pipelineResult.buffer;
                 textureResize = pipelineResult.textureResize;
             }
-            if (!skipSpatialChunk) {
+            if (splitGlbByObjects && req.query.confirm === '1') {
+                for (const f of listObjectSplitFilesForBase(MODELS_DIR, basenameNoExt)) {
+                    try {
+                        fs.unlinkSync(path.join(MODELS_DIR, f));
+                    } catch (e) {
+                        console.warn('[upload] remove old objsplit:', f, e);
+                    }
+                }
+            }
+            if (splitGlbByObjects) {
+                try {
+                    objectSplit = await runGlbObjectSplitFromBuffer(outBuffer, {
+                        modelsDir: MODELS_DIR,
+                        baseFilename: filename,
+                    });
+                } catch (e) {
+                    console.warn('[upload] object split error:', e);
+                    objectSplit = { applied: false, reason: 'error', detail: String(e) };
+                }
+            }
+            multiSplit =
+                !!objectSplit?.applied &&
+                Array.isArray(objectSplit.partFiles) &&
+                objectSplit.partFiles.length >= 2;
+            if (multiSplit && fs.existsSync(destPath)) {
+                try {
+                    fs.unlinkSync(destPath);
+                } catch (e) {
+                    console.warn('[upload] remove mono glb before objsplit:', destPath, e);
+                }
+            }
+            if (!skipSpatialChunkEffective && !multiSplit) {
                 try {
                     spatialChunk = await runGlbSpatialChunkIfNeeded(outBuffer, {
                         modelsDir: MODELS_DIR,
@@ -4419,19 +4460,47 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
                     console.warn('[upload] spatial chunk error:', e);
                     spatialChunk = { applied: false, reason: 'error', detail: String(e) };
                 }
+            } else if (multiSplit) {
+                spatialChunk = { applied: false, reason: 'skipped_after_object_split' };
             } else {
-                spatialChunk = { applied: false, reason: 'skipped_by_client' };
+                spatialChunk = {
+                    applied: false,
+                    reason: splitGlbByObjects ? 'skipped_object_split_mode' : 'skipped_by_client',
+                };
             }
         }
-        fs.writeFileSync(destPath, outBuffer);
-        const invUrls = [publicAssetUrlForCache('models', filename)];
+        if (!multiSplit) {
+            fs.writeFileSync(destPath, outBuffer);
+        }
+        /** @type {string[]} */
+        const invUrls = [];
+        if (multiSplit) {
+            for (const f of objectSplit.partFiles) {
+                invUrls.push(publicAssetUrlForCache('models', f));
+            }
+        } else {
+            invUrls.push(publicAssetUrlForCache('models', filename));
+        }
         if (spatialChunk?.applied && Array.isArray(spatialChunk.chunkFiles)) {
             for (const f of spatialChunk.chunkFiles) {
                 invUrls.push(publicAssetUrlForCache('models', f));
             }
         }
         io.emit('asset-invalidate', { urls: invUrls });
-        const payload = { success: true, filename };
+        const payload = {
+            success: true,
+            filename: multiSplit ? objectSplit.partFiles[0] : filename,
+        };
+        if (multiSplit) {
+            payload.splitFiles = objectSplit.partFiles;
+            payload.objectSplit = { applied: true, partFiles: objectSplit.partFiles };
+        } else if (splitGlbByObjects && objectSplit && !objectSplit.applied) {
+            payload.objectSplit = {
+                applied: false,
+                reason: objectSplit.reason,
+                detail: objectSplit.detail,
+            };
+        }
         if (textureResize) {
             payload.textureResize = textureResize;
         }
@@ -4441,7 +4510,7 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
                 chunkFiles: spatialChunk.chunkFiles,
             };
         }
-        if (skipSpatialChunk && ext === '.glb') {
+        if (skipSpatialChunkEffective && ext === '.glb') {
             payload.spatialChunkSkipped = true;
         }
         if (skipTextureResize && ext === '.glb') {

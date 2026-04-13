@@ -519,6 +519,42 @@
                                             <label class="prop-label" for="obj-anim-z">Rot/Frame Z</label>
                                             <input type="number" id="obj-anim-z" class="prop-input num" step="0.01">
                                         </div>
+                                        <details class="block" id="object-props-glb-anim" style="display:none;margin-top:10px;">
+                                            <summary class="block-header">GLB スキン／ノードアニメーション</summary>
+                                            <div class="block-content">
+                                                <p class="hint" id="obj-glb-anim-hint" style="margin:4px 0 8px;">単体 GLB に含まれるクリップ名です。チャンク分割のみのモデルでは取得できません。</p>
+                                                <div id="obj-glb-anim-list" class="obj-glb-anim-list"></div>
+                                                <div class="prop-group-label" style="margin-top:10px;">メタバース内インタラクト（[E] / プロンプト）</div>
+                                                <div class="prop-row checkbox-row">
+                                                    <input type="checkbox" id="obj-glb-interact-enable" class="prop-checkbox">
+                                                    <label class="prop-label" for="obj-glb-interact-enable">接近時にインタラクトで再生</label>
+                                                </div>
+                                                <div id="obj-glb-interact-fields" style="display:none;">
+                                                    <div class="prop-row">
+                                                        <label class="prop-label" for="obj-glb-interact-clip">再生クリップ</label>
+                                                        <select id="obj-glb-interact-clip" class="prop-input full" aria-label="インタラクトで再生するクリップ"></select>
+                                                    </div>
+                                                    <div class="prop-row">
+                                                        <label class="prop-label" for="obj-glb-interact-radius">接近距離</label>
+                                                        <input type="number" id="obj-glb-interact-radius" class="prop-input num" step="0.1" min="0.1" value="3">
+                                                        <span class="prop-unit">m</span>
+                                                    </div>
+                                                    <div class="prop-row">
+                                                        <label class="prop-label" for="obj-glb-interact-label">プロンプト文言</label>
+                                                        <input type="text" id="obj-glb-interact-label" class="prop-input" placeholder="例: [E] 再生">
+                                                    </div>
+                                                    <div class="prop-row">
+                                                        <label class="prop-label" for="obj-glb-interact-access">利用権限</label>
+                                                        <select id="obj-glb-interact-access" class="prop-input">
+                                                            <option value="public">一般公開</option>
+                                                            <option value="student+">生徒以上</option>
+                                                            <option value="teacher+">教師以上</option>
+                                                            <option value="admin">管理者限定</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </details>
                                         <div class="prop-group-label">乗り物</div>
                                         <p class="hint" style="margin:4px 0 8px;">3D モデルを配置したあと、種類を選んでパラメータを設定してください（メタバース内の操縦用）。</p>
                                         <div class="prop-row">
@@ -1163,6 +1199,10 @@
             <div class="model-upload-skip-texture-row prop-row checkbox-row" style="margin-top:10px;">
                 <input type="checkbox" id="model-upload-skip-texture-resize" class="prop-checkbox">
                 <label class="prop-label" for="model-upload-skip-texture-resize">テクスチャをリサイズしない（GLB 内のオリジナル画像のまま保存）</label>
+            </div>
+            <div class="model-upload-split-objects-row prop-row checkbox-row" style="margin-top:10px;">
+                <input type="checkbox" id="model-upload-split-objects" class="prop-checkbox">
+                <label class="prop-label" for="model-upload-split-objects">GLB をオブジェクトごとに分割して保存（既定シーン直下が複数ノード、または単一親の子が複数のときのみ複数 GLB になります。条件に合わない場合は単体 GLB のみ保存されます。空間チャンク分けは行いません）</label>
             </div>
             <div class="model-upload-skip-chunk-row prop-row checkbox-row" style="margin-top:10px;">
                 <input type="checkbox" id="model-upload-skip-chunk" class="prop-checkbox">
