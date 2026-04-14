@@ -19,6 +19,7 @@ import MobileJoystickManager from './mobile-joystick-manager.js';
 import MobileUIManager from './mobile-ui-manager.js';
 import { createMetaverseVRButton } from './vr-entry-button.js';
 import WebXRLocomotion from './webxr-locomotion.js';
+import { XrPlayerRig } from './xr-player-rig.js';
 import { registerMetaverseServiceWorker } from './service-worker-register.js';
 import AircraftController from './aircraft-controller.js';
 import AircraftManager from './aircraft-manager.js';
@@ -81,6 +82,7 @@ class MetaverseApp {
         this.isMobileMode = false;
         this.resizeUnsubscribe = null;
         this.webxrLocomotion = null;
+        this.xrPlayerRig = null;
         this._frameCallback = null;
         /** @type {'first'|'third'|null} VR 開始前の視点モード（終了時に復元） */
         this._viewModeBeforeVr = null;
@@ -549,11 +551,18 @@ class MetaverseApp {
             domOverlayRoot: xrOverlayRoot || null
         });
         document.body.appendChild(vrBtn);
+        this.xrPlayerRig = new XrPlayerRig({
+            scene: this.sceneManager.getScene(),
+            camera: this.sceneManager.getCamera(),
+            renderer: this.sceneManager.getRenderer(),
+            shouldApplyRig: () => !!this.characterController?.isWalkingCharacter()
+        });
         this.webxrLocomotion = new WebXRLocomotion({
             renderer: this.sceneManager.getRenderer(),
             sceneManager: this.sceneManager,
             physicsManager: this.physicsManager,
             characterController: this.characterController,
+            xrPlayerRig: this.xrPlayerRig,
             domOverlayRoot: xrOverlayRoot || null,
             onVrSessionStart: () => {
                 const vm = this.menuManager.settings.viewMode;
@@ -1059,6 +1068,10 @@ class MetaverseApp {
         }
 
         this.updateLandscapeOverlay();
+
+        if (this.xrPlayerRig?.isAttached() && this.sceneManager.getRenderer().xr.isPresenting) {
+            this.xrPlayerRig.sync(this.characterController);
+        }
 
         // Render scene
         this.sceneManager.render();

@@ -91,6 +91,14 @@ class CharacterController {
     }
 
     /**
+     * 歩行キャラとして処理するか（機体操縦・搭乗中は false）
+     * @returns {boolean}
+     */
+    isWalkingCharacter() {
+        return this._aircraftPoseProvider == null;
+    }
+
+    /**
      * メタバース入室直後など: 初回の移動系入力まで落下・歩行物理を止める
      * @param {boolean} suspended
      */
@@ -128,7 +136,7 @@ class CharacterController {
     }
 
     /**
-     * VR 用スムーズ移動ベクトル（現状 WebXRLocomotion では常に 0。テレポートのみ移動）
+     * VR 用スムーズ移動ベクトル（スティック左右=x、前後=y。WebXRLocomotion が設定）
      * @param {{ x: number, y: number, force?: number }} v
      */
     setXrMoveVector(v) {
@@ -539,7 +547,7 @@ class CharacterController {
     }
 
     /**
-     * WebXR 中: 物理移動のみ。カメラは WebXRManager が更新する。
+     * WebXR 中: 物理移動のみ。カメラ姿勢は WebXRManager が更新し、ワールド位置は XrPlayerRig が足元に同期する。
      * @param {number} deltaTime
      */
     _updateXrMovement(deltaTime) {

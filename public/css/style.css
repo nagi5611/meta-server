@@ -3414,12 +3414,6 @@ a.admin-menu-link:hover {
     border-color: #4fc3f7;
 }
 
-.xr-dom-overlay-hint {
-    font-size: 10px;
-    opacity: 0.85;
-    margin: 0;
-}
-
 #metaverse-vr-button {
     z-index: 10000 !important;
 }
