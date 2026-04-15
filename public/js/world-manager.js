@@ -153,7 +153,8 @@ class WorldManager {
                 {
                     bytePlan,
                     loadState,
-                    onByteProgress
+                    onByteProgress,
+                    worldAircraftPhysics: world.aircraftPhysics
                 }
             );
         } finally {

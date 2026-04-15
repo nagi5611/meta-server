@@ -43,6 +43,19 @@ const isProductionBuild = process.env.NODE_ENV === 'production' &&
     fs.existsSync(path.join(__dirname, 'dist', 'index.html'));
 const STATIC_DIR = path.join(__dirname, isProductionBuild ? 'dist' : 'public');
 
+/**
+ * ENABLE_CHART_FEATURES: 太鼓・譜面・譜面BGM・admin 譜面編集。未設定時は有効。0 / false / off / no で無効。
+ * @param {string | undefined} raw
+ * @returns {boolean}
+ */
+function parseEnvEnabledDefaultTrue(raw) {
+    const s = String(raw ?? '').trim().toLowerCase();
+    if (!s) return true;
+    if (['0', 'false', 'off', 'no'].includes(s)) return false;
+    return true;
+}
+const CHART_FEATURES_ENABLED = parseEnvEnabledDefaultTrue(process.env.ENABLE_CHART_FEATURES);
+
 // Worlds config file (setting.html)
 const WORLDS_PATH = STORAGE_PATHS.WORLDS_PATH;
 /** 接続直後・change-world・admin-tp 後に Y クランプを抑止する時間（ms） */
@@ -199,6 +212,62 @@ function validateWorldsPhysicsAssist(worlds) {
     return errors;
 }
 
+/** aircraftPhysics / models[].aircraft.aircraftPhysics の数値レンジ（POST /admin/worlds 用） */
+const AIRCRAFT_PHYSICS_LIMITS = {
+    maxSpeed: [1, 500],
+    thrustAccel: [0.1, 200],
+    drag: [0.5, 0.99999],
+    yawAccel: [0.05, 40],
+    yawAccelGround: [0.05, 40],
+    yawAccelAir: [0.05, 40],
+    pitchAccel: [0.05, 40],
+    pitchAccelGround: [0.05, 40],
+    pitchAccelAir: [0.05, 40],
+    rollAccel: [0.05, 40],
+    yawMaxRate: [0.02, 10],
+    yawMaxRateGround: [0.02, 10],
+    yawMaxRateAir: [0.02, 10],
+    pitchMaxRate: [0.02, 10],
+    pitchMaxRateGround: [0.02, 10],
+    pitchMaxRateAir: [0.02, 10],
+    rollMaxRate: [0.02, 10],
+    angularDecel: [0, 30],
+    yawGroundFrictionLeft: [0, 30],
+    yawGroundFrictionRight: [0, 30],
+    groundTireLateralDecel: [0, 500],
+    groundTireRollingDecel: [0, 500],
+    wheelBrakeDecel: [0.5, 200],
+    gravity: [0, 50],
+    liftPerHorizontalSpeed: [0, 5],
+    sideslipDamping: [0, 10],
+    excessClimbDamping: [0, 10]
+};
+
+/**
+ * aircraftPhysics オブジェクトのキーごとにレンジ検証する
+ * @param {unknown} ap
+ * @param {string} pathLabel 例: ワールド「lobby」: aircraftPhysics
+ * @param {string[]} errors
+ */
+function appendAircraftPhysicsValidationErrors(ap, pathLabel, errors) {
+    if (ap == null) return;
+    if (typeof ap !== 'object' || Array.isArray(ap)) {
+        errors.push(`${pathLabel} はオブジェクトである必要があります`);
+        return;
+    }
+    for (const [key, [lo, hi]] of Object.entries(AIRCRAFT_PHYSICS_LIMITS)) {
+        if (!(key in ap)) continue;
+        const v = ap[key];
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+            errors.push(`${pathLabel}.${key} は有限の数値にしてください`);
+            continue;
+        }
+        if (v < lo || v > hi) {
+            errors.push(`${pathLabel}.${key} は ${lo}〜${hi} にしてください`);
+        }
+    }
+}
+
 /**
  * aircraftPhysics（飛行機操縦の数値）検証（POST /admin/worlds 用）
  * @param {Record<string, unknown>} worlds
@@ -207,54 +276,11 @@ function validateWorldsPhysicsAssist(worlds) {
 function validateWorldsAircraftPhysics(worlds) {
     const errors = [];
     if (!worlds || typeof worlds !== 'object') return errors;
-    const limits = {
-        maxSpeed: [1, 500],
-        thrustAccel: [0.1, 200],
-        drag: [0.5, 0.99999],
-        yawAccel: [0.05, 40],
-        yawAccelGround: [0.05, 40],
-        yawAccelAir: [0.05, 40],
-        pitchAccel: [0.05, 40],
-        pitchAccelGround: [0.05, 40],
-        pitchAccelAir: [0.05, 40],
-        rollAccel: [0.05, 40],
-        yawMaxRate: [0.02, 10],
-        yawMaxRateGround: [0.02, 10],
-        yawMaxRateAir: [0.02, 10],
-        pitchMaxRate: [0.02, 10],
-        pitchMaxRateGround: [0.02, 10],
-        pitchMaxRateAir: [0.02, 10],
-        rollMaxRate: [0.02, 10],
-        angularDecel: [0, 30],
-        yawGroundFrictionLeft: [0, 30],
-        yawGroundFrictionRight: [0, 30],
-        groundTireLateralDecel: [0, 500],
-        groundTireRollingDecel: [0, 500],
-        wheelBrakeDecel: [0.5, 200],
-        gravity: [0, 50],
-        liftPerHorizontalSpeed: [0, 5],
-        sideslipDamping: [0, 10],
-        excessClimbDamping: [0, 10]
-    };
     for (const [wid, w] of Object.entries(worlds)) {
         if (!w || typeof w !== 'object') continue;
         const ap = w.aircraftPhysics;
         if (ap == null) continue;
-        if (typeof ap !== 'object' || Array.isArray(ap)) {
-            errors.push(`ワールド「${wid}」: aircraftPhysics はオブジェクトである必要があります`);
-            continue;
-        }
-        for (const [key, [lo, hi]] of Object.entries(limits)) {
-            if (!(key in ap)) continue;
-            const v = ap[key];
-            if (typeof v !== 'number' || !Number.isFinite(v)) {
-                errors.push(`ワールド「${wid}」: aircraftPhysics.${key} は有限の数値にしてください`);
-                continue;
-            }
-            if (v < lo || v > hi) {
-                errors.push(`ワールド「${wid}」: aircraftPhysics.${key} は ${lo}〜${hi} にしてください`);
-            }
-        }
+        appendAircraftPhysicsValidationErrors(ap, `ワールド「${wid}」: aircraftPhysics`, errors);
     }
     return errors;
 }
@@ -369,6 +395,13 @@ function validateWorldsAircraft(worlds) {
             const r = a.radius;
             if (r != null && (typeof r !== 'number' || !Number.isFinite(r) || r <= 0)) {
                 errors.push(`ワールド「${wid}」 aircraft「${id}」: radius は正の有限数値にしてください`);
+            }
+            if (a.aircraftPhysics != null) {
+                appendAircraftPhysicsValidationErrors(
+                    a.aircraftPhysics,
+                    `ワールド「${wid}」 aircraft「${id}」: aircraftPhysics`,
+                    errors
+                );
             }
         });
     }
@@ -897,6 +930,8 @@ function parseProxyDomainPortMap(raw) {
 }
 
 const useReverseProxy = isTruthyEnv(process.env.USE_REVERSE_PROXY);
+/** 1/true/yes/on のとき、TLS 相当でない HTTP レイヤー要求を 403 で拒否（平文 HTTP の受け入れを止める） */
+const requireSecureHttp = isTruthyEnv(process.env.REQUIRE_SECURE_HTTP);
 const proxyDomainPortMap = parseProxyDomainPortMap(process.env.PROXY_DOMAIN_PORT_MAP);
 const PROXY_SERVICE_DOMAIN = String(process.env.PROXY_SERVICE_DOMAIN || '').trim().toLowerCase();
 
@@ -937,9 +972,28 @@ if (useReverseProxy) {
     }
 }
 
+if (requireSecureHttp && useReverseProxy && !app.get('trust proxy')) {
+    console.warn(
+        '[security] REQUIRE_SECURE_HTTP=1 with USE_REVERSE_PROXY=1 but trust proxy is off; req.secure may be false. Set TRUST_PROXY=1 (or unset) so X-Forwarded-Proto is honored.'
+    );
+}
+
 assertProductionSecurityBeforeListen();
 
+/**
+ * REQUIRE_SECURE_HTTP 時に、Express が TLS とみなさない要求を拒否する（Basic 等の平文漏えい対策）
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+function rejectNonTlsHttpLayer(req, res, next) {
+    if (!requireSecureHttp) return next();
+    if (req.secure) return next();
+    res.status(403).type('text/plain; charset=utf-8').send('HTTPS required (REQUIRE_SECURE_HTTP=1)');
+}
+
 app.use(cookieParser());
+app.use(rejectNonTlsHttpLayer);
 // Helmet CSP は Vite 出力・インライン方針と衝突するため無効。nonce やハッシュで script-src を組む段階的 CSP は別タスク。
 app.use(helmet({
     contentSecurityPolicy: false,
@@ -956,6 +1010,12 @@ const hasSsl =
     !useReverseProxy &&
     SSL_CERT_PATH && SSL_KEY_PATH &&
     fs.existsSync(SSL_CERT_PATH) && fs.existsSync(SSL_KEY_PATH);
+
+if (requireSecureHttp && !hasSsl && !useReverseProxy) {
+    throw new Error(
+        '[security] REQUIRE_SECURE_HTTP=1 needs TLS: set USE_REVERSE_PROXY=1 with HTTPS at nginx/Caddy (and TRUST_PROXY), or set SSL_CERT_PATH + SSL_KEY_PATH for Node HTTPS.'
+    );
+}
 
 const httpServer = hasSsl
     ? https.createServer(
@@ -1594,13 +1654,15 @@ app.use('/models', express.static(MODELS_DIR));
 app.use('/pdfs', express.static(PDFS_DIR));
 app.use('/images', express.static(IMAGES_DIR));
 app.use('/env', express.static(ENV_DIR));
-app.use('/chart-bgm', express.static(CHART_BGM_DIR, {
-    setHeaders: (res, filePath) => {
-        if (String(filePath).toLowerCase().endsWith('.mp3')) {
-            res.setHeader('Content-Type', 'audio/mpeg');
+if (CHART_FEATURES_ENABLED) {
+    app.use('/chart-bgm', express.static(CHART_BGM_DIR, {
+        setHeaders: (res, filePath) => {
+            if (String(filePath).toLowerCase().endsWith('.mp3')) {
+                res.setHeader('Content-Type', 'audio/mpeg');
+            }
         }
-    }
-}));
+    }));
+}
 
 // admin.html 用の /js, /css は常に public から（dist に含まれないため）
 app.use('/js', express.static(path.join(__dirname, 'public', 'js')));
@@ -2453,6 +2515,7 @@ io.on('connection', (socket) => {
         console.log(`[perf] ${socket.id.slice(0, 8)}… ${uname} ping=${pingMs}ms fps=${fpsSample ?? '-'} tier=${perfTier} eff=${effectiveTier} loaf=${loafCount} longtask=${longtaskCount}`);
     });
 
+    if (CHART_FEATURES_ENABLED) {
     // 太鼓BGM同期用: サーバ時刻の取得（RTT推定はクライアント側）
     socket.on('taiko-time-sync', (data, callback) => {
         if (typeof callback !== 'function') return;
@@ -2701,6 +2764,8 @@ io.on('connection', (socket) => {
         }
         if (typeof cb === 'function') cb({ ok: true });
     });
+
+    } // CHART_FEATURES_ENABLED: 太鼓ソケット
 
     // Handle username setting
     socket.on('set-username', (username) => {
@@ -3941,7 +4006,9 @@ io.on('connection', (socket) => {
         trafficStats.delete(socket.id);
         playerPings.delete(socket.id);
         clientInfo.delete(socket.id);
-        cleanupTaikoMpOnDisconnect(io, socket.id);
+        if (CHART_FEATURES_ENABLED) {
+            cleanupTaikoMpOnDisconnect(io, socket.id);
+        }
     });
     
     // ============================
@@ -4113,9 +4180,11 @@ app.post('/admin/worlds', (req, res) => {
     if (!worlds || typeof worlds !== 'object') {
         return res.status(400).json({ error: 'Invalid body: expected worlds object' });
     }
-        const taikoErrs = validateWorldsTaikoMultiplayer(worlds);
-        if (taikoErrs.length > 0) {
-            return res.status(400).json({ error: taikoErrs.join(' ') });
+        if (CHART_FEATURES_ENABLED) {
+            const taikoErrs = validateWorldsTaikoMultiplayer(worlds);
+            if (taikoErrs.length > 0) {
+                return res.status(400).json({ error: taikoErrs.join(' ') });
+            }
         }
         const aircraftErrs = validateWorldsAircraft(worlds);
         if (aircraftErrs.length > 0) {
@@ -4144,6 +4213,14 @@ app.post('/admin/worlds', (req, res) => {
         console.error('POST /admin/worlds error:', err);
         res.status(500).json({ error: 'Failed to save worlds' });
     }
+});
+
+app.use('/admin/charts', (req, res, next) => {
+    if (CHART_FEATURES_ENABLED) return next();
+    res.status(503).json({
+        error: '譜面機能はこのサーバーでは無効です',
+        chartFeaturesEnabled: false
+    });
 });
 
 app.get('/admin/charts', (req, res) => {
@@ -4523,6 +4600,12 @@ app.get('/admin/storage-files', (req, res) => {
     if (!storeRoot) {
         return res.status(400).json({ error: 'Invalid or missing store' });
     }
+    if (store === 'chart-bgm' && !CHART_FEATURES_ENABLED) {
+        return res.status(503).json({
+            error: '譜面機能はこのサーバーでは無効です',
+            chartFeaturesEnabled: false
+        });
+    }
     const relQuery = typeof req.query.path === 'string' ? req.query.path : '';
     const dirAbs = resolvePathUnderStorageRoot(storeRoot, relQuery);
     if (!dirAbs) {
@@ -4633,6 +4716,12 @@ app.delete('/admin/storage-files', (req, res) => {
     if (!storeRoot) {
         return res.status(400).json({ error: 'Invalid or missing store' });
     }
+    if (store === 'chart-bgm' && !CHART_FEATURES_ENABLED) {
+        return res.status(503).json({
+            error: '譜面機能はこのサーバーでは無効です',
+            chartFeaturesEnabled: false
+        });
+    }
     const relPath = typeof body.relativePath === 'string' ? body.relativePath : '';
     const result = performStorageFileDelete(store, storeRoot, relPath, { missingOk: false });
     if (!result.success) {
@@ -4657,6 +4746,12 @@ app.post('/admin/storage-files/bulk-delete', (req, res) => {
     const storeRoot = STORAGE_FILE_STORE_ROOTS[/** @type {keyof typeof STORAGE_FILE_STORE_ROOTS} */ (store)];
     if (!storeRoot) {
         return res.status(400).json({ error: 'Invalid or missing store' });
+    }
+    if (store === 'chart-bgm' && !CHART_FEATURES_ENABLED) {
+        return res.status(503).json({
+            error: '譜面機能はこのサーバーでは無効です',
+            chartFeaturesEnabled: false
+        });
     }
     const raw = body.relativePaths;
     if (!Array.isArray(raw)) {
@@ -4942,6 +5037,25 @@ app.get('/api/worlds', (req, res) => {
     }
 });
 
+app.get('/api/client-config', (req, res) => {
+    res.json({ chartFeaturesEnabled: CHART_FEATURES_ENABLED });
+});
+
+app.use('/api/charts', (req, res, next) => {
+    if (CHART_FEATURES_ENABLED) return next();
+    const p = req.path || '';
+    if (req.method === 'GET' && (p === '/' || p === '')) {
+        return res.json({});
+    }
+    if (req.method === 'GET' && /\/[^/]+\/ranking\/?$/.test(p)) {
+        return res.json([]);
+    }
+    res.status(503).json({
+        error: '譜面機能はこのサーバーでは無効です',
+        chartFeaturesEnabled: false
+    });
+});
+
 app.get('/api/charts', (req, res) => {
     try {
         const charts = readCharts();
@@ -5032,7 +5146,8 @@ app.get('/admin/stats', (req, res) => {
             portCount: videoVcPortInfo.uniquePorts.length,
             portDetails: videoVcPortInfo.portDetails
         },
-        workers: workers.length
+        workers: workers.length,
+        chartFeaturesEnabled: CHART_FEATURES_ENABLED
     });
 });
 
@@ -5473,7 +5588,9 @@ function formatBytes(bytes) {
 // Start server
 (async () => {
     ensureWorldsFile();
-    ensureChartsFile();
+    if (CHART_FEATURES_ENABLED) {
+        ensureChartsFile();
+    }
     initDb();
     initUserSessionsDb();
     // Initialize mediasoup workers (room VC + PDF VC)
@@ -5489,6 +5606,9 @@ httpServer.listen(PORT, HOST, () => {
         console.log(
             'USE_REVERSE_PROXY: Node serves HTTP only; terminate TLS at nginx/Caddy etc.'
         );
+        if (requireSecureHttp) {
+            console.log('REQUIRE_SECURE_HTTP: rejecting requests without HTTPS (trust X-Forwarded-Proto via trust proxy).');
+        }
         if (proxyDomainPortMap.size > 0) {
             const lines = [...proxyDomainPortMap.entries()]
                 .map(([h, p]) => `  ${h} -> ${p}`)
@@ -5514,6 +5634,9 @@ httpServer.listen(PORT, HOST, () => {
     }
     if (hasSsl) {
         console.log('HTTPS is enabled (SSL_CERT_PATH / SSL_KEY_PATH).');
+        if (requireSecureHttp) {
+            console.log('REQUIRE_SECURE_HTTP: non-TLS connections to this port are rejected.');
+        }
     }
     if (hasSsl && PORT_HTTP_REDIRECT > 0) {
         const redirectServer = http.createServer((req, res) => {
@@ -5527,6 +5650,7 @@ httpServer.listen(PORT, HOST, () => {
     }
     console.log(`Players will sync at 30fps`);
     console.log(`mediasoup VC enabled with ${workers.length} workers; PDF VC with ${pdfWorkers.length} workers`);
+    console.log(`ENABLE_CHART_FEATURES (太鼓・譜面): ${CHART_FEATURES_ENABLED ? '有効' : '無効'}`);
     console.log(`VC_DEBUG_STATS: ${VC_DEBUG_STATS ? 'ENABLED' : 'DISABLED'} (env=${process.env.VC_DEBUG_STATS})`);
     console.log(`Admin panel available at ${protocol}://localhost:${PORT}/admin.html`);
 });

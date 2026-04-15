@@ -52,6 +52,8 @@ export default class AircraftController {
         this._qParentWorld = new THREE.Quaternion();
         /** 直前フレーム終了時の接地（レイ判定・接地用ヨー摩擦・ピッチパラメータ切替に使用） */
         this._aircraftGrounded = false;
+        /** @type {Record<string, unknown>|null|undefined} applyWorldPhysics に渡した直近の生データ */
+        this._worldAircraftPhysicsRaw = null;
         this.physics = mergeAircraftPhysicsFromWorld(null);
         /** 乗客モード: 操縦入力なしでカメラのみ。機体姿勢はネット同期 */
         this.passengerViewSlot = null;
@@ -70,6 +72,7 @@ export default class AircraftController {
      * @param {Record<string, unknown>|null|undefined} raw
      */
     applyWorldPhysics(raw) {
+        this._worldAircraftPhysicsRaw = raw;
         this.physics = mergeAircraftPhysicsFromWorld(raw);
     }
 
@@ -91,6 +94,9 @@ export default class AircraftController {
         this._omegaPitch = 0;
         this._omegaRoll = 0;
         this._aircraftGrounded = false;
+        this.physics = slot?.physics && typeof slot.physics === 'object'
+            ? { ...slot.physics }
+            : mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
         this._attachKeys();
     }
 
@@ -102,6 +108,7 @@ export default class AircraftController {
         this._omegaPitch = 0;
         this._omegaRoll = 0;
         this._aircraftGrounded = false;
+        this.physics = mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
     }
 
     /**

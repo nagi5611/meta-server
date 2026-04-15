@@ -32,7 +32,11 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { encodeAssetPathToUrlPath, notifyServiceWorkerInvalidate } from './service-worker-register.js';
-import { mergeAircraftPhysicsFromWorld, DEFAULT_AIRCRAFT_PHYSICS } from './aircraft-physics-defaults.js';
+import {
+    mergeAircraftPhysicsFromWorld,
+    clipAircraftPhysicsPartialFromUser,
+    DEFAULT_AIRCRAFT_PHYSICS
+} from './aircraft-physics-defaults.js';
 
 // --- State ---
 let scene, camera, renderer, controls, transformControls;
@@ -62,6 +66,8 @@ let worldSelectLoadGen = 0;
 let editorGround = null; // 編集プレビュー用の床メッシュ（表示切替用）
 let editorGrid = null;   // 編集プレビュー用のグリッド（表示切替用）
 let editorDracoLoader = null;
+/** サーバー ENABLE_CHART_FEATURES。無効時はワールド編集の太鼓・譜面UIと taiko 同期を行わない */
+let worldEditorChartFeaturesEnabled = true;
 
 const DEFAULT_FLOOR_WIDTH_M = 1000;
 const DEFAULT_FLOOR_DEPTH_M = 1000;
@@ -1014,6 +1020,11 @@ function getWorldEditorClipboardPayloadFromSelection() {
                 cockpitOffset: { x: ck.x, y: ck.y, z: ck.z },
                 chaseOffset: { x: ch.x, y: ch.y, z: ch.z }
             };
+            const ap = a.aircraftPhysics;
+            if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
+                const clipped = clipAircraftPhysicsPartialFromUser(ap);
+                if (clipped && Object.keys(clipped).length) c.aircraft.aircraftPhysics = clipped;
+            }
         }
         if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
         if (!isObjPath(c.path || '')) delete c.mtlPath;
@@ -1264,17 +1275,19 @@ function selectObject(obj) {
             document.getElementById('light-hint').style.display = 'none';
             document.getElementById('light-props').style.display = 'block';
         } else if (obj.userData.config) {
-            const cid = obj.userData.config.taiko?.multiplayerChartId;
-            refreshTaikoChartSelect(cid).then(() => {
-                if (selectedObject === obj) updateObjectPanel(obj);
-            });
+            if (worldEditorChartFeaturesEnabled) {
+                const cid = obj.userData.config.taiko?.multiplayerChartId;
+                refreshTaikoChartSelect(cid).then(() => {
+                    if (selectedObject === obj) updateObjectPanel(obj);
+                });
+            }
             updateObjectPanel(obj);
             document.getElementById('object-hint').style.display = 'none';
             document.getElementById('object-props').style.display = 'block';
             document.getElementById('light-hint').style.display = 'block';
             document.getElementById('light-props').style.display = 'none';
             document.getElementById('object-props-animation').style.display = '';
-            document.getElementById('object-props-taiko').style.display = '';
+            document.getElementById('object-props-taiko').style.display = worldEditorChartFeaturesEnabled ? '' : 'none';
             document.getElementById('object-props-teleporter').style.display = '';
         } else if (obj.userData.pdfConfig) {
             updateObjectPanel(obj);
@@ -1500,6 +1513,17 @@ function updateObjectPanel(obj) {
             document.getElementById('obj-ac-chase-y').value = 3;
             document.getElementById('obj-ac-chase-z').value = 12;
         }
+        const ovPh = document.getElementById('obj-ac-phys-override');
+        const taPh = document.getElementById('obj-ac-phys-json');
+        if (ovPh && taPh) {
+            const part = ac && ac.aircraftPhysics && typeof ac.aircraftPhysics === 'object' && !Array.isArray(ac.aircraftPhysics)
+                ? ac.aircraftPhysics
+                : null;
+            const partKeys = part ? Object.keys(part).filter((k) => typeof part[k] === 'number' && Number.isFinite(part[k])) : [];
+            ovPh.checked = partKeys.length > 0;
+            taPh.disabled = !ovPh.checked;
+            taPh.value = partKeys.length ? JSON.stringify(part, null, 2) : '';
+        }
         updateVehicleAircraftFieldsVisibility();
         updateGlbAnimInteractPanel(obj);
     } else if (obj.userData.pdfConfig) {
@@ -1589,39 +1613,42 @@ function syncObjectFromPanel(opts) {
         } else {
             delete c.teleporter;
         }
-        if (document.getElementById('obj-taiko').checked) {
-            const radius = parseFloat(document.getElementById('obj-taiko-radius').value) || 3;
-            const mp = document.getElementById('obj-taiko-multiplayer').checked;
-            const groupId = (document.getElementById('obj-taiko-group-id').value || '').trim();
-            const chartEl = document.getElementById('obj-taiko-chart-id');
-            const multiplayerChartId = chartEl && chartEl.value ? chartEl.value.trim() : '';
-            if (mp) {
-                c.taiko = {
-                    radius,
-                    multiplayer: true,
-                    groupId,
-                    multiplayerChartId
-                };
-                if (groupId) {
-                    editGroup.children.forEach((child) => {
-                        const cfg = child.userData.config;
-                        if (!cfg || !cfg.taiko || !cfg.taiko.multiplayer) return;
-                        if (String(cfg.taiko.groupId || '').trim() !== groupId) return;
-                        cfg.taiko.multiplayerChartId = multiplayerChartId;
-                        cfg.taiko.groupId = groupId;
-                    });
+        if (worldEditorChartFeaturesEnabled) {
+            if (document.getElementById('obj-taiko').checked) {
+                const radius = parseFloat(document.getElementById('obj-taiko-radius').value) || 3;
+                const mp = document.getElementById('obj-taiko-multiplayer').checked;
+                const groupId = (document.getElementById('obj-taiko-group-id').value || '').trim();
+                const chartEl = document.getElementById('obj-taiko-chart-id');
+                const multiplayerChartId = chartEl && chartEl.value ? chartEl.value.trim() : '';
+                if (mp) {
+                    c.taiko = {
+                        radius,
+                        multiplayer: true,
+                        groupId,
+                        multiplayerChartId
+                    };
+                    if (groupId) {
+                        editGroup.children.forEach((child) => {
+                            const cfg = child.userData.config;
+                            if (!cfg || !cfg.taiko || !cfg.taiko.multiplayer) return;
+                            if (String(cfg.taiko.groupId || '').trim() !== groupId) return;
+                            cfg.taiko.multiplayerChartId = multiplayerChartId;
+                            cfg.taiko.groupId = groupId;
+                        });
+                    }
+                } else {
+                    c.taiko = { radius };
                 }
             } else {
-                c.taiko = { radius };
+                delete c.taiko;
             }
-        } else {
-            delete c.taiko;
         }
         const vType = document.getElementById('obj-vehicle-type')?.value || '';
         if (vType === 'airplane') {
             const idRaw = document.getElementById('obj-ac-id').value.trim();
             const rad = parseFloat(document.getElementById('obj-ac-radius').value);
-            c.aircraft = {
+            /** @type {Record<string, unknown>} */
+            const acPayload = {
                 id: idRaw || 'plane-1',
                 radius: Number.isFinite(rad) && rad > 0 ? rad : 4,
                 label: (document.getElementById('obj-ac-label').value || '').trim() || '操縦する',
@@ -1636,6 +1663,25 @@ function syncObjectFromPanel(opts) {
                     z: parseFloat(document.getElementById('obj-ac-chase-z').value) || 0
                 }
             };
+            const ovPh = document.getElementById('obj-ac-phys-override');
+            const taPh = document.getElementById('obj-ac-phys-json');
+            if (ovPh?.checked && taPh && !taPh.disabled) {
+                const rawStr = (taPh.value || '').trim();
+                if (rawStr) {
+                    try {
+                        const parsed = JSON.parse(rawStr);
+                        const phys = clipAircraftPhysicsPartialFromUser(parsed);
+                        if (phys && Object.keys(phys).length) acPayload.aircraftPhysics = phys;
+                    } catch (_) {
+                        window.alert('機体の操縦パラメータJSONが不正のため、aircraftPhysics は更新されませんでした。');
+                    }
+                }
+                taPh.disabled = false;
+            } else if (taPh) {
+                taPh.value = '';
+                taPh.disabled = true;
+            }
+            c.aircraft = acPayload;
         } else {
             delete c.aircraft;
         }
@@ -1743,6 +1789,11 @@ function buildWorldsFromScene() {
                             cockpitOffset: { x: ck.x, y: ck.y, z: ck.z },
                             chaseOffset: { x: ch.x, y: ch.y, z: ch.z }
                         };
+                        const ap = a.aircraftPhysics;
+                        if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
+                            const clipped = clipAircraftPhysicsPartialFromUser(ap);
+                            if (clipped && Object.keys(clipped).length) c.aircraft.aircraftPhysics = clipped;
+                        }
                     }
                     if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
                     if (!isObjPath(c.path || '')) delete c.mtlPath;
@@ -2122,6 +2173,11 @@ async function loadWorldIntoScene(world) {
                     z: ch.z ?? 12
                 }
             };
+            const ap = a.aircraftPhysics;
+            if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
+                const clipped = clipAircraftPhysicsPartialFromUser(ap);
+                if (clipped && Object.keys(clipped).length) cfgBase.aircraft.aircraftPhysics = clipped;
+            }
         }
         const cm = String(config.chunkManifest || '').trim();
         if (cm) {
@@ -2292,6 +2348,7 @@ async function fetchPdfs() {
 
 /** マルチ太鼓用・譜面セレクトを /admin/charts から埋める */
 async function refreshTaikoChartSelect(preserveChartId) {
+    if (!worldEditorChartFeaturesEnabled) return;
     const sel = document.getElementById('obj-taiko-chart-id');
     if (!sel) return;
     const prev = preserveChartId != null ? preserveChartId : sel.value;
@@ -2994,6 +3051,43 @@ function bindEvents() {
     ]) {
         document.getElementById(acId)?.addEventListener('change', syncObjectFromPanel);
     }
+    document.getElementById('obj-ac-phys-json')?.addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-ac-phys-override')?.addEventListener('change', () => {
+        const ov = document.getElementById('obj-ac-phys-override');
+        const ta = document.getElementById('obj-ac-phys-json');
+        if (ta) ta.disabled = !ov?.checked;
+        syncObjectFromPanel();
+    });
+    document.getElementById('obj-ac-phys-export')?.addEventListener('click', async () => {
+        const ta = document.getElementById('obj-ac-phys-json');
+        const text = (ta?.value || '').trim() || '{}';
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch (_) {
+            window.alert('クリップボードへのコピーに失敗しました。');
+        }
+    });
+    document.getElementById('obj-ac-phys-import')?.addEventListener('click', async () => {
+        try {
+            const clipText = (await navigator.clipboard.readText()).trim();
+            const parsed = JSON.parse(clipText);
+            const phys = clipAircraftPhysicsPartialFromUser(parsed);
+            if (!phys || !Object.keys(phys).length) {
+                window.alert('有効なパラメータキーが見つかりませんでした。');
+                return;
+            }
+            const ov = document.getElementById('obj-ac-phys-override');
+            const ta = document.getElementById('obj-ac-phys-json');
+            if (ov) ov.checked = true;
+            if (ta) {
+                ta.disabled = false;
+                ta.value = JSON.stringify(phys, null, 2);
+            }
+            syncObjectFromPanel();
+        } catch (_) {
+            window.alert('クリップボードの読み取りまたはJSONの解析に失敗しました。');
+        }
+    });
 
     document.getElementById('object-props')?.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-glb-preview-clip]');
@@ -4582,6 +4676,17 @@ async function init() {
         setWorldEditLoader(false);
         return;
     }
+    try {
+        const r = await fetch('/api/client-config');
+        if (r.ok) {
+            const j = await r.json();
+            if (typeof j.chartFeaturesEnabled === 'boolean') {
+                worldEditorChartFeaturesEnabled = j.chartFeaturesEnabled;
+            }
+        }
+    } catch (_) {
+        /* 既定 true */
+    }
     setWorldEditLoader(true, 'ワールド編集を初期化しています…');
     try {
         initScene();
@@ -4627,7 +4732,9 @@ async function init() {
         if (ids.length) {
             syncSelectWorldChrome(ids[0]);
             await loadWorldIntoScene(worlds[ids[0]]);
-            await refreshTaikoChartSelect(null);
+            if (worldEditorChartFeaturesEnabled) {
+                await refreshTaikoChartSelect(null);
+            }
         } else {
             syncSelectWorldChrome(null);
             await loadWorldIntoScene(EMPTY_EDITOR_WORLD);

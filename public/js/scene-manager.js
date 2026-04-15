@@ -25,6 +25,7 @@ import {
     fetchModelContentLength,
     countTrianglesInObject
 } from './model-load-limits.js';
+import { mergeAircraftPhysicsForObject } from './aircraft-physics-defaults.js';
 
 /** ワールド複数モデル読み込みの同時実行数（キャッシュヒット時の直列待ちを緩和） */
 const WORLD_MODEL_LOAD_CONCURRENCY = 8;
@@ -570,10 +571,10 @@ class SceneManager {
      * Load multiple world models
      * @param {Array<Object|string>} modelConfigs - Array of model configs or paths
      * @param {function} onComplete - Callback when all models are loaded
-     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void }} [loadOptions]
+     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void, worldAircraftPhysics?: Record<string, unknown>|null }} [loadOptions]
      */
     async loadWorldModels(modelConfigs, onComplete, loadOptions = {}) {
-        const { bytePlan, loadState, onByteProgress } = loadOptions;
+        const { bytePlan, loadState, onByteProgress, worldAircraftPhysics } = loadOptions;
 
         if (!modelConfigs || modelConfigs.length === 0) {
             console.warn('No models to load');
@@ -708,7 +709,7 @@ class SceneManager {
             }
 
             if (config.aircraft) {
-                this._registerAircraftSlot(model, config.aircraft, position);
+                this._registerAircraftSlot(model, config.aircraft, position, worldAircraftPhysics);
             }
 
             this._registerGlbWorldInteract(model, config);
@@ -1498,8 +1499,9 @@ class SceneManager {
      * @param {THREE.Object3D} model
      * @param {object} aircraftCfg - models[].aircraft
      * @param {{x:number,y:number,z:number}} position - 設定上の位置（近接ゾーン用）
+     * @param {Record<string, unknown>|null|undefined} worldAircraftPhysics - ワールド共通 aircraftPhysics（生）
      */
-    _registerAircraftSlot(model, aircraftCfg, position) {
+    _registerAircraftSlot(model, aircraftCfg, position, worldAircraftPhysics) {
         const id = String(aircraftCfg.id || '').trim();
         if (!id) {
             console.warn('  Aircraft: skipped — missing id');
@@ -1508,6 +1510,7 @@ class SceneManager {
         model.userData.aircraftId = id;
         const cockpit = aircraftCfg.cockpitOffset || { x: 0, y: 1.2, z: 0 };
         const chase = aircraftCfg.chaseOffset || { x: 0, y: 3, z: 12 };
+        const physics = mergeAircraftPhysicsForObject(worldAircraftPhysics, aircraftCfg.aircraftPhysics);
         this.aircraftSlots.push({
             id,
             position: { x: position.x, y: position.y, z: position.z },
@@ -1515,6 +1518,7 @@ class SceneManager {
             label: aircraftCfg.label || '操縦する',
             cockpitOffset: { x: cockpit.x, y: cockpit.y, z: cockpit.z },
             chaseOffset: { x: chase.x, y: chase.y, z: chase.z },
+            physics,
             root: model,
             parkedPosition: model.position.clone(),
             parkedQuaternion: model.quaternion.clone(),

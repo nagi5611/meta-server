@@ -14,6 +14,8 @@ let lastTrafficSample = null;
 let bandwidthHistory = [];
 let worldEditInitialized = false;
 let chartPanelInitialized = false;
+/** サーバー ENABLE_CHART_FEATURES（/api/client-config および /admin/stats で更新） */
+let adminChartFeaturesEnabled = true;
 /** 譜面作成パネルで選択中の譜面ID */
 let selectedChartId = null;
 /** 「保存」済みとみなす譜面 PUT ペイロードの JSON 文字列（未選択・エディタクリア時は ''） */
@@ -990,25 +992,56 @@ let currentLoginUsersPage = 1;
 const LOGIN_USERS_PAGE_SIZE = 50;
 
 /**
+ * サーバーの譜面機能フラグを取得し、ストレージUI等を合わせる
+ */
+async function refreshAdminChartFeaturesFlag() {
+    try {
+        const r = await fetch('/api/client-config');
+        if (r.ok) {
+            const j = await r.json();
+            if (typeof j.chartFeaturesEnabled === 'boolean') {
+                adminChartFeaturesEnabled = j.chartFeaturesEnabled;
+            }
+        }
+    } catch (_) {
+        /* 既定 true */
+    }
+    applyChartFeaturesAdminChrome();
+}
+
+/**
+ * 譜面無効時にファイル管理の譜面BGMボタンを隠す
+ */
+function applyChartFeaturesAdminChrome() {
+    document.querySelectorAll('.storage-files-store-btn[data-storage-store="chart-bgm"]').forEach((el) => {
+        el.style.display = adminChartFeaturesEnabled ? '' : 'none';
+    });
+}
+
+/**
  * 指定したパネル ID を表示し、サイドメニューの active を更新する。
  * ワールド編集パネルは初表示時に setting.js を動的 import して init する。
  */
 function switchPanel(panelId) {
+    const requestedPanelId = panelId;
+    const resolvedPanelId = (panelId === 'panel-chart' && !adminChartFeaturesEnabled)
+        ? 'panel-chart-inactive'
+        : panelId;
     const activePanel = document.querySelector('.admin-panel.active');
     const currentPanelId = activePanel ? activePanel.id : null;
-    if (currentPanelId === 'panel-chart' && panelId !== 'panel-chart' && isChartEditorDirty()) {
+    if (currentPanelId === 'panel-chart' && resolvedPanelId !== 'panel-chart' && isChartEditorDirty()) {
         if (!confirm('譜面を編集中です（未保存の変更があります）。このまま別の画面に移動しますか？')) {
             return;
         }
     }
     document.querySelectorAll('.admin-panel').forEach((el) => el.classList.remove('active'));
     document.querySelectorAll('.admin-nav-item').forEach((el) => el.classList.remove('active'));
-    const panel = document.getElementById(panelId);
-    const navItem = document.querySelector(`.admin-nav-item[data-panel="${panelId}"]`);
+    const panel = document.getElementById(resolvedPanelId);
+    const navItem = document.querySelector(`.admin-nav-item[data-panel="${requestedPanelId}"]`);
     if (panel) panel.classList.add('active');
     if (navItem) navItem.classList.add('active');
 
-    if (panelId !== 'panel-chart') {
+    if (currentPanelId === 'panel-chart' && resolvedPanelId !== 'panel-chart') {
         stopChartPreview();
         clearChartRollFeelDigitInput();
         const stSw = document.getElementById('chart-status');
@@ -1040,7 +1073,7 @@ function switchPanel(panelId) {
     if (panelId === 'panel-logs') {
         loadLoginUsers(currentLoginUsersPage);
     }
-    if (panelId === 'panel-chart') {
+    if (requestedPanelId === 'panel-chart' && adminChartFeaturesEnabled) {
         loadCharts();
         if (!chartPanelInitialized) {
             chartPanelInitialized = true;
@@ -5020,6 +5053,9 @@ function bindChartPanelEvents() {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    void (async () => {
+    await refreshAdminChartFeaturesFlag();
+
     import('/js/service-worker-register.js')
         .then((m) => m.registerMetaverseServiceWorker())
         .catch(() => {});
@@ -5058,7 +5094,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // URL の ?panel= で初期表示パネルを指定（例: ?panel=world-edit）
     const params = new URLSearchParams(location.search);
     const initialPanel = params.get('panel');
-    const validPanels = ['panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-chart'];
+    const validPanels = ['panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-chart', 'panel-chart-inactive'];
     if (initialPanel && validPanels.includes(initialPanel)) {
         switchPanel(initialPanel);
     }
@@ -5161,6 +5197,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.textContent = 'メタバースへ入る（管理者）';
         }
     });
+    })();
 });
 
 function updateLastUpdateTime() {
@@ -5215,6 +5252,11 @@ async function loadStats() {
             videoPortList.innerHTML = (data.videoVcPorts?.uniquePorts?.length > 0)
                 ? data.videoVcPorts.uniquePorts.map(port => `<span class="port-badge">${port}</span>`).join('')
                 : '<span style="color: #999;">使用中のポートなし</span>';
+        }
+
+        if (typeof data.chartFeaturesEnabled === 'boolean') {
+            adminChartFeaturesEnabled = data.chartFeaturesEnabled;
+            applyChartFeaturesAdminChrome();
         }
 
         updateLastUpdateTime();

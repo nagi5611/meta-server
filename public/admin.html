@@ -604,6 +604,23 @@
                                                 <label class="prop-label" for="obj-ac-chase-z">Z</label>
                                                 <input type="number" id="obj-ac-chase-z" class="prop-input num" step="0.1" value="12">
                                             </div>
+                                            <details class="block" style="margin-top:10px;">
+                                                <summary class="block-header">この機体だけの操縦パラメータ（任意・JSON）</summary>
+                                                <div class="block-content">
+                                                    <p class="hint" style="margin:4px 0 8px;">ワールド共通の「飛行機操縦」に上書きマージされます。キー名はワールド側の飛行機操縦フォームと同じ（例: <code>maxSpeed</code>, <code>thrustAccel</code>）。チェックを外すと上書きは保存されません。</p>
+                                                    <div class="prop-row checkbox-row">
+                                                        <input type="checkbox" id="obj-ac-phys-override" class="prop-checkbox">
+                                                        <label class="prop-label" for="obj-ac-phys-override">機体ごとの上書きを保存する</label>
+                                                    </div>
+                                                    <div class="prop-row">
+                                                        <textarea id="obj-ac-phys-json" class="prop-input full" rows="10" spellcheck="false" style="font-family:monospace;font-size:12px;" disabled placeholder='例: { "maxSpeed": 55, "thrustAccel": 22 }'></textarea>
+                                                    </div>
+                                                    <div class="prop-row" style="flex-wrap:wrap;gap:8px;">
+                                                        <button type="button" id="obj-ac-phys-export" class="btn btn-sm btn-outline-secondary">JSONをコピー</button>
+                                                        <button type="button" id="obj-ac-phys-import" class="btn btn-sm btn-outline-secondary">クリップボードから読込</button>
+                                                    </div>
+                                                </div>
+                                            </details>
                                             <p class="hint" style="margin-top:6px;">前進方向はモデルの <strong>-Z</strong> 軸です。Blender 等の向きに合わせてオブジェクトの回転を調整してください。</p>
                                         </div>
                                     </div>
@@ -909,6 +926,14 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <div id="panel-chart-inactive" class="admin-panel">
+                <section class="section">
+                    <h2 class="section-title">譜面作成</h2>
+                    <p class="status-text" style="font-size:1.05rem">譜面機能は現在アクティブではありません。</p>
+                    <p class="hint" style="margin-top:12px">サーバー環境変数 <code>ENABLE_CHART_FEATURES</code> を有効にして再起動すると、太鼓・譜面の利用と譜面編集が利用できます。</p>
+                </section>
             </div>
 
             <div id="panel-chart" class="admin-panel chart-panel">

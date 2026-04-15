@@ -109,3 +109,36 @@ export function mergeAircraftPhysicsFromWorld(raw) {
     }
     return base;
 }
+
+/**
+ * ワールド共通の aircraftPhysics に、この機体の上書きをマージした操縦パラメータを返す。
+ * @param {Record<string, unknown>|null|undefined} worldRaw
+ * @param {Record<string, unknown>|null|undefined} objectOverrideRaw
+ * @returns {ReturnType<typeof mergeAircraftPhysicsFromWorld>}
+ */
+export function mergeAircraftPhysicsForObject(worldRaw, objectOverrideRaw) {
+    const worldMerged = mergeAircraftPhysicsFromWorld(worldRaw);
+    if (!objectOverrideRaw || typeof objectOverrideRaw !== 'object' || Array.isArray(objectOverrideRaw)) {
+        return worldMerged;
+    }
+    return mergeAircraftPhysicsFromWorld({ ...worldMerged, ...objectOverrideRaw });
+}
+
+/**
+ * ユーザーが貼り付けた JSON から、既知キーのみをクリップした機体上書きオブジェクトを返す。
+ * @param {unknown} raw
+ * @returns {Record<string, number>|null}
+ */
+export function clipAircraftPhysicsPartialFromUser(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const merged = mergeAircraftPhysicsFromWorld(raw);
+    /** @type {Record<string, number>} */
+    const out = {};
+    for (const k of Object.keys(DEFAULT_AIRCRAFT_PHYSICS)) {
+        if (!Object.prototype.hasOwnProperty.call(raw, k)) continue;
+        const v = raw[k];
+        if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+        out[k] = merged[k];
+    }
+    return Object.keys(out).length ? out : null;
+}

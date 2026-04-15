@@ -13,7 +13,6 @@ import VoiceChatManager from './voice-chat-manager.js';
 import VideoChatManager from './video-chat-manager.js';
 import PdfViewerVoiceChatManager from './pdf-viewer-voice-chat-manager.js';
 import PdfViewerManager from './pdf-viewer-manager.js';
-import TaikoGameManager from './taiko-game-manager.js';
 import { isMobile, setupFullscreen, tryLockLandscape, onResize } from './mobile-utils.js';
 import MobileJoystickManager from './mobile-joystick-manager.js';
 import MobileUIManager from './mobile-ui-manager.js';
@@ -133,6 +132,19 @@ class MetaverseApp {
 
         registerMetaverseServiceWorker();
 
+        let chartFeaturesEnabled = true;
+        try {
+            const cfgRes = await fetch('/api/client-config');
+            if (cfgRes.ok) {
+                const cfg = await cfgRes.json();
+                if (typeof cfg.chartFeaturesEnabled === 'boolean') {
+                    chartFeaturesEnabled = cfg.chartFeaturesEnabled;
+                }
+            }
+        } catch (_) {
+            /* 既定の true のまま */
+        }
+
         // /admin セッション: Basic認証済みでトークン取得が必須
         if (isAdminMetaverseEntryPath()) {
             try {
@@ -227,14 +239,19 @@ class MetaverseApp {
             }
         );
 
-        // Initialize Taiko Game (E key near taiko object)
-        this.taikoGameManager = new TaikoGameManager();
-        this.taikoGameManager.init();
-        this.teleportManager.setTaikoCallback((zone) => {
-            this.taikoGameManager.open(zone || null);
-            document.exitPointerLock();
-            this.characterController.resetMovement();
-        });
+        // Initialize Taiko Game (E key near taiko object) — ENABLE_CHART_FEATURES が無効ならモジュールも読まない
+        if (chartFeaturesEnabled) {
+            const { default: TaikoGameManager } = await import('./taiko-game-manager.js');
+            this.taikoGameManager = new TaikoGameManager();
+            this.taikoGameManager.init();
+            this.teleportManager.setTaikoCallback((zone) => {
+                this.taikoGameManager.open(zone || null);
+                document.exitPointerLock();
+                this.characterController.resetMovement();
+            });
+        } else {
+            this.teleportManager.setTaikoCallback(null);
+        }
         this.teleportManager.setGlbInteractPlayHandler((zone) => {
             if (!zone || !zone.model) return;
             this.sceneManager.playGlbInteractAnimation(zone.model, zone.clipName);
@@ -725,6 +742,10 @@ class MetaverseApp {
     }
 
     updateTaikoZones() {
+        if (!this.taikoGameManager) {
+            if (this.teleportManager) this.teleportManager.clearTaikoZones();
+            return;
+        }
         const taikos = this.sceneManager.getTaikos();
         const currentWorldId = this.worldManager.getCurrentWorldId();
         const world = this.worldManager.getWorld(currentWorldId);
