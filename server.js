@@ -126,6 +126,12 @@ function readWorlds() {
     return worldsRuntimeCache;
 }
 
+/** worlds.json（またはランタイムキャッシュ）に定義されたワールド ID か */
+function isValidWorldRoomId(roomId) {
+    const worlds = readWorlds();
+    return worlds != null && typeof worlds === 'object' && Object.prototype.hasOwnProperty.call(worlds, roomId);
+}
+
 function writeWorlds(worlds) {
     const tmpPath = WORLDS_PATH + '.tmp.' + Date.now();
     fs.writeFileSync(tmpPath, JSON.stringify(worlds, null, 2), 'utf8');
@@ -779,6 +785,19 @@ function isTruthyEnv(v) {
 }
 
 /**
+ * Basic 認証配下の管理 API 用 500 応答。本番では内部情報を返さない。
+ * @param {import('express').Response} res
+ * @param {unknown} err
+ */
+function sendAdminServerError(res, err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (isNodeProduction) {
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+    return res.status(500).json({ error: message });
+}
+
+/**
  * SOCKET_CORS_ORIGINS をパースする（改行またはカンマ区切り）
  * @returns {string[]}
  */
@@ -811,13 +830,15 @@ function assertProductionSecurityBeforeListen() {
  */
 function buildSocketIoCors() {
     const allowed = parseSocketAllowedOrigins();
+    const allowMissingOrigin = isTruthyEnv(process.env.SOCKET_CORS_ALLOW_MISSING_ORIGIN);
     return {
         origin: (origin, callback) => {
             if (!isNodeProduction) {
                 return callback(null, true);
             }
             if (!origin) {
-                return callback(null, true);
+                if (allowMissingOrigin) return callback(null, true);
+                return callback(new Error('socket.io CORS: missing Origin (set SOCKET_CORS_ALLOW_MISSING_ORIGIN=1 only if needed)'));
             }
             if (allowed.includes(origin)) {
                 return callback(null, true);
@@ -839,6 +860,14 @@ const authLoginIpLimiter = rateLimit({
 const authRegisterIpLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+/** 公開スコア API の IP レート制限（同一 LAN 集約を考慮し緩め） */
+const chartScoreIpLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
     standardHeaders: true,
     legacyHeaders: false,
 });
@@ -911,6 +940,7 @@ if (useReverseProxy) {
 assertProductionSecurityBeforeListen();
 
 app.use(cookieParser());
+// Helmet CSP は Vite 出力・インライン方針と衝突するため無効。nonce やハッシュで script-src を組む段階的 CSP は別タスク。
 app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -1014,6 +1044,13 @@ const PDF_VC_RTC_MAX_PORT = parseInt(process.env.PDF_VC_RTC_MAX_PORT || '20100',
 const VIDEO_VC_RTC_MIN_PORT = parseInt(process.env.VIDEO_VC_RTC_MIN_PORT || '30000', 10);
 const VIDEO_VC_RTC_MAX_PORT = parseInt(process.env.VIDEO_VC_RTC_MAX_PORT || '31000', 10);
 const VIDEO_VC_MAX_PRODUCERS_PER_ROOM = parseInt(process.env.VIDEO_VC_MAX_PRODUCERS_PER_ROOM || '10', 10);
+
+/** 音声・PDF・ビデオ VC それぞれの mediasoup Router 同時保持数上限（ルータ乱立の緩和） */
+const VC_MAX_MEDIASOUP_ROUTERS = (() => {
+    const n = parseInt(process.env.VC_MAX_ROUTERS || '128', 10);
+    const v = Number.isFinite(n) && n > 0 ? n : 128;
+    return Math.max(4, Math.min(4096, v));
+})();
 
 const mediasoupConfig = {
     worker: {
@@ -2033,6 +2070,9 @@ function getNextWorker() {
 // Get or create mediasoup Router for a room
 async function getOrCreateVCRouter(roomId) {
     if (!vcRouters.has(roomId)) {
+        if (vcRouters.size >= VC_MAX_MEDIASOUP_ROUTERS) {
+            throw new Error('room_limit');
+        }
         const worker = getNextWorker();
         const router = await worker.createRouter({
             mediaCodecs: mediasoupConfig.router.mediaCodecs,
@@ -2045,6 +2085,9 @@ async function getOrCreateVCRouter(roomId) {
 
 async function getOrCreatePdfVCRouter(pdfRoomId) {
     if (!pdfVcRouters.has(pdfRoomId)) {
+        if (pdfVcRouters.size >= VC_MAX_MEDIASOUP_ROUTERS) {
+            throw new Error('room_limit');
+        }
         const worker = getNextPdfWorker();
         const router = await worker.createRouter({
             mediaCodecs: pdfVcMediasoupConfig.router.mediaCodecs,
@@ -2057,6 +2100,9 @@ async function getOrCreatePdfVCRouter(pdfRoomId) {
 
 async function getOrCreateVideoVCRouter(roomId) {
     if (!videoVcRouters.has(roomId)) {
+        if (videoVcRouters.size >= VC_MAX_MEDIASOUP_ROUTERS) {
+            throw new Error('room_limit');
+        }
         const worker = getNextVideoVcWorker();
         const router = await worker.createRouter({
             mediaCodecs: videoVcMediasoupConfig.router.mediaCodecs,
@@ -2223,7 +2269,8 @@ function canUseTeleporter(access, effectiveRole) {
     if (access === 'student+') return role === 'student' || role === 'teacher' || role === 'admin';
     if (access === 'teacher+') return role === 'teacher' || role === 'admin';
     if (access === 'admin') return role === 'admin';
-    return true; // 未知の値は許可
+    console.warn(`[teleporter] unknown access value (${JSON.stringify(access)}) — denied`);
+    return false;
 }
 
 function getPlayerDisplayName(player) {
@@ -2861,6 +2908,12 @@ io.on('connection', (socket) => {
 
         if (oldRoom === newRoom) return;
 
+        if (!isValidWorldRoomId(newRoom)) {
+            if (typeof callback === 'function') callback({ error: 'invalid_world', message: '存在しないワールドです。' });
+            else socket.emit('change-world-rejected', { reason: 'invalid_world', message: '存在しないワールドです。' });
+            return;
+        }
+
         const teleporterId = data.teleporterId;
         if (teleporterId != null && teleporterId !== '') {
             const effectiveRole = socket.data.isAdmin ? 'admin' : (socket.data.role || 'guest');
@@ -3014,6 +3067,9 @@ io.on('connection', (socket) => {
     // VC: Join room
     socket.on('vc-join', async ({ roomId }, callback) => {
         try {
+            if (!roomId || typeof roomId !== 'string' || !isValidWorldRoomId(roomId)) {
+                return callback({ error: 'invalid_room' });
+            }
             const router = await getOrCreateVCRouter(roomId);
             
             // Initialize peer state
@@ -3376,6 +3432,22 @@ io.on('connection', (socket) => {
                 callback({ error: 'pdfPath required' });
                 return;
             }
+            const absPdf = resolvePathUnderStorageRoot(PDFS_DIR, pdfPath);
+            if (!absPdf || !absPdf.toLowerCase().endsWith('.pdf')) {
+                callback({ error: 'invalid_pdf_path' });
+                return;
+            }
+            let pdfStat;
+            try {
+                pdfStat = fs.statSync(absPdf);
+            } catch (_) {
+                callback({ error: 'invalid_pdf_path' });
+                return;
+            }
+            if (!pdfStat.isFile()) {
+                callback({ error: 'invalid_pdf_path' });
+                return;
+            }
             const pdfRoomId = 'pdf:' + pdfPath;
             const router = await getOrCreatePdfVCRouter(pdfRoomId);
 
@@ -3601,6 +3673,9 @@ io.on('connection', (socket) => {
     socket.on('video-vc-join', async ({ roomId }, callback) => {
         try {
             const room = roomId || socket.data.currentRoom || DEFAULT_ROOM;
+            if (!isValidWorldRoomId(room)) {
+                return callback({ error: 'invalid_room' });
+            }
             const router = await getOrCreateVideoVCRouter(room);
 
             if (videoVcPeers.has(socket.id)) {
@@ -3912,6 +3987,7 @@ io.on('connection', (socket) => {
     
     // Admin kick player
     socket.on('admin-kick-player', ({ targetSocketId }) => {
+        if (!socket.data.isAdmin) return;
         const targetSocket = io.sockets.sockets.get(targetSocketId);
         if (targetSocket) {
             // Send kick notification before disconnecting
@@ -3926,6 +4002,7 @@ io.on('connection', (socket) => {
     
     // Admin mute mic
     socket.on('admin-mute-mic', async ({ targetSocketId }) => {
+        if (!socket.data.isAdmin) return;
         const peer = vcPeers.get(targetSocketId);
         if (peer && peer.sendTransport) {
             // Close all producers
@@ -3943,6 +4020,7 @@ io.on('connection', (socket) => {
     
     // Admin send alert
     socket.on('admin-send-alert', ({ targetSocketId, message }) => {
+        if (!socket.data.isAdmin) return;
         const targetSocket = io.sockets.sockets.get(targetSocketId);
         if (targetSocket && message) {
             targetSocket.emit('admin-alert', { message });
@@ -4876,15 +4954,23 @@ app.get('/api/charts', (req, res) => {
 
 /** 譜面別スコアランキング（メモリ保持）。{ chartId: [ { username, score } ] } 降順 */
 const chartScores = {};
+const CHART_SCORE_USERNAME_MAX_LEN = 64;
 
-app.post('/api/charts/:id/score', (req, res) => {
+app.post('/api/charts/:id/score', chartScoreIpLimiter, (req, res) => {
     const id = req.params.id;
+    const charts = readCharts();
+    if (!charts || typeof charts !== 'object' || !Object.prototype.hasOwnProperty.call(charts, id)) {
+        return res.status(404).json({ error: 'Chart not found' });
+    }
     const { username, score } = req.body || {};
     const scoreNum = typeof score === 'number' ? score : parseInt(score, 10);
     if (Number.isNaN(scoreNum) || scoreNum < 0) {
         return res.status(400).json({ error: 'Invalid score' });
     }
     const name = (typeof username === 'string' && username.trim()) ? username.trim() : 'プレイヤー';
+    if (name.length > CHART_SCORE_USERNAME_MAX_LEN) {
+        return res.status(400).json({ error: 'username too long' });
+    }
     if (!chartScores[id]) chartScores[id] = [];
     chartScores[id].push({ username: name, score: scoreNum });
     chartScores[id].sort((a, b) => b.score - a.score);
@@ -5261,7 +5347,7 @@ app.get('/admin/user-sessions', (req, res) => {
         res.json({ sessions, total });
     } catch (err) {
         console.error('GET /admin/user-sessions error:', err);
-        res.status(500).json({ error: err.message });
+        sendAdminServerError(res, err);
     }
 });
 
@@ -5273,7 +5359,7 @@ app.get('/admin/user-sessions/by-username/:username', (req, res) => {
         res.json(session || {});
     } catch (err) {
         console.error('GET /admin/user-sessions/by-username error:', err);
-        res.status(500).json({ error: err.message });
+        sendAdminServerError(res, err);
     }
 });
 
@@ -5283,7 +5369,7 @@ app.get('/admin/users/students', (req, res) => {
         res.json(listStudents());
     } catch (err) {
         console.error('GET /admin/users/students error:', err);
-        res.status(500).json({ error: err.message });
+        sendAdminServerError(res, err);
     }
 });
 
@@ -5292,7 +5378,7 @@ app.get('/admin/users/teachers', (req, res) => {
         res.json(listTeachers());
     } catch (err) {
         console.error('GET /admin/users/teachers error:', err);
-        res.status(500).json({ error: err.message });
+        sendAdminServerError(res, err);
     }
 });
 
