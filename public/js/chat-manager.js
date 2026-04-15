@@ -199,7 +199,7 @@ class ChatManager {
         // Create message text
         const messageText = document.createElement('div');
         messageText.className = 'message-text';
-        messageText.innerHTML = this.formatMessageWithMentions(data.message);
+        messageText.innerHTML = this.formatChatMessageHtml(data.message);
 
         messageDiv.appendChild(messageHeader);
         messageDiv.appendChild(messageText);
@@ -238,8 +238,28 @@ class ChatManager {
         return mentions;
     }
 
-    formatMessageWithMentions(message) {
-        return message.replace(/@(\w+)/g, '<span class="mention-text">@$1</span>');
+    /**
+     * HTML に挿入する前に特殊文字をエスケープする（XSS 対策）
+     * @param {string} str
+     * @returns {string}
+     */
+    escapeHtml(str) {
+        return String(str ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    /**
+     * エスケープ後に @word のみ mention 用 span でラップした HTML を返す
+     * @param {string} message
+     * @returns {string}
+     */
+    formatChatMessageHtml(message) {
+        const escaped = this.escapeHtml(message);
+        return escaped.replace(/@(\w+)/g, '<span class="mention-text">@$1</span>');
     }
 
     playMentionSound() {

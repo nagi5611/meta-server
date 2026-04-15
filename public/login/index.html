@@ -203,6 +203,7 @@
             } else {
                 localStorage.removeItem('username');
                 localStorage.removeItem('userRole');
+                localStorage.removeItem('socketAuthToken');
             }
         }
 
@@ -234,6 +235,7 @@
             // LocalStorageに保存（一般ユーザーはuserRoleなし）
             localStorage.setItem('username', username);
             localStorage.removeItem('userRole');
+            localStorage.removeItem('socketAuthToken');
 
             // ログイン成功 - ゲーム画面へ遷移
             loginBtn.textContent = 'ログイン中...';

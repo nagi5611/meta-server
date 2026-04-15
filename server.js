@@ -15,6 +15,7 @@ import { initDb, verifyStudent, verifyTeacher, registerStudent, registerTeacher,
 import { initUserSessionsDb, insertSession, getLatestSessionByUsername, getSessionsPaginated } from './db/user-sessions.js';
 import { STORAGE_PATHS, validateAndPrepareStoragePaths } from './config/storage-paths.js';
 import { MODEL_UPLOAD_MAX_BYTES } from './lib/model-upload-max-bytes.js';
+import { signSocketAuthToken, verifySocketAuthToken } from './lib/socket-auth-token.js';
 import {
     runGlbTextureResizeQueued,
     getModelUploadQueueStats,
@@ -1138,7 +1139,13 @@ app.post('/api/auth/student/login', (req, res) => {
     if (!user) {
         return res.status(401).json({ success: false, error: 'invalid_credentials' });
     }
-    res.json({ success: true, username: user.displayName, displayName: user.displayName, role: 'student' });
+    res.json({
+        success: true,
+        username: user.displayName,
+        displayName: user.displayName,
+        role: 'student',
+        socketAuthToken: signSocketAuthToken({ role: 'student' }),
+    });
 });
 
 app.post('/api/auth/teacher/login', (req, res) => {
@@ -1150,7 +1157,13 @@ app.post('/api/auth/teacher/login', (req, res) => {
     if (!user) {
         return res.status(401).json({ success: false, error: 'invalid_credentials' });
     }
-    res.json({ success: true, username: user.displayName, displayName: user.displayName, role: 'teacher' });
+    res.json({
+        success: true,
+        username: user.displayName,
+        displayName: user.displayName,
+        role: 'teacher',
+        socketAuthToken: signSocketAuthToken({ role: 'teacher' }),
+    });
 });
 
 app.post('/api/auth/register/student', (req, res) => {
@@ -2033,8 +2046,8 @@ io.on('connection', (socket) => {
         console.log(`Player connected as admin: ${socket.id}`);
     } else {
         socket.data.isAdmin = false;
-        const authRole = socket.handshake.auth?.role;
-        socket.data.role = (authRole === 'student' || authRole === 'teacher') ? authRole : undefined; // guest は undefined
+        const verified = verifySocketAuthToken(socket.handshake.auth?.socketAuthToken);
+        socket.data.role = verified ? verified.role : undefined; // guest は undefined
         console.log(`Player connected: ${socket.id}`);
     }
 

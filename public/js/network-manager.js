@@ -62,8 +62,8 @@ class NetworkManager {
         const adminToken = sessionStorage.getItem('metaverseAdminToken');
         const auth = adminToken ? { adminToken } : {};
         if (!auth.adminToken) {
-            const role = localStorage.getItem('userRole');
-            if (role === 'student' || role === 'teacher') auth.role = role;
+            const socketAuthToken = localStorage.getItem('socketAuthToken');
+            if (socketAuthToken) auth.socketAuthToken = socketAuthToken;
         }
         this.socket = io(socketUrl, {
             transports: ['websocket', 'polling'],
@@ -157,6 +157,7 @@ class NetworkManager {
             const msg = data?.message || '「admin」は管理者専用です。';
             localStorage.removeItem('username');
             localStorage.removeItem('userRole');
+            localStorage.removeItem('socketAuthToken');
             this.username = 'Guest';
             alert(msg);
             window.location.href = '/login/';
@@ -268,6 +269,7 @@ class NetworkManager {
             // Redirect to login page
             localStorage.removeItem('username');
             localStorage.removeItem('userRole');
+            localStorage.removeItem('socketAuthToken');
             window.location.href = '/login/';
         });
 

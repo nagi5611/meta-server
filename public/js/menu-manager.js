@@ -708,6 +708,7 @@ class MenuManager {
     logout() {
         localStorage.removeItem('username');
         localStorage.removeItem('userRole');
+        localStorage.removeItem('socketAuthToken');
         sessionStorage.removeItem('metaverseAdminToken');
         const ap = window.location.pathname;
         const fromAdminMetaverse = ap === '/admin' || ap === '/admin/';
