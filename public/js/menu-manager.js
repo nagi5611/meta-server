@@ -705,10 +705,12 @@ class MenuManager {
         }
     }
     
-    logout() {
+    async logout() {
+        try {
+            await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+        } catch (_) { /* ignore */ }
         localStorage.removeItem('username');
         localStorage.removeItem('userRole');
-        localStorage.removeItem('socketAuthToken');
         sessionStorage.removeItem('metaverseAdminToken');
         const ap = window.location.pathname;
         const fromAdminMetaverse = ap === '/admin' || ap === '/admin/';

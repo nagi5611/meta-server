@@ -52,22 +52,17 @@ class NetworkManager {
     }
 
     connect() {
-        // Use relative path in production, or localhost:3000 in development
-        const socketUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-            ? 'http://localhost:3000'
-            : window.location.origin;
+        // window.location.origin に統一（Vite プロキシ経由で httpOnly Cookie が Socket に届く）
+        const socketUrl = window.location.origin;
 
         console.log(`Connecting to Socket.io server at: ${socketUrl}`);
 
         const adminToken = sessionStorage.getItem('metaverseAdminToken');
         const auth = adminToken ? { adminToken } : {};
-        if (!auth.adminToken) {
-            const socketAuthToken = localStorage.getItem('socketAuthToken');
-            if (socketAuthToken) auth.socketAuthToken = socketAuthToken;
-        }
         this.socket = io(socketUrl, {
             transports: ['websocket', 'polling'],
-            auth
+            auth,
+            withCredentials: true,
         });
 
         this.socket.on('connect', () => {
@@ -153,11 +148,13 @@ class NetworkManager {
         });
 
         // admin 名でのログイン拒否時（管理者以外）→ エラー表示してログインへ
-        this.socket.on('username-rejected', (data) => {
+        this.socket.on('username-rejected', async (data) => {
             const msg = data?.message || '「admin」は管理者専用です。';
+            try {
+                await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+            } catch (_) { /* ignore */ }
             localStorage.removeItem('username');
             localStorage.removeItem('userRole');
-            localStorage.removeItem('socketAuthToken');
             this.username = 'Guest';
             alert(msg);
             window.location.href = '/login/';
@@ -263,13 +260,14 @@ class NetworkManager {
         });
 
         // Handle admin kick
-        this.socket.on('admin-kicked', (data) => {
+        this.socket.on('admin-kicked', async (data) => {
             const message = data && data.message ? data.message : '管理者によってキックされました。';
             alert(message);
-            // Redirect to login page
+            try {
+                await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+            } catch (_) { /* ignore */ }
             localStorage.removeItem('username');
             localStorage.removeItem('userRole');
-            localStorage.removeItem('socketAuthToken');
             window.location.href = '/login/';
         });
 

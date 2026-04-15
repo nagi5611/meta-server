@@ -15,7 +15,11 @@ import { initDb, verifyStudent, verifyTeacher, registerStudent, registerTeacher,
 import { initUserSessionsDb, insertSession, getLatestSessionByUsername, getSessionsPaginated } from './db/user-sessions.js';
 import { STORAGE_PATHS, validateAndPrepareStoragePaths } from './config/storage-paths.js';
 import { MODEL_UPLOAD_MAX_BYTES } from './lib/model-upload-max-bytes.js';
-import { signSocketAuthToken, verifySocketAuthToken } from './lib/socket-auth-token.js';
+import cookieParser from 'cookie-parser';
+import { parse as parseCookieHeader } from 'cookie';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { signSocketAuthToken, verifySocketAuthToken, SOCKET_AUTH_TOKEN_MAX_AGE_MS } from './lib/socket-auth-token.js';
 import {
     runGlbTextureResizeQueued,
     getModelUploadQueueStats,
@@ -29,6 +33,10 @@ const __dirname = path.dirname(__filename);
 
 // Validate required storage env vars early (throw to fail-fast on startup)
 validateAndPrepareStoragePaths();
+
+const isNodeProduction = process.env.NODE_ENV === 'production';
+/** httpOnly Cookie 名（Socket 認証用トークン） */
+const SOCKET_AUTH_COOKIE_NAME = 'metaverse_socket_auth';
 
 /** 本番: dist/index.html が存在し NODE_ENV=production のときは dist を配信 */
 const isProductionBuild = process.env.NODE_ENV === 'production' &&
@@ -771,6 +779,71 @@ function isTruthyEnv(v) {
 }
 
 /**
+ * SOCKET_CORS_ORIGINS をパースする（改行またはカンマ区切り）
+ * @returns {string[]}
+ */
+function parseSocketAllowedOrigins() {
+    return String(process.env.SOCKET_CORS_ORIGINS || '')
+        .split(/[\r\n,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+}
+
+/**
+ * 本番起動前の必須セキュリティ設定を検証する
+ */
+function assertProductionSecurityBeforeListen() {
+    if (!isNodeProduction) return;
+    const sk = String(process.env.SOCKET_AUTH_SECRET || '').trim();
+    if (sk.length < 16) {
+        throw new Error('[security] NODE_ENV=production requires SOCKET_AUTH_SECRET (min 16 characters).');
+    }
+    if (parseSocketAllowedOrigins().length === 0) {
+        throw new Error(
+            '[security] NODE_ENV=production requires SOCKET_CORS_ORIGINS (comma-separated browser origins, e.g. https://meta.example.com).'
+        );
+    }
+}
+
+/**
+ * Socket.io 用 CORS 設定（credentials 利用のため本番は明示 Origin リスト必須）
+ * @returns {{ origin: Function, credentials: boolean, methods: string[] }}
+ */
+function buildSocketIoCors() {
+    const allowed = parseSocketAllowedOrigins();
+    return {
+        origin: (origin, callback) => {
+            if (!isNodeProduction) {
+                return callback(null, true);
+            }
+            if (!origin) {
+                return callback(null, true);
+            }
+            if (allowed.includes(origin)) {
+                return callback(null, true);
+            }
+            return callback(new Error('socket.io CORS: origin not allowed'));
+        },
+        credentials: true,
+        methods: ['GET', 'POST'],
+    };
+}
+
+const authLoginIpLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 40,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+const authRegisterIpLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+/**
  * PROXY_DOMAIN_PORT_MAP をパースする。改行またはカンマ区切り、各項目は host=port
  * @param {string | undefined} raw
  * @returns {Map<string, number>}
@@ -835,6 +908,15 @@ if (useReverseProxy) {
     }
 }
 
+assertProductionSecurityBeforeListen();
+
+app.use(cookieParser());
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
+app.use(express.json({ limit: '1mb' }));
+
 /** HTTPS: SSL_CERT_PATH と SSL_KEY_PATH が両方設定されていれば HTTPS で待ち受ける（リバースプロキシ時は無効） */
 const SSL_CERT_PATH = process.env.SSL_CERT_PATH;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH;
@@ -856,10 +938,7 @@ const httpServer = hasSsl
     : http.createServer(app);
 
 const io = new Server(httpServer, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
+    cors: buildSocketIoCors(),
 });
 
 /** Bind to 0.0.0.0 for LAN access; use 127.0.0.1 for localhost only */
@@ -1100,37 +1179,159 @@ async function getIceServers() {
 // Admin: Basic Authentication
 // ============================
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const envAdminPassword = String(process.env.ADMIN_PASSWORD ?? '').trim();
+const ADMIN_PASSWORD = envAdminPassword.length > 0
+    ? envAdminPassword
+    : (() => {
+        const generated = crypto.randomUUID();
+        console.log('[security] ADMIN_PASSWORD unset; generated one-time Basic auth password (set ADMIN_PASSWORD in .env to keep it across restarts).');
+        console.log(`[security] Admin user: ${ADMIN_USERNAME}`);
+        console.log(`[security] Admin password: ${generated}`);
+        return generated;
+    })();
 // 通信帯域上限 (Mbps)。1 Mbps ≈ 125,000 bytes/s
 const BANDWIDTH_LIMIT_MBPS = parseFloat(process.env.BANDWIDTH_LIMIT_MBPS || '100');
 const BANDWIDTH_LIMIT_BPS = Math.floor(BANDWIDTH_LIMIT_MBPS * 125000);
 
+/**
+ * UTF-8 文字列をタイミングセーフに比較する
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function timingSafeEqualStr(a, b) {
+    const bufa = Buffer.from(String(a), 'utf8');
+    const bufb = Buffer.from(String(b), 'utf8');
+    if (bufa.length !== bufb.length) return false;
+    return crypto.timingSafeEqual(bufa, bufb);
+}
+
 function basicAuth(req, res, next) {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Basic ')) {
         res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"');
         return res.status(401).send('認証が必要です');
     }
-    
-    const base64Credentials = authHeader.split(' ')[1];
-    const credentials = Buffer.from(base64Credentials, 'base64').toString('utf-8');
-    const [username, password] = credentials.split(':');
-    
-    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+
+    const base64Credentials = authHeader.slice(6);
+    let decoded;
+    try {
+        decoded = Buffer.from(base64Credentials, 'base64').toString('utf8');
+    } catch {
+        res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"');
+        return res.status(401).send('認証に失敗しました');
+    }
+
+    const sep = decoded.indexOf(':');
+    const user = sep >= 0 ? decoded.slice(0, sep) : decoded;
+    const pass = sep >= 0 ? decoded.slice(sep + 1) : '';
+
+    if (timingSafeEqualStr(user, ADMIN_USERNAME) && timingSafeEqualStr(pass, ADMIN_PASSWORD)) {
         return next();
     }
-    
+
     res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"');
     return res.status(401).send('認証に失敗しました');
 }
 
-app.use(express.json());
+const SOCKET_AUTH_TOKEN_IN_JSON = isTruthyEnv(process.env.SOCKET_AUTH_TOKEN_IN_JSON);
+const allowPublicRegistration = isTruthyEnv(process.env.ALLOW_PUBLIC_REGISTRATION) || !isNodeProduction;
+
+/**
+ * 本番では既定で無効な公開ユーザー登録を許可するか
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+function requirePublicRegistrationEnabled(req, res, next) {
+    if (allowPublicRegistration) return next();
+    res.status(403).json({ success: false, error: 'registration_disabled' });
+}
+
+/**
+ * @returns {boolean} SOCKET_ALLOW_GUEST が 0/false/off/no のとき true（ゲスト接続を拒否）
+ */
+function isSocketGuestDisabled() {
+    const s = String(process.env.SOCKET_ALLOW_GUEST ?? '').trim().toLowerCase();
+    return s === '0' || s === 'false' || s === 'off' || s === 'no';
+}
+
+/**
+ * @returns {boolean}
+ */
+function isAuthCookieSecure() {
+    return isNodeProduction && process.env.COOKIE_SECURE !== '0';
+}
+
+/**
+ * Socket 認証用 httpOnly Cookie を付与する
+ * @param {import('express').Response} res
+ * @param {string} token
+ */
+function setSocketAuthCookie(res, token) {
+    res.cookie(SOCKET_AUTH_COOKIE_NAME, token, {
+        httpOnly: true,
+        secure: isAuthCookieSecure(),
+        sameSite: 'lax',
+        path: '/',
+        maxAge: SOCKET_AUTH_TOKEN_MAX_AGE_MS,
+    });
+}
+
+/**
+ * HTTP リクエストから Socket 認証トークンを読む
+ * @param {import('express').Request} req
+ * @returns {string|null}
+ */
+function getSocketAuthTokenFromHttp(req) {
+    const c = req.cookies?.[SOCKET_AUTH_COOKIE_NAME];
+    return typeof c === 'string' && c.length > 0 ? c : null;
+}
+
+/**
+ * Socket ハンドシェイクからトークンを読む（httpOnly Cookie を auth ペイロードより優先）
+ * @param {import('socket.io').Socket} socket
+ * @returns {string|null}
+ */
+function getSocketAuthTokenFromHandshake(socket) {
+    const raw = socket.handshake.headers?.cookie;
+    if (raw && typeof raw === 'string') {
+        try {
+            const parsed = parseCookieHeader(raw);
+            const c = parsed[SOCKET_AUTH_COOKIE_NAME];
+            if (typeof c === 'string' && c.length > 0) return c;
+        } catch {
+            /* fall through */
+        }
+    }
+    const fromAuth = socket.handshake.auth?.socketAuthToken;
+    if (fromAuth && typeof fromAuth === 'string' && fromAuth.length > 0) return fromAuth;
+    return null;
+}
 
 // ============================
 // Auth API (student / teacher)
 // ============================
-app.post('/api/auth/student/login', (req, res) => {
+app.get('/api/auth/session', (req, res) => {
+    const raw = getSocketAuthTokenFromHttp(req);
+    const verified = verifySocketAuthToken(raw);
+    if (!verified) {
+        return res.json({ authenticated: false });
+    }
+    res.json({ authenticated: true, role: verified.role });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+    res.clearCookie(SOCKET_AUTH_COOKIE_NAME, {
+        path: '/',
+        sameSite: 'lax',
+        secure: isAuthCookieSecure(),
+    });
+    res.json({ success: true });
+});
+
+app.post('/api/auth/student/login', authLoginIpLimiter, (req, res) => {
     const { username, password } = req.body || {};
     if (!username || !password) {
         return res.status(400).json({ success: false, error: 'username and password required' });
@@ -1139,16 +1340,21 @@ app.post('/api/auth/student/login', (req, res) => {
     if (!user) {
         return res.status(401).json({ success: false, error: 'invalid_credentials' });
     }
-    res.json({
+    const token = signSocketAuthToken({ role: 'student' });
+    setSocketAuthCookie(res, token);
+    const body = {
         success: true,
         username: user.displayName,
         displayName: user.displayName,
         role: 'student',
-        socketAuthToken: signSocketAuthToken({ role: 'student' }),
-    });
+    };
+    if (SOCKET_AUTH_TOKEN_IN_JSON) {
+        body.socketAuthToken = token;
+    }
+    res.json(body);
 });
 
-app.post('/api/auth/teacher/login', (req, res) => {
+app.post('/api/auth/teacher/login', authLoginIpLimiter, (req, res) => {
     const { username, password } = req.body || {};
     if (!username || !password) {
         return res.status(400).json({ success: false, error: 'username and password required' });
@@ -1157,16 +1363,21 @@ app.post('/api/auth/teacher/login', (req, res) => {
     if (!user) {
         return res.status(401).json({ success: false, error: 'invalid_credentials' });
     }
-    res.json({
+    const token = signSocketAuthToken({ role: 'teacher' });
+    setSocketAuthCookie(res, token);
+    const body = {
         success: true,
         username: user.displayName,
         displayName: user.displayName,
         role: 'teacher',
-        socketAuthToken: signSocketAuthToken({ role: 'teacher' }),
-    });
+    };
+    if (SOCKET_AUTH_TOKEN_IN_JSON) {
+        body.socketAuthToken = token;
+    }
+    res.json(body);
 });
 
-app.post('/api/auth/register/student', (req, res) => {
+app.post('/api/auth/register/student', authRegisterIpLimiter, requirePublicRegistrationEnabled, (req, res) => {
     const { username, password, displayName } = req.body || {};
     if (!username || !password) {
         return res.status(400).json({ success: false, error: 'username and password required' });
@@ -1182,7 +1393,7 @@ app.post('/api/auth/register/student', (req, res) => {
     }
 });
 
-app.post('/api/auth/register/teacher', (req, res) => {
+app.post('/api/auth/register/teacher', authRegisterIpLimiter, requirePublicRegistrationEnabled, (req, res) => {
     const { username, password, displayName } = req.body || {};
     if (!username || !password) {
         return res.status(400).json({ success: false, error: 'username and password required' });
@@ -1386,6 +1597,31 @@ function consumeAdminToken(token) {
     }
     adminTokens.delete(token);
     return true;
+}
+
+/**
+ * 管理ワンタイムトークンが未消費かつ有効期限内か（io.use 用、消費はしない）
+ * @param {unknown} token
+ * @returns {boolean}
+ */
+function peekAdminToken(token) {
+    if (!token || typeof token !== 'string') return false;
+    const expiry = adminTokens.get(token);
+    return !!(expiry && Date.now() < expiry);
+}
+
+if (isSocketGuestDisabled()) {
+    io.use((socket, next) => {
+        const adminToken = socket.handshake.auth?.adminToken;
+        if (peekAdminToken(adminToken)) {
+            return next();
+        }
+        const t = getSocketAuthTokenFromHandshake(socket);
+        if (verifySocketAuthToken(t)) {
+            return next();
+        }
+        return next(new Error('AUTH_REQUIRED'));
+    });
 }
 
 // ============================
@@ -2046,7 +2282,7 @@ io.on('connection', (socket) => {
         console.log(`Player connected as admin: ${socket.id}`);
     } else {
         socket.data.isAdmin = false;
-        const verified = verifySocketAuthToken(socket.handshake.auth?.socketAuthToken);
+        const verified = verifySocketAuthToken(getSocketAuthTokenFromHandshake(socket));
         socket.data.role = verified ? verified.role : undefined; // guest は undefined
         console.log(`Player connected: ${socket.id}`);
     }

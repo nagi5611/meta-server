@@ -2,6 +2,20 @@
  * UIManager - Manages UI elements for the game
  */
 
+/**
+ * innerHTML 向けに文字列をエスケープする（表示名 XSS 対策）
+ * @param {string} s
+ * @returns {string}
+ */
+function escapeHtmlForUi(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 class UIManager {
     constructor() {
         this.teleportPrompt = null;
@@ -369,7 +383,7 @@ class UIManager {
                 const videoIcon = p.vcVideoOn ? '<i class="bi bi-camera-video-fill vc-status-icon video-on" title="ビデオON"></i>' : '';
                 const micIcon = p.vcMicOn ? '<i class="bi bi-mic vc-status-icon mic-on" title="マイクON"></i>' : '<i class="bi bi-mic-mute vc-status-icon mic-off" title="マイクOFF"></i>';
                 const spkIcon = p.vcSpeakerOn === true ? '<i class="bi bi-megaphone vc-status-icon speaker-on" title="スピーカーON"></i>' : '<i class="bi bi-megaphone-fill vc-status-icon speaker-off" title="スピーカーOFF"></i>';
-                const name = (p.displayName || p.username || 'Guest').trim() || 'Player';
+                const name = escapeHtmlForUi((p.displayName || p.username || 'Guest').trim() || 'Player');
                 const ping = p.pingMs != null ? p.pingMs : null;
                 const pingClass = ping == null ? 'ping-none' : (ping <= 100 ? 'ping-green' : ping <= 300 ? 'ping-yellow' : 'ping-red');
                 const pingText = ping != null ? `${ping}ms` : '応答なし';

@@ -191,13 +191,20 @@
     </div>
 
     <script>
-        const savedUsername = localStorage.getItem('username');
-        if (savedUsername && savedUsername.trim().length >= 2 && localStorage.getItem('userRole') === 'teacher' && localStorage.getItem('socketAuthToken')) {
-            if (savedUsername.trim().toLowerCase() !== 'admin') {
-                window.location.href = '/index.html' + window.location.search + window.location.hash;
-                throw new Error('redirect');
+        (function () {
+            const savedUsername = localStorage.getItem('username');
+            if (!savedUsername || savedUsername.trim().length < 2 || localStorage.getItem('userRole') !== 'teacher' || savedUsername.trim().toLowerCase() === 'admin') {
+                return;
             }
-        }
+            fetch('/api/auth/session', { credentials: 'include' })
+                .then((r) => r.json())
+                .then((d) => {
+                    if (d && d.authenticated && d.role === 'teacher') {
+                        window.location.href = '/index.html' + window.location.search + window.location.hash;
+                    }
+                })
+                .catch(() => {});
+        })();
 
         const loginForm = document.getElementById('login-form');
         const usernameInput = document.getElementById('username');
@@ -225,6 +232,7 @@
                 const res = await fetch('/api/auth/teacher/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
                     body: JSON.stringify({ username, password })
                 });
                 const data = await res.json();
@@ -232,9 +240,6 @@
                 if (data.success) {
                     localStorage.setItem('username', data.displayName || data.username);
                     localStorage.setItem('userRole', 'teacher');
-                    if (data.socketAuthToken) {
-                        localStorage.setItem('socketAuthToken', data.socketAuthToken);
-                    }
                     window.location.href = '/index.html' + window.location.search + window.location.hash;
                     return;
                 }
