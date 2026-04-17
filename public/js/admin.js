@@ -1,3 +1,23 @@
+/**
+ * サーバー側で生成した WAV を優先し、なければ MP3（chart-bgm-fetch.js と同じロジック）
+ * @param {string} basePath 拡張子なし
+ * @param {string|number} version
+ * @returns {Promise<ArrayBuffer>}
+ */
+async function chartBgmFetchArrayBuffer(basePath, version) {
+    const v = encodeURIComponent(String(version));
+    const tryExt = async (ext) => {
+        const res = await fetch(`${basePath}${ext}?v=${v}`, { credentials: 'same-origin' });
+        if (!res.ok) return null;
+        return res.arrayBuffer();
+    };
+    const wav = await tryExt('.wav');
+    if (wav) return wav;
+    const mp3 = await tryExt('.mp3');
+    if (mp3) return mp3;
+    throw new Error('BGMの取得に失敗しました');
+}
+
 let currentAlertTarget = null;
 /** セレクター補完用のプレイヤー一覧（loadPlayers で更新） */
 let cachedPlayersForCompletion = [];
@@ -1815,10 +1835,9 @@ async function preloadChartPreviewCustomHitSounds(chartId) {
             const o = /** @type {Record<string, unknown>} */ (cell);
             const load = async (/** @type {'don'|'ka'} */ kind, ver) => {
                 const key = `${chartId}|${part}|${b}|${kind}`;
-                const url = `/chart-bgm/${encodeURIComponent(chartId)}/hits/p${part}-b${b}-${kind}.mp3?v=${encodeURIComponent(String(ver))}`;
-                const res = await fetch(url, { credentials: 'same-origin' });
-                if (!res.ok) return;
-                const ab = await res.arrayBuffer();
+                const hitBase = `/chart-bgm/${encodeURIComponent(chartId)}/hits/p${part}-b${b}-${kind}`;
+                const ab = await chartBgmFetchArrayBuffer(hitBase, ver).catch(() => null);
+                if (!ab) return;
                 const buf = await chartPreviewAudioCtx.decodeAudioData(ab.slice(0));
                 chartPreviewHitSoundBuffers.set(key, buf);
             };
@@ -1887,7 +1906,7 @@ function getResolvedChartBgmCacheKeyForPartPreview(chartId, c) {
 
 /**
  * 選択中譜面のBGMを AudioBuffer にデコードする（未設定なら null）
- * @param {{ track?: 'main' | 'part' }} [options] main=曲のMP3のみ。part=編集中パート用MP3、無ければ曲のBGMにフォールバック
+ * @param {{ track?: 'main' | 'part' }} [options] main=曲のBGMのみ。part=編集中パート用、無ければ曲のBGMにフォールバック（WAV 優先）
  * @returns {Promise<AudioBuffer | null>}
  */
 async function ensureChartPreviewBgmDecoded(options = {}) {
@@ -1897,21 +1916,26 @@ async function ensureChartPreviewBgmDecoded(options = {}) {
     if (!c) return null;
 
     let cacheKey = '';
-    let url = '';
+    let basePath = '';
+    /** @type {string|number|null} */
+    let versionForUrl = null;
 
     if (track === 'main') {
         if (c.bgmVersion == null) return null;
         cacheKey = `${chartId}:main:${c.bgmVersion}`;
-        url = `/chart-bgm/${encodeURIComponent(chartId)}.mp3?v=${encodeURIComponent(String(c.bgmVersion))}`;
+        basePath = `/chart-bgm/${encodeURIComponent(chartId)}`;
+        versionForUrl = c.bgmVersion;
     } else {
         const p = chartEditingPart;
         const pb = getChartPartBgmMeta(c, p);
         if (pb) {
             cacheKey = `${chartId}:p${p}:${pb.version}`;
-            url = `/chart-bgm/${encodeURIComponent(chartId)}-p${p}.mp3?v=${encodeURIComponent(String(pb.version))}`;
+            basePath = `/chart-bgm/${encodeURIComponent(chartId)}-p${p}`;
+            versionForUrl = pb.version;
         } else if (c.bgmVersion != null) {
             cacheKey = `${chartId}:main:${c.bgmVersion}`;
-            url = `/chart-bgm/${encodeURIComponent(chartId)}.mp3?v=${encodeURIComponent(String(c.bgmVersion))}`;
+            basePath = `/chart-bgm/${encodeURIComponent(chartId)}`;
+            versionForUrl = c.bgmVersion;
         } else {
             return null;
         }
@@ -1925,9 +1949,7 @@ async function ensureChartPreviewBgmDecoded(options = {}) {
     }
     setChartEditLoaderMessage('BGMファイルをダウンロードしています…');
     await yieldToBrowser();
-    const res = await fetch(url, { credentials: 'same-origin' });
-    if (!res.ok) throw new Error('BGMの取得に失敗しました');
-    const ab = await res.arrayBuffer();
+    const ab = await chartBgmFetchArrayBuffer(basePath, versionForUrl);
     setChartEditLoaderMessage('BGMをデコードしています（長い曲は数十秒かかることがあります）…');
     await yieldToBrowser();
     const buf = await chartPreviewAudioCtx.decodeAudioData(ab.slice(0));

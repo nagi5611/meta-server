@@ -2,6 +2,7 @@
 // 轟太鼓リズムゲーム: オーバーレイ制御・ノーツ生成・判定・スコア管理
 
 import { isMobile } from './mobile-utils.js';
+import { fetchChartBgmArrayBuffer } from './chart-bgm-fetch.js';
 
 /**
  * ノーツ定義: { time: 秒, type: 'don'|'ka', volume?: 0.1〜3 } または { type: 'roll', startTime, endTime, volume?: 0.1〜3, rollCellVolumes?: Record<string, number> }
@@ -242,17 +243,15 @@ class TaikoGameManager {
         return Date.now() + (Number(this._serverOffsetMs) || 0);
     }
 
-    /** BGM(mp3)をデコードしてAudioBufferを返す。bgmVersionが無い場合はnull。 */
+    /** BGM（サーバー生成 WAV 優先、なければ MP3）をデコードして AudioBuffer を返す。bgmVersion が無い場合は null。 */
     async _loadChartBgmBuffer(chartId, bgmVersion) {
         if (!chartId || bgmVersion == null) return null;
         const ctx = this._ensureBgmAudioCtx();
         if (!ctx) return null;
         const key = `${chartId}:${bgmVersion}`;
         if (this._bgmCache.key === key && this._bgmCache.buffer) return this._bgmCache.buffer;
-        const url = `/chart-bgm/${encodeURIComponent(chartId)}.mp3?v=${encodeURIComponent(String(bgmVersion))}`;
-        const res = await fetch(url, { credentials: 'same-origin' });
-        if (!res.ok) throw new Error('BGMの取得に失敗しました');
-        const ab = await res.arrayBuffer();
+        const basePath = `/chart-bgm/${encodeURIComponent(chartId)}`;
+        const ab = await fetchChartBgmArrayBuffer(basePath, bgmVersion);
         const buf = await ctx.decodeAudioData(ab.slice(0));
         this._bgmCache = { key, buffer: buf };
         return buf;
@@ -1060,10 +1059,9 @@ class TaikoGameManager {
         if (this._hitSoundCustomCache.has(key)) return;
         const ctx = this._ensureBgmAudioCtx();
         if (!ctx) return;
-        const url = `/chart-bgm/${encodeURIComponent(chartId)}/hits/p${part}-b${bucket}-${kind}.mp3?v=${encodeURIComponent(String(ver))}`;
-        const res = await fetch(url, { credentials: 'same-origin' });
-        if (!res.ok) return;
-        const ab = await res.arrayBuffer();
+        const basePath = `/chart-bgm/${encodeURIComponent(chartId)}/hits/p${part}-b${bucket}-${kind}`;
+        const ab = await fetchChartBgmArrayBuffer(basePath, ver).catch(() => null);
+        if (!ab) return;
         const buf = await ctx.decodeAudioData(ab.slice(0));
         this._hitSoundCustomCache.set(key, buf);
     }

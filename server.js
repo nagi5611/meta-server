@@ -27,6 +27,7 @@ import {
 } from './lib/glb-texture-resize.js';
 import { runGlbSpatialChunkIfNeeded } from './lib/glb-spatial-chunk.js';
 import { runGlbObjectSplitFromBuffer, listObjectSplitFilesForBase } from './lib/glb-object-split.js';
+import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } from './lib/chart-bgm-transcode.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -4314,15 +4315,19 @@ app.delete('/admin/charts/:id', (req, res) => {
     }
     delete charts[id];
     const bgmPath = path.join(CHART_BGM_DIR, `${id}.mp3`);
+    const bgmWav = wavPathForMp3(bgmPath);
     try {
         if (fs.existsSync(bgmPath)) fs.unlinkSync(bgmPath);
+        if (fs.existsSync(bgmWav)) fs.unlinkSync(bgmWav);
     } catch (e) {
         console.warn('DELETE chart BGM file:', e?.message || e);
     }
     for (const p of [1, 2, 3]) {
         const partPath = path.join(CHART_BGM_DIR, `${id}-p${p}.mp3`);
+        const partWav = wavPathForMp3(partPath);
         try {
             if (fs.existsSync(partPath)) fs.unlinkSync(partPath);
+            if (fs.existsSync(partWav)) fs.unlinkSync(partWav);
         } catch (e) {
             console.warn('DELETE chart part BGM file:', e?.message || e);
         }
@@ -4347,7 +4352,7 @@ app.delete('/admin/charts/:id', (req, res) => {
     }
 });
 
-app.post('/admin/charts/:id/bgm', uploadChartBgm.single('bgm'), (req, res) => {
+app.post('/admin/charts/:id/bgm', uploadChartBgm.single('bgm'), async (req, res) => {
     const id = req.params.id;
     if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
         return res.status(400).json({ error: 'Invalid chart id' });
@@ -4360,7 +4365,10 @@ app.post('/admin/charts/:id/bgm', uploadChartBgm.single('bgm'), (req, res) => {
         return res.status(404).json({ error: 'Chart not found' });
     }
     try {
-        fs.writeFileSync(path.join(CHART_BGM_DIR, `${id}.mp3`), req.file.buffer);
+        const mp3Path = path.join(CHART_BGM_DIR, `${id}.mp3`);
+        fs.writeFileSync(mp3Path, req.file.buffer);
+        const okWav = await ensureWavSidecarForMp3Path(mp3Path);
+        if (!okWav) console.warn('[chart-bgm] WAV sidecar failed for chart', id);
         const orig = path.basename(req.file.originalname || 'bgm.mp3');
         charts[id].bgmVersion = Date.now();
         charts[id].bgmOriginalName = orig.length > 200 ? orig.slice(0, 200) : orig;
@@ -4383,7 +4391,9 @@ app.delete('/admin/charts/:id/bgm', (req, res) => {
     }
     try {
         const bgmPath = path.join(CHART_BGM_DIR, `${id}.mp3`);
+        const bgmWav = wavPathForMp3(bgmPath);
         if (fs.existsSync(bgmPath)) fs.unlinkSync(bgmPath);
+        if (fs.existsSync(bgmWav)) fs.unlinkSync(bgmWav);
         delete charts[id].bgmVersion;
         delete charts[id].bgmOriginalName;
         writeCharts(charts);
@@ -4395,7 +4405,7 @@ app.delete('/admin/charts/:id/bgm', (req, res) => {
 });
 
 /** 1P〜3P 用プレビューBGM（譜面ID-p{1|2|3}.mp3） */
-app.post('/admin/charts/:id/bgm/part/:partNum', uploadChartBgm.single('bgm'), (req, res) => {
+app.post('/admin/charts/:id/bgm/part/:partNum', uploadChartBgm.single('bgm'), async (req, res) => {
     const id = req.params.id;
     const partNum = Number(req.params.partNum);
     if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
@@ -4412,7 +4422,10 @@ app.post('/admin/charts/:id/bgm/part/:partNum', uploadChartBgm.single('bgm'), (r
         return res.status(404).json({ error: 'Chart not found' });
     }
     try {
-        fs.writeFileSync(path.join(CHART_BGM_DIR, `${id}-p${partNum}.mp3`), req.file.buffer);
+        const mp3Path = path.join(CHART_BGM_DIR, `${id}-p${partNum}.mp3`);
+        fs.writeFileSync(mp3Path, req.file.buffer);
+        const okWav = await ensureWavSidecarForMp3Path(mp3Path);
+        if (!okWav) console.warn('[chart-bgm] WAV sidecar failed for part BGM', id, partNum);
         const orig = path.basename(req.file.originalname || 'bgm.mp3');
         if (!charts[id].partBgm || typeof charts[id].partBgm !== 'object') {
             charts[id].partBgm = {};
@@ -4445,7 +4458,9 @@ app.delete('/admin/charts/:id/bgm/part/:partNum', (req, res) => {
     }
     try {
         const partPath = path.join(CHART_BGM_DIR, `${id}-p${partNum}.mp3`);
+        const partWav = wavPathForMp3(partPath);
         if (fs.existsSync(partPath)) fs.unlinkSync(partPath);
+        if (fs.existsSync(partWav)) fs.unlinkSync(partWav);
         if (charts[id].partBgm && typeof charts[id].partBgm === 'object') {
             const pb = /** @type {Record<string, unknown>} */ (charts[id].partBgm);
             delete pb[String(partNum)];
@@ -4462,7 +4477,7 @@ app.delete('/admin/charts/:id/bgm/part/:partNum', (req, res) => {
 });
 
 /** パート(1–3)×音量帯(0–4)×don|ka のヒット音MP3をアップロード */
-app.post('/admin/charts/:id/part-hit-sound', uploadChartBgm.single('sound'), (req, res) => {
+app.post('/admin/charts/:id/part-hit-sound', uploadChartBgm.single('sound'), async (req, res) => {
     const id = req.params.id;
     if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
         return res.status(400).json({ error: 'Invalid chart id' });
@@ -4484,7 +4499,10 @@ app.post('/admin/charts/:id/part-hit-sound', uploadChartBgm.single('sound'), (re
         const hitDir = path.join(CHART_BGM_DIR, id, 'hits');
         fs.mkdirSync(hitDir, { recursive: true });
         const fname = `p${part}-b${bucket}-${kind}.mp3`;
-        fs.writeFileSync(path.join(hitDir, fname), req.file.buffer);
+        const mp3Path = path.join(hitDir, fname);
+        fs.writeFileSync(mp3Path, req.file.buffer);
+        const okWav = await ensureWavSidecarForMp3Path(mp3Path);
+        if (!okWav) console.warn('[chart-bgm] WAV sidecar failed for hit sound', id, part, bucket, kind);
         ensurePartHitSoundsShape(charts[id]);
         const ph = /** @type {Record<string, Array<Record<string, unknown>>>} */ (charts[id].partHitSounds);
         const arr = ph[String(part)];
@@ -4524,8 +4542,10 @@ app.delete('/admin/charts/:id/part-hit-sound', (req, res) => {
         return res.status(404).json({ error: 'Chart not found' });
     }
     const fpath = path.join(CHART_BGM_DIR, id, 'hits', `p${part}-b${bucket}-${kind}.mp3`);
+    const fwav = wavPathForMp3(fpath);
     try {
         if (fs.existsSync(fpath)) fs.unlinkSync(fpath);
+        if (fs.existsSync(fwav)) fs.unlinkSync(fwav);
     } catch (e) {
         console.warn('DELETE part-hit-sound file:', e?.message || e);
     }
@@ -5653,5 +5673,12 @@ httpServer.listen(PORT, HOST, () => {
     console.log(`ENABLE_CHART_FEATURES (太鼓・譜面): ${CHART_FEATURES_ENABLED ? '有効' : '無効'}`);
     console.log(`VC_DEBUG_STATS: ${VC_DEBUG_STATS ? 'ENABLED' : 'DISABLED'} (env=${process.env.VC_DEBUG_STATS})`);
     console.log(`Admin panel available at ${protocol}://localhost:${PORT}/admin.html`);
+    if (CHART_FEATURES_ENABLED) {
+        setImmediate(() => {
+            runChartBgmWavMigration(CHART_BGM_DIR).catch((e) => {
+                console.warn('[chart-bgm] WAV migration error:', e?.message || e);
+            });
+        });
+    }
 });
 })();
