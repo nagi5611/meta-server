@@ -902,6 +902,16 @@ let chartMeasureBpmInputDebounceTimer = 0;
 let chartTempoInputDebounceTimer = 0;
 
 /**
+ * メインスレッドを一度譲り、ローダー文言の描画を先に反映させる
+ * @returns {Promise<void>}
+ */
+function yieldToBrowser() {
+    return new Promise((resolve) => {
+        requestAnimationFrame(() => resolve());
+    });
+}
+
+/**
  * 譜面グリッドの再描画を次フレームに1回にまとめる（ドラッグ・連打リサイズなど高頻度用）
  */
 function scheduleRenderNotesStrip() {
@@ -1154,7 +1164,7 @@ async function loadCharts() {
         else {
             updateChartBgmRowUi();
             updateChartPartBgmRowUi();
-            setChartEditLoaderMessage('音声ファイルを読み込んでいます…');
+            setChartEditLoaderMessage('BGM・波形を読み込んでいます…');
             await refreshChartBgmWaveformForSelectedChart({ externalLoader: true });
         }
         updateChartPartIoUi();
@@ -1913,9 +1923,13 @@ async function ensureChartPreviewBgmDecoded(options = {}) {
     if (!chartPreviewAudioCtx) {
         chartPreviewAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
+    setChartEditLoaderMessage('BGMファイルをダウンロードしています…');
+    await yieldToBrowser();
     const res = await fetch(url, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('BGMの取得に失敗しました');
     const ab = await res.arrayBuffer();
+    setChartEditLoaderMessage('BGMをデコードしています（長い曲は数十秒かかることがあります）…');
+    await yieldToBrowser();
     const buf = await chartPreviewAudioCtx.decodeAudioData(ab.slice(0));
     chartPreviewBgmCache = { key: cacheKey, buffer: buf };
     return buf;
@@ -2138,6 +2152,40 @@ function paintAllMeasureBgmWaveformCanvases() {
     lastMeasureStripWaveformTotalMeasures = grid.querySelectorAll('canvas.measure-spec-canvas').length;
 }
 
+/** 小節波形を数件ずつ描いてフレームを挟み、ローダーに進捗を出す（長時間ブロック回避） */
+const CHART_MEASURE_WAVEFORM_PROGRESS_BATCH = 4;
+
+/**
+ * 小節ごとの BGM 波形 canvas を段階的に描画し、オーバーレイに進捗を表示する
+ * @returns {Promise<void>}
+ */
+async function paintAllMeasureBgmWaveformCanvasesIncremental() {
+    const grid = document.getElementById('chart-measures-grid');
+    if (!grid) return;
+    const canvases = Array.from(grid.querySelectorAll('canvas.measure-spec-canvas'));
+    const total = canvases.length;
+    if (total === 0) {
+        lastMeasureStripWaveformChartId = selectedChartId || null;
+        lastMeasureStripWaveformTimingSig = buildMeasureStripWaveformTimingSignature();
+        lastMeasureStripWaveformTotalMeasures = 0;
+        return;
+    }
+    setChartEditLoaderMessage(`小節の波形を描画中… 0/${total}`);
+    await yieldToBrowser();
+    const batch = Math.max(1, CHART_MEASURE_WAVEFORM_PROGRESS_BATCH);
+    for (let i = 0; i < total; i++) {
+        paintOneMeasureBgmWaveformCanvas(canvases[i]);
+        const atBatchEnd = i % batch === batch - 1 || i === total - 1;
+        if (atBatchEnd) {
+            setChartEditLoaderMessage(`小節の波形を描画中… ${i + 1}/${total}`);
+            await yieldToBrowser();
+        }
+    }
+    lastMeasureStripWaveformChartId = selectedChartId || null;
+    lastMeasureStripWaveformTimingSig = buildMeasureStripWaveformTimingSignature();
+    lastMeasureStripWaveformTotalMeasures = total;
+}
+
 /**
  * renderNotesStrip 後: BPM/BGM/パートが変わったときだけ全再描画、小節数だけ増えたら末尾のみ描画
  * @param {number} totalMeasures
@@ -2343,7 +2391,7 @@ async function refreshChartBgmWaveformForSelectedChart(options = {}) {
         setChartEditLoader(true, '音声ファイルを読み込んでいます…');
         openedLoader = true;
     } else {
-        setChartEditLoaderMessage('音声ファイルを読み込んでいます…');
+        setChartEditLoaderMessage('BGM・波形の準備をしています…');
     }
     try {
         const buf = await ensureChartPreviewBgmDecoded({ track: 'part' });
@@ -2351,7 +2399,8 @@ async function refreshChartBgmWaveformForSelectedChart(options = {}) {
             hideChartBgmWaveformUi();
             return;
         }
-        setChartEditLoaderMessage('スペクトル化中…');
+        setChartEditLoaderMessage('波形のピークを計算しています…');
+        await yieldToBrowser();
         const scrollEl = document.getElementById('chart-measures-scroll');
         const wPx = Math.max(
             200,
@@ -2368,10 +2417,10 @@ async function refreshChartBgmWaveformForSelectedChart(options = {}) {
         }
         if (durEl) durEl.textContent = formatChartBgmWaveformDuration(buf.duration);
         wrap.hidden = false;
-        requestAnimationFrame(() => {
-            paintChartBgmWaveformCanvas();
-            flushPaintMeasureWaveformNow();
-        });
+        setChartEditLoaderMessage('プレビュー用の波形を描画しています…');
+        await yieldToBrowser();
+        paintChartBgmWaveformCanvas();
+        await paintAllMeasureBgmWaveformCanvasesIncremental();
     } catch {
         hideChartBgmWaveformUi();
     } finally {
@@ -2885,8 +2934,11 @@ function selectChart(id) {
             try {
                 if (myGen !== chartSelectLoadGen) return;
                 if (c) {
+                    setChartEditLoaderMessage('ノーツと小節グリッドを準備しています…');
+                    await yieldToBrowser();
                     loadChartIntoEditor(c, { skipBgmWaveform: true });
-                    setChartEditLoaderMessage('音声ファイルを読み込んでいます…');
+                    setChartEditLoaderMessage('BGM・波形を読み込んでいます…');
+                    await yieldToBrowser();
                     await refreshChartBgmWaveformForSelectedChart({ externalLoader: true });
                 } else {
                     clearChartEditor();
