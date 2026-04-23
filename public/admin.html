@@ -1207,6 +1207,10 @@
                         <input type="radio" name="model-upload-kind" value="hdr">
                         <span class="model-upload-kind-segment-ui">HDR</span>
                     </label>
+                    <label class="model-upload-kind-segment">
+                        <input type="radio" name="model-upload-kind" value="prefab">
+                        <span class="model-upload-kind-segment-ui">Prefab（ZIP）</span>
+                    </label>
                 </div>
             </fieldset>
             <p id="model-upload-hint-model" class="hint model-upload-hint">GLB はサーバでテクスチャの縦横を指定の上限まで縮小してから保存します（長辺・短辺それぞれが上限、縦横比は維持。複数アップロード時はサーバ側で順番に処理）。下のチェックで縮小を省略できます。</p>
@@ -1231,7 +1235,14 @@
             </div>
             <div class="model-upload-skip-chunk-row prop-row checkbox-row" style="margin-top:10px;">
                 <input type="checkbox" id="model-upload-skip-chunk" class="prop-checkbox">
-                <label class="prop-label" for="model-upload-skip-chunk">空間チャンク分けをしない（単体 GLB のみ保存。条件を満たしても .chunks.json は作りません）</label>
+                <label class="prop-label" for="model-upload-skip-chunk">空間チャンク分けをしない（単体 GLB のみ保存。条件を満たしても .chunk.json は作りません）</label>
+            </div>
+            <p id="model-upload-hint-prefab" class="hint model-upload-hint" hidden>Blender 等で出力した <code>BaseName.chunk_0.glb</code> などと <code>BaseName.chunk.json</code> を<strong>1 階層</strong>の ZIP にまとめて送ります。テクスチャ再処理は行いません。</p>
+            <div id="model-upload-prefab-panel" class="model-upload-prefab-panel" hidden>
+                <div id="model-upload-prefab-drop" class="model-upload-prefab-drop" tabindex="0" role="button" aria-label="ZIP をドロップまたはクリックで選択">
+                    <span>ZIP をここにドロップ、またはクリックで選択</span>
+                </div>
+                <input type="file" id="model-upload-zip-input" accept=".zip,application/zip" style="display:none" aria-hidden="true">
             </div>
             <p id="model-upload-hint-pdf" class="hint model-upload-hint" hidden>PDF をサーバーにアップロードします。同名ファイルがある場合は上書きの確認が表示されます。</p>
             <p id="model-upload-hint-hdr" class="hint model-upload-hint" hidden>Radiance の <code>.hdr</code> のみ。<code>default.hdr</code> として保存され、メタバースは <code>/env/default.hdr</code> から読み込みます。</p>

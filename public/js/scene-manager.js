@@ -26,6 +26,7 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { mergeAircraftPhysicsForObject } from './aircraft-physics-defaults.js';
+import { implicitChunkManifestPathFromGlbModelPath, alternateChunkManifestPath } from './chunk-manifest-constants.js';
 
 /** ワールド複数モデル読み込みの同時実行数（キャッシュヒット時の直列待ちを緩和） */
 const WORLD_MODEL_LOAD_CONCURRENCY = 8;
@@ -329,32 +330,33 @@ class SceneManager {
     }
 
     /**
-     * models/foo.glb から暗黙の models/foo.chunks.json パス（存在は未検証）
+     * models/foo.glb から暗黙の models/foo.chunk.json パス（存在は未検証。旧 .chunks.json は fetch 側でフォールバック）
      * @param {string} modelPath
      * @returns {string|null}
      */
     _implicitChunksManifestPathFromModelPath(modelPath) {
-        const p = String(modelPath || '').trim();
-        if (!p.toLowerCase().endsWith('.glb')) return null;
-        return `${p.slice(0, -4)}.chunks.json`;
+        return implicitChunkManifestPathFromGlbModelPath(modelPath);
     }
 
     /**
      * マニフェストを fetch し chunkManifestPlan 相当のエントリを作る（planWorldLoadBytes 用・await 内で長さ取得）
-     * @param {string} manifestPath - models/...chunks.json
+     * @param {string} manifestPath - models/...chunk.json（.chunks.json 互換のフォールバックあり）
      * @param {number} FALLBACK
      * @returns {Promise<{ chunks: { url: string, weight: number, label: string, center: number[], radius: number, filePath: string }[], sum: number }|null>}
      */
     async _fetchAndBuildChunkPlanEntries(manifestPath, FALLBACK) {
-        const mUrl = this._buildEncodedModelUrl(manifestPath);
-        let manifest;
-        try {
-            const mRes = await fetch(mUrl);
-            if (!mRes.ok) throw new Error(`HTTP ${mRes.status}`);
-            manifest = await mRes.json();
-        } catch {
-            return null;
+        /** @param {string} rel */
+        const loadManifest = async (rel) => {
+            const mRes = await fetch(this._buildEncodedModelUrl(rel));
+            if (!mRes.ok) return null;
+            return mRes.json();
+        };
+        let manifest = await loadManifest(manifestPath);
+        if (!manifest) {
+            const alt = alternateChunkManifestPath(manifestPath);
+            if (alt) manifest = await loadManifest(alt);
         }
+        if (!manifest) return null;
         const chList = Array.isArray(manifest.chunks) ? manifest.chunks : [];
         if (!chList.length) return null;
         const nCh = Math.max(1, chList.length);

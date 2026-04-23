@@ -26,6 +26,13 @@ import {
     parseTextureMaxEdgeFromUploadBody,
 } from './lib/glb-texture-resize.js';
 import { runGlbSpatialChunkIfNeeded } from './lib/glb-spatial-chunk.js';
+import { applyPrefabZipToModels } from './lib/prefab-zip-upload.js';
+import {
+    CHUNK_MANIFEST_SUFFIX,
+    LEGACY_CHUNK_MANIFEST_SUFFIX,
+    isChunkManifestFilename,
+    baseNameFromManifestFileName,
+} from './lib/chunk-manifest-constants.js';
 import { runGlbObjectSplitFromBuffer, listObjectSplitFilesForBase } from './lib/glb-object-split.js';
 import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } from './lib/chart-bgm-transcode.js';
 
@@ -695,6 +702,15 @@ const uploadHdr = multer({
         cb(null, ext === '.hdr');
     }
 });
+/** 手製 prefab（ZIP: chunk GLB + マニフェスト） */
+const uploadPrefabZip = multer({
+    storage: uploadStorage,
+    limits: { fileSize: MODEL_UPLOAD_MAX_BYTES },
+    fileFilter: (req, file, cb) => {
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        cb(null, ext === '.zip');
+    }
+});
 
 /**
  * multipart 由来の文字化けを避けるため、クライアント送信の UTF-8(base64) ファイル名を優先して正規化する。
@@ -791,8 +807,10 @@ function collectSpatialChunkSiblingPaths(glbAbsolutePath) {
     const dir = path.dirname(glbAbsolutePath);
     const base = path.basename(glbAbsolutePath, path.extname(glbAbsolutePath));
     const out = [];
-    const manifest = path.join(dir, `${base}.chunks.json`);
-    if (fs.existsSync(manifest)) out.push(manifest);
+    const manifestA = path.join(dir, `${base}${CHUNK_MANIFEST_SUFFIX}`);
+    const manifestB = path.join(dir, `${base}${LEGACY_CHUNK_MANIFEST_SUFFIX}`);
+    if (fs.existsSync(manifestA)) out.push(manifestA);
+    if (fs.existsSync(manifestB)) out.push(manifestB);
     try {
         if (!fs.existsSync(dir)) return out;
         for (const name of fs.readdirSync(dir)) {
@@ -801,6 +819,30 @@ function collectSpatialChunkSiblingPaths(glbAbsolutePath) {
             }
         }
     } catch (_) {
+        /* ignore */
+    }
+    return out;
+}
+
+/**
+ * models ストアで *chunk.json を消すとき、同じ base の chunk_*.glb を列挙する
+ * @param {string} manifestAbsPath
+ * @returns {string[]}
+ */
+function collectChunkGlbSiblingsForManifest(manifestAbsPath) {
+    const name = path.basename(manifestAbsPath);
+    const base = baseNameFromManifestFileName(name);
+    if (!base) return [];
+    const dir = path.dirname(manifestAbsPath);
+    const out = [];
+    try {
+        if (!fs.existsSync(dir)) return out;
+        for (const f of fs.readdirSync(dir)) {
+            if (f.startsWith(`${base}.chunk_`) && f.toLowerCase().endsWith('.glb')) {
+                out.push(path.join(dir, f));
+            }
+        }
+    } catch {
         /* ignore */
     }
     return out;
@@ -4578,7 +4620,12 @@ app.get('/admin/models', (req, res) => {
         const names = fs.readdirSync(MODELS_DIR)
             .filter((n) => {
                 const low = n.toLowerCase();
-                return low.endsWith('.glb') || low.endsWith('.obj') || low.endsWith('.chunks.json');
+                return (
+                    low.endsWith('.glb') ||
+                    low.endsWith('.obj') ||
+                    low.endsWith('.chunk.json') ||
+                    low.endsWith('.chunks.json')
+                );
             })
             .map((n) => decodeLikelyMojibakeFilename(n))
             .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
@@ -4707,6 +4754,8 @@ function performStorageFileDelete(store, storeRoot, relPath, options) {
         const unlinkFirst = [];
         if (store === 'models' && fileAbs.toLowerCase().endsWith('.glb')) {
             unlinkFirst.push(...collectSpatialChunkSiblingPaths(fileAbs));
+        } else if (store === 'models' && isChunkManifestFilename(path.basename(fileAbs))) {
+            unlinkFirst.push(...collectChunkGlbSiblingsForManifest(fileAbs));
         }
         for (const p of unlinkFirst) {
             try {
@@ -4967,6 +5016,33 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
             detail: err instanceof Error ? err.message : String(err),
         });
     }
+});
+
+app.post('/admin/upload-prefab-zip', uploadPrefabZip.single('zip'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file or invalid file' });
+    }
+    const ext = path.extname(req.file.originalname || '').toLowerCase();
+    if (ext !== '.zip') {
+        return res.status(400).json({ error: 'Only .zip is allowed' });
+    }
+    const confirm = req.query.confirm === '1';
+    const result = applyPrefabZipToModels(req.file.buffer, MODELS_DIR, confirm);
+    if (!result.success) {
+        if (result.status === 409) {
+            return res.status(409).json({ error: 'file_exists', code: result.code, filename: result.filename });
+        }
+        return res.status(result.status).json({ error: result.error, code: result.code });
+    }
+    const invUrls = result.writtenFiles.map((f) => publicAssetUrlForCache('models', f));
+    if (invUrls.length) {
+        io.emit('asset-invalidate', { urls: invUrls });
+    }
+    res.json({
+        success: true,
+        chunkManifest: result.chunkManifest,
+        writtenFiles: result.writtenFiles
+    });
 });
 
 app.get('/admin/pdfs', (req, res) => {

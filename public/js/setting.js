@@ -37,6 +37,11 @@ import {
     clipAircraftPhysicsPartialFromUser,
     DEFAULT_AIRCRAFT_PHYSICS
 } from './aircraft-physics-defaults.js';
+import {
+    CHUNK_MANIFEST_SUFFIX,
+    LEGACY_CHUNK_MANIFEST_SUFFIX,
+    baseNameFromManifestFileName
+} from './chunk-manifest-constants.js';
 
 // --- State ---
 let scene, camera, renderer, controls, transformControls;
@@ -141,8 +146,6 @@ function isObjPath(path) {
     return typeof path === 'string' && path.toLowerCase().endsWith('.obj');
 }
 
-const CHUNKS_JSON_SUFFIX = '.chunks.json';
-
 /** 単体 GLB/OBJ 等（チャンクマニフェストなし）— 八面体風シルエット */
 const MODEL_ICON_3D_ASSET =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 20.5 12 12 21.5 3.5 12 12 2.5z"/><path d="M12 2.5v19M3.5 12h17"/></svg>';
@@ -153,7 +156,7 @@ const MODEL_ICON_PREFAB_CHUNKED =
 
 /**
  * admin/models の生ファイル名一覧から、左パネル用エントリを作る。
- * チャンク GLB（*.chunk_*.glb）とマニフェスト（*.chunks.json）は一覧に出さない。
+ * チャンク GLB（*.chunk_*.glb）とマニフェスト（*.chunk.json / *.chunks.json）は一覧に出さない。
  * エクスプローラーは生一覧のまま。
  * @param {string[]} fileNames
  * @returns {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'prefab'|'model3d' }[]}
@@ -161,21 +164,38 @@ const MODEL_ICON_PREFAB_CHUNKED =
 function buildModelPrefabEntries(fileNames) {
     const names = Array.isArray(fileNames) ? fileNames : [];
     const set = new Set(names);
-    /** @type {Set<string>} basename（拡張子なしパス）で .chunks.json が存在 */
+    /** @type {Set<string>} マニフェストのある basename */
     const basesWithManifest = new Set();
     for (const n of names) {
-        const low = n.toLowerCase();
-        if (low.endsWith(CHUNKS_JSON_SUFFIX.toLowerCase())) {
-            basesWithManifest.add(n.slice(0, -CHUNKS_JSON_SUFFIX.length));
-        }
+        const b = baseNameFromManifestFileName(n);
+        if (b) basesWithManifest.add(b);
     }
+    /**
+     * @param {string} base
+     * @returns {string|null}
+     */
+    const pickManifestName = (base) => {
+        const a = base + CHUNK_MANIFEST_SUFFIX;
+        const b = base + LEGACY_CHUNK_MANIFEST_SUFFIX;
+        if (set.has(a)) return a;
+        if (set.has(b)) return b;
+        return null;
+    };
+    /**
+     * @param {string} base
+     * @returns {boolean}
+     */
+    const hasAnyChunkGlb = (base) => {
+        const p = (base + '.chunk_').toLowerCase();
+        return names.some((n) => n.toLowerCase().startsWith(p) && /\.chunk_\d+\.glb$/i.test(n));
+    };
     /** @type {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'prefab'|'model3d' }[]} */
     const out = [];
     /** @type {Set<string>} チャンク付きプレハブとして既に出した basename */
     const usedChunkGroup = new Set();
     for (const name of names) {
         const low = name.toLowerCase();
-        if (low.endsWith(CHUNKS_JSON_SUFFIX.toLowerCase())) {
+        if (low.endsWith(CHUNK_MANIFEST_SUFFIX) || low.endsWith(LEGACY_CHUNK_MANIFEST_SUFFIX)) {
             continue;
         }
         if (/\.chunk_\d+\.glb$/i.test(name)) {
@@ -183,8 +203,8 @@ function buildModelPrefabEntries(fileNames) {
         }
         if (low.endsWith('.glb')) {
             const base = name.slice(0, -4);
-            const manifestName = base + CHUNKS_JSON_SUFFIX;
-            if (basesWithManifest.has(base) && set.has(manifestName)) {
+            const mName = pickManifestName(base);
+            if (mName && (basesWithManifest.has(base) || hasAnyChunkGlb(base))) {
                 if (usedChunkGroup.has(base)) {
                     continue;
                 }
@@ -193,7 +213,7 @@ function buildModelPrefabEntries(fileNames) {
                 out.push({
                     displayLabel,
                     path: 'models/' + name,
-                    chunkManifest: 'models/' + manifestName,
+                    chunkManifest: 'models/' + mName,
                     prefabKind: 'prefab'
                 });
                 continue;
@@ -204,6 +224,20 @@ function buildModelPrefabEntries(fileNames) {
             path: 'models/' + name,
             prefabKind: 'model3d'
         });
+    }
+    for (const base of basesWithManifest) {
+        if (usedChunkGroup.has(base)) continue;
+        const mName = pickManifestName(base);
+        if (!mName) continue;
+        if (!set.has(base + '.glb') && hasAnyChunkGlb(base)) {
+            usedChunkGroup.add(base);
+            out.push({
+                displayLabel: base,
+                path: '',
+                chunkManifest: 'models/' + mName,
+                prefabKind: 'prefab'
+            });
+        }
     }
     out.sort((a, b) => a.displayLabel.localeCompare(b.displayLabel, 'ja'));
     return out;
@@ -225,9 +259,7 @@ function modelPaletteSelectionKey(path, chunkManifest) {
 function syncModelPaletteSelectionAfterListChange() {
     const pal = buildModelPrefabEntries(modelList);
     const key = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
-    const ok = pal.some(
-        (e) => modelPaletteSelectionKey(e.path, e.chunkManifest) === key && selectedModelPath
-    );
+    const ok = pal.some((e) => modelPaletteSelectionKey(e.path, e.chunkManifest) === key);
     if (!ok && pal.length) {
         selectedModelPath = pal[0].path;
         selectedModelChunkManifest = pal[0].chunkManifest || null;
@@ -290,16 +322,13 @@ function playEditorGltfClipPreview(model, clipName) {
 
 /**
  * ワールド用モデル 1 件を読み込み（サイズ・ポリゴン上限あり）
- * @param {{ path: string, mtlPath?: string, chunkManifest?: string }} config
+ * @param {{ path?: string, mtlPath?: string, chunkManifest?: string }} config
  * @returns {Promise<{ model: THREE.Object3D, triangleCount: number, gltfAnimations?: THREE.AnimationClip[] }>}
  */
 async function loadModelFromConfig(config) {
     const path = config.path || '';
     const chunkManifest = String(config.chunkManifest || '').trim();
     if (chunkManifest) {
-        if (!path) {
-            throw new Error('チャンクモデルには代表 path（通常は単体 GLB）が必要です');
-        }
         const mUrl = buildEncodedModelUrl(chunkManifest);
         const mRes = await fetch(mUrl);
         if (!mRes.ok) {
@@ -1449,7 +1478,8 @@ function updateObjectPanel(obj) {
             mtlRow.style.display = 'none';
         }
     }
-    document.getElementById('obj-path').value = (c.path || (c.framePaths && c.framePaths[0])) || '';
+    document.getElementById('obj-path').value =
+        (c.path || c.chunkManifest || (c.framePaths && c.framePaths[0])) || '';
     document.getElementById('obj-pos-x').value = obj.position.x;
     document.getElementById('obj-pos-y').value = obj.position.y;
     document.getElementById('obj-pos-z').value = obj.position.z;
@@ -1797,6 +1827,7 @@ function buildWorldsFromScene() {
                     }
                     if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
                     if (!isObjPath(c.path || '')) delete c.mtlPath;
+                    if (!String(c.path || '').trim()) delete c.path;
                     w.models.push(c);
                 }
                 if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
@@ -2146,7 +2177,6 @@ async function loadWorldIntoScene(world) {
         const rot = config.rotation || { x: 0, y: 0, z: 0 };
         const scale = config.scale || { x: 1, y: 1, z: 1 };
         const cfgBase = {
-            path,
             position: { ...pos },
             rotation: { ...rot },
             scale: { ...scale },
@@ -2154,6 +2184,7 @@ async function loadWorldIntoScene(world) {
             teleporter: config.teleporter ? { ...config.teleporter } : undefined,
             taiko: config.taiko ? { ...config.taiko } : undefined
         };
+        if (String(path).trim()) cfgBase.path = path;
         if (config.aircraft && config.aircraft.id) {
             const a = config.aircraft;
             const ck = a.cockpitOffset || {};
@@ -2459,7 +2490,9 @@ function renderWorldObjectList() {
         }
         if (child.userData.config) {
             const path = child.userData.config.path || '';
-            return path.split('/').pop() || 'モデル';
+            const cm = String(child.userData.config.chunkManifest || '').trim();
+            const labelSrc = path || cm;
+            return labelSrc.split('/').pop() || (cm ? 'prefab' : 'モデル');
         }
         return (child.userData.lightConfig && child.userData.lightConfig.type) || 'light';
     }
@@ -2527,8 +2560,7 @@ function renderModelList() {
     const selKey = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
     pal.forEach((ent) => {
         const path = ent.path;
-        const isSel =
-            modelPaletteSelectionKey(path, ent.chunkManifest) === selKey && selectedModelPath === path;
+        const isSel = modelPaletteSelectionKey(path, ent.chunkManifest) === selKey;
         const div = document.createElement('div');
         div.className = 'item model-prefab-item' + (isSel ? ' selected' : '');
         div.setAttribute('role', 'button');
@@ -2599,11 +2631,11 @@ function addModel(path, mtlPath, chunkManifest) {
     const mtl = isObjPath(path) ? (mtlPath || '').trim() : '';
     const cm = String(chunkManifest || '').trim();
     const cfg = {
-        path,
         position: { x: 0, y: 2, z: -5 },
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 }
     };
+    if (String(path || '').trim()) cfg.path = path;
     if (mtl) cfg.mtlPath = mtl;
     if (cm) cfg.chunkManifest = cm;
     void (async () => {
@@ -3584,16 +3616,20 @@ function bindEvents() {
 
     document.getElementById('btn-add-model').addEventListener('click', () => {
         const pal = buildModelPrefabEntries(modelList);
-        const first = pal[0];
-        const path = selectedModelPath || (first ? first.path : null);
-        const match = path ? pal.find((e) => e.path === path) : null;
-        const chunkManifest = (match && match.chunkManifest) || '';
-        if (!path) {
+        if (!pal.length) {
+            alert('モデルをアップロードするか、一覧から選択してください');
+            return;
+        }
+        const selKey = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
+        const match = pal.find((e) => modelPaletteSelectionKey(e.path, e.chunkManifest) === selKey) || pal[0];
+        const path = match.path || '';
+        const chunkManifest = match.chunkManifest || '';
+        if (!path && !chunkManifest) {
             alert('モデルをアップロードするか、一覧から選択してください');
             return;
         }
         let mtlPath = '';
-        if (isObjPath(path)) {
+        if (path && isObjPath(path)) {
             const mtlSel = document.getElementById('add-obj-mtl');
             mtlPath = mtlSel && mtlSel.value ? mtlSel.value.trim() : '';
         }
@@ -3654,13 +3690,24 @@ function bindEvents() {
         const hModel = document.getElementById('model-upload-hint-model');
         const hPdf = document.getElementById('model-upload-hint-pdf');
         const hHdr = document.getElementById('model-upload-hint-hdr');
+        const hPrefab = document.getElementById('model-upload-hint-prefab');
+        const prefabPanel = document.getElementById('model-upload-prefab-panel');
         const textureEdgeRow = document.querySelector('.model-upload-texture-max-edge-row');
+        const skipTexRow = document.querySelector('.model-upload-skip-texture-row');
+        const splitRow = document.querySelector('.model-upload-split-objects-row');
+        const skipChunkRow = document.querySelector('.model-upload-skip-chunk-row');
         const show3d = kind === 'model';
+        const showPrefab = kind === 'prefab';
         if (block3d) block3d.hidden = !show3d;
         if (hModel) hModel.hidden = kind !== 'model';
         if (hPdf) hPdf.hidden = kind !== 'pdf';
         if (hHdr) hHdr.hidden = kind !== 'hdr';
+        if (hPrefab) hPrefab.hidden = !showPrefab;
+        if (prefabPanel) prefabPanel.hidden = !showPrefab;
         if (textureEdgeRow) textureEdgeRow.hidden = kind !== 'model';
+        if (skipTexRow) skipTexRow.hidden = kind !== 'model';
+        if (splitRow) splitRow.hidden = kind !== 'model';
+        if (skipChunkRow) skipChunkRow.hidden = kind !== 'model';
         syncModelUploadTextureEdgeControlState();
         syncModelUploadSplitObjectsChunkRow();
     }
@@ -3956,7 +4003,133 @@ function bindEvents() {
         if (kind === 'model') modelUploadInput?.click();
         else if (kind === 'pdf') document.getElementById('upload-pdf-input')?.click();
         else if (kind === 'hdr') document.getElementById('upload-hdr-input')?.click();
+        else if (kind === 'prefab') document.getElementById('model-upload-zip-input')?.click();
     });
+
+    /**
+     * Prefab ZIP（1 本）を /admin/upload-prefab-zip へ送る
+     * @param {File} file
+     */
+    async function postPrefabZipFile(file) {
+        const inModal = modelUploadModal?.classList.contains('show');
+        const status = document.getElementById('upload-status');
+        let didSetBusy = false;
+        try {
+            if (inModal) {
+                modelUploadModalBusy = true;
+                didSetBusy = true;
+                syncModelUploadCloseButtonVisibility();
+            }
+            if (modelUploadFooterStatus) {
+                modelUploadFooterStatus.textContent = 'アップロード中…';
+                modelUploadFooterStatus.className = '';
+            }
+            const doPost = async (confirm) => {
+                const form = new FormData();
+                form.append('zip', file);
+                form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+                let u = '/admin/upload-prefab-zip';
+                if (confirm) u += '?confirm=1';
+                return fetch(u, { method: 'POST', credentials: 'include', body: form });
+            };
+            let res = await doPost(false);
+            if (res.status === 409) {
+                if (!confirm('models 内に同名ファイルがあります。上書きしますか？')) {
+                    if (modelUploadFooterStatus) modelUploadFooterStatus.textContent = 'キャンセルしました';
+                    return;
+                }
+                res = await doPost(true);
+            }
+            if (res.status === 409) {
+                if (modelUploadFooterStatus) {
+                    modelUploadFooterStatus.textContent = '上書きには確認が必要です。';
+                    modelUploadFooterStatus.className = 'error';
+                }
+                return;
+            }
+            if (!res.ok) {
+                const errBody = await res.text();
+                let msg = errBody;
+                try {
+                    const j = JSON.parse(errBody);
+                    if (j.error) msg = j.error;
+                } catch {
+                    /* keep text */
+                }
+                throw new Error(msg);
+            }
+            const data = await res.json();
+            if (!data.success || !data.chunkManifest) throw new Error('応答が不正です');
+            const inv = [encodeAssetPathToUrlPath(data.chunkManifest)];
+            if (Array.isArray(data.writtenFiles)) {
+                for (const f of data.writtenFiles) {
+                    inv.push(encodeAssetPathToUrlPath(`models/${f}`));
+                }
+            }
+            await notifyServiceWorkerInvalidate(inv);
+            await fetchModels();
+            renderModelList();
+            const doneMsg = `保存しました。worlds.json の models に chunkManifest: "${data.chunkManifest}" を追加してください。`;
+            if (status) {
+                status.textContent = doneMsg;
+                status.className = 'success';
+            }
+            if (modelUploadFooterStatus) {
+                modelUploadFooterStatus.textContent = doneMsg;
+                modelUploadFooterStatus.className = 'success';
+            }
+            if (inModal) setModelUploadModalOpen(false);
+        } catch (err) {
+            const m = err instanceof Error ? err.message : String(err);
+            if (status) {
+                status.textContent = '失敗: ' + m;
+                status.className = 'error';
+            }
+            if (modelUploadFooterStatus) {
+                modelUploadFooterStatus.textContent = '失敗: ' + m;
+                modelUploadFooterStatus.className = 'error';
+            }
+        } finally {
+            if (didSetBusy) {
+                modelUploadModalBusy = false;
+                syncModelUploadCloseButtonVisibility();
+            }
+        }
+    }
+
+    document.getElementById('model-upload-zip-input')?.addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith('.zip')) {
+            alert('ZIP ファイルを選択してください');
+            return;
+        }
+        await postPrefabZipFile(file);
+    });
+
+    (function wirePrefabZipDrop() {
+        const drop = document.getElementById('model-upload-prefab-drop');
+        const zin = document.getElementById('model-upload-zip-input');
+        if (!drop || !zin) return;
+        drop.addEventListener('click', () => zin.click());
+        drop.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault();
+                zin.click();
+            }
+        });
+        const stop = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+        };
+        ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, stop));
+        drop.addEventListener('drop', (ev) => {
+            stop(ev);
+            const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+            if (f) void postPrefabZipFile(f);
+        });
+    })();
 
     document.getElementById('model-upload-close')?.addEventListener('click', () => {
         if (modelUploadModalBusy) return;
