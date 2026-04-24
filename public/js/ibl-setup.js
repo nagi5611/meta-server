@@ -13,8 +13,8 @@ export const DEFAULT_WORLD_DIRECTIONAL_INTENSITY = 0.8;
 
 /** メタバース描画距離（球半径・メートル相当）の既定・クランプ範囲 */
 export const VIEW_DISTANCE_M_DEFAULT = 50;
-export const VIEW_DISTANCE_M_MIN = 50;
-export const VIEW_DISTANCE_M_MAX = 500;
+export const VIEW_DISTANCE_M_MIN = 10;
+export const VIEW_DISTANCE_M_MAX = 150;
 
 /**
  * 描画距離（m）を許容範囲に収める

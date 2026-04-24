@@ -1,4 +1,9 @@
-import { migrateLegacyGraphicsKeys, clampViewDistanceM } from './ibl-setup.js';
+import {
+    migrateLegacyGraphicsKeys,
+    clampViewDistanceM,
+    VIEW_DISTANCE_M_MIN,
+    VIEW_DISTANCE_M_MAX
+} from './ibl-setup.js';
 
 /**
  * MenuManager - メニューバーと設定管理
@@ -934,7 +939,11 @@ class MenuManager {
         const viewDistValEl = document.getElementById('viewDistanceMValue');
         const vd = clampViewDistanceM(this.settings.viewDistanceM);
         this.settings.viewDistanceM = vd;
-        if (viewDistEl) viewDistEl.value = String(vd);
+        if (viewDistEl) {
+            viewDistEl.min = String(VIEW_DISTANCE_M_MIN);
+            viewDistEl.max = String(VIEW_DISTANCE_M_MAX);
+            viewDistEl.value = String(vd);
+        }
         if (viewDistValEl) viewDistValEl.textContent = String(Math.round(vd));
         this.updateViewModeButton();
     }
