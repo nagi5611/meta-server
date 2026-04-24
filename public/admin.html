@@ -522,7 +522,7 @@
                                         <details class="block" id="object-props-glb-anim" style="display:none;margin-top:10px;">
                                             <summary class="block-header">GLB スキン／ノードアニメーション</summary>
                                             <div class="block-content">
-                                                <p class="hint" id="obj-glb-anim-hint" style="margin:4px 0 8px;">単体 GLB に含まれるクリップ名です。チャンク分割のみのモデルでは取得できません。</p>
+                                                <p class="hint" id="obj-glb-anim-hint" style="margin:4px 0 8px;">GLB に含まれるクリップ名です（ファイルによっては一覧されない場合があります）。</p>
                                                 <div id="obj-glb-anim-list" class="obj-glb-anim-list"></div>
                                                 <div class="prop-group-label" style="margin-top:10px;">メタバース内インタラクト（[E] / プロンプト）</div>
                                                 <div class="prop-row checkbox-row">
@@ -1229,10 +1229,6 @@
                 <input type="checkbox" id="model-upload-skip-texture-resize" class="prop-checkbox">
                 <label class="prop-label" for="model-upload-skip-texture-resize">テクスチャをリサイズしない（GLB 内のオリジナル画像のまま保存）</label>
             </div>
-            <div class="model-upload-split-objects-row prop-row checkbox-row" style="margin-top:10px;">
-                <input type="checkbox" id="model-upload-split-objects" class="prop-checkbox">
-                <label class="prop-label" for="model-upload-split-objects">GLB をオブジェクトごとに分割して保存（既定シーン直下が複数ノード、または単一親の子が複数のときのみ複数 GLB になります。条件に合わない場合は単体 GLB のみ保存されます）</label>
-            </div>
             <p id="model-upload-hint-pdf" class="hint model-upload-hint" hidden>PDF をサーバーにアップロードします。同名ファイルがある場合は上書きの確認が表示されます。</p>
             <p id="model-upload-hint-hdr" class="hint model-upload-hint" hidden>Radiance の <code>.hdr</code> のみ。<code>default.hdr</code> として保存され、メタバースは <code>/env/default.hdr</code> から読み込みます。</p>
             <p id="model-upload-hint-prefab" class="hint model-upload-hint" hidden>ZIP 内の複数 GLB と同梱アセットを展開し、<code>*-prefab-manifest.json</code> とともに <code>models/</code> 配下に保存します。一部のファイル名が既にある場合は一覧で上書き確認できます。</p>
@@ -1247,7 +1243,7 @@
                 <div id="model-upload-file-list" class="model-upload-file-list"></div>
             </div>
             <input type="file" id="model-upload-input" accept=".glb,.obj,.mtl,.png,.jpg,.jpeg,.webp" multiple style="display:none">
-            <input type="file" id="model-upload-zip-input" accept=".zip,application/zip" style="display:none">
+            <input type="file" id="model-upload-zip-input" accept=".zip,.ZIP,application/zip,application/x-zip-compressed" style="display:none">
             <div class="modal-buttons model-upload-modal-actions">
                 <button type="button" id="model-upload-pick" class="btn-secondary">ファイルを選択</button>
                 <button type="button" id="model-upload-close" class="btn-secondary">閉じる</button>

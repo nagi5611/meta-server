@@ -705,7 +705,11 @@ const uploadPrefabZip = multer({
     limits: { fileSize: MODEL_UPLOAD_MAX_BYTES },
     fileFilter: (req, file, cb) => {
         const ext = path.extname(file.originalname || '').toLowerCase();
-        cb(null, ext === '.zip');
+        const byMime =
+            file.mimetype === 'application/zip' ||
+            file.mimetype === 'application/x-zip-compressed' ||
+            file.mimetype === 'application/zip-compressed';
+        cb(null, ext === '.zip' || byMime);
     },
 });
 /**
@@ -4814,7 +4818,11 @@ app.post('/admin/upload-prefab-zip', uploadPrefabZip.single('zip'), async (req, 
     }
     const origName = getSafeUploadedFilename(req, req.file.originalname);
     const ext = path.extname(origName).toLowerCase();
-    if (ext !== '.zip') {
+    const mimeOk =
+        req.file.mimetype === 'application/zip' ||
+        req.file.mimetype === 'application/x-zip-compressed' ||
+        req.file.mimetype === 'application/zip-compressed';
+    if (ext !== '.zip' && !mimeOk) {
         return res.status(400).json({ error: 'Only .zip is allowed' });
     }
     const glbOpts = parseGlbOptionsFromPrefabBody(req.body);

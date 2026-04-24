@@ -3759,7 +3759,6 @@ function bindEvents() {
         const hHdr = document.getElementById('model-upload-hint-hdr');
         const textureEdgeRow = document.querySelector('.model-upload-texture-max-edge-row');
         const skipTexRow = document.querySelector('.model-upload-skip-texture-row');
-        const splitRow = document.querySelector('.model-upload-split-objects-row');
         const isModel = kind === 'model';
         const isPrefab = kind === 'prefab';
         const show3d = isModel || isPrefab;
@@ -3770,7 +3769,6 @@ function bindEvents() {
         if (hHdr) hHdr.hidden = kind !== 'hdr';
         if (textureEdgeRow) textureEdgeRow.hidden = !show3d;
         if (skipTexRow) skipTexRow.hidden = !show3d;
-        if (splitRow) splitRow.hidden = !isModel;
         syncModelUploadTextureEdgeControlState();
     }
 
@@ -3862,7 +3860,6 @@ function bindEvents() {
      * @param {() => void} [onUploadBytesSent] リクエストボディの送信完了後（サーバ処理待ち）。GLB のテクスチャリサイズ中など。
      * @param {boolean} [skipTextureResize] true のとき GLB のテクスチャ長辺縮小を行わない
      * @param {string} [textureMaxEdgeStr] 縮小する場合の長辺上限（px）の数字文字列
-     * @param {boolean} [splitGlbByObjects] true のとき GLB をオブジェクト単位で複数ファイルに分割
      * @returns {Promise<{ status: number, text: string, json: object|null }>}
      */
     function postAdminModelUploadXHR(
@@ -3871,8 +3868,7 @@ function bindEvents() {
         onUploadProgress,
         onUploadBytesSent,
         skipTextureResize,
-        textureMaxEdgeStr,
-        splitGlbByObjects
+        textureMaxEdgeStr
     ) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
@@ -3902,7 +3898,6 @@ function bindEvents() {
             form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
             if (skipTextureResize) form.append('skipTextureResize', '1');
             else if (textureMaxEdgeStr) form.append('textureMaxEdge', textureMaxEdgeStr);
-            if (splitGlbByObjects) form.append('splitGlbByObjects', '1');
             xhr.send(form);
         });
     }
@@ -3932,7 +3927,6 @@ function bindEvents() {
      * @param {string} fileName
      * @param {boolean} [skipTextureResize]
      * @param {string} [textureMaxEdgeStr]
-     * @param {boolean} [splitGlbByObjects]
      */
     async function postAdminModelUploadWithPhaseCleanup(
         url,
@@ -3941,8 +3935,7 @@ function bindEvents() {
         ui,
         fileName,
         skipTextureResize,
-        textureMaxEdgeStr,
-        splitGlbByObjects
+        textureMaxEdgeStr
     ) {
         try {
             return await postAdminModelUploadXHR(
@@ -3951,8 +3944,7 @@ function bindEvents() {
                 onUploadProgress,
                 onModelUploadBytesSentIfGlb(ui, fileName, skipTextureResize),
                 skipTextureResize,
-                textureMaxEdgeStr,
-                splitGlbByObjects
+                textureMaxEdgeStr
             );
         } finally {
             if (activeGlbServerPhaseUi === ui) activeGlbServerPhaseUi = null;
@@ -4290,8 +4282,6 @@ function bindEvents() {
             approvedOverwriteNames = selectedNames;
         }
 
-        const splitObjectsEl = document.getElementById('model-upload-split-objects');
-        const splitGlbByObjects = !!(splitObjectsEl && splitObjectsEl.checked);
         const skipTexEl = document.getElementById('model-upload-skip-texture-resize');
         const skipTextureResize = !!(skipTexEl && skipTexEl.checked);
         const textureMaxEdgeEl = document.getElementById('model-upload-texture-max-edge');
@@ -4377,8 +4367,7 @@ function bindEvents() {
                     ui,
                     name,
                     skipTextureResize,
-                    textureMaxEdgeStr,
-                    splitGlbByObjects
+                    textureMaxEdgeStr
                 );
 
                 if (xhrRes.status === 409) {
@@ -4409,8 +4398,7 @@ function bindEvents() {
                         ui,
                         name,
                         skipTextureResize,
-                        textureMaxEdgeStr,
-                        splitGlbByObjects
+                        textureMaxEdgeStr
                     );
                     if (xhrRes.status === 409) {
                         lastErr = '同名の上書き確認が必要: ' + name;
@@ -4480,8 +4468,7 @@ function bindEvents() {
                             ui,
                             name,
                             skipTextureResize,
-                            textureMaxEdgeStr,
-                            splitGlbByObjects
+                            textureMaxEdgeStr
                         );
                         if (xhrRes.status === 409) {
                             lastErr = '同名の上書き確認が必要: ' + name;
