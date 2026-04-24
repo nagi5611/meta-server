@@ -24,6 +24,11 @@ import {
     DEFAULT_WORLD_DIRECTIONAL_INTENSITY
 } from './ibl-setup.js';
 import {
+    loadPrefabGroupFromManifest,
+    normalizePrefabManifest,
+    fetchPrefabManifestJson
+} from './prefab-load-shared.js';
+import {
     MODEL_MAX_BYTES_OBJ,
     MODEL_MAX_BYTES_GLTF,
     MODEL_MAX_TRIANGLES_TOTAL,
@@ -37,11 +42,6 @@ import {
     clipAircraftPhysicsPartialFromUser,
     DEFAULT_AIRCRAFT_PHYSICS
 } from './aircraft-physics-defaults.js';
-import {
-    CHUNK_MANIFEST_SUFFIX,
-    LEGACY_CHUNK_MANIFEST_SUFFIX,
-    baseNameFromManifestFileName
-} from './chunk-manifest-constants.js';
 
 // --- State ---
 let scene, camera, renderer, controls, transformControls;
@@ -51,14 +51,15 @@ let selectedWorldId = null;
 let selectedObject = null;
 let modelList = [];
 let mtlList = []; // MTL ファイル名（models/ 配下、ファイル名のみ）
+/** @type {string[]} */
+let prefabManifestList = []; // models 直下 *-prefab-manifest.json ファイル名のみ（GET /admin/prefab-manifests）
 let selectedModelPath = null; // 左パネル「モデル一覧」で選択中のモデル（models/xxx.glb または .obj）
-/** チャンク分割済み GLB 用。単体モデル時は null */
-let selectedModelChunkManifest = null;
 let pdfList = [];
 let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（pdfs/xxx.pdf）
 let lightHelpers = []; // { light, mesh? } for point/spot position drag
 let worldObjectList = []; // 右パネル「オブジェクト一覧」の並び（クリックで選択用）
-let objectListExpanded = { lights: false, models: false, pdfs: false }; // オブジェクト一覧の階層展開状態
+/** オブジェクト一覧の階層展開状態＋ prefab 子行用の動的キー（例 pf_m123） */
+let objectListExpanded = { lights: false, models: false, pdfs: false };
 /** @type {{ kind: 'model'|'pdf'|'light', data: object }|null} Ctrl+C で取り込んだオブジェクトスナップショット */
 let worldEditorObjectClipboard = null;
 /** 貼り付け時に X 方向へずらす距離（m） */
@@ -125,6 +126,16 @@ function getEditorDracoLoader() {
     }
     return editorDracoLoader;
 }
+
+/**
+ * prefab / 単体 GLB 読み込み用（Draco 付き GLTFLoader）
+ * @returns {InstanceType<typeof GLTFLoader>}
+ */
+function createEditorGLTFLoader() {
+    const loader = new GLTFLoader();
+    loader.setDRACOLoader(getEditorDracoLoader());
+    return loader;
+}
 const raycaster = new THREE.Raycaster();
 
 /**
@@ -146,127 +157,57 @@ function isObjPath(path) {
     return typeof path === 'string' && path.toLowerCase().endsWith('.obj');
 }
 
-/** 単体 GLB/OBJ 等（チャンクマニフェストなし）— 八面体風シルエット */
+/** 単体 GLB/OBJ 等 — 八面体風シルエット */
 const MODEL_ICON_3D_ASSET =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 20.5 12 12 21.5 3.5 12 12 2.5z"/><path d="M12 2.5v19M3.5 12h17"/></svg>';
 
-/** プレハブ（チャンク分割済み）— タイル状の複数パーツ */
-const MODEL_ICON_PREFAB_CHUNKED =
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7.5" height="6.5" rx="1"/><rect x="13.5" y="4" width="7.5" height="6.5" rx="1"/><rect x="3" y="13.5" width="7.5" height="6.5" rx="1"/><rect x="13.5" y="13.5" width="7.5" height="6.5" rx="1"/><path stroke-width="1.25" d="M10.5 7.25h3M10.5 16.75h3M7.25 10.5v3M16.75 10.5v3"/></svg>';
-
 /**
- * admin/models の生ファイル名一覧から、左パネル用エントリを作る。
- * チャンク GLB（*.chunk_*.glb）とマニフェスト（*.chunk.json / *.chunks.json）は一覧に出さない。
- * エクスプローラーは生一覧のまま。
+ * admin/models の生ファイル名と prefab マニフェスト一覧から、左パネル用エントリを作る。
+ * 空間チャンク用の *.chunk_*.glb / *.chunk.json / *.chunks.json は一覧に出さない（レガシー資産用）。
  * @param {string[]} fileNames
- * @returns {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'prefab'|'model3d' }[]}
+ * @param {string[]} [manifestFileNames]
+ * @returns {{ displayLabel: string, path: string, isPrefab?: boolean }[]}
  */
-function buildModelPrefabEntries(fileNames) {
+function buildModelPrefabEntries(fileNames, manifestFileNames) {
     const names = Array.isArray(fileNames) ? fileNames : [];
-    const set = new Set(names);
-    /** @type {Set<string>} マニフェストのある basename */
-    const basesWithManifest = new Set();
-    for (const n of names) {
-        const b = baseNameFromManifestFileName(n);
-        if (b) basesWithManifest.add(b);
-    }
-    /**
-     * @param {string} base
-     * @returns {string|null}
-     */
-    const pickManifestName = (base) => {
-        const a = base + CHUNK_MANIFEST_SUFFIX;
-        const b = base + LEGACY_CHUNK_MANIFEST_SUFFIX;
-        if (set.has(a)) return a;
-        if (set.has(b)) return b;
-        return null;
-    };
-    /**
-     * @param {string} base
-     * @returns {boolean}
-     */
-    const hasAnyChunkGlb = (base) => {
-        const p = (base + '.chunk_').toLowerCase();
-        return names.some((n) => n.toLowerCase().startsWith(p) && /\.chunk_\d+\.glb$/i.test(n));
-    };
-    /** @type {{ displayLabel: string, path: string, chunkManifest?: string, prefabKind: 'prefab'|'model3d' }[]} */
+    const mans = Array.isArray(manifestFileNames) ? manifestFileNames : [];
+    /** @type {{ displayLabel: string, path: string, isPrefab?: boolean }[]} */
     const out = [];
-    /** @type {Set<string>} チャンク付きプレハブとして既に出した basename */
-    const usedChunkGroup = new Set();
     for (const name of names) {
         const low = name.toLowerCase();
-        if (low.endsWith(CHUNK_MANIFEST_SUFFIX) || low.endsWith(LEGACY_CHUNK_MANIFEST_SUFFIX)) {
-            continue;
-        }
-        if (/\.chunk_\d+\.glb$/i.test(name)) {
-            continue;
-        }
-        if (low.endsWith('.glb')) {
-            const base = name.slice(0, -4);
-            const mName = pickManifestName(base);
-            if (mName && (basesWithManifest.has(base) || hasAnyChunkGlb(base))) {
-                if (usedChunkGroup.has(base)) {
-                    continue;
-                }
-                usedChunkGroup.add(base);
-                const displayLabel = name.replace(/\.glb$/i, '');
-                out.push({
-                    displayLabel,
-                    path: 'models/' + name,
-                    chunkManifest: 'models/' + mName,
-                    prefabKind: 'prefab'
-                });
-                continue;
-            }
-        }
+        if (low.endsWith('.chunk.json') || low.endsWith('.chunks.json')) continue;
+        if (/\.chunk_\d+\.glb$/i.test(name)) continue;
+        if (!low.endsWith('.glb') && !low.endsWith('.obj')) continue;
         out.push({
             displayLabel: name,
-            path: 'models/' + name,
-            prefabKind: 'model3d'
+            path: 'models/' + name
         });
     }
-    for (const base of basesWithManifest) {
-        if (usedChunkGroup.has(base)) continue;
-        const mName = pickManifestName(base);
-        if (!mName) continue;
-        if (!set.has(base + '.glb') && hasAnyChunkGlb(base)) {
-            usedChunkGroup.add(base);
-            out.push({
-                displayLabel: base,
-                path: '',
-                chunkManifest: 'models/' + mName,
-                prefabKind: 'prefab'
-            });
-        }
+    for (const name of mans) {
+        const low = name.toLowerCase();
+        if (!low.endsWith('-prefab-manifest.json')) continue;
+        const base = name.replace(/-prefab-manifest\.json$/i, '');
+        out.push({
+            displayLabel: `${base}（Prefab）`,
+            path: 'models/' + name.replace(/^\//, ''),
+            isPrefab: true
+        });
     }
     out.sort((a, b) => a.displayLabel.localeCompare(b.displayLabel, 'ja'));
     return out;
 }
 
 /**
- * パレット選択キー（path + 任意の chunkManifest）
- * @param {string} path
- * @param {string|null|undefined} chunkManifest
- * @returns {string}
- */
-function modelPaletteSelectionKey(path, chunkManifest) {
-    return String(path || '') + '\0' + String(chunkManifest || '').trim();
-}
-
-/**
  * 現在の選択がパレットに存在するか確認し、無ければ先頭へ寄せる
  */
 function syncModelPaletteSelectionAfterListChange() {
-    const pal = buildModelPrefabEntries(modelList);
-    const key = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
-    const ok = pal.some((e) => modelPaletteSelectionKey(e.path, e.chunkManifest) === key);
+    const pal = buildModelPrefabEntries(modelList, prefabManifestList);
+    const ok = pal.some((e) => e.path === selectedModelPath);
     if (!ok && pal.length) {
         selectedModelPath = pal[0].path;
-        selectedModelChunkManifest = pal[0].chunkManifest || null;
     }
     if (!pal.length) {
         selectedModelPath = null;
-        selectedModelChunkManifest = null;
     }
 }
 
@@ -322,57 +263,27 @@ function playEditorGltfClipPreview(model, clipName) {
 
 /**
  * ワールド用モデル 1 件を読み込み（サイズ・ポリゴン上限あり）
- * @param {{ path?: string, mtlPath?: string, chunkManifest?: string }} config
+ * @param {{ path?: string, mtlPath?: string, prefabManifest?: string }} config
  * @returns {Promise<{ model: THREE.Object3D, triangleCount: number, gltfAnimations?: THREE.AnimationClip[] }>}
  */
 async function loadModelFromConfig(config) {
-    const path = config.path || '';
-    const chunkManifest = String(config.chunkManifest || '').trim();
-    if (chunkManifest) {
-        const mUrl = buildEncodedModelUrl(chunkManifest);
-        const mRes = await fetch(mUrl);
-        if (!mRes.ok) {
-            throw new Error(`チャンク一覧の取得に失敗しました: ${chunkManifest}（HTTP ${mRes.status}）`);
-        }
-        /** @type {{ chunks?: { file?: string }[] }} */
-        const manifest = await mRes.json();
-        const chList = Array.isArray(manifest.chunks) ? manifest.chunks : [];
-        if (!chList.length) {
-            throw new Error(`チャンクがありません: ${chunkManifest}`);
-        }
-        const gltfLoader = new GLTFLoader();
-        gltfLoader.setDRACOLoader(getEditorDracoLoader());
-        const anchor = new THREE.Group();
-        let totalTris = 0;
-        for (const ch of chList) {
-            const fp = String(ch.file || '').replace(/^\//, '');
-            if (!fp) continue;
-            const chunkUrl = buildEncodedModelUrl(fp);
-            const len = await fetchModelContentLength(chunkUrl);
-            if (len != null && len > MODEL_MAX_BYTES_GLTF) {
-                disposeObjectTree(anchor);
-                throw new Error(
-                    `チャンク「${fp.split('/').pop()}」が大きすぎます（約 ${Math.round(len / 1024 / 1024)}MB）。上限約 ${Math.round(MODEL_MAX_BYTES_GLTF / 1024 / 1024)}MB です。`
-                );
-            }
-            const scene = await new Promise((resolve, reject) => {
-                gltfLoader.load(chunkUrl, (gltf) => resolve(gltf.scene), undefined, reject);
-            });
-            totalTris += countTrianglesInObject(scene);
-            anchor.add(scene);
-        }
-        if (!anchor.children.length) {
-            disposeObjectTree(anchor);
-            throw new Error(`有効なチャンクファイルがありません: ${chunkManifest}`);
-        }
+    const pfm = String(config.prefabManifest || '').trim();
+    if (pfm) {
+        const { group, totalTris } = await loadPrefabGroupFromManifest({
+            THREE,
+            manifestPath: pfm,
+            createGLTFLoader: createEditorGLTFLoader
+        });
         if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
-            disposeObjectTree(anchor);
+            disposeObjectTree(group);
             throw new Error(
                 `ポリゴンが多すぎます（約 ${totalTris.toLocaleString()} 三角）。上限約 ${MODEL_MAX_TRIANGLES_TOTAL.toLocaleString()} 三角です。`
             );
         }
-        return { model: anchor, triangleCount: totalTris, gltfAnimations: [] };
+        return { model: group, triangleCount: totalTris, gltfAnimations: [] };
     }
+
+    const path = config.path || '';
 
     const url = buildEncodedModelUrl(path);
     const maxB = isObjPath(path) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
@@ -385,8 +296,7 @@ async function loadModelFromConfig(config) {
 
     const model = await new Promise((resolve, reject) => {
         if (!isObjPath(path)) {
-            const gltfLoader = new GLTFLoader();
-            gltfLoader.setDRACOLoader(getEditorDracoLoader());
+            const gltfLoader = createEditorGLTFLoader();
             gltfLoader.load(
                 url,
                 (gltf) => {
@@ -1179,13 +1089,14 @@ async function pasteWorldEditorClipboard() {
         uniquifyPastedModelConfig(cfg);
         const path = cfg.path || '';
         const mtlPath = isObjPath(path) ? (cfg.mtlPath || '') : '';
-        const cm = String(cfg.chunkManifest || '').trim();
         try {
-            const { model, triangleCount } = await loadModelFromConfig({
-                path,
-                mtlPath,
-                chunkManifest: cm || undefined
-            });
+            const pfe = String(cfg.prefabManifest || '').trim();
+            const { model, triangleCount } = pfe
+                ? await loadModelFromConfig({ prefabManifest: pfe, path: cfg.path || pfe })
+                : await loadModelFromConfig({
+                    path,
+                    mtlPath
+                });
             const pos = cfg.position || { x: 0, y: 0, z: 0 };
             const rot = cfg.rotation || { x: 0, y: 0, z: 0 };
             const sc = cfg.scale || { x: 1, y: 1, z: 1 };
@@ -1413,7 +1324,7 @@ function updateGlbAnimInteractPanel(obj) {
     }
     const c = obj.userData.config;
     const path = String(c.path || '');
-    const isSingleGlb = path.toLowerCase().endsWith('.glb') && !String(c.chunkManifest || '').trim();
+    const isSingleGlb = path.toLowerCase().endsWith('.glb');
     const clips = obj.userData.editorGltfClips;
     if (!isSingleGlb || !clips || !clips.length) {
         block.style.display = 'none';
@@ -1479,7 +1390,7 @@ function updateObjectPanel(obj) {
         }
     }
     document.getElementById('obj-path').value =
-        (c.path || c.chunkManifest || (c.framePaths && c.framePaths[0])) || '';
+        (c.path || (c.framePaths && c.framePaths[0])) || '';
     document.getElementById('obj-pos-x').value = obj.position.x;
     document.getElementById('obj-pos-y').value = obj.position.y;
     document.getElementById('obj-pos-z').value = obj.position.z;
@@ -1826,8 +1737,17 @@ function buildWorldsFromScene() {
                         }
                     }
                     if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
+                    delete c.chunkManifest;
                     if (!isObjPath(c.path || '')) delete c.mtlPath;
-                    if (!String(c.path || '').trim()) delete c.path;
+                    const hasPfm = !!String(c.prefabManifest || '').trim();
+                    if (!hasPfm) {
+                        delete c.prefabManifest;
+                        delete c.prefabGroupId;
+                    }
+                    if (!String(c.path || '').trim() && hasPfm) {
+                        c.path = c.prefabManifest;
+                    }
+                    if (!String(c.path || '').trim() && !hasPfm) delete c.path;
                     w.models.push(c);
                 }
                 if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
@@ -2173,6 +2093,7 @@ async function loadWorldIntoScene(world) {
     for (let idx = 0; idx < models.length; idx++) {
         const config = models[idx];
         const path = config.path || '';
+        const pfm = String(config.prefabManifest || '').trim();
         const pos = config.position || { x: 0, y: 0, z: 0 };
         const rot = config.rotation || { x: 0, y: 0, z: 0 };
         const scale = config.scale || { x: 1, y: 1, z: 1 };
@@ -2185,6 +2106,10 @@ async function loadWorldIntoScene(world) {
             taiko: config.taiko ? { ...config.taiko } : undefined
         };
         if (String(path).trim()) cfgBase.path = path;
+        if (pfm) {
+            cfgBase.prefabManifest = pfm;
+            if (String(config.prefabGroupId || '').trim()) cfgBase.prefabGroupId = String(config.prefabGroupId).trim();
+        }
         if (config.aircraft && config.aircraft.id) {
             const a = config.aircraft;
             const ck = a.cockpitOffset || {};
@@ -2210,19 +2135,29 @@ async function loadWorldIntoScene(world) {
                 if (clipped && Object.keys(clipped).length) cfgBase.aircraft.aircraftPhysics = clipped;
             }
         }
-        const cm = String(config.chunkManifest || '').trim();
-        if (cm) {
-            cfgBase.chunkManifest = cm;
-        }
         if (isObjPath(path) && config.mtlPath) {
             cfgBase.mtlPath = config.mtlPath;
         }
         try {
-            const { model, triangleCount } = await loadModelFromConfig({
-                path,
-                mtlPath: isObjPath(path) ? (config.mtlPath || '') : '',
-                chunkManifest: cm || undefined
-            });
+            let model;
+            let triangleCount;
+            if (pfm) {
+                const res = await loadModelFromConfig({
+                    prefabManifest: pfm,
+                    path: String(path || '').trim() || pfm
+                });
+                model = res.model;
+                triangleCount = res.triangleCount;
+            } else if (String(path || '').trim()) {
+                const res = await loadModelFromConfig({
+                    path,
+                    mtlPath: isObjPath(path) ? (config.mtlPath || '') : ''
+                });
+                model = res.model;
+                triangleCount = res.triangleCount;
+            } else {
+                continue;
+            }
             model.position.set(pos.x, pos.y, pos.z);
             model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
             model.scale.set(scale.x, scale.y, scale.z);
@@ -2231,7 +2166,7 @@ async function loadWorldIntoScene(world) {
             model.userData.config = cfgBase;
             editGroup.add(model);
         } catch (err) {
-            console.error('Load model failed:', path, err);
+            console.error('Load model failed:', pfm || path, err);
             errs.push(err.message || String(err));
         }
     }
@@ -2329,6 +2264,7 @@ function writeWorldEditCache() {
             savedAt: Date.now(),
             worlds: JSON.parse(JSON.stringify(worlds)),
             modelList: modelList.slice(),
+            prefabManifestList: prefabManifestList.slice(),
             mtlList: mtlList.slice(),
             pdfList: pdfList.slice()
         };
@@ -2340,7 +2276,7 @@ function writeWorldEditCache() {
 
 /**
  * キャッシュをメモリに適用する
- * @param {{ v?: number, worlds?: object, modelList?: string[], mtlList?: string[], pdfList?: string[] }} data
+ * @param {{ v?: number, worlds?: object, modelList?: string[], prefabManifestList?: string[], mtlList?: string[], pdfList?: string[] }} data
  * @returns {boolean}
  */
 function applyWorldEditCacheToState(data) {
@@ -2348,6 +2284,7 @@ function applyWorldEditCacheToState(data) {
     if (typeof data.worlds !== 'object' || data.worlds === null || Array.isArray(data.worlds)) return false;
     worlds = JSON.parse(JSON.stringify(data.worlds));
     modelList = Array.isArray(data.modelList) ? data.modelList.slice() : [];
+    prefabManifestList = Array.isArray(data.prefabManifestList) ? data.prefabManifestList.slice() : [];
     mtlList = Array.isArray(data.mtlList) ? data.mtlList.slice() : [];
     pdfList = Array.isArray(data.pdfList) ? data.pdfList.slice() : [];
     return true;
@@ -2363,6 +2300,16 @@ async function fetchModels() {
     const res = await fetch('/admin/models', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load models');
     modelList = await res.json();
+    try {
+        const r2 = await fetch('/admin/prefab-manifests', { credentials: 'include' });
+        if (r2.ok) {
+            prefabManifestList = await r2.json();
+        } else {
+            prefabManifestList = [];
+        }
+    } catch {
+        prefabManifestList = [];
+    }
 }
 
 async function fetchMtls() {
@@ -2455,6 +2402,101 @@ function addPdf(path) {
 }
 
 // --- UI ---
+
+/**
+ * オブジェクト一覧の「モデル」カテゴリ（prefab は親行＋折りたたみ子パーツ行。子クリックも親を選択）
+ * @param {string} key
+ * @param {THREE.Object3D[]} modelChildren
+ * @param {number} startIndex worldObjectList 上の開始インデックス
+ * @returns {HTMLDivElement}
+ */
+function createModelObjectListCategory(key, modelChildren, startIndex) {
+    const wrap = document.createElement('div');
+    wrap.className = 'object-list-category';
+    wrap.dataset.category = key;
+
+    const header = document.createElement('div');
+    header.className = 'object-list-category-header';
+    const isExpanded = objectListExpanded[key];
+    header.innerHTML = `<span class="object-list-arrow">${isExpanded ? '▼' : '▶'}</span><span>モデル</span>`;
+    header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        objectListExpanded[key] = !objectListExpanded[key];
+        renderWorldObjectList();
+    });
+    wrap.appendChild(header);
+
+    const childrenWrap = document.createElement('div');
+    childrenWrap.className = 'object-list-children';
+    childrenWrap.style.display = isExpanded ? '' : 'none';
+
+    modelChildren.forEach((child, i) => {
+        const idx = startIndex + i;
+        const cfg = child.userData.config;
+        const isPf = cfg && String(cfg.prefabManifest || '').trim();
+        if (!isPf) {
+            const div = document.createElement('div');
+            div.className = 'item object-list-item' + (selectedObject === child ? ' selected' : '');
+            div.dataset.index = String(idx);
+            const path = (cfg && cfg.path) || '';
+            const label = path.split('/').pop() || 'モデル';
+            div.innerHTML = `<span title="${label}">${label}</span>`;
+            div.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (worldObjectList[idx]) selectObject(worldObjectList[idx]);
+            });
+            childrenWrap.appendChild(div);
+            return;
+        }
+        const eid = String(child.userData.editId != null ? child.userData.editId : idx);
+        const exKey = 'pf_' + eid;
+        const subEx = objectListExpanded[exKey] === true;
+        const displayName = child.userData.prefabDisplayName || (cfg.prefabManifest || '').split('/').pop() || 'Prefab';
+        const block = document.createElement('div');
+        block.className = 'object-list-prefab-block';
+        const head = document.createElement('div');
+        head.className = 'item object-list-item object-list-prefab-head' + (selectedObject === child ? ' selected' : '');
+        const arr = document.createElement('span');
+        arr.className = 'object-list-arrow';
+        arr.textContent = subEx ? '▼' : '▶';
+        arr.addEventListener('click', (e) => {
+            e.stopPropagation();
+            objectListExpanded[exKey] = !subEx;
+            renderWorldObjectList();
+        });
+        const title = document.createElement('span');
+        title.textContent = displayName;
+        head.appendChild(arr);
+        head.appendChild(title);
+        head.addEventListener('click', (e) => {
+            if (e.target === arr) return;
+            e.stopPropagation();
+            selectObject(child);
+        });
+        block.appendChild(head);
+        const sub = document.createElement('div');
+        sub.className = 'object-list-prefab-parts';
+        sub.style.display = subEx ? '' : 'none';
+        sub.style.paddingLeft = '1.25em';
+        child.children.forEach((partRoot) => {
+            if (!partRoot.userData || !partRoot.userData.isPrefabPart) return;
+            const pl = (partRoot.userData.prefabPartPath || '').split('/').pop() || 'part';
+            const pr = document.createElement('div');
+            pr.className = 'item object-list-item object-list-prefab-part' + (selectedObject === child ? ' selected' : '');
+            pr.textContent = pl;
+            pr.addEventListener('click', (e) => {
+                e.stopPropagation();
+                selectObject(child);
+            });
+            sub.appendChild(pr);
+        });
+        block.appendChild(sub);
+        childrenWrap.appendChild(block);
+    });
+    wrap.appendChild(childrenWrap);
+    return wrap;
+}
+
 function renderWorldObjectList() {
     const el = document.getElementById('world-object-list');
     if (!el) return;
@@ -2481,6 +2523,13 @@ function renderWorldObjectList() {
         if (lightsArr.includes(selectedObject)) objectListExpanded.lights = true;
         if (modelsArr.includes(selectedObject)) objectListExpanded.models = true;
         if (pdfsArr.includes(selectedObject)) objectListExpanded.pdfs = true;
+        if (
+            selectedObject.userData.config
+            && String(selectedObject.userData.config.prefabManifest || '').trim()
+        ) {
+            const eid = String(selectedObject.userData.editId != null ? selectedObject.userData.editId : 'x');
+            objectListExpanded['pf_' + eid] = true;
+        }
     }
 
     function makeItemLabel(child) {
@@ -2490,9 +2539,7 @@ function renderWorldObjectList() {
         }
         if (child.userData.config) {
             const path = child.userData.config.path || '';
-            const cm = String(child.userData.config.chunkManifest || '').trim();
-            const labelSrc = path || cm;
-            return labelSrc.split('/').pop() || (cm ? 'prefab' : 'モデル');
+            return path.split('/').pop() || 'モデル';
         }
         return (child.userData.lightConfig && child.userData.lightConfig.type) || 'light';
     }
@@ -2534,7 +2581,7 @@ function renderWorldObjectList() {
     }
 
     el.appendChild(createCategory('ライト', 'lights', lightsArr, 0));
-    el.appendChild(createCategory('モデル', 'models', modelsArr, lightsArr.length));
+    el.appendChild(createModelObjectListCategory('models', modelsArr, lightsArr.length));
     el.appendChild(createCategory('PDF', 'pdfs', pdfsArr, lightsArr.length + modelsArr.length));
 }
 
@@ -2556,29 +2603,20 @@ function renderModelList() {
     syncModelPaletteSelectionAfterListChange();
     const el = document.getElementById('model-list');
     el.innerHTML = '';
-    const pal = buildModelPrefabEntries(modelList);
-    const selKey = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
+    const pal = buildModelPrefabEntries(modelList, prefabManifestList);
     pal.forEach((ent) => {
         const path = ent.path;
-        const isSel = modelPaletteSelectionKey(path, ent.chunkManifest) === selKey;
+        const isSel = path === selectedModelPath;
         const div = document.createElement('div');
         div.className = 'item model-prefab-item' + (isSel ? ' selected' : '');
         div.setAttribute('role', 'button');
         div.setAttribute('tabindex', '0');
-        div.setAttribute(
-            'aria-label',
-            ent.prefabKind === 'prefab' ? `プレハブ ${ent.displayLabel}` : ent.displayLabel
-        );
+        div.setAttribute('aria-label', ent.displayLabel);
         div.dataset.path = path;
-        if (ent.chunkManifest) {
-            div.dataset.chunkManifest = ent.chunkManifest;
-        }
         const icon = document.createElement('span');
-        icon.className =
-            'model-prefab-icon' +
-            (ent.prefabKind === 'prefab' ? ' model-prefab-icon--prefab' : ' model-prefab-icon--model3d');
+        icon.className = 'model-prefab-icon model-prefab-icon--model3d';
         icon.setAttribute('aria-hidden', 'true');
-        icon.innerHTML = ent.prefabKind === 'prefab' ? MODEL_ICON_PREFAB_CHUNKED : MODEL_ICON_3D_ASSET;
+        icon.innerHTML = MODEL_ICON_3D_ASSET;
         const label = document.createElement('span');
         label.className = 'model-prefab-label';
         label.textContent = ent.displayLabel;
@@ -2586,7 +2624,6 @@ function renderModelList() {
         div.appendChild(label);
         const activate = () => {
             selectedModelPath = path;
-            selectedModelChunkManifest = ent.chunkManifest || null;
             renderModelList();
         };
         div.addEventListener('click', activate);
@@ -2621,15 +2658,57 @@ async function selectWorld(id) {
 }
 
 /**
+ * prefab マニフェスト（models/...-prefab-manifest.json）からグループを追加する
+ * @param {string} manifestPath
+ */
+function addPrefabFromManifest(manifestPath) {
+    if (!selectedWorldId) return;
+    void (async () => {
+        try {
+            const raw = await fetchPrefabManifestJson(manifestPath);
+            const man = normalizePrefabManifest(raw);
+            const firstPart = man.parts[0]
+                ? (man.parts[0].file.startsWith('models/')
+                    ? man.parts[0].file
+                    : `models/${man.parts[0].file}`)
+                : manifestPath;
+            const cfg = {
+                position: { x: 0, y: 2, z: -5 },
+                rotation: { x: 0, y: 0, z: 0 },
+                scale: { x: 1, y: 1, z: 1 },
+                path: firstPart,
+                prefabManifest: manifestPath,
+                prefabGroupId: man.prefabGroupId
+            };
+            const { model, triangleCount } = await loadModelFromConfig(cfg);
+            pushUndo();
+            model.position.set(0, 2, -5);
+            model.rotation.set(0, 0, 0);
+            model.scale.set(1, 1, 1);
+            applyModelShadowByTriangleCount(model, triangleCount);
+            model.userData.editId = 'm' + Date.now();
+            model.userData.config = cfg;
+            editGroup.add(model);
+            renderWorldObjectList();
+        } catch (err) {
+            console.error('Load prefab failed:', manifestPath, err);
+            alert(err.message || String(err));
+        }
+    })();
+}
+
+/**
  * シーンにモデルを追加（path は models/...）
  * @param {string} path
  * @param {string} [mtlPath] - OBJ 時のみ models/...mtl
- * @param {string} [chunkManifest] - チャンク分割済み時 models/...chunks.json
  */
-function addModel(path, mtlPath, chunkManifest) {
+function addModel(path, mtlPath) {
     if (!selectedWorldId) return;
+    if (String(path || '').toLowerCase().endsWith('-prefab-manifest.json')) {
+        addPrefabFromManifest(path);
+        return;
+    }
     const mtl = isObjPath(path) ? (mtlPath || '').trim() : '';
-    const cm = String(chunkManifest || '').trim();
     const cfg = {
         position: { x: 0, y: 2, z: -5 },
         rotation: { x: 0, y: 0, z: 0 },
@@ -2637,13 +2716,11 @@ function addModel(path, mtlPath, chunkManifest) {
     };
     if (String(path || '').trim()) cfg.path = path;
     if (mtl) cfg.mtlPath = mtl;
-    if (cm) cfg.chunkManifest = cm;
     void (async () => {
         try {
             const { model, triangleCount } = await loadModelFromConfig({
                 path,
-                mtlPath: mtl,
-                chunkManifest: cm || undefined
+                mtlPath: mtl
             });
             pushUndo();
             model.position.set(0, 2, -5);
@@ -3615,17 +3692,19 @@ function bindEvents() {
     });
 
     document.getElementById('btn-add-model').addEventListener('click', () => {
-        const pal = buildModelPrefabEntries(modelList);
+        const pal = buildModelPrefabEntries(modelList, prefabManifestList);
         if (!pal.length) {
             alert('モデルをアップロードするか、一覧から選択してください');
             return;
         }
-        const selKey = modelPaletteSelectionKey(selectedModelPath, selectedModelChunkManifest);
-        const match = pal.find((e) => modelPaletteSelectionKey(e.path, e.chunkManifest) === selKey) || pal[0];
+        const match = pal.find((e) => e.path === selectedModelPath) || pal[0];
         const path = match.path || '';
-        const chunkManifest = match.chunkManifest || '';
-        if (!path && !chunkManifest) {
+        if (!path) {
             alert('モデルをアップロードするか、一覧から選択してください');
+            return;
+        }
+        if (match.isPrefab) {
+            addPrefabFromManifest(path);
             return;
         }
         let mtlPath = '';
@@ -3633,7 +3712,7 @@ function bindEvents() {
             const mtlSel = document.getElementById('add-obj-mtl');
             mtlPath = mtlSel && mtlSel.value ? mtlSel.value.trim() : '';
         }
-        addModel(path, mtlPath, chunkManifest);
+        addModel(path, mtlPath);
     });
 
     document.getElementById('btn-add-pdf').addEventListener('click', () => {
@@ -3670,46 +3749,29 @@ function bindEvents() {
         edgeEl.disabled = !!(skipTexEl && skipTexEl.checked);
     }
 
-    /** GLB オブジェクト分割 ON のときは空間チャンクをスキップ扱いに固定する */
-    function syncModelUploadSplitObjectsChunkRow() {
-        const splitEl = document.getElementById('model-upload-split-objects');
-        const chunkEl = document.getElementById('model-upload-skip-chunk');
-        if (!chunkEl) return;
-        if (splitEl && splitEl.checked) {
-            chunkEl.checked = true;
-            chunkEl.disabled = true;
-        } else {
-            chunkEl.disabled = false;
-        }
-    }
-
     /** アップロード種別に応じてモーダル内の説明と 3D 専用ブロックの表示を切り替える */
     function syncModelUploadKindUI() {
         const kind = document.querySelector('input[name="model-upload-kind"]:checked')?.value || 'model';
         const block3d = document.getElementById('model-upload-3d-only');
         const hModel = document.getElementById('model-upload-hint-model');
+        const hPref = document.getElementById('model-upload-hint-prefab');
         const hPdf = document.getElementById('model-upload-hint-pdf');
         const hHdr = document.getElementById('model-upload-hint-hdr');
-        const hPrefab = document.getElementById('model-upload-hint-prefab');
-        const prefabPanel = document.getElementById('model-upload-prefab-panel');
         const textureEdgeRow = document.querySelector('.model-upload-texture-max-edge-row');
         const skipTexRow = document.querySelector('.model-upload-skip-texture-row');
         const splitRow = document.querySelector('.model-upload-split-objects-row');
-        const skipChunkRow = document.querySelector('.model-upload-skip-chunk-row');
-        const show3d = kind === 'model';
-        const showPrefab = kind === 'prefab';
+        const isModel = kind === 'model';
+        const isPrefab = kind === 'prefab';
+        const show3d = isModel || isPrefab;
         if (block3d) block3d.hidden = !show3d;
-        if (hModel) hModel.hidden = kind !== 'model';
+        if (hModel) hModel.hidden = !isModel;
+        if (hPref) hPref.hidden = !isPrefab;
         if (hPdf) hPdf.hidden = kind !== 'pdf';
         if (hHdr) hHdr.hidden = kind !== 'hdr';
-        if (hPrefab) hPrefab.hidden = !showPrefab;
-        if (prefabPanel) prefabPanel.hidden = !showPrefab;
-        if (textureEdgeRow) textureEdgeRow.hidden = kind !== 'model';
-        if (skipTexRow) skipTexRow.hidden = kind !== 'model';
-        if (splitRow) splitRow.hidden = kind !== 'model';
-        if (skipChunkRow) skipChunkRow.hidden = kind !== 'model';
+        if (textureEdgeRow) textureEdgeRow.hidden = !show3d;
+        if (skipTexRow) skipTexRow.hidden = !show3d;
+        if (splitRow) splitRow.hidden = !isModel;
         syncModelUploadTextureEdgeControlState();
-        syncModelUploadSplitObjectsChunkRow();
     }
 
     /** PDF アップロード結果をパネルと（モーダル表示中なら）モーダル下部にも出す */
@@ -3744,9 +3806,6 @@ function bindEvents() {
     document.getElementById('model-upload-skip-texture-resize')?.addEventListener('change', () => {
         syncModelUploadTextureEdgeControlState();
     });
-    document.getElementById('model-upload-split-objects')?.addEventListener('change', () => {
-        syncModelUploadSplitObjectsChunkRow();
-    });
     syncModelUploadKindUI();
 
     /** サーバ側 GLB キュー表示のポーリングを止める */
@@ -3758,7 +3817,7 @@ function bindEvents() {
         activeGlbServerPhaseUi = null;
     }
 
-    /** @param {{ waiting?: number, processing?: boolean, spatialChunking?: boolean }|null} q */
+    /** @param {{ waiting?: number, processing?: boolean }|null} q */
     function applyServerQueueToLabel(q) {
         if (!modelUploadServerQueueEl) return;
         if (!q || typeof q.waiting !== 'number') {
@@ -3767,17 +3826,14 @@ function bindEvents() {
         }
         let proc = 'リサイズ処理待ち';
         if (q.processing) proc = 'リサイズ処理を実行中';
-        if (q.spatialChunking) proc = 'チャンク分割処理を実行中';
         modelUploadServerQueueEl.textContent = `サーバ側 GLB: 待ち ${q.waiting} 件、${proc}`;
     }
 
-    /** @param {{ waiting?: number, processing?: boolean, spatialChunking?: boolean }|null} q */
+    /** @param {{ waiting?: number, processing?: boolean }|null} q */
     function applyActiveGlbRowFromQueue(q) {
         if (!activeGlbServerPhaseUi || !q || typeof q.waiting !== 'number') return;
         if (q.processing) {
             activeGlbServerPhaseUi.setStatus('リサイズ中…', 'muted');
-        } else if (q.spatialChunking) {
-            activeGlbServerPhaseUi.setStatus('チャンク分割中…', 'muted');
         } else {
             activeGlbServerPhaseUi.setStatus('サーバで処理中…', 'muted');
         }
@@ -3804,7 +3860,6 @@ function bindEvents() {
      * @param {File} file
      * @param {(ratio: number) => void} [onUploadProgress]
      * @param {() => void} [onUploadBytesSent] リクエストボディの送信完了後（サーバ処理待ち）。GLB のテクスチャリサイズ中など。
-     * @param {boolean} [skipSpatialChunk] true のとき GLB の空間チャンク分割をサーバで行わない
      * @param {boolean} [skipTextureResize] true のとき GLB のテクスチャ長辺縮小を行わない
      * @param {string} [textureMaxEdgeStr] 縮小する場合の長辺上限（px）の数字文字列
      * @param {boolean} [splitGlbByObjects] true のとき GLB をオブジェクト単位で複数ファイルに分割
@@ -3815,7 +3870,6 @@ function bindEvents() {
         file,
         onUploadProgress,
         onUploadBytesSent,
-        skipSpatialChunk,
         skipTextureResize,
         textureMaxEdgeStr,
         splitGlbByObjects
@@ -3846,7 +3900,6 @@ function bindEvents() {
             const form = new FormData();
             form.append('model', file);
             form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
-            if (skipSpatialChunk) form.append('skipSpatialChunk', '1');
             if (skipTextureResize) form.append('skipTextureResize', '1');
             else if (textureMaxEdgeStr) form.append('textureMaxEdge', textureMaxEdgeStr);
             if (splitGlbByObjects) form.append('splitGlbByObjects', '1');
@@ -3855,7 +3908,7 @@ function bindEvents() {
     }
 
     /**
-     * GLB はボディ送信後にサーバでリサイズ→条件によりチャンク分割する。キュー API と行表示を同期する。
+     * GLB はボディ送信後にサーバでテクスチャリサイズ等を行う。キュー API と行表示を同期する。
      * @param {{ setStatus: (t: string, c?: string) => void }} ui
      * @param {string} fileName
      */
@@ -3877,7 +3930,6 @@ function bindEvents() {
      * @param {(ratio: number) => void} [onUploadProgress]
      * @param {{ setStatus: (t: string, c?: string) => void }} ui
      * @param {string} fileName
-     * @param {boolean} [skipSpatialChunk]
      * @param {boolean} [skipTextureResize]
      * @param {string} [textureMaxEdgeStr]
      * @param {boolean} [splitGlbByObjects]
@@ -3888,7 +3940,6 @@ function bindEvents() {
         onUploadProgress,
         ui,
         fileName,
-        skipSpatialChunk,
         skipTextureResize,
         textureMaxEdgeStr,
         splitGlbByObjects
@@ -3899,7 +3950,6 @@ function bindEvents() {
                 file,
                 onUploadProgress,
                 onModelUploadBytesSentIfGlb(ui, fileName, skipTextureResize),
-                skipSpatialChunk,
                 skipTextureResize,
                 textureMaxEdgeStr,
                 splitGlbByObjects
@@ -4001,135 +4051,10 @@ function bindEvents() {
     document.getElementById('model-upload-pick')?.addEventListener('click', () => {
         const kind = document.querySelector('input[name="model-upload-kind"]:checked')?.value || 'model';
         if (kind === 'model') modelUploadInput?.click();
+        else if (kind === 'prefab') document.getElementById('model-upload-zip-input')?.click();
         else if (kind === 'pdf') document.getElementById('upload-pdf-input')?.click();
         else if (kind === 'hdr') document.getElementById('upload-hdr-input')?.click();
-        else if (kind === 'prefab') document.getElementById('model-upload-zip-input')?.click();
     });
-
-    /**
-     * Prefab ZIP（1 本）を /admin/upload-prefab-zip へ送る
-     * @param {File} file
-     */
-    async function postPrefabZipFile(file) {
-        const inModal = modelUploadModal?.classList.contains('show');
-        const status = document.getElementById('upload-status');
-        let didSetBusy = false;
-        try {
-            if (inModal) {
-                modelUploadModalBusy = true;
-                didSetBusy = true;
-                syncModelUploadCloseButtonVisibility();
-            }
-            if (modelUploadFooterStatus) {
-                modelUploadFooterStatus.textContent = 'アップロード中…';
-                modelUploadFooterStatus.className = '';
-            }
-            const doPost = async (confirm) => {
-                const form = new FormData();
-                form.append('zip', file);
-                form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
-                let u = '/admin/upload-prefab-zip';
-                if (confirm) u += '?confirm=1';
-                return fetch(u, { method: 'POST', credentials: 'include', body: form });
-            };
-            let res = await doPost(false);
-            if (res.status === 409) {
-                if (!confirm('models 内に同名ファイルがあります。上書きしますか？')) {
-                    if (modelUploadFooterStatus) modelUploadFooterStatus.textContent = 'キャンセルしました';
-                    return;
-                }
-                res = await doPost(true);
-            }
-            if (res.status === 409) {
-                if (modelUploadFooterStatus) {
-                    modelUploadFooterStatus.textContent = '上書きには確認が必要です。';
-                    modelUploadFooterStatus.className = 'error';
-                }
-                return;
-            }
-            if (!res.ok) {
-                const errBody = await res.text();
-                let msg = errBody;
-                try {
-                    const j = JSON.parse(errBody);
-                    if (j.error) msg = j.error;
-                } catch {
-                    /* keep text */
-                }
-                throw new Error(msg);
-            }
-            const data = await res.json();
-            if (!data.success || !data.chunkManifest) throw new Error('応答が不正です');
-            const inv = [encodeAssetPathToUrlPath(data.chunkManifest)];
-            if (Array.isArray(data.writtenFiles)) {
-                for (const f of data.writtenFiles) {
-                    inv.push(encodeAssetPathToUrlPath(`models/${f}`));
-                }
-            }
-            await notifyServiceWorkerInvalidate(inv);
-            await fetchModels();
-            renderModelList();
-            const doneMsg = `保存しました。worlds.json の models に chunkManifest: "${data.chunkManifest}" を追加してください。`;
-            if (status) {
-                status.textContent = doneMsg;
-                status.className = 'success';
-            }
-            if (modelUploadFooterStatus) {
-                modelUploadFooterStatus.textContent = doneMsg;
-                modelUploadFooterStatus.className = 'success';
-            }
-            if (inModal) setModelUploadModalOpen(false);
-        } catch (err) {
-            const m = err instanceof Error ? err.message : String(err);
-            if (status) {
-                status.textContent = '失敗: ' + m;
-                status.className = 'error';
-            }
-            if (modelUploadFooterStatus) {
-                modelUploadFooterStatus.textContent = '失敗: ' + m;
-                modelUploadFooterStatus.className = 'error';
-            }
-        } finally {
-            if (didSetBusy) {
-                modelUploadModalBusy = false;
-                syncModelUploadCloseButtonVisibility();
-            }
-        }
-    }
-
-    document.getElementById('model-upload-zip-input')?.addEventListener('change', async (e) => {
-        const file = e.target.files && e.target.files[0];
-        e.target.value = '';
-        if (!file) return;
-        if (!file.name.toLowerCase().endsWith('.zip')) {
-            alert('ZIP ファイルを選択してください');
-            return;
-        }
-        await postPrefabZipFile(file);
-    });
-
-    (function wirePrefabZipDrop() {
-        const drop = document.getElementById('model-upload-prefab-drop');
-        const zin = document.getElementById('model-upload-zip-input');
-        if (!drop || !zin) return;
-        drop.addEventListener('click', () => zin.click());
-        drop.addEventListener('keydown', (ev) => {
-            if (ev.key === 'Enter' || ev.key === ' ') {
-                ev.preventDefault();
-                zin.click();
-            }
-        });
-        const stop = (ev) => {
-            ev.preventDefault();
-            ev.stopPropagation();
-        };
-        ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, stop));
-        drop.addEventListener('drop', (ev) => {
-            stop(ev);
-            const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-            if (f) void postPrefabZipFile(f);
-        });
-    })();
 
     document.getElementById('model-upload-close')?.addEventListener('click', () => {
         if (modelUploadModalBusy) return;
@@ -4365,11 +4290,8 @@ function bindEvents() {
             approvedOverwriteNames = selectedNames;
         }
 
-        const skipChunkEl = document.getElementById('model-upload-skip-chunk');
         const splitObjectsEl = document.getElementById('model-upload-split-objects');
         const splitGlbByObjects = !!(splitObjectsEl && splitObjectsEl.checked);
-        const skipSpatialChunkParam =
-            !!(skipChunkEl && skipChunkEl.checked) || splitGlbByObjects;
         const skipTexEl = document.getElementById('model-upload-skip-texture-resize');
         const skipTextureResize = !!(skipTexEl && skipTexEl.checked);
         const textureMaxEdgeEl = document.getElementById('model-upload-texture-max-edge');
@@ -4404,17 +4326,11 @@ function bindEvents() {
                     if (tr.errorDetail) ui.setErrorDetail(tr.errorDetail);
                 }
             }
-            if (uploadData.chunkManifest) {
-                msg += ` チャンク: worlds.json の models に chunkManifest「${uploadData.chunkManifest}」を追加してください（単体 GLB も保存済み）。`;
-            }
             if (uploadData.objectSplit?.applied && Array.isArray(uploadData.splitFiles)) {
                 msg += ` オブジェクト分割: ${uploadData.splitFiles.length} ファイル（${uploadData.splitFiles.join('、')}）。`;
             } else if (uploadData.objectSplit && uploadData.objectSplit.applied === false) {
                 const r = uploadData.objectSplit.reason || '';
                 msg += ` オブジェクト分割は未実施（${r}）。単体 GLB を保存しました。`;
-            }
-            if (uploadData.spatialChunkSkipped) {
-                msg += ' 空間チャンク分けはスキップしました（単体 GLB のみ。chunkManifest は不要です）。';
             }
             ui.setStatus(msg, cls);
             ui.setProgress(1);
@@ -4460,7 +4376,6 @@ function bindEvents() {
                     },
                     ui,
                     name,
-                    skipSpatialChunkParam,
                     skipTextureResize,
                     textureMaxEdgeStr,
                     splitGlbByObjects
@@ -4493,7 +4408,6 @@ function bindEvents() {
                         },
                         ui,
                         name,
-                        skipSpatialChunkParam,
                         skipTextureResize,
                         textureMaxEdgeStr,
                         splitGlbByObjects
@@ -4521,14 +4435,6 @@ function bindEvents() {
                     }
                 } else {
                     inv.push(encodeAssetPathToUrlPath('models/' + uploadData.filename));
-                }
-                if (uploadData.chunkManifest) {
-                    inv.push(encodeAssetPathToUrlPath(uploadData.chunkManifest));
-                }
-                if (Array.isArray(uploadData.spatialChunk?.chunkFiles)) {
-                    for (const f of uploadData.spatialChunk.chunkFiles) {
-                        inv.push(encodeAssetPathToUrlPath(`models/${f}`));
-                    }
                 }
                 await notifyServiceWorkerInvalidate(inv);
                 await fetchModels();
@@ -4573,7 +4479,6 @@ function bindEvents() {
                             },
                             ui,
                             name,
-                            skipSpatialChunkParam,
                             skipTextureResize,
                             textureMaxEdgeStr,
                             splitGlbByObjects
@@ -4599,14 +4504,6 @@ function bindEvents() {
                             }
                         } else {
                             invR.push(encodeAssetPathToUrlPath('models/' + uploadDataRetry.filename));
-                        }
-                        if (uploadDataRetry.chunkManifest) {
-                            invR.push(encodeAssetPathToUrlPath(uploadDataRetry.chunkManifest));
-                        }
-                        if (Array.isArray(uploadDataRetry.spatialChunk?.chunkFiles)) {
-                            for (const f of uploadDataRetry.spatialChunk.chunkFiles) {
-                                invR.push(encodeAssetPathToUrlPath(`models/${f}`));
-                            }
                         }
                         await notifyServiceWorkerInvalidate(invR);
                         await fetchModels();
@@ -4651,6 +4548,118 @@ function bindEvents() {
             }
         }
         if (autoCloseModelUpload) setModelUploadModalOpen(false);
+    });
+
+    document.getElementById('model-upload-zip-input')?.addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        const status = document.getElementById('upload-status');
+        if (status) {
+            status.textContent = '';
+            status.className = '';
+        }
+        if (modelUploadFooterStatus) {
+            modelUploadFooterStatus.textContent = '';
+            modelUploadFooterStatus.className = '';
+        }
+        if (!modelUploadFileList) return;
+
+        modelUploadModalBusy = true;
+        syncModelUploadCloseButtonVisibility();
+
+        const ui = createModelUploadRow(file.name);
+        modelUploadFileList.appendChild(ui.row);
+        ui.setStatus('ZIP をアップロード中…', 'muted');
+        ui.setProgress(0);
+
+        const skipTexEl = document.getElementById('model-upload-skip-texture-resize');
+        const skipTextureResize = !!(skipTexEl && skipTexEl.checked);
+        const textureMaxEdgeEl = document.getElementById('model-upload-texture-max-edge');
+        const textureMaxEdgeStr =
+            !skipTextureResize && textureMaxEdgeEl && !textureMaxEdgeEl.disabled
+                ? String(textureMaxEdgeEl.value).trim()
+                : '';
+
+        const postZip = (confirmFlag) =>
+            new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                const url = '/admin/upload-prefab-zip' + (confirmFlag ? '?confirm=1' : '');
+                xhr.open('POST', url);
+                xhr.withCredentials = true;
+                xhr.addEventListener('load', () => {
+                    let json = null;
+                    const text = xhr.responseText || '';
+                    try {
+                        json = text ? JSON.parse(text) : null;
+                    } catch {
+                        json = null;
+                    }
+                    resolve({ status: xhr.status, text, json });
+                });
+                xhr.addEventListener('error', () => reject(new Error('ネットワークエラー（XHR）')));
+                xhr.upload.addEventListener('progress', (ev) => {
+                    if (ev.lengthComputable) {
+                        ui.setProgress(ev.loaded / ev.total);
+                    }
+                });
+                const form = new FormData();
+                form.append('zip', file, file.name);
+                if (skipTextureResize) form.append('skipTextureResize', '1');
+                else if (textureMaxEdgeStr) form.append('textureMaxEdge', textureMaxEdgeStr);
+                xhr.send(form);
+            });
+
+        try {
+            let xhrRes = await postZip(false);
+            if (xhrRes.status === 409 && xhrRes.json && Array.isArray(xhrRes.json.conflictingFiles)) {
+                const names = xhrRes.json.conflictingFiles;
+                const head = names.slice(0, 25).join('\n');
+                const more = names.length > 25 ? `\n…他 ${names.length - 25} 件` : '';
+                if (
+                    !confirm(
+                        `次のファイルが既に存在します。上書きしますか？\n\n${head}${more}`
+                    )
+                ) {
+                    ui.setStatus('キャンセル', 'muted');
+                    ui.setProgress(1);
+                    modelUploadModalBusy = false;
+                    syncModelUploadCloseButtonVisibility();
+                    if (modelUploadFooterStatus) modelUploadFooterStatus.textContent = 'キャンセルしました';
+                    return;
+                }
+                xhrRes = await postZip(true);
+            }
+            if (xhrRes.status !== 200 || !xhrRes.json || !xhrRes.json.success) {
+                const errMsg = xhrRes.json?.error || xhrRes.text || `HTTP ${xhrRes.status}`;
+                throw new Error(errMsg);
+            }
+            const data = xhrRes.json;
+            const inv = (data.writtenFiles || []).map((rel) =>
+                encodeAssetPathToUrlPath('models/' + String(rel).replace(/^\/+/, ''))
+            );
+            if (inv.length) await notifyServiceWorkerInvalidate(inv);
+            await fetchModels();
+            renderModelList();
+            const pm = data.prefabManifest || '';
+            ui.setStatus(`保存しました${pm ? `（${pm}）` : ''}`, 'ok');
+            ui.setProgress(1);
+            if (modelUploadFooterStatus) {
+                modelUploadFooterStatus.textContent = 'Prefab ZIP の処理が完了しました';
+                modelUploadFooterStatus.className = 'success';
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            ui.setStatus('失敗: ' + msg, 'warn');
+            ui.setProgress(1);
+            if (modelUploadFooterStatus) {
+                modelUploadFooterStatus.textContent = msg;
+                modelUploadFooterStatus.className = 'error';
+            }
+        } finally {
+            modelUploadModalBusy = false;
+            syncModelUploadCloseButtonVisibility();
+        }
     });
 
     document.getElementById('btn-add-light').addEventListener('click', () => {

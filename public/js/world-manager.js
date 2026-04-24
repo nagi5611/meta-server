@@ -31,7 +31,7 @@ class WorldManager {
         let n = 0;
         for (const c of modelList) {
             const o = typeof c === 'string' ? { path: c } : c;
-            if (o?.path || String(o?.chunkManifest || '').trim()) n++;
+            if (String(o?.path || '').trim() || String(o?.prefabManifest || '').trim()) n++;
         }
         return n;
     }

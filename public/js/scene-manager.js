@@ -26,7 +26,25 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { mergeAircraftPhysicsForObject } from './aircraft-physics-defaults.js';
-import { implicitChunkManifestPathFromGlbModelPath, alternateChunkManifestPath } from './chunk-manifest-constants.js';
+import { loadPrefabGroupFromManifest, normalizePrefabManifest } from './prefab-load-shared.js';
+
+/**
+ * 足元 p・半径 R の球と AABB（ワールド空間 min/max）が交差するか
+ * @param {import('three').Vector3} p
+ * @param {number} R
+ * @param {import('three').Vector3} min
+ * @param {import('three').Vector3} max
+ * @returns {boolean}
+ */
+function aabbIntersectsViewSphere(p, R, min, max) {
+    const cx = Math.max(min.x, Math.min(max.x, p.x));
+    const cy = Math.max(min.y, Math.min(max.y, p.y));
+    const cz = Math.max(min.z, Math.min(max.z, p.z));
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    const dz = p.z - cz;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz) <= R;
+}
 
 /** ワールド複数モデル読み込みの同時実行数（キャッシュヒット時の直列待ちを緩和） */
 const WORLD_MODEL_LOAD_CONCURRENCY = 8;
@@ -314,88 +332,23 @@ class SceneManager {
     _registerDrawCullTarget(obj) {
         if (!obj) return;
         if (this._drawCullTargets.includes(obj)) return;
-        obj.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(obj);
-        if (box.isEmpty()) {
-            obj.userData.drawCullWorld = null;
+        if (obj.userData.drawCullStyle === 'aabb') {
+            obj.userData.drawCullWorld = { aabb: true };
         } else {
-            const sp = new THREE.Sphere();
-            box.getBoundingSphere(sp);
-            obj.userData.drawCullWorld = {
-                center: sp.center.clone(),
-                radius: Math.max(sp.radius, 0.05)
-            };
+            obj.updateMatrixWorld(true);
+            const box = new THREE.Box3().setFromObject(obj);
+            if (box.isEmpty()) {
+                obj.userData.drawCullWorld = null;
+            } else {
+                const sp = new THREE.Sphere();
+                box.getBoundingSphere(sp);
+                obj.userData.drawCullWorld = {
+                    center: sp.center.clone(),
+                    radius: Math.max(sp.radius, 0.05)
+                };
+            }
         }
         this._drawCullTargets.push(obj);
-    }
-
-    /**
-     * models/foo.glb から暗黙の models/foo.chunk.json パス（存在は未検証。旧 .chunks.json は fetch 側でフォールバック）
-     * @param {string} modelPath
-     * @returns {string|null}
-     */
-    _implicitChunksManifestPathFromModelPath(modelPath) {
-        return implicitChunkManifestPathFromGlbModelPath(modelPath);
-    }
-
-    /**
-     * マニフェストを fetch し chunkManifestPlan 相当のエントリを作る（planWorldLoadBytes 用・await 内で長さ取得）
-     * @param {string} manifestPath - models/...chunk.json（.chunks.json 互換のフォールバックあり）
-     * @param {number} FALLBACK
-     * @returns {Promise<{ chunks: { url: string, weight: number, label: string, center: number[], radius: number, filePath: string }[], sum: number }|null>}
-     */
-    async _fetchAndBuildChunkPlanEntries(manifestPath, FALLBACK) {
-        /** @param {string} rel */
-        const loadManifest = async (rel) => {
-            const mRes = await fetch(this._buildEncodedModelUrl(rel));
-            if (!mRes.ok) return null;
-            return mRes.json();
-        };
-        let manifest = await loadManifest(manifestPath);
-        if (!manifest) {
-            const alt = alternateChunkManifestPath(manifestPath);
-            if (alt) manifest = await loadManifest(alt);
-        }
-        if (!manifest) return null;
-        const chList = Array.isArray(manifest.chunks) ? manifest.chunks : [];
-        if (!chList.length) return null;
-        const nCh = Math.max(1, chList.length);
-        /** @type {(Promise<{ url: string, weight: number, label: string, center: number[], radius: number, filePath: string }|null>)[]} */
-        const chunkTasks = chList.map(async (ch) => {
-            const fp = String(ch.file || '').replace(/^\//, '');
-            if (!fp) return null;
-            const u = this._buildEncodedModelUrl(fp);
-            const len = await fetchModelContentLength(u);
-            const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / nCh));
-            const cx = Array.isArray(ch.center) && ch.center.length >= 3 ? ch.center[0] : 0;
-            const cy = Array.isArray(ch.center) && ch.center.length >= 3 ? ch.center[1] : 0;
-            const cz = Array.isArray(ch.center) && ch.center.length >= 3 ? ch.center[2] : 0;
-            const rad = Number.isFinite(ch.radius) ? Math.max(ch.radius, 0.01) : 0.01;
-            return {
-                url: u,
-                weight: w,
-                label: fp.split(/[/\\]/).pop() || fp,
-                center: [cx, cy, cz],
-                radius: rad,
-                filePath: fp
-            };
-        });
-        const settled = await Promise.all(chunkTasks);
-        /** @type {{ url: string, weight: number, label: string, center: number[], radius: number, filePath: string }[]} */
-        const chunkPlan = settled.filter(Boolean);
-        const sum = chunkPlan.reduce((s, e) => s + e.weight, 0);
-        if (!chunkPlan.length || sum <= 0) return null;
-        return { chunks: chunkPlan, sum };
-    }
-
-    /**
-     * loadOne でプラン欠落時のフォールバック用
-     * @param {string} manifestPath
-     * @returns {Promise<{ url: string, weight: number, label: string, center: number[], radius: number, filePath: string }[]|null>}
-     */
-    async _fetchChunkPlanChunksOnly(manifestPath) {
-        const built = await this._fetchAndBuildChunkPlanEntries(manifestPath, 5 * 1024 * 1024);
-        return built ? built.chunks : null;
     }
 
     /**
@@ -413,10 +366,20 @@ class SceneManager {
 
         for (const obj of this._drawCullTargets) {
             if (!obj || !obj.parent) continue;
-            const c = obj.userData.drawCullWorld;
             let inRange = true;
-            if (c && c.center && Number.isFinite(c.radius)) {
-                inRange = p.distanceTo(c.center) <= R + c.radius;
+            if (obj.userData.drawCullStyle === 'aabb') {
+                obj.updateMatrixWorld(true);
+                const box = new THREE.Box3().setFromObject(obj);
+                if (box.isEmpty()) {
+                    inRange = true;
+                } else {
+                    inRange = aabbIntersectsViewSphere(p, R, box.min, box.max);
+                }
+            } else {
+                const c = obj.userData.drawCullWorld;
+                if (c && c.center && Number.isFinite(c.radius)) {
+                    inRange = p.distanceTo(c.center) <= R + c.radius;
+                }
             }
             obj.userData._cullInRange = inRange;
             if (obj === this.groundMesh || obj === this.gridHelper) {
@@ -436,38 +399,89 @@ class SceneManager {
      */
     async _planWorldLoadBytesForModel(config, idx, FALLBACK) {
         const fullConfig = typeof config === 'string' ? { path: config } : config;
-        let resolvedManifest = String(fullConfig.chunkManifest || '').trim();
-        const modelPath = fullConfig.path;
-        if (!resolvedManifest && modelPath && modelPath.toLowerCase().endsWith('.glb') && !this._isObjPath(modelPath)) {
-            resolvedManifest = String(this._implicitChunksManifestPathFromModelPath(modelPath) || '').trim();
-        }
-        if (resolvedManifest) {
-            const built = await this._fetchAndBuildChunkPlanEntries(resolvedManifest, FALLBACK);
-            if (!built) {
-                console.warn('[SceneManager] chunk manifest missing or invalid:', resolvedManifest);
+        const pfm = String(fullConfig.prefabManifest || '').trim();
+        if (pfm) {
+            const fileLabel = pfm.split(/[/\\]/).pop() || pfm;
+            try {
+                const mUrl = this._buildEncodedModelUrl(pfm);
+                const mRes = await fetch(mUrl);
+                if (!mRes.ok) {
+                    console.warn('[SceneManager] prefab manifest not found for byte plan:', pfm);
+                    return {
+                        idx,
+                        entry: {
+                            fileLabel,
+                            totalFileBytes: FALLBACK,
+                            wMtl: 0,
+                            wObj: FALLBACK,
+                            contentLenObj: null,
+                            prefabManifestPath: pfm,
+                            prefabManifestPlan: null
+                        },
+                        bytes: FALLBACK
+                    };
+                }
+                const raw = await mRes.json();
+                const man = normalizePrefabManifest(raw);
+                if (!man.parts.length) {
+                    return {
+                        idx,
+                        entry: {
+                            fileLabel,
+                            totalFileBytes: FALLBACK,
+                            wMtl: 0,
+                            wObj: FALLBACK,
+                            contentLenObj: null,
+                            prefabManifestPath: pfm,
+                            prefabManifestPlan: null
+                        },
+                        bytes: FALLBACK
+                    };
+                }
+                const nP = man.parts.length;
+                let sum = 0;
+                for (const part of man.parts) {
+                    const fp = part.file.startsWith('models/') ? part.file : `models/${part.file}`;
+                    const u = this._buildEncodedModelUrl(fp);
+                    const len = await fetchModelContentLength(u);
+                    const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / nP));
+                    sum += w;
+                }
+                const mLen = await fetchModelContentLength(mUrl);
+                if (mLen != null && mLen > 0) {
+                    sum += mLen;
+                }
                 return {
                     idx,
                     entry: {
-                        fileLabel: resolvedManifest.split(/[/\\]/).pop() || resolvedManifest,
+                        fileLabel,
+                        totalFileBytes: Math.max(1, sum),
+                        wMtl: 0,
+                        wObj: Math.max(1, sum),
+                        contentLenObj: null,
+                        prefabManifestPath: pfm,
+                        prefabManifestPlan: { parts: man.parts }
+                    },
+                    bytes: Math.max(1, sum)
+                };
+            } catch (e) {
+                console.warn('[SceneManager] prefab byte plan error:', e);
+                return {
+                    idx,
+                    entry: {
+                        fileLabel: pfm.split(/[/\\]/).pop() || pfm,
                         totalFileBytes: FALLBACK,
-                        resolvedChunkManifest: resolvedManifest,
-                        chunkManifestPlan: null
+                        wMtl: 0,
+                        wObj: FALLBACK,
+                        contentLenObj: null,
+                        prefabManifestPath: pfm,
+                        prefabManifestPlan: null
                     },
                     bytes: FALLBACK
                 };
             }
-            return {
-                idx,
-                entry: {
-                    fileLabel: resolvedManifest.split(/[/\\]/).pop() || resolvedManifest,
-                    totalFileBytes: built.sum,
-                    resolvedChunkManifest: resolvedManifest,
-                    chunkManifestPlan: { chunks: built.chunks }
-                },
-                bytes: built.sum
-            };
         }
-
+        const modelPath = fullConfig.path;
         if (!modelPath) return null;
 
         const url = this._buildEncodedModelUrl(modelPath);
@@ -672,8 +686,19 @@ class SceneManager {
 
             model.updateMatrixWorld(true);
             // 飛行機ルートは操縦で移動するが、drawCull の球心は登録時固定のため、そのままだと離陸後に視距離外扱いで非表示になる
-            if (!String(config.chunkManifest || '').trim() && !config.aircraft) {
-                this._registerDrawCullTarget(model);
+            // prefab は親 Group は cull せず、各パーツ子のみ AABB + 視距離
+            if (!config.aircraft) {
+                const isPrefab = !!String(config.prefabManifest || '').trim();
+                if (isPrefab) {
+                    model.traverse((ch) => {
+                        if (ch.userData && ch.userData.isPrefabPart) {
+                            ch.userData.drawCullStyle = 'aabb';
+                            this._registerDrawCullTarget(ch);
+                        }
+                    });
+                } else {
+                    this._registerDrawCullTarget(model);
+                }
             }
 
             if (config.animate) {
@@ -726,16 +751,15 @@ class SceneManager {
         const loadOne = async (config, idx) => {
             const fullConfig = typeof config === 'string' ? { path: config } : config;
             const plan = bytePlan?.modelByIndex?.get(idx);
-            let manifestPath = String(plan?.resolvedChunkManifest || fullConfig.chunkManifest || '').trim();
             const modelPath = fullConfig.path;
-            if (!manifestPath && modelPath && modelPath.toLowerCase().endsWith('.glb') && !this._isObjPath(modelPath)) {
-                manifestPath = String(this._implicitChunksManifestPathFromModelPath(modelPath) || '').trim();
-            }
+            const pfm = String(fullConfig.prefabManifest || '').trim();
 
             const fileLabel = plan?.fileLabel
                 || (modelPath
                     ? (modelPath.split(/[/\\]/).pop() || modelPath)
-                    : (manifestPath ? manifestPath.split(/[/\\]/).pop() || manifestPath : 'model'));
+                    : pfm
+                    ? (pfm.split(/[/\\]/).pop() || pfm)
+                    : 'model');
             const fileBudget = plan?.totalFileBytes ?? (5 * 1024 * 1024);
             const fileStart = useAggregatedProgress ? 0 : (loadState?.completedBytes ?? 0);
 
@@ -757,69 +781,63 @@ class SceneManager {
                 });
             };
 
-            let chunkPlan = plan?.chunkManifestPlan?.chunks;
-            if (manifestPath && (!chunkPlan || chunkPlan.length === 0)) {
-                chunkPlan = await this._fetchChunkPlanChunksOnly(manifestPath);
+            if (!pfm && !modelPath) {
+                snapBudgetDone();
+                return;
             }
 
-            if (manifestPath && chunkPlan && chunkPlan.length > 0) {
-                const totalW = chunkPlan.reduce((s, c) => s + c.weight, 0) || 1;
-                const anchor = new THREE.Group();
-                const cfgForFinish = { ...fullConfig, chunkManifest: manifestPath };
-                let totalTris = 0;
-                let completedChunkBytes = 0;
-                const loader = createGLTFLoaderWithDraco();
+            if (pfm) {
+                if (fullConfig.aircraft) {
+                    console.warn('[SceneManager] prefab と aircraft は同時に指定できません。スキップ:', pfm);
+                    snapBudgetDone();
+                    return;
+                }
                 try {
-                    for (let ci = 0; ci < chunkPlan.length; ci++) {
-                        const ent = chunkPlan[ci];
-                        const chunkBudget = fileBudget * (ent.weight / totalW);
-                        const scene = await new Promise((resolve, reject) => {
-                            loader.load(
-                                ent.url,
-                                (gltf) => resolve(gltf.scene),
-                                (xhr) => {
-                                    const denom = xhr.total > 0 ? xhr.total : chunkBudget;
-                                    const chunkFrac = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
-                                    const bytesIntoModel = completedChunkBytes + chunkFrac * chunkBudget;
-                                    if (useAggregatedProgress) {
-                                        setModelBytesProgress(idx, ent.label, bytesIntoModel, fileBudget);
-                                    } else {
-                                        emitFromBase(
-                                            ent.label,
-                                            xhr.loaded,
-                                            xhr.total || 0,
-                                            chunkBudget,
-                                            fileStart + completedChunkBytes
-                                        );
-                                    }
-                                },
-                                reject
-                            );
-                        });
-                        const tris = countTrianglesInObject(scene);
-                        totalTris += tris;
-                        anchor.add(scene);
-                        scene.updateMatrixWorld(true);
-                        if (!fullConfig.aircraft) {
-                            this._registerDrawCullTarget(scene);
-                        }
-                        completedChunkBytes += chunkBudget;
-                    }
-                    if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
-                        this._disposeModelObject(anchor);
-                        console.error(`[SceneManager] chunk manifest 合計ポリゴン過多 (約 ${totalTris} 三角): ${manifestPath}`);
-                        window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
-                            detail: {
-                                path: manifestPath,
-                                reason: 'too_many_triangles',
-                                triangles: totalTris,
-                                maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
+                    const nPlanParts = plan?.prefabManifestPlan?.parts?.length;
+                    const nPart = nPlanParts && nPlanParts > 0 ? nPlanParts : 1;
+                    const partW = fileBudget / nPart;
+                    const { group, totalTris } = await loadPrefabGroupFromManifest({
+                        THREE,
+                        manifestPath: pfm,
+                        createGLTFLoader: createGLTFLoaderWithDraco,
+                        onXhrProgress: (name, xhr, partIndex) => {
+                            const denom = xhr.total > 0 ? xhr.total : partW;
+                            const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
+                            const doneInModel = (partIndex + f) * partW;
+                            if (useAggregatedProgress) {
+                                setModelBytesProgress(idx, name || fileLabel, doneInModel, fileBudget);
+                            } else {
+                                const effIdx = partIndex;
+                                const basePart = fileStart + effIdx * partW;
+                                emitFromBase(
+                                    name || fileLabel,
+                                    xhr.loaded,
+                                    xhr.total || 0,
+                                    partW,
+                                    basePart
+                                );
                             }
-                        }));
+                        }
+                    });
+                    if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
+                        this._disposeModelObject(group);
+                        console.error(`[SceneManager] ポリゴン過多のため prefab 読み込み中止 (約 ${totalTris} 三角): ${pfm}`);
+                        window.dispatchEvent(
+                            new CustomEvent('metaverse-model-load-guard', {
+                                detail: {
+                                    path: pfm,
+                                    reason: 'too_many_triangles',
+                                    triangles: totalTris,
+                                    maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
+                                }
+                            })
+                        );
                         snapBudgetDone();
                         return;
                     }
-                    finishAddModel(anchor, cfgForFinish, manifestPath, totalTris);
+                    const cfgForAdd = { ...fullConfig, prefabManifest: pfm };
+                    const pathForLog = String(modelPath || '').trim() || pfm;
+                    finishAddModel(group, cfgForAdd, pathForLog, totalTris);
                     if (loadState) {
                         if (useAggregatedProgress && modelProgressFrac) {
                             modelProgressFrac[idx] = 1;
@@ -829,18 +847,9 @@ class SceneManager {
                         }
                     }
                 } catch (error) {
-                    console.error(`Error loading chunk manifest ${manifestPath}:`, error);
+                    console.error(`[SceneManager] prefab 読み込み失敗 ${pfm}:`, error);
                     snapBudgetDone();
                 }
-                return;
-            }
-
-            if (manifestPath) {
-                console.warn('[SceneManager] チャンクプランが無いため単体 path にフォールバックします:', manifestPath);
-            }
-
-            if (!modelPath) {
-                if (manifestPath) snapBudgetDone();
                 return;
             }
 

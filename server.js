@@ -25,15 +25,12 @@ import {
     getModelUploadQueueStats,
     parseTextureMaxEdgeFromUploadBody,
 } from './lib/glb-texture-resize.js';
-import { runGlbSpatialChunkIfNeeded } from './lib/glb-spatial-chunk.js';
-import { applyPrefabZipToModels } from './lib/prefab-zip-upload.js';
-import {
-    CHUNK_MANIFEST_SUFFIX,
-    LEGACY_CHUNK_MANIFEST_SUFFIX,
-    isChunkManifestFilename,
-    baseNameFromManifestFileName,
-} from './lib/chunk-manifest-constants.js';
 import { runGlbObjectSplitFromBuffer, listObjectSplitFilesForBase } from './lib/glb-object-split.js';
+import {
+    applyPrefabBundleZipToModels,
+    parseGlbOptionsFromPrefabBody,
+    removePrefabBundleFromDisk,
+} from './lib/prefab-bundle-upload.js';
 import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } from './lib/chart-bgm-transcode.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -702,16 +699,15 @@ const uploadHdr = multer({
         cb(null, ext === '.hdr');
     }
 });
-/** 手製 prefab（ZIP: chunk GLB + マニフェスト） */
+/** Prefab バンドル（複数 GLB + 同梱アセット）ZIP */
 const uploadPrefabZip = multer({
     storage: uploadStorage,
     limits: { fileSize: MODEL_UPLOAD_MAX_BYTES },
     fileFilter: (req, file, cb) => {
         const ext = path.extname(file.originalname || '').toLowerCase();
         cb(null, ext === '.zip');
-    }
+    },
 });
-
 /**
  * multipart 由来の文字化けを避けるため、クライアント送信の UTF-8(base64) ファイル名を優先して正規化する。
  * @param {import('express').Request} req
@@ -794,58 +790,6 @@ function resolvePathUnderStorageRoot(storeRoot, relativePath) {
     if (resolved === rootResolved) return resolved;
     if (!resolved.startsWith(rootResolved + sep)) return null;
     return resolved;
-}
-
-/**
- * models ストアで .glb を消すとき、空間チャンクの manifest と chunk GLB を列挙する
- * @param {string} glbAbsolutePath
- * @returns {string[]}
- */
-function collectSpatialChunkSiblingPaths(glbAbsolutePath) {
-    const low = String(glbAbsolutePath || '').toLowerCase();
-    if (!low.endsWith('.glb')) return [];
-    const dir = path.dirname(glbAbsolutePath);
-    const base = path.basename(glbAbsolutePath, path.extname(glbAbsolutePath));
-    const out = [];
-    const manifestA = path.join(dir, `${base}${CHUNK_MANIFEST_SUFFIX}`);
-    const manifestB = path.join(dir, `${base}${LEGACY_CHUNK_MANIFEST_SUFFIX}`);
-    if (fs.existsSync(manifestA)) out.push(manifestA);
-    if (fs.existsSync(manifestB)) out.push(manifestB);
-    try {
-        if (!fs.existsSync(dir)) return out;
-        for (const name of fs.readdirSync(dir)) {
-            if (name.startsWith(`${base}.chunk_`) && name.toLowerCase().endsWith('.glb')) {
-                out.push(path.join(dir, name));
-            }
-        }
-    } catch (_) {
-        /* ignore */
-    }
-    return out;
-}
-
-/**
- * models ストアで *chunk.json を消すとき、同じ base の chunk_*.glb を列挙する
- * @param {string} manifestAbsPath
- * @returns {string[]}
- */
-function collectChunkGlbSiblingsForManifest(manifestAbsPath) {
-    const name = path.basename(manifestAbsPath);
-    const base = baseNameFromManifestFileName(name);
-    if (!base) return [];
-    const dir = path.dirname(manifestAbsPath);
-    const out = [];
-    try {
-        if (!fs.existsSync(dir)) return out;
-        for (const f of fs.readdirSync(dir)) {
-            if (f.startsWith(`${base}.chunk_`) && f.toLowerCase().endsWith('.glb')) {
-                out.push(path.join(dir, f));
-            }
-        }
-    } catch {
-        /* ignore */
-    }
-    return out;
 }
 
 const app = express();
@@ -4622,9 +4566,7 @@ app.get('/admin/models', (req, res) => {
                 const low = n.toLowerCase();
                 return (
                     low.endsWith('.glb') ||
-                    low.endsWith('.obj') ||
-                    low.endsWith('.chunk.json') ||
-                    low.endsWith('.chunks.json')
+                    low.endsWith('.obj')
                 );
             })
             .map((n) => decodeLikelyMojibakeFilename(n))
@@ -4750,22 +4692,14 @@ function performStorageFileDelete(store, storeRoot, relPath, options) {
         }
         /** @type {string[]} */
         const invUrls = [];
-        /** @type {string[]} */
-        const unlinkFirst = [];
-        if (store === 'models' && fileAbs.toLowerCase().endsWith('.glb')) {
-            unlinkFirst.push(...collectSpatialChunkSiblingPaths(fileAbs));
-        } else if (store === 'models' && isChunkManifestFilename(path.basename(fileAbs))) {
-            unlinkFirst.push(...collectChunkGlbSiblingsForManifest(fileAbs));
-        }
-        for (const p of unlinkFirst) {
-            try {
-                if (fs.existsSync(p) && fs.statSync(p).isFile()) {
-                    fs.unlinkSync(p);
-                    const rel = path.relative(storeRoot, p).split(path.sep).join('/');
-                    invUrls.push(publicAssetUrlForCache('models', rel));
+        if (store === 'models') {
+            const relOne = path.relative(storeRoot, fileAbs).split(path.sep).join('/');
+            if (relOne.toLowerCase().endsWith('-prefab-manifest.json')) {
+                const { relPaths } = removePrefabBundleFromDisk(storeRoot, relOne);
+                for (const rp of relPaths) {
+                    invUrls.push(publicAssetUrlForCache('models', rp));
                 }
-            } catch (e) {
-                console.error('[storage-files] chunk sidecar delete:', e);
+                return { success: true, invUrls, skipped: false };
             }
         }
         fs.unlinkSync(fileAbs);
@@ -4857,6 +4791,77 @@ app.post('/admin/storage-files/bulk-delete', (req, res) => {
     });
 });
 
+app.get('/admin/prefab-manifests', (req, res) => {
+    try {
+        if (!fs.existsSync(MODELS_DIR)) {
+            return res.json([]);
+        }
+        const names = fs
+            .readdirSync(MODELS_DIR)
+            .filter((n) => n.toLowerCase().endsWith('-prefab-manifest.json'))
+            .map((n) => decodeLikelyMojibakeFilename(n))
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        res.json(names);
+    } catch (err) {
+        console.error('GET /admin/prefab-manifests error:', err);
+        res.status(500).json({ error: 'Failed to list prefab manifests' });
+    }
+});
+
+app.post('/admin/upload-prefab-zip', uploadPrefabZip.single('zip'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file or invalid file' });
+    }
+    const origName = getSafeUploadedFilename(req, req.file.originalname);
+    const ext = path.extname(origName).toLowerCase();
+    if (ext !== '.zip') {
+        return res.status(400).json({ error: 'Only .zip is allowed' });
+    }
+    const glbOpts = parseGlbOptionsFromPrefabBody(req.body);
+    if (glbOpts.parseError) {
+        return res.status(400).json({ error: glbOpts.parseError });
+    }
+    const confirm = req.query.confirm === '1';
+    try {
+        const result = await applyPrefabBundleZipToModels(
+            req.file.buffer,
+            MODELS_DIR,
+            origName,
+            confirm,
+            { maxEdgePx: glbOpts.maxEdgePx, skipTextureResize: glbOpts.skipTextureResize }
+        );
+        if (!result.success) {
+            if (result.status === 409) {
+                return res.status(409).json({
+                    error: result.error,
+                    code: result.code,
+                    conflictingFiles: result.conflictingFiles,
+                });
+            }
+            return res.status(result.status).json({ error: result.error, code: result.code });
+        }
+        const invUrls = result.writtenFiles.map((f) => publicAssetUrlForCache('models', f));
+        if (invUrls.length) {
+            io.emit('asset-invalidate', { urls: invUrls });
+        }
+        return res.json({
+            success: true,
+            prefabManifest: result.manifestRelativePath,
+            prefabGroupId: result.prefabGroupId,
+            displayName: result.displayName,
+            writtenFiles: result.writtenFiles,
+            glbCount: result.glbCount,
+            textureResizeNotes: result.textureResizeNotes,
+        });
+    } catch (err) {
+        console.error('POST /admin/upload-prefab-zip error:', err);
+        return res.status(500).json({
+            error: 'Failed to process prefab zip',
+            detail: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+
 app.post('/admin/upload', upload.single('model'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file or invalid file' });
@@ -4882,11 +4887,8 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         }
         let outBuffer = req.file.buffer;
         let textureResize = null;
-        let spatialChunk = null;
         let objectSplit = null;
         let multiSplit = false;
-        const skipSpatialChunk = req.body?.skipSpatialChunk === '1' || req.body?.skipSpatialChunk === 'true';
-        const skipSpatialChunkEffective = skipSpatialChunk || splitGlbByObjects;
         const skipTextureResize = req.body?.skipTextureResize === '1' || req.body?.skipTextureResize === 'true';
         let textureMaxEdgeParsed = null;
         if (ext === '.glb' && !skipTextureResize) {
@@ -4942,24 +4944,6 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
                     console.warn('[upload] remove mono glb before objsplit:', destPath, e);
                 }
             }
-            if (!skipSpatialChunkEffective && !multiSplit) {
-                try {
-                    spatialChunk = await runGlbSpatialChunkIfNeeded(outBuffer, {
-                        modelsDir: MODELS_DIR,
-                        baseFilename: filename,
-                    });
-                } catch (e) {
-                    console.warn('[upload] spatial chunk error:', e);
-                    spatialChunk = { applied: false, reason: 'error', detail: String(e) };
-                }
-            } else if (multiSplit) {
-                spatialChunk = { applied: false, reason: 'skipped_after_object_split' };
-            } else {
-                spatialChunk = {
-                    applied: false,
-                    reason: splitGlbByObjects ? 'skipped_object_split_mode' : 'skipped_by_client',
-                };
-            }
         }
         if (!multiSplit) {
             fs.writeFileSync(destPath, outBuffer);
@@ -4972,11 +4956,6 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
             }
         } else {
             invUrls.push(publicAssetUrlForCache('models', filename));
-        }
-        if (spatialChunk?.applied && Array.isArray(spatialChunk.chunkFiles)) {
-            for (const f of spatialChunk.chunkFiles) {
-                invUrls.push(publicAssetUrlForCache('models', f));
-            }
         }
         io.emit('asset-invalidate', { urls: invUrls });
         const payload = {
@@ -4996,15 +4975,6 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         if (textureResize) {
             payload.textureResize = textureResize;
         }
-        if (spatialChunk?.applied && spatialChunk.manifestRelativePath) {
-            payload.chunkManifest = spatialChunk.manifestRelativePath;
-            payload.spatialChunk = {
-                chunkFiles: spatialChunk.chunkFiles,
-            };
-        }
-        if (skipSpatialChunkEffective && ext === '.glb') {
-            payload.spatialChunkSkipped = true;
-        }
         if (skipTextureResize && ext === '.glb') {
             payload.textureResizeSkipped = true;
         }
@@ -5016,33 +4986,6 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
             detail: err instanceof Error ? err.message : String(err),
         });
     }
-});
-
-app.post('/admin/upload-prefab-zip', uploadPrefabZip.single('zip'), async (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ error: 'No file or invalid file' });
-    }
-    const ext = path.extname(req.file.originalname || '').toLowerCase();
-    if (ext !== '.zip') {
-        return res.status(400).json({ error: 'Only .zip is allowed' });
-    }
-    const confirm = req.query.confirm === '1';
-    const result = applyPrefabZipToModels(req.file.buffer, MODELS_DIR, confirm);
-    if (!result.success) {
-        if (result.status === 409) {
-            return res.status(409).json({ error: 'file_exists', code: result.code, filename: result.filename });
-        }
-        return res.status(result.status).json({ error: result.error, code: result.code });
-    }
-    const invUrls = result.writtenFiles.map((f) => publicAssetUrlForCache('models', f));
-    if (invUrls.length) {
-        io.emit('asset-invalidate', { urls: invUrls });
-    }
-    res.json({
-        success: true,
-        chunkManifest: result.chunkManifest,
-        writtenFiles: result.writtenFiles
-    });
 });
 
 app.get('/admin/pdfs', (req, res) => {
