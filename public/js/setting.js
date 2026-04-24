@@ -4541,6 +4541,10 @@ function bindEvents() {
         const file = e.target.files && e.target.files[0];
         e.target.value = '';
         if (!file) return;
+        if (!String(file.name || '').toLowerCase().endsWith('.zip')) {
+            window.alert('Prefab 用には拡張子 .zip のファイルを選んでください。');
+            return;
+        }
         const status = document.getElementById('upload-status');
         if (status) {
             status.textContent = '';

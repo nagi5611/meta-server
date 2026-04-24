@@ -1243,7 +1243,8 @@
                 <div id="model-upload-file-list" class="model-upload-file-list"></div>
             </div>
             <input type="file" id="model-upload-input" accept=".glb,.obj,.mtl,.png,.jpg,.jpeg,.webp" multiple style="display:none">
-            <input type="file" id="model-upload-zip-input" accept=".zip,.ZIP,application/zip,application/x-zip-compressed" style="display:none">
+            <!-- accept は付けない（OS により .zip が選べなくなる事例がある。サーバで .zip を検証） -->
+            <input type="file" id="model-upload-zip-input" style="display:none">
             <div class="modal-buttons model-upload-modal-actions">
                 <button type="button" id="model-upload-pick" class="btn-secondary">ファイルを選択</button>
                 <button type="button" id="model-upload-close" class="btn-secondary">閉じる</button>
