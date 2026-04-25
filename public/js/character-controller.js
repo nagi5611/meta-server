@@ -1,5 +1,19 @@
 import * as THREE from 'three';
 
+/** 1 イベントの回転がこの角度（ラジアン）を超える場合はスパイク扱いし下記に置き換える */
+const SUDDEN_VIEW_DELTA_THRESHOLD_RAD = (90 * Math.PI) / 180;
+const SUDDEN_VIEW_DELTA_REPLACE_RAD = (5 * Math.PI) / 180;
+
+/**
+ * 急激な movement スパイク（例: 120° 相当）を 5° 程度に抑える
+ * @param {number} deltaRad
+ * @returns {number}
+ */
+function clampSuddenViewDeltaRad(deltaRad) {
+    if (Math.abs(deltaRad) <= SUDDEN_VIEW_DELTA_THRESHOLD_RAD) return deltaRad;
+    return Math.sign(deltaRad || 1) * SUDDEN_VIEW_DELTA_REPLACE_RAD;
+}
+
 /** 初回入力で物理再開する対象キー（ロード完了〜操作まで落下させない） */
 const GAMEPLAY_KEY_CODES = new Set([
     'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyC', 'KeyE'
@@ -358,12 +372,13 @@ class CharacterController {
         if (this.xrPresenting) return;
         if (!this.isPointerLocked) return;
 
-        // Update camera horizontal rotation (yaw)
-        this.cameraYaw -= event.movementX * this.mouseSensitivity;
+        let dYaw = -event.movementX * this.mouseSensitivity;
+        let dPitch = -event.movementY * this.mouseSensitivity;
+        dYaw = clampSuddenViewDeltaRad(dYaw);
+        dPitch = clampSuddenViewDeltaRad(dPitch);
+        this.cameraYaw += dYaw;
+        this.cameraPitch += dPitch;
 
-        // Update camera vertical angle (pitch) with limits
-        this.cameraPitch -= event.movementY * this.mouseSensitivity;
-        
         // Clamp vertical rotation (prevent camera from going too high or too low)
         this.cameraPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(0.2, this.cameraPitch));
     }
@@ -413,8 +428,12 @@ class CharacterController {
 
         // Apply mobile camera delta (right stick) before movement
         if (this.isMobileMode && (this.mobileCameraDelta.x !== 0 || this.mobileCameraDelta.y !== 0)) {
-            this.cameraYaw -= this.mobileCameraDelta.x;
-            this.cameraPitch -= this.mobileCameraDelta.y;
+            let dMyaw = -this.mobileCameraDelta.x;
+            let dMpitch = -this.mobileCameraDelta.y;
+            dMyaw = clampSuddenViewDeltaRad(dMyaw);
+            dMpitch = clampSuddenViewDeltaRad(dMpitch);
+            this.cameraYaw += dMyaw;
+            this.cameraPitch += dMpitch;
             this.cameraPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(0.2, this.cameraPitch));
             this.mobileCameraDelta.x = 0;
             this.mobileCameraDelta.y = 0;
