@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 
-/** 1 イベントあたりのヨー／ピッチ回転の上限（90°、ラジアン） */
-const MAX_VIEW_DELTA_PER_EVENT_RAD = (90 * Math.PI) / 180;
+/** 1 イベントあたりのヨー／ピッチ回転の上限（30°、ラジアン） */
+const MAX_VIEW_DELTA_PER_EVENT_RAD = (30 * Math.PI) / 180;
 
 /**
- * マウス movement 等のスパイクを 1 フレーム最大 90° に抑える
+ * マウス movement 等のスパイクを 1 フレーム最大 30° に抑える
  * @param {number} deltaRad
  * @returns {number}
  */
