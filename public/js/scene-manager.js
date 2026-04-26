@@ -400,7 +400,7 @@ class SceneManager {
     }
 
     /**
-     * models[].lodRank / lodPartRanks を prefab パーツ userData に反映する
+     * models[].lodRanks（パーツ順）優先、なければ lodPartRanks / lodRank で prefab パーツ userData に反映する
      * @param {import('three').Object3D} model
      * @param {object} config
      */
@@ -410,6 +410,19 @@ class SceneManager {
             config.lodPartRanks && typeof config.lodPartRanks === 'object' && !Array.isArray(config.lodPartRanks)
                 ? config.lodPartRanks
                 : {};
+        const byOrder = Array.isArray(config.lodRanks) && config.lodRanks.length > 0;
+        if (byOrder) {
+            let idx = 0;
+            const arr = config.lodRanks;
+            for (const ch of model.children) {
+                if (!ch.userData || !ch.userData.isPrefabPart) continue;
+                let r = idx < arr.length ? Number(arr[idx]) : Number(arr[arr.length - 1]);
+                if (!Number.isFinite(r) || r < 1) r = defRank;
+                ch.userData.prefabLodRank = Math.max(1, Math.floor(r));
+                idx++;
+            }
+            return;
+        }
         model.traverse((ch) => {
             if (!ch.userData || !ch.userData.isPrefabPart) return;
             const path = ch.userData.prefabPartPath || '';
@@ -472,22 +485,34 @@ class SceneManager {
             rank = Math.max(1, Math.min(numBands, rank));
             root.userData._prefabLodStableBand = rank;
 
-            let anyShown = false;
+            /** @type {import('three').Object3D[]} */
+            const partNodes = [];
             root.traverse((ch) => {
                 if (!ch.userData || !ch.userData.isPrefabPart) return;
+                partNodes.push(ch);
+            });
+            let anyShown = false;
+            for (const ch of partNodes) {
                 const pr = ch.userData.prefabLodRank;
                 const prn = Number.isFinite(pr) ? Math.max(1, Math.min(numBands, Math.floor(pr))) : 1;
                 const vis = prn === rank;
                 ch.userData._prefabLodVisible = vis;
                 if (vis) anyShown = true;
-            });
-            if (!anyShown) {
-                root.traverse((ch) => {
-                    if (!ch.userData || !ch.userData.isPrefabPart) return;
-                    const prn = ch.userData.prefabLodRank;
-                    const fallback = Number.isFinite(prn) ? Math.max(1, Math.min(numBands, Math.floor(prn))) : 1;
-                    ch.userData._prefabLodVisible = fallback === 1;
-                });
+            }
+            if (!anyShown && partNodes.length) {
+                let bestD = Infinity;
+                for (const ch of partNodes) {
+                    const prn = Number.isFinite(ch.userData.prefabLodRank)
+                        ? Math.max(1, Math.min(numBands, Math.floor(ch.userData.prefabLodRank)))
+                        : 1;
+                    bestD = Math.min(bestD, Math.abs(prn - rank));
+                }
+                for (const ch of partNodes) {
+                    const prn = Number.isFinite(ch.userData.prefabLodRank)
+                        ? Math.max(1, Math.min(numBands, Math.floor(ch.userData.prefabLodRank)))
+                        : 1;
+                    ch.userData._prefabLodVisible = Math.abs(prn - rank) === bestD;
+                }
             }
         }
     }

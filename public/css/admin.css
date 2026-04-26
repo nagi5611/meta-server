@@ -515,6 +515,113 @@ body.admin-dark .chart-edit-loading-message {
     color: var(--we-accent);
 }
 
+/* Prefab LOD（距離）— ワールド編集右ペインと同系のカード・アクセント */
+.admin-panel-world-edit .world-lod-item {
+    border: 1px solid var(--we-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    background: #f8fafc;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.admin-panel-world-edit .world-lod-track-wrap {
+    margin: 12px 0 6px;
+    padding: 0 2px;
+}
+
+.admin-panel-world-edit .world-lod-track-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 8px;
+}
+
+.admin-panel-world-edit .world-lod-track {
+    position: relative;
+    min-height: 52px;
+    margin: 6px 0 4px;
+    --lod-rail-center-y: 15px;
+}
+
+.admin-panel-world-edit .world-lod-track-rail {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(var(--lod-rail-center-y) - 3px);
+    height: 6px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    border: 1px solid var(--we-border);
+    pointer-events: none;
+}
+
+.admin-panel-world-edit .world-lod-thumb-wrap {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 44px;
+    z-index: 2;
+    cursor: grab;
+}
+
+.admin-panel-world-edit .world-lod-thumb-wrap:active {
+    cursor: grabbing;
+}
+
+.admin-panel-world-edit .world-lod-thumb {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: calc(var(--lod-rail-center-y) - 9px);
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--we-accent);
+    box-shadow: 0 1px 4px rgba(21, 101, 192, 0.25);
+    cursor: grab;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-panel-world-edit .world-lod-thumb:hover {
+    border-color: #0d47a1;
+    box-shadow: 0 2px 8px rgba(21, 101, 192, 0.35);
+}
+
+.admin-panel-world-edit .world-lod-thumb:active {
+    cursor: grabbing;
+}
+
+.admin-panel-world-edit .world-lod-thumb-label {
+    margin-top: 5px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--we-accent);
+    line-height: 1;
+    letter-spacing: 0.02em;
+    user-select: none;
+}
+
+.admin-panel-world-edit .world-lod-thumb-sublabel {
+    margin-top: 3px;
+    font-size: 10px;
+    font-weight: 500;
+    color: #757575;
+    line-height: 1;
+    user-select: none;
+}
+
+.admin-panel-world-edit .world-lod-track-ticks {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: #888;
+    margin-top: 6px;
+    padding: 0 1px;
+}
+
 .admin-panel-world-edit .btn-primary {
     background: var(--we-accent);
     border-color: var(--we-accent);
@@ -3483,6 +3590,43 @@ body.admin-dark .admin-panel-world-edit #btn-save,
 body.admin-dark .admin-panel-world-edit #btn-export-worlds,
 body.admin-dark .admin-panel-world-edit #btn-edit-worlds-json {
     color: #e6e4df;
+}
+
+body.admin-dark .admin-panel-world-edit .world-lod-item {
+    background: #25231d;
+    border-color: var(--we-border);
+    box-shadow: none;
+}
+
+body.admin-dark .admin-panel-world-edit .world-lod-track-label {
+    color: #9c9992;
+}
+
+body.admin-dark .admin-panel-world-edit .world-lod-track-rail {
+    background: #3d3a33;
+    border-color: var(--we-border);
+}
+
+body.admin-dark .admin-panel-world-edit .world-lod-thumb {
+    background: #1f1e19;
+    border-color: var(--we-accent);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+body.admin-dark .admin-panel-world-edit .world-lod-thumb:hover {
+    border-color: #a8d4f0;
+}
+
+body.admin-dark .admin-panel-world-edit .world-lod-thumb-label {
+    color: var(--we-accent);
+}
+
+body.admin-dark .admin-panel-world-edit .world-lod-thumb-sublabel {
+    color: #9c9992;
+}
+
+body.admin-dark .admin-panel-world-edit .world-lod-track-ticks {
+    color: #9c9992;
 }
 body.admin-dark .admin-panel-world-edit .users-table th {
     background: #14120b;

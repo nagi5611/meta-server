@@ -386,14 +386,7 @@ button:disabled {
     font-size: 13px;
 }
 
-/* Prefab LOD: ワールド設定スライダー */
-.world-lod-item {
-    border: 1px solid rgba(128, 128, 128, 0.35);
-    border-radius: 6px;
-    padding: 10px;
-    margin-bottom: 12px;
-    background: rgba(0, 0, 0, 0.12);
-}
+/* Prefab LOD スライダー本体は admin.css（.admin-panel-world-edit）でワールド編集 UI と統一 */
 
 .world-lod-item-header {
     display: flex;
@@ -405,53 +398,6 @@ button:disabled {
 
 .world-lod-item-header .prop-label {
     margin: 0;
-}
-
-.world-lod-track-wrap {
-    position: relative;
-    margin: 14px 0 8px;
-    padding: 0 6px;
-}
-
-.world-lod-track-label {
-    font-size: 11px;
-    color: #888;
-    margin-bottom: 4px;
-}
-
-.world-lod-track {
-    position: relative;
-    height: 10px;
-    border-radius: 5px;
-    background: linear-gradient(90deg, #3a5a7a 0%, #2a4a5a 100%);
-    cursor: default;
-}
-
-.world-lod-track-ticks {
-    display: flex;
-    justify-content: space-between;
-    font-size: 10px;
-    color: #777;
-    margin-top: 2px;
-}
-
-.world-lod-thumb {
-    position: absolute;
-    top: 50%;
-    width: 14px;
-    height: 14px;
-    margin-left: -7px;
-    margin-top: -7px;
-    border-radius: 50%;
-    background: #e8b44c;
-    border: 2px solid #333;
-    cursor: grab;
-    z-index: 2;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-}
-
-.world-lod-thumb:active {
-    cursor: grabbing;
 }
 
 .world-lod-prefab-list {

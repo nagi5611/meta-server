@@ -1669,6 +1669,8 @@ function syncObjectFromPanel(opts) {
                 c.lodRank = Number.isFinite(dr) && dr > 0 ? dr : 1;
                 const tbody = document.getElementById('obj-lod-part-tbody');
                 const partRanks = {};
+                /** @type {number[]} */
+                const lodRanks = [];
                 if (tbody) {
                     tbody.querySelectorAll('tr[data-part-path]').forEach((row) => {
                         const path = row.getAttribute('data-part-path');
@@ -1676,14 +1678,18 @@ function syncObjectFromPanel(opts) {
                         if (!path || !inp) return;
                         const r = parseInt(inp.value, 10);
                         if (Number.isFinite(r) && r > 0) partRanks[path] = r;
+                        lodRanks.push(Number.isFinite(r) && r > 0 ? r : c.lodRank);
                     });
                 }
                 if (Object.keys(partRanks).length) c.lodPartRanks = partRanks;
                 else delete c.lodPartRanks;
+                if (lodRanks.length) c.lodRanks = lodRanks;
+                else delete c.lodRanks;
             } else {
                 delete c.lodId;
                 delete c.lodRank;
                 delete c.lodPartRanks;
+                delete c.lodRanks;
             }
             renderWorldLodPanel();
         }
@@ -1713,7 +1719,7 @@ function syncObjectFromPanel(opts) {
 /** Prefab LOD: スライダー最大倍率（500%） */
 const WORLD_LOD_MAX_RATIO = 5;
 
-/** @type {{ lodId: string, index: number, thumbEl: HTMLElement, trackEl: HTMLElement }|null} */
+/** @type {{ lodId: string, index: number, thumbWrapEl: HTMLElement, trackEl: HTMLElement }|null} */
 let worldLodDragState = null;
 
 let worldLodEditorInitialized = false;
@@ -1806,6 +1812,7 @@ function deleteLodIdFromWorld(w, id) {
             delete cfg.lodId;
             delete cfg.lodRank;
             delete cfg.lodPartRanks;
+            delete cfg.lodRanks;
         }
     });
 }
@@ -1857,7 +1864,7 @@ function renderWorldLodPanel() {
 
         const bandsHint = document.createElement('p');
         bandsHint.className = 'hint';
-        bandsHint.textContent = `ランク段数: ${numBands}（境界 ${ratios.length} 個）。ノブをドラッグして倍率を変更。`;
+        bandsHint.textContent = `ランク段数: ${numBands}（境界 ${ratios.length} 個）。ノブ下の数字がトグル番号（1番・2番…）。小さな表記はランクの区切り。`;
 
         const trackWrap = document.createElement('div');
         trackWrap.className = 'world-lod-track-wrap';
@@ -1867,14 +1874,30 @@ function renderWorldLodPanel() {
         const track = document.createElement('div');
         track.className = 'world-lod-track';
         track.setAttribute('data-role', 'lod-track');
+        const rail = document.createElement('div');
+        rail.className = 'world-lod-track-rail';
+        rail.setAttribute('aria-hidden', 'true');
+        track.appendChild(rail);
         ratios.forEach((ratio, idx) => {
+            const wrap = document.createElement('div');
+            wrap.className = 'world-lod-thumb-wrap';
+            const r = Math.min(WORLD_LOD_MAX_RATIO, Math.max(0.05, Number(ratio) || 1));
+            const pct = (r / WORLD_LOD_MAX_RATIO) * 100;
+            wrap.style.left = `${pct}%`;
             const thumb = document.createElement('div');
             thumb.className = 'world-lod-thumb';
             thumb.dataset.thumbIndex = String(idx);
-            const r = Math.min(WORLD_LOD_MAX_RATIO, Math.max(0.05, Number(ratio) || 1));
-            const pct = (r / WORLD_LOD_MAX_RATIO) * 100;
-            thumb.style.left = `${pct}%`;
-            track.appendChild(thumb);
+            thumb.title = `トグル ${idx + 1}：ランク ${idx + 1} と ${idx + 2} の境界`;
+            const labelNum = document.createElement('span');
+            labelNum.className = 'world-lod-thumb-label';
+            labelNum.textContent = String(idx + 1);
+            const labelSub = document.createElement('span');
+            labelSub.className = 'world-lod-thumb-sublabel';
+            labelSub.textContent = `${idx + 1}–${idx + 2}`;
+            wrap.appendChild(thumb);
+            wrap.appendChild(labelNum);
+            wrap.appendChild(labelSub);
+            track.appendChild(wrap);
         });
         const ticks = document.createElement('div');
         ticks.className = 'world-lod-track-ticks';
@@ -1922,6 +1945,13 @@ function renderWorldLodPanel() {
                 if (!Number.isFinite(r) || r < 1) r = 1;
                 r = Math.min(numBands, r);
                 cfg.lodRank = r;
+                /** @type {number[]} */
+                const ranksByChild = [];
+                ch.children.forEach((part) => {
+                    if (part.userData && part.userData.isPrefabPart) ranksByChild.push(r);
+                });
+                if (ranksByChild.length) cfg.lodRanks = ranksByChild;
+                else delete cfg.lodRanks;
                 ch.traverse((part) => {
                     if (part.userData && part.userData.isPrefabPart && part.userData.prefabPartPath) {
                         if (!cfg.lodPartRanks) cfg.lodPartRanks = {};
@@ -1964,7 +1994,7 @@ function onWorldLodMouseMove(e) {
     const maxB = i === ratios.length - 1 ? WORLD_LOD_MAX_RATIO - 0.05 : ratios[i + 1] - 0.05;
     ratio = Math.max(minB, Math.min(maxB, ratio));
     ratios[i] = ratio;
-    worldLodDragState.thumbEl.style.left = `${(ratio / WORLD_LOD_MAX_RATIO) * 100}%`;
+    worldLodDragState.thumbWrapEl.style.left = `${(ratio / WORLD_LOD_MAX_RATIO) * 100}%`;
 }
 
 function onWorldLodMouseUp() {
@@ -2011,10 +2041,12 @@ function bindWorldLodEditorEvents() {
             if (selectedObject && selectedObject.userData.config) updateObjectPanel(selectedObject);
         });
         entries.addEventListener('mousedown', (e) => {
-            const thumb = e.target.closest('.world-lod-thumb');
+            const thumbWrap = e.target.closest('.world-lod-thumb-wrap');
+            if (!thumbWrap) return;
+            const thumb = thumbWrap.querySelector('.world-lod-thumb');
             if (!thumb) return;
             e.preventDefault();
-            const item = thumb.closest('.world-lod-item');
+            const item = thumbWrap.closest('.world-lod-item');
             const lodId = item && item.dataset.lodId;
             const w = getSelectedWorldForLod();
             if (!lodId || !w) return;
@@ -2023,7 +2055,7 @@ function bindWorldLodEditorEvents() {
             const idx = parseInt(thumb.dataset.thumbIndex, 10);
             const ratios = w.lodSystem.thresholdsById[lodId];
             if (!Array.isArray(ratios) || !Number.isFinite(idx)) return;
-            worldLodDragState = { lodId, index: idx, thumbEl: thumb, trackEl: track };
+            worldLodDragState = { lodId, index: idx, thumbWrapEl: thumbWrap, trackEl: track };
         });
     }
 
@@ -2061,8 +2093,10 @@ function fillObjectLodPanel(obj, c) {
     tbody.innerHTML = '';
     const map = c.lodPartRanks && typeof c.lodPartRanks === 'object' ? c.lodPartRanks : {};
     const defR = Number.isFinite(c.lodRank) ? c.lodRank : 1;
-    obj.traverse((ch) => {
-        if (!ch.userData || !ch.userData.isPrefabPart || !ch.userData.prefabPartPath) return;
+    const lodArr = Array.isArray(c.lodRanks) && c.lodRanks.length ? c.lodRanks : null;
+    let partIdx = 0;
+    for (const ch of obj.children) {
+        if (!ch.userData || !ch.userData.isPrefabPart || !ch.userData.prefabPartPath) continue;
         const path = ch.userData.prefabPartPath;
         const tr = document.createElement('tr');
         tr.dataset.partPath = path;
@@ -2075,14 +2109,21 @@ function fillObjectLodPanel(obj, c) {
         inp.min = '1';
         inp.step = '1';
         inp.setAttribute('data-part-rank', '1');
-        const r = map[path];
+        let r;
+        if (lodArr) {
+            r = partIdx < lodArr.length ? lodArr[partIdx] : lodArr[lodArr.length - 1];
+            r = Number(r);
+        } else {
+            r = map[path];
+        }
         inp.value = String(Number.isFinite(r) ? r : defR);
         inp.addEventListener('change', () => syncObjectFromPanel());
         td2.appendChild(inp);
         tr.appendChild(td1);
         tr.appendChild(td2);
         tbody.appendChild(tr);
-    });
+        partIdx++;
+    }
 }
 
 function buildWorldsFromScene() {
@@ -2182,10 +2223,14 @@ function buildWorldsFromScene() {
                             if (c.lodPartRanks && typeof c.lodPartRanks === 'object') {
                                 c.lodPartRanks = { ...c.lodPartRanks };
                             }
+                            if (Array.isArray(c.lodRanks) && c.lodRanks.length) {
+                                c.lodRanks = c.lodRanks.map((x) => Math.max(1, Math.floor(Number(x))));
+                            }
                         } else {
                             delete c.lodId;
                             delete c.lodRank;
                             delete c.lodPartRanks;
+                            delete c.lodRanks;
                         }
                     }
                     w.models.push(c);
@@ -2565,6 +2610,9 @@ async function loadWorldIntoScene(world) {
             if (Number.isFinite(config.lodRank)) cfgBase.lodRank = Math.max(1, Math.floor(config.lodRank));
             if (config.lodPartRanks && typeof config.lodPartRanks === 'object' && !Array.isArray(config.lodPartRanks)) {
                 cfgBase.lodPartRanks = { ...config.lodPartRanks };
+            }
+            if (Array.isArray(config.lodRanks) && config.lodRanks.length) {
+                cfgBase.lodRanks = config.lodRanks.map((x) => Math.max(1, Math.floor(Number(x))));
             }
         }
         if (config.aircraft && config.aircraft.id) {

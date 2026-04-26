@@ -1456,8 +1456,17 @@ a.admin-menu-link:hover {
     height: 8px;
     -webkit-appearance: none;
     appearance: none;
-    background: linear-gradient(to right, #667eea 0%, #764ba2 100%);
+    background: #cfd8dc;
+    border-radius: 10px;
+    border: 1px solid #b0bec5;
+    box-shadow: none;
     cursor: pointer;
+}
+
+.setting-item input[type="range"]::-webkit-slider-runnable-track {
+    height: 8px;
+    border-radius: 10px;
+    background: #cfd8dc;
 }
 
 .setting-item input[type="range"]::-webkit-slider-thumb {
@@ -1465,30 +1474,41 @@ a.admin-menu-link:hover {
     appearance: none;
     width: 20px;
     height: 20px;
+    margin-top: -6px;
     border-radius: 50%;
-    background: white;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.5);
+    background: #fff;
+    border: 2px solid #546e7a;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .setting-item input[type="range"]::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
+    border-color: #37474f;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.setting-item input[type="range"]::-moz-range-track {
+    height: 8px;
+    border-radius: 10px;
+    background: #cfd8dc;
+    border: none;
 }
 
 .setting-item input[type="range"]::-moz-range-thumb {
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: white;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.5);
+    background: #fff;
+    border: 2px solid #546e7a;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     cursor: pointer;
-    transition: all 0.2s ease;
-    border: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .setting-item input[type="range"]::-moz-range-thumb:hover {
-    transform: scale(1.2);
+    border-color: #37474f;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 
 .setting-description {

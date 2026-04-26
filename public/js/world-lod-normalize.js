@@ -71,6 +71,7 @@ export function stripLodFromNonPrefabModel(m) {
     delete m.lodId;
     delete m.lodRank;
     delete m.lodPartRanks;
+    delete m.lodRanks;
 }
 
 /**
@@ -130,6 +131,7 @@ export function normalizeWorldLodSystem(world) {
             delete m.lodId;
             delete m.lodRank;
             delete m.lodPartRanks;
+            delete m.lodRanks;
             continue;
         }
 
@@ -152,6 +154,16 @@ export function normalizeWorldLodSystem(world) {
                 next[path] = Math.min(numBands, Math.floor(r));
             }
             m.lodPartRanks = next;
+        }
+
+        if (Array.isArray(m.lodRanks) && m.lodRanks.length > 0) {
+            m.lodRanks = m.lodRanks.map((x) => {
+                let r = Number(x);
+                if (!Number.isFinite(r) || r < 1) r = lr;
+                return Math.min(numBands, Math.floor(r));
+            });
+        } else {
+            delete m.lodRanks;
         }
     }
 }
