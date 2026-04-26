@@ -1000,6 +1000,7 @@ class MetaverseApp {
             const movementState = this.characterController.getMovementState();
             this.playerManager.updateLocalPlayer(position, rotation, movementState);
 
+            this.sceneManager.updatePrefabLodVisibility(position);
             this.sceneManager.updateDrawDistanceCulling(position);
             this.playerManager.updateRemoteDrawDistance(
                 position,

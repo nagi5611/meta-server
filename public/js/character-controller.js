@@ -1,18 +1,33 @@
 import * as THREE from 'three';
 
-/** 1 イベントあたりのヨー／ピッチ回転の上限（10°、ラジアン） */
-const MAX_VIEW_DELTA_PER_EVENT_RAD = (10 * Math.PI) / 180;
+/** 1 イベントあたりのヨー（左右）回転の上限（ラジアン） */
+const MAX_YAW_VIEW_DELTA_PER_EVENT_RAD = (10 * Math.PI) / 180;
+/** 1 イベントあたりのピッチ（上下）回転の上限（ラジアン） */
+const MAX_PITCH_VIEW_DELTA_PER_EVENT_RAD = (15 * Math.PI) / 180;
 
 /**
- * マウス movement 等のスパイクを 1 フレーム最大 10° に抑える
+ * マウス movement 等のヨー差分を 1 フレームあたりの上限内に抑える
  * @param {number} deltaRad
  * @returns {number}
  */
-function clampViewDeltaPerEventRad(deltaRad) {
+function clampYawViewDeltaPerEventRad(deltaRad) {
     return THREE.MathUtils.clamp(
         deltaRad,
-        -MAX_VIEW_DELTA_PER_EVENT_RAD,
-        MAX_VIEW_DELTA_PER_EVENT_RAD
+        -MAX_YAW_VIEW_DELTA_PER_EVENT_RAD,
+        MAX_YAW_VIEW_DELTA_PER_EVENT_RAD
+    );
+}
+
+/**
+ * 上下方向の回転差分を 1 フレームあたり ±15° 以内に抑える
+ * @param {number} deltaRad
+ * @returns {number}
+ */
+function clampPitchViewDeltaPerEventRad(deltaRad) {
+    return THREE.MathUtils.clamp(
+        deltaRad,
+        -MAX_PITCH_VIEW_DELTA_PER_EVENT_RAD,
+        MAX_PITCH_VIEW_DELTA_PER_EVENT_RAD
     );
 }
 
@@ -376,8 +391,8 @@ class CharacterController {
 
         let dYaw = -event.movementX * this.mouseSensitivity;
         let dPitch = -event.movementY * this.mouseSensitivity;
-        dYaw = clampViewDeltaPerEventRad(dYaw);
-        dPitch = clampViewDeltaPerEventRad(dPitch);
+        dYaw = clampYawViewDeltaPerEventRad(dYaw);
+        dPitch = clampPitchViewDeltaPerEventRad(dPitch);
         this.cameraYaw += dYaw;
         this.cameraPitch += dPitch;
 
@@ -432,8 +447,8 @@ class CharacterController {
         if (this.isMobileMode && (this.mobileCameraDelta.x !== 0 || this.mobileCameraDelta.y !== 0)) {
             let dMyaw = -this.mobileCameraDelta.x;
             let dMpitch = -this.mobileCameraDelta.y;
-            dMyaw = clampViewDeltaPerEventRad(dMyaw);
-            dMpitch = clampViewDeltaPerEventRad(dMpitch);
+            dMyaw = clampYawViewDeltaPerEventRad(dMyaw);
+            dMpitch = clampPitchViewDeltaPerEventRad(dMpitch);
             this.cameraYaw += dMyaw;
             this.cameraPitch += dMpitch;
             this.cameraPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(0.2, this.cameraPitch));

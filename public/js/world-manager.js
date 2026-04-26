@@ -154,7 +154,8 @@ class WorldManager {
                     bytePlan,
                     loadState,
                     onByteProgress,
-                    worldAircraftPhysics: world.aircraftPhysics
+                    worldAircraftPhysics: world.aircraftPhysics,
+                    worldLodSystem: world.lodSystem && typeof world.lodSystem === 'object' ? world.lodSystem : null
                 }
             );
         } finally {

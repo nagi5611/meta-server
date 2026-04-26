@@ -28,6 +28,7 @@ import {
     normalizePrefabManifest,
     fetchPrefabManifestJson
 } from './prefab-load-shared.js';
+import { normalizeWorldsLod } from './world-lod-normalize.js';
 import {
     MODEL_MAX_BYTES_OBJ,
     MODEL_MAX_BYTES_GLTF,
@@ -1467,6 +1468,16 @@ function updateObjectPanel(obj) {
         }
         updateVehicleAircraftFieldsVisibility();
         updateGlbAnimInteractPanel(obj);
+        const lodDet = document.getElementById('object-props-prefab-lod');
+        const pfm = String(c.prefabManifest || '').trim();
+        if (lodDet) {
+            if (pfm) {
+                lodDet.style.display = '';
+                fillObjectLodPanel(obj, c);
+            } else {
+                lodDet.style.display = 'none';
+            }
+        }
     } else if (obj.userData.pdfConfig) {
         const tp = c.teleporter;
         document.getElementById('obj-teleporter').checked = !!tp;
@@ -1479,6 +1490,8 @@ function updateObjectPanel(obj) {
         document.getElementById('obj-tp-auto-contact-teleport').checked = !!(tp && tp.autoTeleportOnContact);
         const gb = document.getElementById('object-props-glb-anim');
         if (gb) gb.style.display = 'none';
+        const lodDet = document.getElementById('object-props-prefab-lod');
+        if (lodDet) lodDet.style.display = 'none';
     }
 }
 
@@ -1645,6 +1658,35 @@ function syncObjectFromPanel(opts) {
         } else {
             delete c.glbInteract;
         }
+        const pfmLod = String(c.prefabManifest || '').trim();
+        if (pfmLod) {
+            const sel = document.getElementById('obj-lod-id');
+            const lid = sel && sel.value ? String(sel.value).trim() : '';
+            if (lid) {
+                c.lodId = lid;
+                const drEl = document.getElementById('obj-lod-rank-default');
+                const dr = drEl ? parseInt(drEl.value, 10) : 1;
+                c.lodRank = Number.isFinite(dr) && dr > 0 ? dr : 1;
+                const tbody = document.getElementById('obj-lod-part-tbody');
+                const partRanks = {};
+                if (tbody) {
+                    tbody.querySelectorAll('tr[data-part-path]').forEach((row) => {
+                        const path = row.getAttribute('data-part-path');
+                        const inp = row.querySelector('input[data-part-rank]');
+                        if (!path || !inp) return;
+                        const r = parseInt(inp.value, 10);
+                        if (Number.isFinite(r) && r > 0) partRanks[path] = r;
+                    });
+                }
+                if (Object.keys(partRanks).length) c.lodPartRanks = partRanks;
+                else delete c.lodPartRanks;
+            } else {
+                delete c.lodId;
+                delete c.lodRank;
+                delete c.lodPartRanks;
+            }
+            renderWorldLodPanel();
+        }
     } else if (selectedObject.userData.pdfConfig) {
         if (document.getElementById('obj-teleporter').checked) {
             const accessEl = document.getElementById('obj-tp-access');
@@ -1666,6 +1708,381 @@ function syncObjectFromPanel(opts) {
             delete c.teleporter;
         }
     }
+}
+
+/** Prefab LOD: スライダー最大倍率（500%） */
+const WORLD_LOD_MAX_RATIO = 5;
+
+/** @type {{ lodId: string, index: number, thumbEl: HTMLElement, trackEl: HTMLElement }|null} */
+let worldLodDragState = null;
+
+let worldLodEditorInitialized = false;
+
+/**
+ * 選択中ワールドを返す（LOD UI 用）
+ * @returns {Record<string, unknown>|null}
+ */
+function getSelectedWorldForLod() {
+    return selectedWorldId && worlds[selectedWorldId] ? worlds[selectedWorldId] : null;
+}
+
+/**
+ * world.lodSystem の骨格を保証する
+ * @param {Record<string, unknown>|null|undefined} w
+ */
+function ensureWorldLodShape(w) {
+    if (!w || typeof w !== 'object') return;
+    if (!w.lodSystem || typeof w.lodSystem !== 'object') {
+        w.lodSystem = { ids: [], thresholdsById: {} };
+    }
+    if (!Array.isArray(w.lodSystem.ids)) w.lodSystem.ids = [];
+    if (!w.lodSystem.thresholdsById || typeof w.lodSystem.thresholdsById !== 'object') {
+        w.lodSystem.thresholdsById = {};
+    }
+}
+
+/**
+ * 新規 LOD ID（ワールド内で重複しない短い名前）
+ * @param {Record<string, unknown>} w
+ * @returns {string}
+ */
+function generateUniqueLodId(w) {
+    ensureWorldLodShape(w);
+    const ids = w.lodSystem.ids;
+    let n = ids.length + 1;
+    let candidate = `lod-${n}`;
+    while (ids.includes(candidate)) {
+        n++;
+        candidate = `lod-${n}`;
+    }
+    return candidate;
+}
+
+/**
+ * LOD ID を変更し、しきい値・モデル参照を追従する
+ * @param {Record<string, unknown>} w
+ * @param {string} oldId
+ * @param {string} rawNew
+ */
+function applyLodIdRename(w, oldId, rawNew) {
+    let newId = String(rawNew || '').trim();
+    if (!newId || newId === oldId) return;
+    ensureWorldLodShape(w);
+    const ids = w.lodSystem.ids;
+    if (ids.includes(newId)) {
+        const base = newId;
+        let k = 2;
+        while (ids.includes(newId)) {
+            newId = `${base}-${k}`;
+            k++;
+        }
+    }
+    const ix = ids.indexOf(oldId);
+    if (ix < 0) return;
+    ids[ix] = newId;
+    const tb = w.lodSystem.thresholdsById;
+    if (tb && tb[oldId] !== undefined) {
+        tb[newId] = tb[oldId];
+        delete tb[oldId];
+    }
+    editGroup.children.forEach((ch) => {
+        const cfg = ch.userData && ch.userData.config;
+        if (cfg && String(cfg.lodId || '').trim() === oldId) cfg.lodId = newId;
+    });
+}
+
+/**
+ * LOD ID をワールドから削除し、参照する Prefab の lod フィールドを消す
+ * @param {Record<string, unknown>} w
+ * @param {string} id
+ */
+function deleteLodIdFromWorld(w, id) {
+    ensureWorldLodShape(w);
+    w.lodSystem.ids = w.lodSystem.ids.filter((x) => x !== id);
+    delete w.lodSystem.thresholdsById[id];
+    editGroup.children.forEach((ch) => {
+        const cfg = ch.userData && ch.userData.config;
+        if (cfg && String(cfg.lodId || '').trim() === id) {
+            delete cfg.lodId;
+            delete cfg.lodRank;
+            delete cfg.lodPartRanks;
+        }
+    });
+}
+
+/**
+ * ワールド設定パネルの LOD UI を描画する
+ */
+function renderWorldLodPanel() {
+    const w = getSelectedWorldForLod();
+    const container = document.getElementById('world-lod-entries');
+    if (!container) return;
+    if (!w) {
+        container.innerHTML = '';
+        return;
+    }
+    ensureWorldLodShape(w);
+    const ls = w.lodSystem;
+    container.innerHTML = '';
+
+    for (const id of ls.ids) {
+        if (!ls.thresholdsById[id] || !Array.isArray(ls.thresholdsById[id]) || ls.thresholdsById[id].length === 0) {
+            ls.thresholdsById[id] = [1, 2];
+        }
+        const ratios = ls.thresholdsById[id];
+        const numBands = ratios.length + 1;
+
+        const item = document.createElement('div');
+        item.className = 'world-lod-item';
+        item.dataset.lodId = id;
+
+        const header = document.createElement('div');
+        header.className = 'world-lod-item-header';
+        const lab = document.createElement('label');
+        lab.className = 'prop-label';
+        lab.textContent = 'LOD ID';
+        const idInput = document.createElement('input');
+        idInput.type = 'text';
+        idInput.className = 'prop-input';
+        idInput.value = id;
+        idInput.setAttribute('data-role', 'lod-id-input');
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.textContent = '削除';
+        delBtn.className = 'btn btn-sm btn-outline-secondary';
+        delBtn.setAttribute('data-role', 'lod-delete');
+        header.appendChild(lab);
+        header.appendChild(idInput);
+        header.appendChild(delBtn);
+
+        const bandsHint = document.createElement('p');
+        bandsHint.className = 'hint';
+        bandsHint.textContent = `ランク段数: ${numBands}（境界 ${ratios.length} 個）。ノブをドラッグして倍率を変更。`;
+
+        const trackWrap = document.createElement('div');
+        trackWrap.className = 'world-lod-track-wrap';
+        const trackLab = document.createElement('div');
+        trackLab.className = 'world-lod-track-label';
+        trackLab.textContent = '距離境界（描画距離 × 倍率）';
+        const track = document.createElement('div');
+        track.className = 'world-lod-track';
+        track.setAttribute('data-role', 'lod-track');
+        ratios.forEach((ratio, idx) => {
+            const thumb = document.createElement('div');
+            thumb.className = 'world-lod-thumb';
+            thumb.dataset.thumbIndex = String(idx);
+            const r = Math.min(WORLD_LOD_MAX_RATIO, Math.max(0.05, Number(ratio) || 1));
+            const pct = (r / WORLD_LOD_MAX_RATIO) * 100;
+            thumb.style.left = `${pct}%`;
+            track.appendChild(thumb);
+        });
+        const ticks = document.createElement('div');
+        ticks.className = 'world-lod-track-ticks';
+        ticks.innerHTML = '<span>0%</span><span>100%</span><span>200%</span><span>300%</span><span>400%</span><span>500%</span>';
+
+        trackWrap.appendChild(trackLab);
+        trackWrap.appendChild(track);
+        trackWrap.appendChild(ticks);
+
+        const addBoundaryBtn = document.createElement('button');
+        addBoundaryBtn.type = 'button';
+        addBoundaryBtn.className = 'btn btn-sm btn-outline-secondary';
+        addBoundaryBtn.style.marginTop = '6px';
+        addBoundaryBtn.textContent = '境界を追加（ランク +1）';
+        addBoundaryBtn.addEventListener('click', () => {
+            const last = ratios[ratios.length - 1] || 1;
+            ratios.push(Math.min(WORLD_LOD_MAX_RATIO, last + 0.5));
+            renderWorldLodPanel();
+        });
+
+        const prefList = document.createElement('div');
+        prefList.className = 'world-lod-prefab-list';
+        const subT = document.createElement('strong');
+        subT.textContent = 'この LOD ID を使用している Prefab';
+        prefList.appendChild(subT);
+        editGroup.children.forEach((ch) => {
+            const cfg = ch.userData && ch.userData.config;
+            if (!cfg || !String(cfg.prefabManifest || '').trim()) return;
+            if (String(cfg.lodId || '').trim() !== id) return;
+            const nm = ch.userData.prefabDisplayName || (cfg.prefabManifest || '').split('/').pop() || 'Prefab';
+            const row = document.createElement('div');
+            row.className = 'world-lod-prefab-row';
+            const span = document.createElement('span');
+            span.textContent = nm;
+            const rankLab = document.createElement('label');
+            rankLab.textContent = 'ランク';
+            const rankInp = document.createElement('input');
+            rankInp.type = 'number';
+            rankInp.min = '1';
+            rankInp.step = '1';
+            rankInp.className = 'prop-input num';
+            rankInp.value = String(Number.isFinite(cfg.lodRank) ? cfg.lodRank : 1);
+            rankInp.addEventListener('change', () => {
+                let r = parseInt(rankInp.value, 10);
+                if (!Number.isFinite(r) || r < 1) r = 1;
+                r = Math.min(numBands, r);
+                cfg.lodRank = r;
+                ch.traverse((part) => {
+                    if (part.userData && part.userData.isPrefabPart && part.userData.prefabPartPath) {
+                        if (!cfg.lodPartRanks) cfg.lodPartRanks = {};
+                        cfg.lodPartRanks[part.userData.prefabPartPath] = r;
+                    }
+                });
+                if (selectedObject === ch) updateObjectPanel(ch);
+            });
+            row.appendChild(span);
+            row.appendChild(rankLab);
+            row.appendChild(rankInp);
+            prefList.appendChild(row);
+        });
+
+        item.appendChild(header);
+        item.appendChild(bandsHint);
+        item.appendChild(trackWrap);
+        item.appendChild(addBoundaryBtn);
+        item.appendChild(prefList);
+        container.appendChild(item);
+    }
+}
+
+/**
+ * @param {Event} e
+ */
+function onWorldLodMouseMove(e) {
+    if (!worldLodDragState) return;
+    const w = getSelectedWorldForLod();
+    if (!w) return;
+    const ls = w.lodSystem;
+    const ratios = ls.thresholdsById[worldLodDragState.lodId];
+    if (!Array.isArray(ratios)) return;
+    const track = worldLodDragState.trackEl;
+    const rect = track.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    let ratio = (x / Math.max(1e-6, rect.width)) * WORLD_LOD_MAX_RATIO;
+    const i = worldLodDragState.index;
+    const minB = i === 0 ? 0.05 : ratios[i - 1] + 0.05;
+    const maxB = i === ratios.length - 1 ? WORLD_LOD_MAX_RATIO - 0.05 : ratios[i + 1] - 0.05;
+    ratio = Math.max(minB, Math.min(maxB, ratio));
+    ratios[i] = ratio;
+    worldLodDragState.thumbEl.style.left = `${(ratio / WORLD_LOD_MAX_RATIO) * 100}%`;
+}
+
+function onWorldLodMouseUp() {
+    worldLodDragState = null;
+}
+
+/**
+ * LOD パネル用のグローバルイベント（1 回だけ登録）
+ */
+function bindWorldLodEditorEvents() {
+    if (worldLodEditorInitialized) return;
+    worldLodEditorInitialized = true;
+    document.getElementById('btn-world-lod-add-id')?.addEventListener('click', () => {
+        const w = getSelectedWorldForLod();
+        if (!w) return;
+        const id = generateUniqueLodId(w);
+        w.lodSystem.ids.push(id);
+        w.lodSystem.thresholdsById[id] = [1, 2];
+        renderWorldLodPanel();
+    });
+
+    const entries = document.getElementById('world-lod-entries');
+    if (entries) {
+        entries.addEventListener('click', (e) => {
+            const delBtn = e.target.closest('[data-role="lod-delete"]');
+            if (!delBtn) return;
+            const item = delBtn.closest('.world-lod-item');
+            const id = item && item.dataset.lodId;
+            const w = getSelectedWorldForLod();
+            if (!id || !w) return;
+            deleteLodIdFromWorld(w, id);
+            renderWorldLodPanel();
+            if (selectedObject && selectedObject.userData.config) updateObjectPanel(selectedObject);
+        });
+        entries.addEventListener('change', (e) => {
+            const inp = e.target.closest('[data-role="lod-id-input"]');
+            if (!inp) return;
+            const item = inp.closest('.world-lod-item');
+            const oldId = item && item.dataset.lodId;
+            const w = getSelectedWorldForLod();
+            if (!oldId || !w) return;
+            applyLodIdRename(w, oldId, inp.value);
+            renderWorldLodPanel();
+            if (selectedObject && selectedObject.userData.config) updateObjectPanel(selectedObject);
+        });
+        entries.addEventListener('mousedown', (e) => {
+            const thumb = e.target.closest('.world-lod-thumb');
+            if (!thumb) return;
+            e.preventDefault();
+            const item = thumb.closest('.world-lod-item');
+            const lodId = item && item.dataset.lodId;
+            const w = getSelectedWorldForLod();
+            if (!lodId || !w) return;
+            const track = item.querySelector('[data-role="lod-track"]');
+            if (!track) return;
+            const idx = parseInt(thumb.dataset.thumbIndex, 10);
+            const ratios = w.lodSystem.thresholdsById[lodId];
+            if (!Array.isArray(ratios) || !Number.isFinite(idx)) return;
+            worldLodDragState = { lodId, index: idx, thumbEl: thumb, trackEl: track };
+        });
+    }
+
+    document.addEventListener('mousemove', onWorldLodMouseMove);
+    document.addEventListener('mouseup', onWorldLodMouseUp);
+}
+
+/**
+ * Prefab 用 LOD オブジェクトパネルを埋める
+ * @param {import('three').Object3D} obj
+ * @param {Record<string, unknown>} c
+ */
+function fillObjectLodPanel(obj, c) {
+    const sel = document.getElementById('obj-lod-id');
+    if (!sel) return;
+    const w = getSelectedWorldForLod();
+    if (w) ensureWorldLodShape(w);
+    const ids = w && w.lodSystem ? w.lodSystem.ids : [];
+    sel.innerHTML = '<option value="">（未設定・距離 LOD なし）</option>';
+    ids.forEach((id) => {
+        const o = document.createElement('option');
+        o.value = id;
+        o.textContent = id;
+        sel.appendChild(o);
+    });
+    const cur = String(c.lodId || '').trim();
+    if (cur && ids.includes(cur)) sel.value = cur;
+    else sel.value = '';
+
+    const drEl = document.getElementById('obj-lod-rank-default');
+    if (drEl) drEl.value = String(Number.isFinite(c.lodRank) ? c.lodRank : 1);
+
+    const tbody = document.getElementById('obj-lod-part-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const map = c.lodPartRanks && typeof c.lodPartRanks === 'object' ? c.lodPartRanks : {};
+    const defR = Number.isFinite(c.lodRank) ? c.lodRank : 1;
+    obj.traverse((ch) => {
+        if (!ch.userData || !ch.userData.isPrefabPart || !ch.userData.prefabPartPath) return;
+        const path = ch.userData.prefabPartPath;
+        const tr = document.createElement('tr');
+        tr.dataset.partPath = path;
+        const td1 = document.createElement('td');
+        td1.textContent = path.split('/').pop() || path;
+        td1.title = path;
+        const td2 = document.createElement('td');
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.min = '1';
+        inp.step = '1';
+        inp.setAttribute('data-part-rank', '1');
+        const r = map[path];
+        inp.value = String(Number.isFinite(r) ? r : defR);
+        inp.addEventListener('change', () => syncObjectFromPanel());
+        td2.appendChild(inp);
+        tr.appendChild(td1);
+        tr.appendChild(td2);
+        tbody.appendChild(tr);
+    });
 }
 
 function buildWorldsFromScene() {
@@ -1698,6 +2115,15 @@ function buildWorldsFromScene() {
         }
         if (wid !== selectedWorldId && w.aircraftPhysics && typeof w.aircraftPhysics === 'object' && !Array.isArray(w.aircraftPhysics)) {
             out[wid].aircraftPhysics = { ...mergeAircraftPhysicsFromWorld(w.aircraftPhysics) };
+        }
+        if (wid !== selectedWorldId && w.lodSystem && typeof w.lodSystem === 'object') {
+            out[wid].lodSystem = {
+                ids: Array.isArray(w.lodSystem.ids) ? w.lodSystem.ids.slice() : [],
+                thresholdsById:
+                    w.lodSystem.thresholdsById && typeof w.lodSystem.thresholdsById === 'object'
+                        ? JSON.parse(JSON.stringify(w.lodSystem.thresholdsById))
+                        : {}
+            };
         }
     }
     if (selectedWorldId) {
@@ -1748,6 +2174,20 @@ function buildWorldsFromScene() {
                         c.path = c.prefabManifest;
                     }
                     if (!String(c.path || '').trim() && !hasPfm) delete c.path;
+                    if (hasPfm) {
+                        const lid = String(c.lodId || '').trim();
+                        if (lid) {
+                            c.lodId = lid;
+                            if (Number.isFinite(c.lodRank)) c.lodRank = Math.max(1, Math.floor(c.lodRank));
+                            if (c.lodPartRanks && typeof c.lodPartRanks === 'object') {
+                                c.lodPartRanks = { ...c.lodPartRanks };
+                            }
+                        } else {
+                            delete c.lodId;
+                            delete c.lodRank;
+                            delete c.lodPartRanks;
+                        }
+                    }
                     w.models.push(c);
                 }
                 if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
@@ -1793,8 +2233,19 @@ function buildWorldsFromScene() {
                 delete w.physicsAssist;
             }
             w.aircraftPhysics = readWorldAircraftPhysicsFromForm();
+            const srcLod = worlds[selectedWorldId] && worlds[selectedWorldId].lodSystem;
+            if (srcLod && typeof srcLod === 'object') {
+                w.lodSystem = {
+                    ids: Array.isArray(srcLod.ids) ? srcLod.ids.slice() : [],
+                    thresholdsById:
+                        srcLod.thresholdsById && typeof srcLod.thresholdsById === 'object'
+                            ? JSON.parse(JSON.stringify(srcLod.thresholdsById))
+                            : {}
+                };
+            }
         }
     }
+    normalizeWorldsLod(out);
     return out;
 }
 
@@ -2010,6 +2461,7 @@ function appendWorldLightToEditGroup(cfg) {
  * @returns {Promise<void>}
  */
 async function loadWorldIntoScene(world) {
+    ensureWorldLodShape(world);
     while (editGroup.children.length) {
         const c = editGroup.children[0];
         editGroup.remove(c);
@@ -2109,6 +2561,11 @@ async function loadWorldIntoScene(world) {
         if (pfm) {
             cfgBase.prefabManifest = pfm;
             if (String(config.prefabGroupId || '').trim()) cfgBase.prefabGroupId = String(config.prefabGroupId).trim();
+            if (String(config.lodId || '').trim()) cfgBase.lodId = String(config.lodId).trim();
+            if (Number.isFinite(config.lodRank)) cfgBase.lodRank = Math.max(1, Math.floor(config.lodRank));
+            if (config.lodPartRanks && typeof config.lodPartRanks === 'object' && !Array.isArray(config.lodPartRanks)) {
+                cfgBase.lodPartRanks = { ...config.lodPartRanks };
+            }
         }
         if (config.aircraft && config.aircraft.id) {
             const a = config.aircraft;
@@ -2177,7 +2634,10 @@ async function loadWorldIntoScene(world) {
             el.className = 'error';
         }
     }
+    const wCur = getSelectedWorldForLod();
+    if (wCur) ensureWorldLodShape(wCur);
     renderWorldObjectList();
+    renderWorldLodPanel();
 }
 
 function animate() {
@@ -2219,7 +2679,8 @@ const EMPTY_EDITOR_WORLD = {
     spawnPoint: { x: 0, y: 10, z: 0 },
     floorEnabled: true,
     floorWidth: DEFAULT_FLOOR_WIDTH_M,
-    floorDepth: DEFAULT_FLOOR_DEPTH_M
+    floorDepth: DEFAULT_FLOOR_DEPTH_M,
+    lodSystem: { ids: [], thresholdsById: {} }
 };
 
 /**
@@ -3073,6 +3534,8 @@ function bindEvents() {
 
     // 右パネル: モデル/ライト/設定 カテゴリ切り替え、クリックで展開
     const rightCategoryNav = document.querySelector('.we-right-category-nav');
+    bindWorldLodEditorEvents();
+
     if (rightCategoryNav) {
         rightCategoryNav.addEventListener('click', (e) => {
             const btn = e.target.closest('.we-right-category-btn');
@@ -3110,6 +3573,9 @@ function bindEvents() {
             reloadSelectedObjModelFromMtlChange();
         });
     }
+    document.getElementById('obj-lod-id')?.addEventListener('change', syncObjectFromPanel);
+    document.getElementById('obj-lod-rank-default')?.addEventListener('change', syncObjectFromPanel);
+
     document.getElementById('obj-animate').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-anim-x').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-anim-y').addEventListener('change', syncObjectFromPanel);
@@ -3639,7 +4105,8 @@ function bindEvents() {
             vdbs: [],
             floorEnabled: true,
             floorWidth: DEFAULT_FLOOR_WIDTH_M,
-            floorDepth: DEFAULT_FLOOR_DEPTH_M
+            floorDepth: DEFAULT_FLOOR_DEPTH_M,
+            lodSystem: { ids: [], thresholdsById: {} }
         };
         renderWorldList();
         void selectWorld(id);

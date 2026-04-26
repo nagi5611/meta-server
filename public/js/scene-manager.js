@@ -49,6 +49,9 @@ function aabbIntersectsViewSphere(p, R, min, max) {
 /** ワールド複数モデル読み込みの同時実行数（キャッシュヒット時の直列待ちを緩和） */
 const WORLD_MODEL_LOAD_CONCURRENCY = 8;
 
+/** Prefab LOD 境界のヒステリシス（±5%） */
+const PREFAB_LOD_HYSTERESIS = 0.05;
+
 /**
  * 工場関数配列を最大 concurrency 本で同時実行し、結果を入力順の配列で返す
  * @template T
@@ -106,6 +109,11 @@ class SceneManager {
         this._drawCullFrame = 0;
         /** @type {import('three').Object3D[]} */
         this._drawCullTargets = [];
+        /** @type {{ ids?: string[], thresholdsById?: Record<string, number[]> }|null} */
+        this._worldLodSystem = null;
+        /** @type {import('three').Object3D[]} LOD 対象 prefab ルート */
+        this._prefabLodRoots = [];
+        this._lodTempWorldPos = new THREE.Vector3();
         /** ワールド設定の床表示希望（距離カリングと AND） */
         this._floorWantedVisible = true;
         /** WebXR セッション中は true（FPS 優先のティア上書きに使用） */
@@ -382,10 +390,104 @@ class SceneManager {
                 }
             }
             obj.userData._cullInRange = inRange;
+            const lodOk = obj.userData._prefabLodVisible !== false;
             if (obj === this.groundMesh || obj === this.gridHelper) {
                 obj.visible = this._floorWantedVisible && inRange;
             } else {
-                obj.visible = inRange;
+                obj.visible = inRange && lodOk;
+            }
+        }
+    }
+
+    /**
+     * models[].lodRank / lodPartRanks を prefab パーツ userData に反映する
+     * @param {import('three').Object3D} model
+     * @param {object} config
+     */
+    _applyPrefabPartLodRanks(model, config) {
+        const defRank = Number.isFinite(config.lodRank) ? Math.max(1, Math.floor(config.lodRank)) : 1;
+        const map =
+            config.lodPartRanks && typeof config.lodPartRanks === 'object' && !Array.isArray(config.lodPartRanks)
+                ? config.lodPartRanks
+                : {};
+        model.traverse((ch) => {
+            if (!ch.userData || !ch.userData.isPrefabPart) return;
+            const path = ch.userData.prefabPartPath || '';
+            let r = map[path];
+            if (!Number.isFinite(r)) r = defRank;
+            ch.userData.prefabLodRank = Math.max(1, Math.floor(r));
+        });
+    }
+
+    /**
+     * プレイヤー足元と描画距離に応じて prefab パーツの LOD 可視を更新する（毎フレーム）
+     * @param {import('three').Vector3} feetWorld
+     */
+    updatePrefabLodVisibility(feetWorld) {
+        if (!feetWorld || !this._prefabLodRoots.length) return;
+        const ls = this._worldLodSystem;
+        const R = clampViewDistanceM(this.graphicsOptions.viewDistanceM);
+        if (!(R > 0)) return;
+
+        for (const root of this._prefabLodRoots) {
+            const meta = root.userData.prefabLodRootMeta;
+            if (!meta || !meta.lodId) continue;
+
+            if (!ls || !ls.thresholdsById || typeof ls.thresholdsById !== 'object') {
+                root.traverse((ch) => {
+                    if (ch.userData && ch.userData.isPrefabPart) ch.userData._prefabLodVisible = true;
+                });
+                continue;
+            }
+
+            const ratios = ls.thresholdsById[meta.lodId];
+            if (!Array.isArray(ratios) || ratios.length === 0) {
+                root.traverse((ch) => {
+                    if (ch.userData && ch.userData.isPrefabPart) ch.userData._prefabLodVisible = true;
+                });
+                continue;
+            }
+
+            const numBands = ratios.length + 1;
+            root.getWorldPosition(this._lodTempWorldPos);
+            const d = this._lodTempWorldPos.distanceTo(feetWorld);
+
+            let stable = root.userData._prefabLodStableBand;
+            if (!Number.isFinite(stable) || stable < 1) stable = 1;
+
+            const h = PREFAB_LOD_HYSTERESIS;
+            let rank = stable;
+            while (rank > 1) {
+                const boundaryIdx = rank - 2;
+                const t = ratios[boundaryIdx] * R;
+                if (d < t * (1 - h)) rank--;
+                else break;
+            }
+            while (rank < numBands) {
+                const boundaryIdx = rank - 1;
+                const t = ratios[boundaryIdx] * R;
+                if (d >= t * (1 + h)) rank++;
+                else break;
+            }
+            rank = Math.max(1, Math.min(numBands, rank));
+            root.userData._prefabLodStableBand = rank;
+
+            let anyShown = false;
+            root.traverse((ch) => {
+                if (!ch.userData || !ch.userData.isPrefabPart) return;
+                const pr = ch.userData.prefabLodRank;
+                const prn = Number.isFinite(pr) ? Math.max(1, Math.min(numBands, Math.floor(pr))) : 1;
+                const vis = prn === rank;
+                ch.userData._prefabLodVisible = vis;
+                if (vis) anyShown = true;
+            });
+            if (!anyShown) {
+                root.traverse((ch) => {
+                    if (!ch.userData || !ch.userData.isPrefabPart) return;
+                    const prn = ch.userData.prefabLodRank;
+                    const fallback = Number.isFinite(prn) ? Math.max(1, Math.min(numBands, Math.floor(prn))) : 1;
+                    ch.userData._prefabLodVisible = fallback === 1;
+                });
             }
         }
     }
@@ -590,7 +692,11 @@ class SceneManager {
      * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void, worldAircraftPhysics?: Record<string, unknown>|null }} [loadOptions]
      */
     async loadWorldModels(modelConfigs, onComplete, loadOptions = {}) {
-        const { bytePlan, loadState, onByteProgress, worldAircraftPhysics } = loadOptions;
+        const { bytePlan, loadState, onByteProgress, worldAircraftPhysics, worldLodSystem } = loadOptions;
+
+        this._worldLodSystem =
+            worldLodSystem && typeof worldLodSystem === 'object' ? worldLodSystem : null;
+        this._prefabLodRoots = [];
 
         if (!modelConfigs || modelConfigs.length === 0) {
             console.warn('No models to load');
@@ -690,6 +796,12 @@ class SceneManager {
             if (!config.aircraft) {
                 const isPrefab = !!String(config.prefabManifest || '').trim();
                 if (isPrefab) {
+                    const lodId = String(config.lodId || '').trim();
+                    if (lodId) {
+                        model.userData.prefabLodRootMeta = { lodId };
+                        this._applyPrefabPartLodRanks(model, config);
+                        this._prefabLodRoots.push(model);
+                    }
                     model.traverse((ch) => {
                         if (ch.userData && ch.userData.isPrefabPart) {
                             ch.userData.drawCullStyle = 'aabb';
@@ -1461,6 +1573,8 @@ class SceneManager {
         this.clearWorldLights();
 
         this._drawCullTargets = [];
+        this._worldLodSystem = null;
+        this._prefabLodRoots = [];
 
         // Remove all children from environment group except ground plane
         const ground = this.environmentGroup.children[0]; // Ground is first child

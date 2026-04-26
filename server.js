@@ -32,6 +32,7 @@ import {
     removePrefabBundleFromDisk,
 } from './lib/prefab-bundle-upload.js';
 import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } from './lib/chart-bgm-transcode.js';
+import { normalizeWorldsLod } from './public/js/world-lod-normalize.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -4197,6 +4198,7 @@ app.post('/admin/worlds', (req, res) => {
     if (floorDimErrs.length > 0) {
         return res.status(400).json({ error: floorDimErrs.join(' ') });
     }
+    normalizeWorldsLod(worlds);
     try {
         writeWorlds(worlds);
         res.json({ success: true });
