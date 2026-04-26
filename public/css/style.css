@@ -3382,14 +3382,36 @@ a.admin-menu-link:hover {
     transition: width 0.2s ease-out;
 }
 
-/* WebXR DOM Overlay / VR 移動モード */
+/* WebXR DOM Overlay: 2D UI 全体のラッパー（没入中もメニュー・チャット等を表示） */
 .xr-dom-overlay-root {
-    position: fixed;
-    left: 12px;
-    bottom: 56px;
-    z-index: 9998;
-    max-width: min(360px, 92vw);
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    min-height: 100vh;
+    pointer-events: none;
+}
+
+.xr-dom-overlay-root * {
     pointer-events: auto;
+}
+
+.xr-stick-feedback {
+    position: fixed;
+    right: 12px;
+    bottom: 100px;
+    z-index: 10002;
+    max-width: min(320px, 88vw);
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(20, 24, 32, 0.9);
+    border: 1px solid rgba(79, 195, 247, 0.5);
+    color: #e8f4fc;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: pre-line;
+    pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
 .xr-dom-overlay-panel {

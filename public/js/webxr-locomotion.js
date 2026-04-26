@@ -31,6 +31,33 @@ function applyStickDeadzone(x, y, dead) {
     return { x: nx * t, y: ny * t, mag: t };
 }
 
+/**
+ * axes (0,1) と (2,3) のうちノルムが大きいペアを採用する（ランタイムでスティック軸がずれる場合への対応）。
+ * @param {Gamepad} gp
+ * @returns {{ x: number, y: number, tag: string }}
+ */
+function pickPrimaryThumbstickXY(gp) {
+    if (!gp || !gp.axes || gp.axes.length < 2) {
+        return { x: 0, y: 0, tag: '—' };
+    }
+    const a = gp.axes;
+    /** @type {{ x: number, y: number, tag: string }[]} */
+    const cands = [{ x: a[0] || 0, y: a[1] || 0, tag: '0,1' }];
+    if (a.length >= 4) {
+        cands.push({ x: a[2] || 0, y: a[3] || 0, tag: '2,3' });
+    }
+    let best = cands[0];
+    let bm = Math.hypot(best.x, best.y);
+    for (let i = 1; i < cands.length; i++) {
+        const m = Math.hypot(cands[i].x, cands[i].y);
+        if (m > bm) {
+            best = cands[i];
+            bm = m;
+        }
+    }
+    return { x: best.x, y: best.y, tag: best.tag };
+}
+
 export default class WebXRLocomotion {
     /**
      * @param {object} opts
@@ -77,6 +104,9 @@ export default class WebXRLocomotion {
         this._onSessionEnd = () => this._handleSessionEnd();
         this.renderer.xr.addEventListener('sessionstart', this._onSessionStart);
         this.renderer.xr.addEventListener('sessionend', this._onSessionEnd);
+
+        /** @type {HTMLElement|null} */
+        this._stickFeedbackEl = typeof document !== 'undefined' ? document.getElementById('xr-stick-feedback') : null;
 
         this._savedPixelRatio = null;
         this._controllersWired = false;
@@ -186,6 +216,10 @@ export default class WebXRLocomotion {
         this.characterController.setXrPresenting(presenting);
         if (!presenting) {
             this.characterController.setXrMoveVector({ x: 0, y: 0, force: 0 });
+            if (this._stickFeedbackEl) {
+                this._stickFeedbackEl.hidden = true;
+                this._stickFeedbackEl.textContent = '';
+            }
             return;
         }
 
@@ -195,25 +229,64 @@ export default class WebXRLocomotion {
         this._snapCooldown = Math.max(0, this._snapCooldown - deltaTime);
         this._teleportCooldown = Math.max(0, this._teleportCooldown - deltaTime);
 
-        const { moveX, moveY, moveMag, snapX, leftGrip } = this._readInputs(session);
+        const inp = this._readInputs(session);
 
         this.characterController.setXrMoveVector({
-            x: moveX,
-            y: moveY,
-            force: moveMag
+            x: inp.moveX,
+            y: inp.moveY,
+            force: inp.moveMag
         });
 
-        this._maybeSnapTurn(snapX);
+        this._updateStickFeedback(session, inp);
 
-        if (leftGrip && !this._prevLeftGrip) {
+        this._maybeSnapTurn(inp.snapX);
+
+        if (inp.leftGrip && !this._prevLeftGrip) {
             this.characterController.triggerJump();
         }
-        this._prevLeftGrip = leftGrip;
+        this._prevLeftGrip = inp.leftGrip;
+    }
+
+    /**
+     * 左スティック入力の検出状況を没入中のみ表示する。
+     * @param {XRSession} session
+     * @param {{ moveX: number, moveY: number, moveMag: number, rawHypot: number, axisTag: string, hasMoveGamepad: boolean, sourceCount: number }} inp
+     */
+    _updateStickFeedback(session, inp) {
+        const el = this._stickFeedbackEl;
+        if (!el) return;
+
+        const rawLo = STICK_DEADZONE * 0.55;
+        const moving = inp.moveMag > 0.04;
+        const rawActive = inp.rawHypot >= rawLo;
+
+        if (inp.sourceCount === 0) {
+            el.hidden = false;
+            el.textContent = 'スティック: 入力ソースがありません（コントローラーを認識できていません）';
+            return;
+        }
+        if (!inp.hasMoveGamepad) {
+            el.hidden = false;
+            el.textContent = 'スティック: gamepad 付きのソースがありません';
+            return;
+        }
+        if (moving) {
+            el.hidden = false;
+            el.textContent = `左スティック操作中\n移動量 ${inp.moveMag.toFixed(2)}  左右 ${inp.moveX.toFixed(2)} 前後 ${inp.moveY.toFixed(2)}\n軸ペア [${inp.axisTag}]`;
+            return;
+        }
+        if (rawActive) {
+            el.hidden = false;
+            el.textContent = `スティック入力を検出（デッドゾーン内）\nraw 強さ ${inp.rawHypot.toFixed(2)}  [${inp.axisTag}]`;
+            return;
+        }
+        el.hidden = true;
+        el.textContent = '';
     }
 
     /**
      * @param {XRSession} session
-     * @returns {{ moveX: number, moveY: number, moveMag: number, snapX: number, leftGrip: boolean }}
+     * @returns {{ moveX: number, moveY: number, moveMag: number, snapX: number, leftGrip: boolean, rawHypot: number, axisTag: string, hasMoveGamepad: boolean, sourceCount: number }}
      */
     _readInputs(session) {
         /** @type {{ src: XRInputSource, gp: Gamepad }[]} */
@@ -223,6 +296,7 @@ export default class WebXRLocomotion {
             if (!gp || !gp.axes || gp.axes.length < 2) continue;
             sources.push({ src, gp });
         }
+        const sourceCount = session.inputSources.length;
 
         let moveEntry = null;
         for (const entry of sources) {
@@ -249,10 +323,15 @@ export default class WebXRLocomotion {
         let moveX = 0;
         let moveY = 0;
         let moveMag = 0;
+        /** @type {string} */
+        let axisTag = '—';
+        let rawHypot = 0;
+        const hasMoveGamepad = !!moveEntry;
         if (moveEntry) {
-            const ax0 = moveEntry.gp.axes[0] || 0;
-            const ax1 = moveEntry.gp.axes[1] || 0;
-            const dz = applyStickDeadzone(ax0, -ax1, STICK_DEADZONE);
+            const pick = pickPrimaryThumbstickXY(moveEntry.gp);
+            axisTag = pick.tag;
+            rawHypot = Math.hypot(pick.x, pick.y);
+            const dz = applyStickDeadzone(pick.x, -pick.y, STICK_DEADZONE);
             moveX = dz.x;
             moveY = dz.y;
             moveMag = dz.mag;
@@ -260,12 +339,12 @@ export default class WebXRLocomotion {
 
         let snapX = 0;
         if (snapEntry && snapEntry !== moveEntry) {
-            snapX = snapEntry.gp.axes[0] || 0;
+            const sp = pickPrimaryThumbstickXY(snapEntry.gp);
+            snapX = sp.x;
         } else if (moveEntry && (!snapEntry || snapEntry === moveEntry)) {
-            const ax0 = moveEntry.gp.axes[0] || 0;
-            const ax1 = moveEntry.gp.axes[1] || 0;
-            if (Math.abs(ax1) < SINGLE_CTRL_SNAP_AX1_MAX) {
-                snapX = ax0;
+            const pick = pickPrimaryThumbstickXY(moveEntry.gp);
+            if (Math.abs(pick.y) < SINGLE_CTRL_SNAP_AX1_MAX) {
+                snapX = pick.x;
             }
         }
 
@@ -282,7 +361,7 @@ export default class WebXRLocomotion {
             leftGrip = !!(b1 && b1.pressed);
         }
 
-        return { moveX, moveY, moveMag, snapX, leftGrip };
+        return { moveX, moveY, moveMag, snapX, leftGrip, rawHypot, axisTag, hasMoveGamepad, sourceCount };
     }
 
     _maybeSnapTurn(snapX) {

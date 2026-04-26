@@ -8,9 +8,6 @@
  */
 export function createMetaverseVRButton(renderer, options = {}) {
     const domOverlayRoot = options.domOverlayRoot || null;
-    if (domOverlayRoot) {
-        domOverlayRoot.style.display = 'none';
-    }
 
     const optionalFeatures = ['local-floor'];
     if (domOverlayRoot) {
@@ -97,12 +94,10 @@ export function createMetaverseVRButton(renderer, options = {}) {
 
     navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
         if (!supported) {
-            if (domOverlayRoot) domOverlayRoot.style.display = 'none';
             button.style.display = 'none';
             disableButton();
             return;
         }
-        if (domOverlayRoot) domOverlayRoot.style.display = '';
         button.style.display = '';
         button.onclick = tryEnterVR;
         button.onmouseenter = () => { button.style.opacity = '1'; };
@@ -113,7 +108,6 @@ export function createMetaverseVRButton(renderer, options = {}) {
         }
     }).catch((e) => {
         console.warn('[WebXR] isSessionSupported:', e);
-        if (domOverlayRoot) domOverlayRoot.style.display = 'none';
         button.style.display = 'none';
         disableButton();
     });
