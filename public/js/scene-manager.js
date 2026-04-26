@@ -53,6 +53,24 @@ const WORLD_MODEL_LOAD_CONCURRENCY = 8;
 const PREFAB_LOD_HYSTERESIS = 0.05;
 
 /**
+ * ワールド lodSystem からしきい値比の最大値を取る（1 未満は 1）
+ * @param {{ thresholdsById?: Record<string, unknown> }|null} ls
+ * @returns {number}
+ */
+function maxLodThresholdRatioFromSystem(ls) {
+    if (!ls || !ls.thresholdsById || typeof ls.thresholdsById !== 'object') return 1;
+    let m = 1;
+    for (const arr of Object.values(ls.thresholdsById)) {
+        if (!Array.isArray(arr)) continue;
+        for (const t of arr) {
+            const n = Number(t);
+            if (Number.isFinite(n) && n > 0) m = Math.max(m, n);
+        }
+    }
+    return m;
+}
+
+/**
  * 工場関数配列を最大 concurrency 本で同時実行し、結果を入力順の配列で返す
  * @template T
  * @param {number} concurrency
@@ -108,8 +126,6 @@ class SceneManager {
         };
         /** @type {THREE.Group|null} 描画距離 R・2R の半透明球（足元基準） */
         this._viewRangeDebugGroup = null;
-        /** 描画距離カリング用フレームカウンタ */
-        this._drawCullFrame = 0;
         /** @type {import('three').Object3D[]} */
         this._drawCullTargets = [];
         /** @type {{ ids?: string[], thresholdsById?: Record<string, number[]> }|null} */
@@ -117,8 +133,6 @@ class SceneManager {
         /** @type {import('three').Object3D[]} LOD 対象 prefab ルート */
         this._prefabLodRoots = [];
         this._lodTempWorldPos = new THREE.Vector3();
-        /** 描画カリング用（毎回 new しない） */
-        this._cullScratchBox = new THREE.Box3();
         /** ワールド設定の床表示希望（距離カリングと AND） */
         this._floorWantedVisible = true;
         /** WebXR セッション中は true（FPS 優先のティア上書きに使用） */
@@ -368,8 +382,7 @@ class SceneManager {
     }
 
     /**
-     * 設定がオンなら足元に描画距離 R（青系）と 2R（黄系）の半透明球を合わせる。
-     * 注意: 実際のカリング・LOD しきい値に使うのは R のみ。黄は参考表示（2R 内でも R 外なら非表示になり得る）。
+     * 設定がオンなら足元に描画距離 R（青系）と 2R（黄系）の半透明球を合わせる
      * @param {import('three').Vector3} feetWorld
      */
     updateViewRangeDebugSpheres(feetWorld) {
@@ -383,6 +396,27 @@ class SceneManager {
         const outer = this._viewRangeDebugGroup.userData.outerMesh;
         if (inner) inner.scale.setScalar(R);
         if (outer) outer.scale.setScalar(2 * R);
+    }
+
+    /**
+     * 設定の描画距離 R（m）。LOD 境界計算とデバッグ球の青に使用
+     * @returns {number}
+     */
+    getViewDistanceBaseM() {
+        return clampViewDistanceM(this.graphicsOptions.viewDistanceM);
+    }
+
+    /**
+     * メッシュ・PDF 等の描画カリングに使う半径（m）。
+     * LOD 境界が R の倍数で伸びるのにカリングが R のみだと、遠方帯のメッシュが一度も描画されないため、
+     * ワールドの LOD しきい値最大倍率まで拡張する（LOD 未設定時は R のまま）
+     * @returns {number}
+     */
+    getEffectiveDrawCullRadiusM() {
+        const R = this.getViewDistanceBaseM();
+        if (!(R > 0)) return R;
+        const mult = Math.max(1, maxLodThresholdRatioFromSystem(this._worldLodSystem));
+        return R * mult;
     }
 
     /**
@@ -423,16 +457,14 @@ class SceneManager {
     }
 
     /**
-     * 足元中心・描画距離（球）で environment の可視を更新する（4 フレームに 1 回）。
+     * 足元中心・描画カリング半径（getEffectiveDrawCullRadiusM）で environment の可視を更新する。
      * 登録時の包絡球心が固定のため、移動するオブジェクト（models[].aircraft）は _drawCullTargets に入れない。
      * @param {import('three').Vector3} feetWorld
      */
     updateDrawDistanceCulling(feetWorld) {
         if (!feetWorld) return;
-        this._drawCullFrame = (this._drawCullFrame + 1) % 4;
-        if (this._drawCullFrame !== 0) return;
 
-        const R = clampViewDistanceM(this.graphicsOptions.viewDistanceM);
+        const Rcull = this.getEffectiveDrawCullRadiusM();
         const p = feetWorld;
 
         for (const obj of this._drawCullTargets) {
@@ -440,23 +472,16 @@ class SceneManager {
             let inRange = true;
             if (obj.userData.drawCullStyle === 'aabb') {
                 obj.updateMatrixWorld(true);
-                const box = this._cullScratchBox;
-                // prefab パーツは子ごとの AABB だけだとルートから離れたメッシュが誤カリングされやすいため、親 Group 全体で判定する
-                if (obj.userData.isPrefabPart && obj.parent) {
-                    obj.parent.updateMatrixWorld(true);
-                    box.setFromObject(obj.parent);
-                } else {
-                    box.setFromObject(obj);
-                }
+                const box = new THREE.Box3().setFromObject(obj);
                 if (box.isEmpty()) {
                     inRange = true;
                 } else {
-                    inRange = aabbIntersectsViewSphere(p, R, box.min, box.max);
+                    inRange = aabbIntersectsViewSphere(p, Rcull, box.min, box.max);
                 }
             } else {
                 const c = obj.userData.drawCullWorld;
                 if (c && c.center && Number.isFinite(c.radius)) {
-                    inRange = p.distanceTo(c.center) <= R + c.radius;
+                    inRange = p.distanceTo(c.center) <= Rcull + c.radius;
                 }
             }
             obj.userData._cullInRange = inRange;
@@ -532,7 +557,6 @@ class SceneManager {
             }
 
             const numBands = ratios.length + 1;
-            // 帯判定はルートの一点距離（パーツ AABB ではない）。カリングは updateDrawDistanceCulling で親全体 AABB。
             root.getWorldPosition(this._lodTempWorldPos);
             const d = this._lodTempWorldPos.distanceTo(feetWorld);
 

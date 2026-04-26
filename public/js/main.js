@@ -1003,10 +1003,7 @@ class MetaverseApp {
             this.sceneManager.updatePrefabLodVisibility(position);
             this.sceneManager.updateDrawDistanceCulling(position);
             this.sceneManager.updateViewRangeDebugSpheres(position);
-            this.playerManager.updateRemoteDrawDistance(
-                position,
-                this.sceneManager.graphicsOptions.viewDistanceM
-            );
+            this.playerManager.updateRemoteDrawDistance(position, this.sceneManager.getEffectiveDrawCullRadiusM());
 
             // Check teleport and PDF proximity
             if (this.teleportManager) {
