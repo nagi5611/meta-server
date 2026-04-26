@@ -98,13 +98,16 @@ class SceneManager {
         this.groundMesh = null;
         /** Grid helper. Visibility controlled by setFloorVisible. */
         this.gridHelper = null;
-        /** Graphics options (graphicsTier, toneMappingExposure, pixelRatioCap, viewDistanceM) */
+        /** Graphics options（描画距離デバッグ球は showViewRangeSpheres） */
         this.graphicsOptions = {
             graphicsTier: 'low',
             toneMappingExposure: 1,
             pixelRatioCap: 1,
-            viewDistanceM: 50
+            viewDistanceM: 50,
+            showViewRangeSpheres: false
         };
+        /** @type {THREE.Group|null} 描画距離 R・2R の半透明球（足元基準） */
+        this._viewRangeDebugGroup = null;
         /** 描画距離カリング用フレームカウンタ */
         this._drawCullFrame = 0;
         /** @type {import('three').Object3D[]} */
@@ -182,6 +185,7 @@ class SceneManager {
                 this.graphicsOptions.toneMappingExposure = migrated.toneMappingExposure;
                 this.graphicsOptions.pixelRatioCap = migrated.pixelRatioCap;
                 this.graphicsOptions.viewDistanceM = migrated.viewDistanceM;
+                this.graphicsOptions.showViewRangeSpheres = migrated.showViewRangeSpheres;
             } catch (e) { /* ignore */ }
         }
 
@@ -224,6 +228,8 @@ class SceneManager {
 
         // Add static environment
         this.addEnvironment();
+
+        this._createViewRangeDebugHelpers();
 
         requestAnimationFrame(() => {
             this._loadIBLAsync();
@@ -357,6 +363,60 @@ class SceneManager {
             }
         }
         this._drawCullTargets.push(obj);
+    }
+
+    /**
+     * 設定がオンなら足元に描画距離 R（青系）と 2R（黄系）の半透明球を合わせる
+     * @param {import('three').Vector3} feetWorld
+     */
+    updateViewRangeDebugSpheres(feetWorld) {
+        if (!this._viewRangeDebugGroup || !feetWorld) return;
+        const show = this.graphicsOptions.showViewRangeSpheres === true;
+        this._viewRangeDebugGroup.visible = show;
+        if (!show) return;
+        const R = clampViewDistanceM(this.graphicsOptions.viewDistanceM);
+        this._viewRangeDebugGroup.position.copy(feetWorld);
+        const inner = this._viewRangeDebugGroup.userData.innerMesh;
+        const outer = this._viewRangeDebugGroup.userData.outerMesh;
+        if (inner) inner.scale.setScalar(R);
+        if (outer) outer.scale.setScalar(2 * R);
+    }
+
+    /**
+     * 描画距離デバッグ用の球メッシュを生成しシーンへ追加する
+     */
+    _createViewRangeDebugHelpers() {
+        if (!this.scene || this._viewRangeDebugGroup) return;
+        const group = new THREE.Group();
+        group.name = 'ViewRangeDebug';
+        const geo = new THREE.SphereGeometry(1, 40, 28);
+        const matOuter = new THREE.MeshBasicMaterial({
+            color: 0xe8c840,
+            transparent: true,
+            opacity: 0.16,
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+        const matInner = new THREE.MeshBasicMaterial({
+            color: 0x4a9eff,
+            transparent: true,
+            opacity: 0.22,
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+        const outer = new THREE.Mesh(geo, matOuter);
+        const inner = new THREE.Mesh(geo, matInner);
+        outer.frustumCulled = false;
+        inner.frustumCulled = false;
+        outer.renderOrder = 0;
+        inner.renderOrder = 1;
+        group.add(outer);
+        group.add(inner);
+        group.userData.outerMesh = outer;
+        group.userData.innerMesh = inner;
+        group.visible = this.graphicsOptions.showViewRangeSpheres === true;
+        this.scene.add(group);
+        this._viewRangeDebugGroup = group;
     }
 
     /**
@@ -1796,8 +1856,13 @@ class SceneManager {
             graphicsTier: migrated.graphicsTier,
             toneMappingExposure: migrated.toneMappingExposure,
             pixelRatioCap: migrated.pixelRatioCap,
-            viewDistanceM: migrated.viewDistanceM
+            viewDistanceM: migrated.viewDistanceM,
+            showViewRangeSpheres: migrated.showViewRangeSpheres
         };
+
+        if (this._viewRangeDebugGroup) {
+            this._viewRangeDebugGroup.visible = this.graphicsOptions.showViewRangeSpheres === true;
+        }
 
         const tier = this._effectiveGraphicsTier();
         const needAA = getAntialiasForTier(tier);

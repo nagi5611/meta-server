@@ -72,7 +72,7 @@ export function getAntialiasForTier(tier) {
 /**
  * localStorage 由来のオブジェクトを新スキーマに寄せる（旧 drawQualityLow / shadowQuality / fogFar を除去）
  * @param {Record<string, unknown>} raw
- * @returns {{ graphicsTier: GraphicsTier, toneMappingExposure: number, pixelRatioCap: number|'full', viewDistanceM: number }}
+ * @returns {{ graphicsTier: GraphicsTier, toneMappingExposure: number, pixelRatioCap: number|'full', viewDistanceM: number, showViewRangeSpheres: boolean }}
  */
 export function migrateLegacyGraphicsKeys(raw) {
     const s = { ...raw };
@@ -101,11 +101,14 @@ export function migrateLegacyGraphicsKeys(raw) {
 
     const viewDistanceM = clampViewDistanceM(s.viewDistanceM);
 
+    const showViewRangeSpheres = s.showViewRangeSpheres === true;
+
     return {
         graphicsTier: normalizeGraphicsTier(String(graphicsTier)),
         toneMappingExposure,
         pixelRatioCap,
-        viewDistanceM
+        viewDistanceM,
+        showViewRangeSpheres
     };
 }
 

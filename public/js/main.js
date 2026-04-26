@@ -1002,6 +1002,7 @@ class MetaverseApp {
 
             this.sceneManager.updatePrefabLodVisibility(position);
             this.sceneManager.updateDrawDistanceCulling(position);
+            this.sceneManager.updateViewRangeDebugSpheres(position);
             this.playerManager.updateRemoteDrawDistance(
                 position,
                 this.sceneManager.graphicsOptions.viewDistanceM

@@ -84,6 +84,7 @@ class MenuManager {
             toneMappingExposure: 1,
             pixelRatioCap: 1,
             viewDistanceM: 50,
+            showViewRangeSpheres: false,
             viewMode: 'third'
         };
         
@@ -544,6 +545,11 @@ class MenuManager {
             this.saveSettings();
             this.sceneManager?.applyGraphicsSettings(this.settings);
         });
+        document.getElementById('showViewRangeSpheres')?.addEventListener('change', (e) => {
+            this.settings.showViewRangeSpheres = !!e.target.checked;
+            this.saveSettings();
+            this.sceneManager?.applyGraphicsSettings(this.settings);
+        });
         document.getElementById('viewModeToggle')?.addEventListener('change', (e) => {
             this.settings.viewMode = e.target.checked ? 'first' : 'third';
             this.updateViewModeButton();
@@ -892,6 +898,7 @@ class MenuManager {
                 this.settings.toneMappingExposure = g.toneMappingExposure;
                 this.settings.pixelRatioCap = g.pixelRatioCap;
                 this.settings.viewDistanceM = g.viewDistanceM;
+                this.settings.showViewRangeSpheres = g.showViewRangeSpheres;
             } catch (e) {
                 console.error('Failed to load settings:', e);
             }
@@ -945,6 +952,8 @@ class MenuManager {
             viewDistEl.value = String(vd);
         }
         if (viewDistValEl) viewDistValEl.textContent = String(Math.round(vd));
+        const showVrEl = document.getElementById('showViewRangeSpheres');
+        if (showVrEl) showVrEl.checked = !!this.settings.showViewRangeSpheres;
         this.updateViewModeButton();
     }
 
