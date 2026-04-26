@@ -625,18 +625,6 @@
         </div>
     </div>
 
-    <!-- WebXR DOM Overlay 用（対応端末のみ HMD 内で表示。2D では操作できるよう表示） -->
-    <div id="xr-dom-overlay-root" class="xr-dom-overlay-root" aria-label="VR 移動モード">
-        <div class="xr-dom-overlay-panel">
-            <span class="xr-dom-overlay-title">VR 移動</span>
-            <div class="xr-dom-overlay-buttons">
-                <button type="button" class="xr-loco-btn" data-vr-locomotion="both" title="テレポート＋スナップターン">テレポ＋スナップ</button>
-                <button type="button" class="xr-loco-btn" data-vr-locomotion="smooth" title="テレポートなし・左スティック移動＋スナップ＋ジャンプ">スナップのみ</button>
-                <button type="button" class="xr-loco-btn" data-vr-locomotion="teleport" title="右トリガー離しでテレポート">テレポート</button>
-            </div>
-        </div>
-    </div>
-
     <canvas id="canvas"></canvas>
 
     <!-- Vite handles all module imports -->

@@ -563,9 +563,8 @@ class MetaverseApp {
             this.setupAdminPlayerInfoClick();
         }
 
-        const xrOverlayRoot = document.getElementById('xr-dom-overlay-root');
         const vrBtn = createMetaverseVRButton(this.sceneManager.getRenderer(), {
-            domOverlayRoot: xrOverlayRoot || null
+            domOverlayRoot: null
         });
         document.body.appendChild(vrBtn);
         this.xrPlayerRig = new XrPlayerRig({
@@ -580,7 +579,7 @@ class MetaverseApp {
             physicsManager: this.physicsManager,
             characterController: this.characterController,
             xrPlayerRig: this.xrPlayerRig,
-            domOverlayRoot: xrOverlayRoot || null,
+            domOverlayRoot: null,
             onVrSessionStart: () => {
                 const vm = this.menuManager.settings.viewMode;
                 this._viewModeBeforeVr = (vm === 'first' || vm === 'third') ? vm : 'third';
