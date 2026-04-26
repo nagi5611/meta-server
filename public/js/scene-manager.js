@@ -117,6 +117,8 @@ class SceneManager {
         /** @type {import('three').Object3D[]} LOD 対象 prefab ルート */
         this._prefabLodRoots = [];
         this._lodTempWorldPos = new THREE.Vector3();
+        /** 描画カリング用（毎回 new しない） */
+        this._cullScratchBox = new THREE.Box3();
         /** ワールド設定の床表示希望（距離カリングと AND） */
         this._floorWantedVisible = true;
         /** WebXR セッション中は true（FPS 優先のティア上書きに使用） */
@@ -366,7 +368,8 @@ class SceneManager {
     }
 
     /**
-     * 設定がオンなら足元に描画距離 R（青系）と 2R（黄系）の半透明球を合わせる
+     * 設定がオンなら足元に描画距離 R（青系）と 2R（黄系）の半透明球を合わせる。
+     * 注意: 実際のカリング・LOD しきい値に使うのは R のみ。黄は参考表示（2R 内でも R 外なら非表示になり得る）。
      * @param {import('three').Vector3} feetWorld
      */
     updateViewRangeDebugSpheres(feetWorld) {
@@ -437,7 +440,14 @@ class SceneManager {
             let inRange = true;
             if (obj.userData.drawCullStyle === 'aabb') {
                 obj.updateMatrixWorld(true);
-                const box = new THREE.Box3().setFromObject(obj);
+                const box = this._cullScratchBox;
+                // prefab パーツは子ごとの AABB だけだとルートから離れたメッシュが誤カリングされやすいため、親 Group 全体で判定する
+                if (obj.userData.isPrefabPart && obj.parent) {
+                    obj.parent.updateMatrixWorld(true);
+                    box.setFromObject(obj.parent);
+                } else {
+                    box.setFromObject(obj);
+                }
                 if (box.isEmpty()) {
                     inRange = true;
                 } else {
@@ -522,6 +532,7 @@ class SceneManager {
             }
 
             const numBands = ratios.length + 1;
+            // 帯判定はルートの一点距離（パーツ AABB ではない）。カリングは updateDrawDistanceCulling で親全体 AABB。
             root.getWorldPosition(this._lodTempWorldPos);
             const d = this._lodTempWorldPos.distanceTo(feetWorld);
 
