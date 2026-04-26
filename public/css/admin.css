@@ -568,6 +568,23 @@ body.admin-dark .chart-edit-loading-message {
     cursor: grab;
 }
 
+.admin-panel-world-edit .world-lod-thumb-value-tip {
+    display: none;
+    margin-bottom: 2px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #0d47a1;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid var(--we-border);
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 4;
+}
+
 .admin-panel-world-edit .world-lod-thumb-wrap:active {
     cursor: grabbing;
 }
@@ -3623,6 +3640,13 @@ body.admin-dark .admin-panel-world-edit .world-lod-thumb-label {
 
 body.admin-dark .admin-panel-world-edit .world-lod-thumb-sublabel {
     color: #9c9992;
+}
+
+body.admin-dark .admin-panel-world-edit .world-lod-thumb-value-tip {
+    color: #a8d4f0;
+    background: rgba(31, 30, 25, 0.96);
+    border-color: #4a4840;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
 }
 
 body.admin-dark .admin-panel-world-edit .world-lod-track-ticks {

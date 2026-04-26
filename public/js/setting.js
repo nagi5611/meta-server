@@ -1719,7 +1719,18 @@ function syncObjectFromPanel(opts) {
 /** Prefab LOD: スライダー最大倍率（500%） */
 const WORLD_LOD_MAX_RATIO = 5;
 
-/** @type {{ lodId: string, index: number, thumbWrapEl: HTMLElement, trackEl: HTMLElement }|null} */
+/**
+ * LOD 境界スライダー上に表示する倍率ラベル（描画距離に対する倍）
+ * @param {number} ratio
+ * @returns {string}
+ */
+function formatWorldLodRatioLabel(ratio) {
+    const r = Number(ratio);
+    if (!Number.isFinite(r)) return '×—';
+    return `×${r.toFixed(2)}`;
+}
+
+/** @type {{ lodId: string, index: number, thumbWrapEl: HTMLElement, trackEl: HTMLElement, valueTipEl?: HTMLElement }|null} */
 let worldLodDragState = null;
 
 let worldLodEditorInitialized = false;
@@ -1884,6 +1895,10 @@ function renderWorldLodPanel() {
             const r = Math.min(WORLD_LOD_MAX_RATIO, Math.max(0.05, Number(ratio) || 1));
             const pct = (r / WORLD_LOD_MAX_RATIO) * 100;
             wrap.style.left = `${pct}%`;
+            const valueTip = document.createElement('span');
+            valueTip.className = 'world-lod-thumb-value-tip';
+            valueTip.setAttribute('aria-hidden', 'true');
+            valueTip.textContent = formatWorldLodRatioLabel(r);
             const thumb = document.createElement('div');
             thumb.className = 'world-lod-thumb';
             thumb.dataset.thumbIndex = String(idx);
@@ -1894,6 +1909,7 @@ function renderWorldLodPanel() {
             const labelSub = document.createElement('span');
             labelSub.className = 'world-lod-thumb-sublabel';
             labelSub.textContent = `${idx + 1}–${idx + 2}`;
+            wrap.appendChild(valueTip);
             wrap.appendChild(thumb);
             wrap.appendChild(labelNum);
             wrap.appendChild(labelSub);
@@ -1995,9 +2011,15 @@ function onWorldLodMouseMove(e) {
     ratio = Math.max(minB, Math.min(maxB, ratio));
     ratios[i] = ratio;
     worldLodDragState.thumbWrapEl.style.left = `${(ratio / WORLD_LOD_MAX_RATIO) * 100}%`;
+    if (worldLodDragState.valueTipEl) {
+        worldLodDragState.valueTipEl.textContent = formatWorldLodRatioLabel(ratio);
+    }
 }
 
 function onWorldLodMouseUp() {
+    if (worldLodDragState && worldLodDragState.valueTipEl) {
+        worldLodDragState.valueTipEl.style.display = 'none';
+    }
     worldLodDragState = null;
 }
 
@@ -2055,7 +2077,12 @@ function bindWorldLodEditorEvents() {
             const idx = parseInt(thumb.dataset.thumbIndex, 10);
             const ratios = w.lodSystem.thresholdsById[lodId];
             if (!Array.isArray(ratios) || !Number.isFinite(idx)) return;
-            worldLodDragState = { lodId, index: idx, thumbWrapEl: thumbWrap, trackEl: track };
+            const valueTipEl = thumbWrap.querySelector('.world-lod-thumb-value-tip');
+            if (valueTipEl) {
+                valueTipEl.textContent = formatWorldLodRatioLabel(ratios[idx]);
+                valueTipEl.style.display = 'block';
+            }
+            worldLodDragState = { lodId, index: idx, thumbWrapEl: thumbWrap, trackEl: track, valueTipEl };
         });
     }
 
