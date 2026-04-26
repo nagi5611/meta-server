@@ -63,6 +63,33 @@ function distancePointToAabb(p, min, max) {
     return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+/**
+ * 点 p が AABB 内部（境界含む）か
+ * @param {import('three').Vector3} p
+ * @param {import('three').Vector3} min
+ * @param {import('three').Vector3} max
+ * @returns {boolean}
+ */
+function isPointInsideAabb(p, min, max) {
+    return p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y && p.z >= min.z && p.z <= max.z;
+}
+
+/**
+ * Prefab LOD 用の距離: 箱外は表面までの距離、箱内は中心までの距離（箱内で表面距離が常に 0 になる不具合を避ける）
+ * @param {import('three').Vector3} feetWorld
+ * @param {import('three').Box3} box
+ * @param {import('three').Vector3} centerOut
+ * @returns {number}
+ */
+function lodDistanceFeetToPrefabBounds(feetWorld, box, centerOut) {
+    if (box.isEmpty()) return 0;
+    if (isPointInsideAabb(feetWorld, box.min, box.max)) {
+        box.getCenter(centerOut);
+        return feetWorld.distanceTo(centerOut);
+    }
+    return distancePointToAabb(feetWorld, box.min, box.max);
+}
+
 /** ワールド複数モデル読み込みの同時実行数（キャッシュヒット時の直列待ちを緩和） */
 const WORLD_MODEL_LOAD_CONCURRENCY = 8;
 
@@ -542,7 +569,7 @@ class SceneManager {
                 root.getWorldPosition(this._lodTempWorldPos);
                 d = this._lodTempWorldPos.distanceTo(feetWorld);
             } else {
-                d = distancePointToAabb(feetWorld, lodBox.min, lodBox.max);
+                d = lodDistanceFeetToPrefabBounds(feetWorld, lodBox, this._lodTempWorldPos);
             }
 
             let stable = root.userData._prefabLodStableBand;
