@@ -91,7 +91,7 @@ function lodDistanceFeetToPrefabBounds(feetWorld, box, centerOut) {
 }
 
 /** ワールド複数モデル読み込みの同時実行数（キャッシュヒット時の直列待ちを緩和） */
-const WORLD_MODEL_LOAD_CONCURRENCY = 24;
+const WORLD_MODEL_LOAD_CONCURRENCY = 100;
 
 /** Prefab LOD 境界のヒステリシス（±5%） */
 const PREFAB_LOD_HYSTERESIS = 0.50;
