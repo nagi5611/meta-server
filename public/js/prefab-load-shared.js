@@ -2,6 +2,32 @@
 
 import { countTrianglesInObject } from './model-load-limits.js';
 
+/** マニフェスト内 .glb パーツの同時取得数（1 本の GLTFLoader は setPath 競合のためパーツごとに作る） */
+const PREFAB_PART_LOAD_CONCURRENCY = 24;
+
+/**
+ * 工場を最大 concurrency 本で同時実行し、結果を入力順の配列で返す
+ * @template T
+ * @param {number} concurrency
+ * @param {Array<() => Promise<T>>} factories
+ * @returns {Promise<T[]>}
+ */
+async function runWithConcurrency(concurrency, factories) {
+    const n = factories.length;
+    const results = new Array(n);
+    let cursor = 0;
+    async function worker() {
+        while (true) {
+            const i = cursor++;
+            if (i >= n) break;
+            results[i] = await factories[i]();
+        }
+    }
+    const workers = Math.min(Math.max(1, concurrency), Math.max(1, n));
+    await Promise.all(Array.from({ length: workers }, () => worker()));
+    return results;
+}
+
 /**
  * @param {string} assetPath models/ からの相対（例: models/Foo_prefab/a.glb または Foo_prefab/a.glb）
  * @returns {string} 同一オリジン URL
@@ -59,6 +85,7 @@ export function gltfLoaderPathAndFile(fullUrl) {
 }
 
 /**
+ * マニフェストに従い子 GLB を読み、同一 Group にまとめる。各パーツ GLB のネットワーク取得は最大 16 本まで並行（GLTFLoader はパーツごとに生成）。
  * @param {object} options
  * @param {typeof import('three')} options.THREE
  * @param {import('three').Group} [options.existingGroup] 再読込用に既存 Group を流用
@@ -80,31 +107,33 @@ export async function loadPrefabGroupFromManifest({ THREE, existingGroup, manife
     }
     group.userData.prefabDisplayName = man.displayName;
     group.userData.prefabGroupId = man.prefabGroupId;
-    const loader = createGLTFLoader();
     const partCount = man.parts.length;
-    let totalTris = 0;
-    for (let i = 0; i < man.parts.length; i++) {
-        const p = man.parts[i];
-        const filePath = p.file.startsWith('models/') ? p.file : `models/${p.file}`;
-        const fullPathUrl = buildEncodedModelUrlFromPath(filePath);
-        const { dirUrl, fileName } = gltfLoaderPathAndFile(fullPathUrl);
-        loader.setPath(dirUrl);
-        const scene = await new Promise((resolve, reject) => {
+    const factories = man.parts.map((p, i) => () => {
+        return new Promise((resolve, reject) => {
+            const filePath = p.file.startsWith('models/') ? p.file : `models/${p.file}`;
+            const fullPathUrl = buildEncodedModelUrlFromPath(filePath);
+            const { dirUrl, fileName } = gltfLoaderPathAndFile(fullPathUrl);
+            const loader = createGLTFLoader();
+            loader.setPath(dirUrl);
             loader.load(
                 fileName,
                 (gltf) => {
                     const root = gltf.scene;
                     const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
                     if (anims.length) root.userData.gltfClips = anims;
+                    root.userData.prefabGroupId = man.prefabGroupId;
+                    root.userData.prefabPartPath = filePath;
+                    root.userData.isPrefabPart = true;
                     resolve(root);
                 },
                 (xhr) => onXhrProgress?.(fileName, xhr, i, partCount),
                 reject
             );
         });
-        scene.userData.prefabGroupId = man.prefabGroupId;
-        scene.userData.prefabPartPath = filePath;
-        scene.userData.isPrefabPart = true;
+    });
+    const partRoots = await runWithConcurrency(PREFAB_PART_LOAD_CONCURRENCY, factories);
+    let totalTris = 0;
+    for (const scene of partRoots) {
         group.add(scene);
         totalTris += countTrianglesInObject(scene);
     }

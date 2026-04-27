@@ -2527,8 +2527,123 @@ function appendWorldLightToEditGroup(cfg) {
     return null;
 }
 
+/** 管理画面ワールド読込時の同時モデル数（クライアント本番の SceneManager とは別上限） */
+const ADMIN_WORLD_MODEL_LOAD_CONCURRENCY = 16;
+
 /**
- * ワールド設定をシーンに適用する（3D モデルは順次 await で読み込み）
+ * 工場を最大 concurrency 本で同時実行し、結果を入力順の配列で返す
+ * @template T
+ * @param {number} concurrency
+ * @param {Array<() => Promise<T>>} factories
+ * @returns {Promise<T[]>}
+ */
+async function runWithConcurrency(concurrency, factories) {
+    const n = factories.length;
+    const results = new Array(n);
+    let cursor = 0;
+    async function worker() {
+        while (true) {
+            const i = cursor++;
+            if (i >= n) break;
+            results[i] = await factories[i]();
+        }
+    }
+    const workers = Math.min(Math.max(1, concurrency), Math.max(1, n));
+    await Promise.all(Array.from({ length: workers }, () => worker()));
+    return results;
+}
+
+/**
+ * ワールド models[i] の cfg を組み立て、モデルを1件ロードする（失敗は err で返す）
+ * @param {object} config
+ * @param {number} idx
+ * @returns {Promise<{ idx: number, skip?: true, model?: import('three').Object3D, triangleCount?: number, cfgBase?: object, err?: string }>}
+ */
+async function loadWorldModelEntryForEditor(config, idx) {
+    const path = config.path || '';
+    const pfm = String(config.prefabManifest || '').trim();
+    const pos = config.position || { x: 0, y: 0, z: 0 };
+    const rot = config.rotation || { x: 0, y: 0, z: 0 };
+    const scale = config.scale || { x: 1, y: 1, z: 1 };
+    const cfgBase = {
+        position: { ...pos },
+        rotation: { ...rot },
+        scale: { ...scale },
+        animate: config.animate ? { ...config.animate } : undefined,
+        teleporter: config.teleporter ? { ...config.teleporter } : undefined,
+        taiko: config.taiko ? { ...config.taiko } : undefined
+    };
+    if (String(path).trim()) cfgBase.path = path;
+    if (pfm) {
+        cfgBase.prefabManifest = pfm;
+        if (String(config.prefabGroupId || '').trim()) cfgBase.prefabGroupId = String(config.prefabGroupId).trim();
+        if (String(config.lodId || '').trim()) cfgBase.lodId = String(config.lodId).trim();
+        if (Number.isFinite(config.lodRank)) cfgBase.lodRank = Math.max(1, Math.floor(config.lodRank));
+        if (config.lodPartRanks && typeof config.lodPartRanks === 'object' && !Array.isArray(config.lodPartRanks)) {
+            cfgBase.lodPartRanks = { ...config.lodPartRanks };
+        }
+        if (Array.isArray(config.lodRanks) && config.lodRanks.length) {
+            cfgBase.lodRanks = config.lodRanks.map((x) => Math.max(1, Math.floor(Number(x))));
+        }
+    }
+    if (config.aircraft && config.aircraft.id) {
+        const a = config.aircraft;
+        const ck = a.cockpitOffset || {};
+        const ch = a.chaseOffset || {};
+        cfgBase.aircraft = {
+            id: String(a.id || '').trim(),
+            radius: typeof a.radius === 'number' && Number.isFinite(a.radius) ? a.radius : 4,
+            label: a.label || '操縦する',
+            cockpitOffset: {
+                x: ck.x ?? 0,
+                y: ck.y ?? 1.2,
+                z: ck.z ?? 0
+            },
+            chaseOffset: {
+                x: ch.x ?? 0,
+                y: ch.y ?? 3,
+                z: ch.z ?? 12
+            }
+        };
+        const ap = a.aircraftPhysics;
+        if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
+            const clipped = clipAircraftPhysicsPartialFromUser(ap);
+            if (clipped && Object.keys(clipped).length) cfgBase.aircraft.aircraftPhysics = clipped;
+        }
+    }
+    if (isObjPath(path) && config.mtlPath) {
+        cfgBase.mtlPath = config.mtlPath;
+    }
+    if (!pfm && !String(path || '').trim()) {
+        return { idx, skip: true };
+    }
+    try {
+        let model;
+        let triangleCount;
+        if (pfm) {
+            const res = await loadModelFromConfig({
+                prefabManifest: pfm,
+                path: String(path || '').trim() || pfm
+            });
+            model = res.model;
+            triangleCount = res.triangleCount;
+        } else {
+            const res = await loadModelFromConfig({
+                path,
+                mtlPath: isObjPath(path) ? (config.mtlPath || '') : ''
+            });
+            model = res.model;
+            triangleCount = res.triangleCount;
+        }
+        return { idx, model, triangleCount, cfgBase };
+    } catch (err) {
+        console.error('Load model failed:', pfm || path, err);
+        return { idx, err: err.message || String(err) };
+    }
+}
+
+/**
+ * ワールド設定をシーンに適用する（3D モデルは最大 16 件ずつバッチ並列で読み込み。GET /models/* は既存の Service Worker により Stale-While-Revalidate される）
  * @param {object} world
  * @returns {Promise<void>}
  */
@@ -2613,94 +2728,26 @@ async function loadWorldIntoScene(world) {
     fillWorldAircraftPhysicsForm(world);
 
     const models = world.models || [];
+    const factories = models.map((config, idx) => () => loadWorldModelEntryForEditor(config, idx));
+    const slots = await runWithConcurrency(ADMIN_WORLD_MODEL_LOAD_CONCURRENCY, factories);
     const errs = [];
-    for (let idx = 0; idx < models.length; idx++) {
-        const config = models[idx];
-        const path = config.path || '';
-        const pfm = String(config.prefabManifest || '').trim();
-        const pos = config.position || { x: 0, y: 0, z: 0 };
-        const rot = config.rotation || { x: 0, y: 0, z: 0 };
-        const scale = config.scale || { x: 1, y: 1, z: 1 };
-        const cfgBase = {
-            position: { ...pos },
-            rotation: { ...rot },
-            scale: { ...scale },
-            animate: config.animate ? { ...config.animate } : undefined,
-            teleporter: config.teleporter ? { ...config.teleporter } : undefined,
-            taiko: config.taiko ? { ...config.taiko } : undefined
-        };
-        if (String(path).trim()) cfgBase.path = path;
-        if (pfm) {
-            cfgBase.prefabManifest = pfm;
-            if (String(config.prefabGroupId || '').trim()) cfgBase.prefabGroupId = String(config.prefabGroupId).trim();
-            if (String(config.lodId || '').trim()) cfgBase.lodId = String(config.lodId).trim();
-            if (Number.isFinite(config.lodRank)) cfgBase.lodRank = Math.max(1, Math.floor(config.lodRank));
-            if (config.lodPartRanks && typeof config.lodPartRanks === 'object' && !Array.isArray(config.lodPartRanks)) {
-                cfgBase.lodPartRanks = { ...config.lodPartRanks };
-            }
-            if (Array.isArray(config.lodRanks) && config.lodRanks.length) {
-                cfgBase.lodRanks = config.lodRanks.map((x) => Math.max(1, Math.floor(Number(x))));
-            }
+    for (const slot of slots) {
+        if (!slot || slot.skip) continue;
+        if (slot.err) {
+            errs.push(slot.err);
+            continue;
         }
-        if (config.aircraft && config.aircraft.id) {
-            const a = config.aircraft;
-            const ck = a.cockpitOffset || {};
-            const ch = a.chaseOffset || {};
-            cfgBase.aircraft = {
-                id: String(a.id || '').trim(),
-                radius: typeof a.radius === 'number' && Number.isFinite(a.radius) ? a.radius : 4,
-                label: a.label || '操縦する',
-                cockpitOffset: {
-                    x: ck.x ?? 0,
-                    y: ck.y ?? 1.2,
-                    z: ck.z ?? 0
-                },
-                chaseOffset: {
-                    x: ch.x ?? 0,
-                    y: ch.y ?? 3,
-                    z: ch.z ?? 12
-                }
-            };
-            const ap = a.aircraftPhysics;
-            if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
-                const clipped = clipAircraftPhysicsPartialFromUser(ap);
-                if (clipped && Object.keys(clipped).length) cfgBase.aircraft.aircraftPhysics = clipped;
-            }
-        }
-        if (isObjPath(path) && config.mtlPath) {
-            cfgBase.mtlPath = config.mtlPath;
-        }
-        try {
-            let model;
-            let triangleCount;
-            if (pfm) {
-                const res = await loadModelFromConfig({
-                    prefabManifest: pfm,
-                    path: String(path || '').trim() || pfm
-                });
-                model = res.model;
-                triangleCount = res.triangleCount;
-            } else if (String(path || '').trim()) {
-                const res = await loadModelFromConfig({
-                    path,
-                    mtlPath: isObjPath(path) ? (config.mtlPath || '') : ''
-                });
-                model = res.model;
-                triangleCount = res.triangleCount;
-            } else {
-                continue;
-            }
-            model.position.set(pos.x, pos.y, pos.z);
-            model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
-            model.scale.set(scale.x, scale.y, scale.z);
-            applyModelShadowByTriangleCount(model, triangleCount);
-            model.userData.editId = 'm' + idx;
-            model.userData.config = cfgBase;
-            editGroup.add(model);
-        } catch (err) {
-            console.error('Load model failed:', pfm || path, err);
-            errs.push(err.message || String(err));
-        }
+        const { model, triangleCount, cfgBase, idx: slotIdx } = slot;
+        const pos = cfgBase.position || { x: 0, y: 0, z: 0 };
+        const rot = cfgBase.rotation || { x: 0, y: 0, z: 0 };
+        const scale = cfgBase.scale || { x: 1, y: 1, z: 1 };
+        model.position.set(pos.x, pos.y, pos.z);
+        model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
+        model.scale.set(scale.x, scale.y, scale.z);
+        applyModelShadowByTriangleCount(model, triangleCount);
+        model.userData.editId = 'm' + slotIdx;
+        model.userData.config = cfgBase;
+        editGroup.add(model);
     }
     if (errs.length) {
         const el = document.getElementById('save-status');
