@@ -16,11 +16,13 @@
 | `CLOUDFRONT_PRIVATE_KEY` | PEM 本文（改行は `\n` でも可）。または `CLOUDFRONT_PRIVATE_KEY_PATH` でファイルパス |
 | `CLOUDFRONT_SIGN_EXPIRES_SECONDS` | （任意）署名 URL 有効時間。既定 900 |
 
-EC2/ECS などでは `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` または IAM ロールで `s3:PutObject` / `s3:GetObject` / `s3:DeleteObject` が必要です。**起動時同期**は通常 **マニフェスト＋`GetObject`（マニフェスト1本）** で済みます。リモートにマニフェストがない初回など **レガシー同期**に落ちたときのみ、各ファイルの `HeadObject` と **`s3:ListBucket`**（プレフィックス付きで孤児削除）が使われます。
+EC2/ECS などでは `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` または IAM ロールで `s3:PutObject` / `s3:GetObject` / `s3:DeleteObject` が必要です。**起動時同期**は通常 **マニフェスト＋`GetObject`（マニフェスト1本）** で済みます。リモートにマニフェストがない初回など **レガシー同期**に落ちると、各ファイルの `HeadObject` のあと **孤児オブジェクト削除**用に **`s3:ListBucket`** を使います。`ListBucket` が IAM で拒否される場合も **起動は続行**し、孤児削除だけスキップしたうえでマニフェストを書きます（本体同期は MD5/Head で完了している前提）。
 
 マニフェストは **`models/_meta/s3-sync-manifest.json`**（`META_MODELS_S3_PREFIX` がある場合は `prefix/_meta/s3-sync-manifest.json`）に置きます。`_meta/` 配下はモデル同期の走査対象外です。初回または S3 上のマニフェストが欠ける／壊れている場合のみ、従来どおり MD5 と Head で全件突き合わせたあと List で孤児を削り、マニフェストを書きます。差分同期は **パス＋ローカル mtime（ms）** の一致で判定します（同一 ms に内容だけ変えた場合は取りこぼすので、そのときは該当ファイルの `touch` か一度レガシー同期に戻す運用を想定）。
 
 ## AWS 側チェックリスト（要約）
+
+1. **S3 バケット** — パブリックアクセスをすべてブロックする。
 2. **CloudFront** — オリジンは上記バケット。オリジンアクセスは **Origin Access Control (OAC)** 推奨。
 3. **バケットポリシー** — 下記「[バケットポリシー（CloudFront OAC）](#バケットポリシーcloudfront-oac)」を参照。**CloudFront から の `s3:GetObject` のみ**を書くことが多く、アプリの IAM（Put 等）は基本は **IAM ポリシー側だけ** で足ります（二重許可になるが同じバケットに書く場合は複数 Statement をマージ）。
 4. **CloudFront キーペア** — AWS コンソールでキーペアを作成し、秘密鍵（PEM）を安全にサーバーへ配置（環境変数・Secrets Manager）。
@@ -38,7 +40,8 @@ Access-Control-Allow-Headers: Range
 </details>
 
 なお、CloudFront の Distribution 設定に「レスポンスヘッダー（Response headers policy）」としてプリセット又はカスタムの CORS ポリシーを割り当てておく必要があります。S3 バケットポリシー（CORS ルール）は CloudFront オリジン直アクセス時しか効かず、通常は CloudFront 側の設定だけで十分です。
-6. **検証手順の例**
+
+6. **検証手順の例** — 下記:
 
 ```bash
 # オブジェクトがある前提で、署名なし GET が 403 であること
@@ -59,6 +62,24 @@ curl -sI 'https://<distribution>/models/test.glb' | head -n 5
 | 閲覧者向け CDN | **S3 バケットポリシー**の Statement | CloudFront（OAC）だけがオブジェクトを読めるようにする |
 
 ※ サーバー用の権限をバケットポリシーにも重ねて書く必要は**必須ではありません**（IAM 側で足りる）。既存 Statement とマージする場合は JSON を一つにまとめます。
+
+### アップロード用 IAM に ListBucket（任意・孤児削除）
+
+最小権限の Put/Get/Delete のみの IAM だと、**レガシー同期**時の `ListObjectsV2` が `AccessDenied` になります。その場合でもアプリは **警告を出して続行**し、**マニフェストは書き込みます**。S3 上にマニフェストに載らない古いキーを掃除したいときだけ、バケット ARN に対する `ListBucket` を次のように **プレフィックス条件付き**で足してください（`YOUR_BUCKET_NAME`・`META_MODELS_S3_PREFIX` に合わせる。既定プレフィックスなら `models/*`）。
+
+```json
+{
+  "Sid": "ListBucketForModelSyncOrphanCleanup",
+  "Effect": "Allow",
+  "Action": "s3:ListBucket",
+  "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME",
+  "Condition": {
+    "StringLike": {
+      "s3:prefix": ["models/*"]
+    }
+  }
+}
+```
 
 ### 例（OAC 用・CloudFront からの GET のみ）
 
@@ -106,6 +127,7 @@ node scripts/migrate-world-models-to-cdn.mjs ./data/worlds.json https://dxxxxxxx
 | 署名 API 503 | `isS3ModelsConfigComplete()` に必要な環境変数が揃っているか |
 | CDN GET CORS | CloudFront が `Access-Control-Allow-Origin` を返しているか、アプリ Origin と一致させるか |
 | `/models/` 403 | メタバースにログイン済み Cookie か、`Authorization: Basic` 管理画面ログイン状態か |
+| `AccessDenied` の `s3:ListBucket` | 孤児削除だけ失敗。起動・マニフェスト書き込みは継続。孤児を掃除するなら「ListBucket（任意・孤児削除）」の IAM 例を追加 |
 
 ## 参考（公式）
 
