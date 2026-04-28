@@ -16,11 +16,11 @@
 | `CLOUDFRONT_PRIVATE_KEY` | PEM 本文（改行は `\n` でも可）。または `CLOUDFRONT_PRIVATE_KEY_PATH` でファイルパス |
 | `CLOUDFRONT_SIGN_EXPIRES_SECONDS` | （任意）署名 URL 有効時間。既定 900 |
 
-EC2/ECS などでは `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` または IAM ロールで `s3:PutObject` / `s3:GetObject` / `s3:DeleteObject` が必要です（このアプリの起動時同期は **`s3:ListBucket` は使いません**）。
+EC2/ECS などでは `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` または IAM ロールで `s3:PutObject` / `s3:GetObject` / `s3:DeleteObject` が必要です。**起動時同期**は通常 **マニフェスト＋`GetObject`（マニフェスト1本）** で済みます。リモートにマニフェストがない初回など **レガシー同期**に落ちたときのみ、各ファイルの `HeadObject` と **`s3:ListBucket`**（プレフィックス付きで孤児削除）が使われます。
+
+マニフェストは **`models/_meta/s3-sync-manifest.json`**（`META_MODELS_S3_PREFIX` がある場合は `prefix/_meta/s3-sync-manifest.json`）に置きます。`_meta/` 配下はモデル同期の走査対象外です。初回または S3 上のマニフェストが欠ける／壊れている場合のみ、従来どおり MD5 と Head で全件突き合わせたあと List で孤児を削り、マニフェストを書きます。差分同期は **パス＋ローカル mtime（ms）** の一致で判定します（同一 ms に内容だけ変えた場合は取りこぼすので、そのときは該当ファイルの `touch` か一度レガシー同期に戻す運用を想定）。
 
 ## AWS 側チェックリスト（要約）
-
-1. **S3 バケット** — パブリックアクセスをすべてブロックする。
 2. **CloudFront** — オリジンは上記バケット。オリジンアクセスは **Origin Access Control (OAC)** 推奨。
 3. **バケットポリシー** — 下記「[バケットポリシー（CloudFront OAC）](#バケットポリシーcloudfront-oac)」を参照。**CloudFront から の `s3:GetObject` のみ**を書くことが多く、アプリの IAM（Put 等）は基本は **IAM ポリシー側だけ** で足ります（二重許可になるが同じバケットに書く場合は複数 Statement をマージ）。
 4. **CloudFront キーペア** — AWS コンソールでキーペアを作成し、秘密鍵（PEM）を安全にサーバーへ配置（環境変数・Secrets Manager）。
@@ -36,8 +36,8 @@ Access-Control-Allow-Headers: Range
 ```
 （必要に応じて `OPTIONS` も追加、`Access-Control-Allow-Credentials` も用途により有効化）
 </details>
- Distribution 設定に「レスポンスヘッダー（Response headers policy）」としてプリセット又はカスタムの CORS ポリシーを割り当てておく必要があります。S3 バケットポリシー（CORS ルール）は CloudFront オリジン直アクセス時しか効かず、通常は CloudFront 側の設定だ
-なお、CloudFront のけで十分です。
+
+なお、CloudFront の Distribution 設定に「レスポンスヘッダー（Response headers policy）」としてプリセット又はカスタムの CORS ポリシーを割り当てておく必要があります。S3 バケットポリシー（CORS ルール）は CloudFront オリジン直アクセス時しか効かず、通常は CloudFront 側の設定だけで十分です。
 6. **検証手順の例**
 
 ```bash

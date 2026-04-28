@@ -1048,6 +1048,60 @@ function applyChartFeaturesAdminChrome() {
     });
 }
 
+/** ワールド編集の import 用に /api/client-config を 1 回だけキャッシュする */
+let cachedClientConfigForModules = null;
+
+/**
+ * client-config を取得する（モジュール import フォールバック用）
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function getClientConfigForModules() {
+    if (cachedClientConfigForModules) return cachedClientConfigForModules;
+    try {
+        const r = await fetch('/api/client-config');
+        if (r.ok) cachedClientConfigForModules = await r.json();
+        else cachedClientConfigForModules = {};
+    } catch {
+        cachedClientConfigForModules = {};
+    }
+    return cachedClientConfigForModules;
+}
+
+/**
+ * setting.js を dynamic import。ページオリジンで失敗したら moduleScriptOrigin とキャッシュバストで再試行する。
+ * @returns {Promise<{ initSettingEditor: () => Promise<void> }>}
+ */
+async function importSettingEditorModule() {
+    const cfg = await getClientConfigForModules();
+    let modOrigin = '';
+    if (cfg && typeof cfg.moduleScriptOrigin === 'string') {
+        const t = cfg.moduleScriptOrigin.trim().replace(/\/$/, '');
+        try {
+            const u = new URL(t);
+            modOrigin = `${u.protocol}//${u.host}`;
+        } catch {
+            modOrigin = '';
+        }
+    }
+
+    const bases = [window.location.origin];
+    if (modOrigin && !bases.includes(modOrigin)) bases.push(modOrigin);
+
+    let lastErr = null;
+    for (const base of bases) {
+        for (const bust of [false, true]) {
+            const qs = bust ? `?t=${Date.now()}` : '';
+            const url = `${base}/js/setting.js${qs}`;
+            try {
+                return await import(/* @vite-ignore */ url);
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+    }
+    throw lastErr;
+}
+
 /**
  * 指定したパネル ID を表示し、サイドメニューの active を更新する。
  * ワールド編集パネルは初表示時に setting.js を動的 import して init する。
@@ -1087,10 +1141,11 @@ function switchPanel(panelId) {
             weOverlay.setAttribute('aria-hidden', 'false');
             if (weMsg) weMsg.textContent = 'ワールド編集を起動しています…';
         }
-        import('/js/setting.js')
+        importSettingEditorModule()
             .then((m) => m.initSettingEditor())
             .catch((e) => {
                 console.error('Setting editor init failed:', e);
+                worldEditInitialized = false;
                 if (weOverlay) {
                     weOverlay.classList.remove('show');
                     weOverlay.setAttribute('aria-hidden', 'true');

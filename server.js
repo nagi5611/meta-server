@@ -74,6 +74,23 @@ function parseEnvEnabledDefaultTrue(raw) {
 }
 const CHART_FEATURES_ENABLED = parseEnvEnabledDefaultTrue(process.env.ENABLE_CHART_FEATURES);
 
+/**
+ * 管理画面ワールド編集の dynamic import 失敗時のフォールバック元（Node が配信するオリジン）。
+ * 静的ホスト（S3/CloudFront 等）が /js を誤配信する場合に設定する。
+ */
+const MODULE_SCRIPT_ORIGIN = (() => {
+    const s = String(process.env.MODULE_SCRIPT_ORIGIN || '').trim();
+    if (!s) return null;
+    try {
+        const u = new URL(/^\w+:\/\//.test(s) ? s : `https://${s}`);
+        return `${u.protocol}//${u.host}`;
+    } catch {
+        return null;
+    }
+})();
+/** /js モジュールに CORS を付与（静的ページと API のオリジンが異なる場合）。値は * か 1 件の Origin */
+const MODULE_SCRIPT_CORS_ORIGIN = String(process.env.MODULE_SCRIPT_CORS_ORIGIN || '').trim();
+
 // Worlds config file (setting.html)
 const WORLDS_PATH = STORAGE_PATHS.WORLDS_PATH;
 /** 接続直後・change-world・admin-tp 後に Y クランプを抑止する時間（ms） */
@@ -1712,6 +1729,15 @@ if (CHART_FEATURES_ENABLED) {
 }
 
 // admin.html 用の /js, /css は常に public から（dist に含まれないため）
+if (MODULE_SCRIPT_CORS_ORIGIN) {
+    app.use('/js', (req, res, next) => {
+        const acao = MODULE_SCRIPT_CORS_ORIGIN === '1' || MODULE_SCRIPT_CORS_ORIGIN === '*'
+            ? '*'
+            : MODULE_SCRIPT_CORS_ORIGIN;
+        res.setHeader('Access-Control-Allow-Origin', acao);
+        next();
+    });
+}
 app.use('/js', express.static(path.join(__dirname, 'public', 'js')));
 app.use('/css', express.static(path.join(__dirname, 'public', 'css')));
 
@@ -5225,6 +5251,7 @@ app.get('/api/client-config', (req, res) => {
     }
     res.json({
         chartFeaturesEnabled: CHART_FEATURES_ENABLED,
+        moduleScriptOrigin: MODULE_SCRIPT_ORIGIN,
         assetModels: {
             mode: USE_S3_MODELS ? 'cdn' : 'local',
             cdnBaseUrl: USE_S3_MODELS ? normalizedCdnBaseUrl() : null,
