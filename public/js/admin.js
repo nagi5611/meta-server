@@ -1069,6 +1069,11 @@ async function getClientConfigForModules() {
 
 /**
  * setting.js を dynamic import。ページオリジンで失敗したら moduleScriptOrigin とキャッシュバストで再試行する。
+ * setting.js をデプロイし直したらこの版を上げる（ブラウザ・中間キャッシュが古いモジュールを掴み続けるのを避ける）
+ */
+const SETTING_EDITOR_MODULE_VER = '2';
+
+/**
  * @returns {Promise<{ initSettingEditor: () => Promise<void> }>}
  */
 async function importSettingEditorModule() {
@@ -1090,8 +1095,8 @@ async function importSettingEditorModule() {
     let lastErr = null;
     for (const base of bases) {
         for (const bust of [false, true]) {
-            const qs = bust ? `?t=${Date.now()}` : '';
-            const url = `${base}/js/setting.js${qs}`;
+            const qs = bust ? `&t=${Date.now()}` : '';
+            const url = `${base}/js/setting.js?v=${SETTING_EDITOR_MODULE_VER}${qs}`;
             try {
                 return await import(/* @vite-ignore */ url);
             } catch (e) {

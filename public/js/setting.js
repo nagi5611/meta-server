@@ -286,8 +286,10 @@ async function loadModelFromConfig(config) {
     }
 
     const mtlPath = (config.mtlPath || '').trim();
-    const mtlEncoded =
-        isObjPath(path) && mtlPath ? await resolveModelAssetHref(mtlPath) : '';
+    let mtlEncoded = '';
+    if (isObjPath(path) && mtlPath) {
+        mtlEncoded = await resolveModelAssetHref(mtlPath);
+    }
 
     const model = await new Promise((resolve, reject) => {
         if (!isObjPath(path)) {
