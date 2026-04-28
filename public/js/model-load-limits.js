@@ -23,7 +23,20 @@ export const MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD = 400_000;
  */
 export async function fetchModelContentLength(url) {
     try {
-        const r = await fetch(url, { method: 'HEAD', credentials: 'same-origin' });
+        const isOtherOriginHttp =
+            typeof window !== 'undefined' &&
+            /^https?:\/\//i.test(url) &&
+            (() => {
+                try {
+                    return new URL(url).origin !== window.location.origin;
+                } catch {
+                    return false;
+                }
+            })();
+        const r = await fetch(url, {
+            method: 'HEAD',
+            credentials: isOtherOriginHttp ? 'omit' : 'same-origin',
+        });
         if (!r.ok) return null;
         const cl = r.headers.get('Content-Length');
         if (cl == null || cl === '') return null;

@@ -1,4 +1,5 @@
 // public/sw.js — /models/* と /pdfs/* の Stale-While-Revalidate + Cache API
+// 注: CloudFront 等の別オリジンのモデル URL はここを通らずネットワークフェッチされる
 const CACHE_VERSION = 'v1';
 const CACHE_NAME = `metaverse-assets-${CACHE_VERSION}`;
 

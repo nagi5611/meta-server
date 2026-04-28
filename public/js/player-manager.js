@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { AnimationMixer } from 'three';
 import { createGLTFLoaderWithDraco } from './gltf-loader-draco.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { resolveModelAssetHref } from './asset-resolve.js';
 
 class PlayerManager {
     constructor(scene) {
@@ -30,9 +31,10 @@ class PlayerManager {
             return { scene: clonedScene, animations };
         }
 
+        const url = await resolveModelAssetHref(this.avatarPath);
         return new Promise((resolve, reject) => {
             this.gltfLoader.load(
-                this.avatarPath,
+                url,
                 (gltf) => {
                     const animations = gltf.animations || [];
                     this.avatarModelCache = { scene: gltf.scene, animations };

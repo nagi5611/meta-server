@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { createGLTFLoaderWithDraco } from './gltf-loader-draco.js';
+import { resolveModelAssetHref } from './asset-resolve.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { MeshBVH, StaticGeometryGenerator } from 'three-mesh-bvh';
 import {
@@ -346,7 +347,16 @@ class SceneManager {
     }
 
     /**
-     * アセットパスを同一オリジンの絶対 URL に変換（セグメントごとに encode）
+     * アセットパス（models/... または CDN 絶対 URL）を読み込み用 URL に変換
+     * @param {string} assetPath
+     * @returns {Promise<string>}
+     */
+    async _resolveModelHref(assetPath) {
+        return resolveModelAssetHref(String(assetPath || ''));
+    }
+
+    /**
+     * @deprecated 同一オリジンのみ必要な場合の内部用。通常は _resolveModelHref を使う
      * @param {string} assetPath
      * @returns {string}
      */
@@ -637,8 +647,10 @@ class SceneManager {
         if (pfm) {
             const fileLabel = pfm.split(/[/\\]/).pop() || pfm;
             try {
-                const mUrl = this._buildEncodedModelUrl(pfm);
-                const mRes = await fetch(mUrl);
+                const mUrl = await this._resolveModelHref(pfm);
+                const cred =
+                    typeof window !== 'undefined' && mUrl.startsWith(window.location.origin) ? 'include' : 'omit';
+                const mRes = await fetch(mUrl, { credentials: cred });
                 if (!mRes.ok) {
                     console.warn('[SceneManager] prefab manifest not found for byte plan:', pfm);
                     return {
@@ -676,7 +688,7 @@ class SceneManager {
                 let sum = 0;
                 for (const part of man.parts) {
                     const fp = part.file.startsWith('models/') ? part.file : `models/${part.file}`;
-                    const u = this._buildEncodedModelUrl(fp);
+                    const u = await this._resolveModelHref(fp);
                     const len = await fetchModelContentLength(u);
                     const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / nP));
                     sum += w;
@@ -718,14 +730,14 @@ class SceneManager {
         const modelPath = fullConfig.path;
         if (!modelPath) return null;
 
-        const url = this._buildEncodedModelUrl(modelPath);
+        const url = await this._resolveModelHref(modelPath);
         const fileLabel = modelPath.split(/[/\\]/).pop() || modelPath;
         if (this._isObjPath(modelPath)) {
             const mtlPath = String(fullConfig.mtlPath || '').trim();
             let objLen;
             let mtlLen = 0;
             if (mtlPath) {
-                const mtlUrl = this._buildEncodedModelUrl(mtlPath);
+                const mtlUrl = await this._resolveModelHref(mtlPath);
                 const pair = await Promise.all([
                     fetchModelContentLength(url),
                     fetchModelContentLength(mtlUrl)
@@ -1097,7 +1109,15 @@ class SceneManager {
                 return;
             }
 
-            const url = this._buildEncodedModelUrl(modelPath);
+            const url = await this._resolveModelHref(modelPath);
+            /** OBJ+MTL: MTL URL は Promise の外で先行解決する（実行子が非 async のため） */
+            let resolvedObjMtlHref = /** @type {string | null} */ (null);
+            if (this._isObjPath(modelPath)) {
+                const mtlPathPre = String(fullConfig.mtlPath || '').trim();
+                if (mtlPathPre) {
+                    resolvedObjMtlHref = await this._resolveModelHref(mtlPathPre);
+                }
+            }
             const maxBytes = this._isObjPath(modelPath) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
             let contentLen = plan?.contentLenObj;
             if (contentLen === undefined) {
@@ -1138,7 +1158,7 @@ class SceneManager {
                             );
                             return;
                         }
-                        const mtlEncoded = this._buildEncodedModelUrl(mtlPath);
+                        const mtlEncoded = resolvedObjMtlHref;
                         const mtlDirUrl = mtlEncoded.slice(0, mtlEncoded.lastIndexOf('/') + 1);
                         const mtlFile = mtlPath.split('/').pop() || '';
                         const objDirUrl = url.slice(0, url.lastIndexOf('/') + 1);

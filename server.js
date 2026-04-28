@@ -30,9 +30,21 @@ import {
     applyPrefabBundleZipToModels,
     parseGlbOptionsFromPrefabBody,
     removePrefabBundleFromDisk,
+    baseNameFromZipFilename,
 } from './lib/prefab-bundle-upload.js';
 import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } from './lib/chart-bgm-transcode.js';
 import { normalizeWorldsLod } from './public/js/world-lod-normalize.js';
+import { USE_S3_MODELS, isS3ModelsConfigComplete, normalizedCdnBaseUrl } from './config/s3-assets.js';
+import { insertVersionBeforeExt, createModelVersionToken } from './lib/model-upload-version.js';
+import {
+    uploadLocalModelsPathsOrRollbackS3,
+    syncLocalModelsToS3OnStartup,
+    uploadLocalModelsFile,
+    canonicalCdnUrlForModelsRelative,
+    tryUnlinkQuiet,
+    publicAssetUrlCacheForModels,
+} from './lib/s3-model-assets.js';
+import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -763,8 +775,13 @@ function publicAssetUrlForCache(base, filename) {
             return '/images/' + tail;
         case 'chart-bgm':
             return '/chart-bgm/' + tail;
-        default:
+        default: {
+            if (USE_S3_MODELS) {
+                const posix = parts.join('/');
+                return publicAssetUrlCacheForModels(posix);
+            }
             return '/models/' + tail;
+        }
     }
 }
 
@@ -1379,6 +1396,29 @@ function getSocketAuthTokenFromHttp(req) {
 }
 
 /**
+ * S3 モデル本番モード時: /models GET はメタバース Socket 認証 Cookie または管理者 Basic のみ（直リンク抑止）
+ * @param {import('express').Request} req
+ * @returns {boolean}
+ */
+function metaverseModelsAccessAllowed(req) {
+    if (!USE_S3_MODELS) return true;
+    if (verifySocketAuthToken(getSocketAuthTokenFromHttp(req))) return true;
+    const ah = req.headers.authorization;
+    if (ah && ah.startsWith('Basic ')) {
+        try {
+            const decoded = Buffer.from(ah.slice(6), 'base64').toString('utf8');
+            const sep = decoded.indexOf(':');
+            const user = sep >= 0 ? decoded.slice(0, sep) : decoded;
+            const pass = sep >= 0 ? decoded.slice(sep + 1) : '';
+            if (timingSafeEqualStr(user, ADMIN_USERNAME) && timingSafeEqualStr(pass, ADMIN_PASSWORD)) return true;
+        } catch {
+            return false;
+        }
+    }
+    return false;
+}
+
+/**
  * Socket ハンドシェイクからトークンを読む（httpOnly Cookie を auth ペイロードより優先）
  * @param {import('socket.io').Socket} socket
  * @returns {string|null}
@@ -1641,8 +1681,14 @@ app.use('/admin', basicAuth);
 // Serve bootstrap-icons from node_modules (for admin.html etc.)
 app.use('/vendor/bootstrap-icons', express.static(path.join(__dirname, 'node_modules/bootstrap-icons/font')));
 
-// /models, /pdfs は常に public から（アップロード先）
-app.use('/models', express.static(MODELS_DIR));
+// /models: アップロード先。本番 S3 モードでは Cookie / Basic 付きのみ配信
+const modelsStaticMiddleware = express.static(MODELS_DIR);
+app.use('/models', (req, res, next) => {
+    if (USE_S3_MODELS && !metaverseModelsAccessAllowed(req)) {
+        return res.status(403).type('txt').send('モデルは認証されたメタバースセッションからのみ取得できます');
+    }
+    modelsStaticMiddleware(req, res, next);
+});
 app.use('/pdfs', express.static(PDFS_DIR));
 app.use('/images', express.static(IMAGES_DIR));
 app.use('/env', express.static(ENV_DIR));
@@ -4832,13 +4878,22 @@ app.post('/admin/upload-prefab-zip', uploadPrefabZip.single('zip'), async (req, 
         return res.status(400).json({ error: glbOpts.parseError });
     }
     const confirm = req.query.confirm === '1';
+    const prefabZipOpts =
+        USE_S3_MODELS
+            ? {
+                  maxEdgePx: glbOpts.maxEdgePx,
+                  skipTextureResize: glbOpts.skipTextureResize,
+                  prefabBaseOverride: `${baseNameFromZipFilename(origName)}_v_${createModelVersionToken()}`,
+              }
+            : { maxEdgePx: glbOpts.maxEdgePx, skipTextureResize: glbOpts.skipTextureResize };
+
     try {
         const result = await applyPrefabBundleZipToModels(
             req.file.buffer,
             MODELS_DIR,
             origName,
             confirm,
-            { maxEdgePx: glbOpts.maxEdgePx, skipTextureResize: glbOpts.skipTextureResize }
+            prefabZipOpts
         );
         if (!result.success) {
             if (result.status === 409) {
@@ -4849,6 +4904,24 @@ app.post('/admin/upload-prefab-zip', uploadPrefabZip.single('zip'), async (req, 
                 });
             }
             return res.status(result.status).json({ error: result.error, code: result.code });
+        }
+        if (USE_S3_MODELS && isS3ModelsConfigComplete()) {
+            try {
+                const absPaths = result.writtenFiles.map((f) => path.join(MODELS_DIR, f));
+                await uploadLocalModelsPathsOrRollbackS3(absPaths, MODELS_DIR);
+            } catch (eUp) {
+                const manBare = String(result.manifestRelativePath || '').replace(/^models\/?/, '').trim();
+                if (manBare) {
+                    removePrefabBundleFromDisk(MODELS_DIR, manBare);
+                }
+                console.error('[upload-prefab-zip] S3 upload failed, rolled back:', eUp);
+                return res.status(500).json({
+                    error:
+                        'S3 に反映できなかったためアップロードを破棄しました。環境変数 META_MODELS_S3_BUCKET 等を確認してください。',
+                    detail: eUp instanceof Error ? eUp.message : String(eUp),
+                    code: 's3_upload_failed',
+                });
+            }
         }
         const invUrls = result.writtenFiles.map((f) => publicAssetUrlForCache('models', f));
         if (invUrls.length) {
@@ -4876,10 +4949,13 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file or invalid file' });
     }
-    const filename = getSafeUploadedFilename(req, req.file.originalname);
+    let filename = getSafeUploadedFilename(req, req.file.originalname);
     const ext = path.extname(filename).toLowerCase();
     if (!MODEL_UPLOAD_EXTS.has(ext)) {
         return res.status(400).json({ error: 'File type not allowed for model upload' });
+    }
+    if (USE_S3_MODELS) {
+        filename = insertVersionBeforeExt(filename, createModelVersionToken());
     }
     const destPath = path.join(MODELS_DIR, filename);
     const splitGlbByObjects = req.body?.splitGlbByObjects === '1' || req.body?.splitGlbByObjects === 'true';
@@ -4888,9 +4964,22 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
     const uploadConflict =
         fs.existsSync(destPath) ||
         (splitGlbByObjects && ext === '.glb' && existingObjSplits.length > 0);
-    if (uploadConflict && req.query.confirm !== '1') {
+    if (!USE_S3_MODELS && uploadConflict && req.query.confirm !== '1') {
         return res.status(409).json({ error: 'file_exists', filename });
     }
+    /** @type {string[]} — ディスク確定済み・アップロード連動で消すファイル */
+    const pathsToUndoOnFail = [];
+
+    const rollbackAndFail = (eUp, logLabel) => {
+        for (const p of pathsToUndoOnFail) tryUnlinkQuiet(p);
+        console.error(`${logLabel}:`, eUp);
+        return res.status(500).json({
+            error: 'モデルのアップロードに失敗しました（外部ストレージへ反映できませんでした）。',
+            detail: eUp instanceof Error ? eUp.message : String(eUp),
+            code: 's3_upload_failed',
+        });
+    };
+
     try {
         if (!fs.existsSync(MODELS_DIR)) {
             fs.mkdirSync(MODELS_DIR, { recursive: true });
@@ -4957,7 +5046,14 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         }
         if (!multiSplit) {
             fs.writeFileSync(destPath, outBuffer);
+            pathsToUndoOnFail.push(destPath);
         }
+        if (multiSplit && objectSplit.partFiles?.length) {
+            for (const f of objectSplit.partFiles) {
+                pathsToUndoOnFail.push(path.join(MODELS_DIR, f));
+            }
+        }
+
         /** @type {string[]} */
         const invUrls = [];
         if (multiSplit) {
@@ -4967,11 +5063,32 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         } else {
             invUrls.push(publicAssetUrlForCache('models', filename));
         }
+
+        if (USE_S3_MODELS && isS3ModelsConfigComplete()) {
+            try {
+                const absList = pathsToUndoOnFail.slice();
+                await uploadLocalModelsPathsOrRollbackS3(absList, MODELS_DIR);
+            } catch (eUp) {
+                rollbackAndFail(eUp, 'POST /admin/upload S3');
+            }
+        }
+
         io.emit('asset-invalidate', { urls: invUrls });
         const payload = {
             success: true,
             filename: multiSplit ? objectSplit.partFiles[0] : filename,
         };
+        if (USE_S3_MODELS) {
+            if (multiSplit && objectSplit?.partFiles) {
+                payload.canonicalUrls = objectSplit.partFiles.map((f) =>
+                    publicAssetUrlForCache('models', f)
+                );
+                payload.cdnBaseUrlHint = normalizedCdnBaseUrl();
+            } else {
+                payload.canonicalUrl = publicAssetUrlForCache('models', filename);
+                payload.cdnBaseUrlHint = normalizedCdnBaseUrl();
+            }
+        }
         if (multiSplit) {
             payload.splitFiles = objectSplit.partFiles;
             payload.objectSplit = { applied: true, partFiles: objectSplit.partFiles };
@@ -4990,6 +5107,7 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         }
         res.json(payload);
     } catch (err) {
+        for (const p of pathsToUndoOnFail) tryUnlinkQuiet(p);
         console.error('POST /admin/upload error:', err);
         res.status(500).json({
             error: 'Failed to save file',
@@ -5087,7 +5205,74 @@ app.get('/api/worlds', (req, res) => {
 });
 
 app.get('/api/client-config', (req, res) => {
-    res.json({ chartFeaturesEnabled: CHART_FEATURES_ENABLED });
+    let cdnHostname = null;
+    if (USE_S3_MODELS) {
+        try {
+            const cu = normalizedCdnBaseUrl();
+            if (cu) cdnHostname = new URL(/^\w+:\/\//.test(cu) ? cu : `https://${cu}`).hostname;
+        } catch {
+            /* ignore */
+        }
+    }
+    res.json({
+        chartFeaturesEnabled: CHART_FEATURES_ENABLED,
+        assetModels: {
+            mode: USE_S3_MODELS ? 'cdn' : 'local',
+            cdnBaseUrl: USE_S3_MODELS ? normalizedCdnBaseUrl() : null,
+            cdnHostname,
+        },
+    });
+});
+
+/** CloudFront で保護されている CDN 上のアセットへ GET するための署名 URL をまとめて発行する */
+app.post('/api/metaverse/sign-asset-urls', async (req, res) => {
+    try {
+        if (!USE_S3_MODELS || !isS3ModelsConfigComplete()) {
+            return res.status(503).json({ error: 'signing_unavailable' });
+        }
+        if (!verifySocketAuthToken(getSocketAuthTokenFromHttp(req))) {
+            return res.status(401).json({ error: 'unauthorized' });
+        }
+        const urlsIn = req.body?.urls;
+        if (!Array.isArray(urlsIn) || urlsIn.length === 0) {
+            return res.status(400).json({ error: 'urls array required' });
+        }
+        const cdnOrigin = normalizedCdnBaseUrl();
+        let allowedHost = '';
+        try {
+            allowedHost = new URL(/^\w+:\/\//.test(cdnOrigin) ? cdnOrigin : `https://${cdnOrigin}`).hostname;
+        } catch {
+            return res.status(500).json({ error: 'invalid_cdn_config' });
+        }
+        const max = Math.min(urlsIn.length, 64);
+        const signed = /** @type {Record<string, string>} */ ({});
+        for (let i = 0; i < max; i++) {
+            const raw = urlsIn[i];
+            if (typeof raw !== 'string' || !raw.trim()) continue;
+            const uClean = raw.trim().split('#')[0];
+            let parsed;
+            try {
+                parsed = new URL(uClean);
+            } catch {
+                return res.status(400).json({ error: `invalid url at ${i}` });
+            }
+            if (parsed.protocol !== 'https:') {
+                return res.status(400).json({ error: 'https_only' });
+            }
+            const phost = parsed.hostname.replace(/:\d+$/, '');
+            if (phost !== allowedHost.replace(/:\d+$/, '')) {
+                return res.status(400).json({ error: `host mismatch at ${i}` });
+            }
+            signed[uClean] = await signCloudFrontGetUrl(uClean);
+        }
+        return res.json({ signed });
+    } catch (e) {
+        console.error('POST /api/metaverse/sign-asset-urls:', e);
+        return res.status(500).json({
+            error: 'sign_failed',
+            detail: e instanceof Error ? e.message : String(e),
+        });
+    }
 });
 
 app.use('/api/charts', (req, res, next) => {
@@ -5647,9 +5832,18 @@ function formatBytes(bytes) {
     await createPdfWorkers();
     await createVideoVcWorkers();
 
-const protocol = hasSsl ? 'https' : 'http';
+    if (USE_S3_MODELS && isS3ModelsConfigComplete()) {
+        try {
+            const r = await syncLocalModelsToS3OnStartup(MODELS_DIR);
+            console.log('[s3-sync] startup', r);
+        } catch (e) {
+            console.error('[s3-sync] startup failed:', e);
+        }
+    }
 
-httpServer.listen(PORT, HOST, () => {
+    const protocol = hasSsl ? 'https' : 'http';
+
+    httpServer.listen(PORT, HOST, () => {
     console.log(`Server running on ${protocol}://localhost:${PORT}`);
     if (useReverseProxy) {
         console.log(
@@ -5709,5 +5903,5 @@ httpServer.listen(PORT, HOST, () => {
             });
         });
     }
-});
+    });
 })();

@@ -38,6 +38,7 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { encodeAssetPathToUrlPath, notifyServiceWorkerInvalidate } from './service-worker-register.js';
+import { resolveModelAssetHref } from './asset-resolve.js';
 import {
     mergeAircraftPhysicsFromWorld,
     clipAircraftPhysicsPartialFromUser,
@@ -138,17 +139,6 @@ function createEditorGLTFLoader() {
     return loader;
 }
 const raycaster = new THREE.Raycaster();
-
-/**
- * アセットパスを同一オリジンの絶対 URL に変換（セグメントごとに encode）
- * @param {string} assetPath - 例: models/foo.obj
- * @returns {string}
- */
-function buildEncodedModelUrl(assetPath) {
-    const pathStr = assetPath.startsWith('/') ? assetPath.slice(1) : assetPath;
-    const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
-    return '/' + encodedPath;
-}
 
 /**
  * @param {string} path
@@ -286,7 +276,7 @@ async function loadModelFromConfig(config) {
 
     const path = config.path || '';
 
-    const url = buildEncodedModelUrl(path);
+    const url = await resolveModelAssetHref(path);
     const maxB = isObjPath(path) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
     const len = await fetchModelContentLength(url);
     if (len != null && len > maxB) {
@@ -320,7 +310,7 @@ async function loadModelFromConfig(config) {
             return;
         }
 
-        const mtlEncoded = buildEncodedModelUrl(mtlPath);
+        const mtlEncoded = await resolveModelAssetHref(mtlPath);
         const mtlDirUrl = mtlEncoded.slice(0, mtlEncoded.lastIndexOf('/') + 1);
         const mtlFile = mtlPath.split('/').pop();
         const objDirUrl = url.slice(0, url.lastIndexOf('/') + 1);

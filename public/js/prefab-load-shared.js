@@ -1,6 +1,7 @@
 // public/js/prefab-load-shared.js — prefab マニフェスト fetch + THREE.Group + 子 GLB 読込（scene-manager / setting 共有）
 
 import { countTrianglesInObject } from './model-load-limits.js';
+import { resolveModelAssetHref } from './asset-resolve.js';
 
 /** マニフェスト内 .glb パーツの同時取得数（1 本の GLTFLoader は setPath 競合のためパーツごとに作る） */
 const PREFAB_PART_LOAD_CONCURRENCY = 24;
@@ -61,8 +62,9 @@ export function normalizePrefabManifest(manifest) {
  * @returns {Promise<object>}
  */
 export async function fetchPrefabManifestJson(manifestPath) {
-    const u = buildEncodedModelUrlFromPath(manifestPath);
-    const mRes = await fetch(u);
+    const u = await resolveModelAssetHref(String(manifestPath || ''));
+    const credentials = typeof window !== 'undefined' && u.startsWith(window.location.origin) ? 'same-origin' : 'omit';
+    const mRes = await fetch(u, { credentials });
     if (!mRes.ok) {
         throw new Error(`マニフェストの取得に失敗: ${manifestPath}（HTTP ${mRes.status}）`);
     }
@@ -108,12 +110,34 @@ export async function loadPrefabGroupFromManifest({ THREE, existingGroup, manife
     group.userData.prefabDisplayName = man.displayName;
     group.userData.prefabGroupId = man.prefabGroupId;
     const partCount = man.parts.length;
-    const factories = man.parts.map((p, i) => () => {
+    const factories = man.parts.map((p, i) => async () => {
+        const filePath = p.file.startsWith('models/') ? p.file : `models/${p.file}`;
+        const resolved = await resolveModelAssetHref(filePath);
         return new Promise((resolve, reject) => {
-            const filePath = p.file.startsWith('models/') ? p.file : `models/${p.file}`;
-            const fullPathUrl = buildEncodedModelUrlFromPath(filePath);
-            const { dirUrl, fileName } = gltfLoaderPathAndFile(fullPathUrl);
             const loader = createGLTFLoader();
+            const isHttpsAbs = /^https:\/\//i.test(resolved);
+            const onProg = /** @type {import('three').LoadingManager['onProgress']} */ ((xhr) => {
+                const label = resolved.split(/[/]/).pop() || resolved;
+                onXhrProgress?.(label, xhr, i, partCount);
+            });
+            if (isHttpsAbs) {
+                loader.load(
+                    resolved,
+                    (gltf) => {
+                        const root = gltf.scene;
+                        const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
+                        if (anims.length) root.userData.gltfClips = anims;
+                        root.userData.prefabGroupId = man.prefabGroupId;
+                        root.userData.prefabPartPath = filePath;
+                        root.userData.isPrefabPart = true;
+                        resolve(root);
+                    },
+                    onProg,
+                    reject
+                );
+                return;
+            }
+            const { dirUrl, fileName } = gltfLoaderPathAndFile(resolved);
             loader.setPath(dirUrl);
             loader.load(
                 fileName,
@@ -126,7 +150,7 @@ export async function loadPrefabGroupFromManifest({ THREE, existingGroup, manife
                     root.userData.isPrefabPart = true;
                     resolve(root);
                 },
-                (xhr) => onXhrProgress?.(fileName, xhr, i, partCount),
+                onProg,
                 reject
             );
         });
