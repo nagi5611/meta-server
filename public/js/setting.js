@@ -285,6 +285,10 @@ async function loadModelFromConfig(config) {
         );
     }
 
+    const mtlPath = (config.mtlPath || '').trim();
+    const mtlEncoded =
+        isObjPath(path) && mtlPath ? await resolveModelAssetHref(mtlPath) : '';
+
     const model = await new Promise((resolve, reject) => {
         if (!isObjPath(path)) {
             const gltfLoader = createEditorGLTFLoader();
@@ -304,13 +308,11 @@ async function loadModelFromConfig(config) {
         }
 
         const objLoader = new OBJLoader();
-        const mtlPath = (config.mtlPath || '').trim();
         if (!mtlPath) {
             objLoader.load(url, (obj) => resolve(obj), undefined, reject);
             return;
         }
 
-        const mtlEncoded = await resolveModelAssetHref(mtlPath);
         const mtlDirUrl = mtlEncoded.slice(0, mtlEncoded.lastIndexOf('/') + 1);
         const mtlFile = mtlPath.split('/').pop();
         const objDirUrl = url.slice(0, url.lastIndexOf('/') + 1);
