@@ -16,15 +16,28 @@
 | `CLOUDFRONT_PRIVATE_KEY` | PEM 本文（改行は `\n` でも可）。または `CLOUDFRONT_PRIVATE_KEY_PATH` でファイルパス |
 | `CLOUDFRONT_SIGN_EXPIRES_SECONDS` | （任意）署名 URL 有効時間。既定 900 |
 
-EC2/ECS などでは `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` または IAM ロールで `s3:PutObject` / `s3:GetObject` / `s3:ListBucket` / `s3:DeleteObject` が必要です。
+EC2/ECS などでは `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` または IAM ロールで `s3:PutObject` / `s3:GetObject` / `s3:DeleteObject` が必要です（このアプリの起動時同期は **`s3:ListBucket` は使いません**）。
 
 ## AWS 側チェックリスト（要約）
 
 1. **S3 バケット** — パブリックアクセスをすべてブロックする。
 2. **CloudFront** — オリジンは上記バケット。オリジンアクセスは **Origin Access Control (OAC)** 推奨。
-3. **バケットポリシー** — Put/Get は運用 IAM のみ許可。**CloudFront からの読み取りのみ**許可したポリシー（OAC 用）。
+3. **バケットポリシー** — 下記「[バケットポリシー（CloudFront OAC）](#バケットポリシーcloudfront-oac)」を参照。**CloudFront から の `s3:GetObject` のみ**を書くことが多く、アプリの IAM（Put 等）は基本は **IAM ポリシー側だけ** で足ります（二重許可になるが同じバケットに書く場合は複数 Statement をマージ）。
 4. **CloudFront キーペア** — AWS コンソールでキーペアを作成し、秘密鍵（PEM）を安全にサーバーへ配置（環境変数・Secrets Manager）。
-5. **CORS（CloudFront 応答）** — メタバースのオリジン（例 `https://game.example.com`）に対して `GET`/`HEAD` を許可。必要なら `Range`。
+5. **CORS（CloudFront のレスポンスヘッダー）** — モデルを読み込むメタバース側のオリジン（例: `https://game.example.com`）に対して、`GET` および `HEAD` メソッドの許可を設定します。Range リクエスト（部分取得）を使う場合は `Range` ヘッダーの許可も必要です。
+
+<details>
+<summary>CloudFront の動的レスポンスヘッダー例（カスタムヘッダー Behavior で追加）</summary>
+
+```
+Access-Control-Allow-Origin: https://game.example.com
+Access-Control-Allow-Methods: GET, HEAD
+Access-Control-Allow-Headers: Range
+```
+（必要に応じて `OPTIONS` も追加、`Access-Control-Allow-Credentials` も用途により有効化）
+</details>
+ Distribution 設定に「レスポンスヘッダー（Response headers policy）」としてプリセット又はカスタムの CORS ポリシーを割り当てておく必要があります。S3 バケットポリシー（CORS ルール）は CloudFront オリジン直アクセス時しか効かず、通常は CloudFront 側の設定だ
+なお、CloudFront のけで十分です。
 6. **検証手順の例**
 
 ```bash
@@ -33,6 +46,48 @@ curl -sI 'https://<distribution>/models/test.glb' | head -n 5
 
 # アプリ経由で発行した署名付き URL なら 200 （サーバー側で確認）
 ```
+
+## バケットポリシー（CloudFront OAC）
+
+バケットが**非公開**でも、CloudFront ディストリビューション経由でオブジェクトを配信するには、**バケットポリシー**で **`cloudfront.amazonaws.com` に `s3:GetObject` を許可**します。OAC をディストリビューションに関連付けたあと、コンソールから **推奨ポリシーをコピー**する方法が公式に案内されています（手動で書く場合は下記の形）。
+
+### 役割の切り分け
+
+| 種類 | どこに書くか | 何のためか |
+|------|----------------|------------|
+| メタバースサーバー（アップロード・同期） | **IAM ユーザー／ロールに付ける IAM ポリシー** | `PutObject` / `GetObject`（HEAD 含む）/ `DeleteObject` |
+| 閲覧者向け CDN | **S3 バケットポリシー**の Statement | CloudFront（OAC）だけがオブジェクトを読めるようにする |
+
+※ サーバー用の権限をバケットポリシーにも重ねて書く必要は**必須ではありません**（IAM 側で足りる）。既存 Statement とマージする場合は JSON を一つにまとめます。
+
+### 例（OAC 用・CloudFront からの GET のみ）
+
+`YOUR_ACCOUNT_ID`・`YOUR_BUCKET_NAME`・`YOUR_DISTRIBUTION_ID` を置き換えます。`AWS:SourceArn` は **その CloudFront ディストリビューションにだけ**効くよう固定します。
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowCloudFrontServicePrincipalReadOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudfront.amazonaws.com"
+      },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME/*",
+      "Condition": {
+        "StringEquals": {
+          "AWS:SourceArn": "arn:aws:cloudfront::YOUR_ACCOUNT_ID:distribution/YOUR_DISTRIBUTION_ID"
+        }
+      }
+    }
+  ]
+}
+```
+
+- ディストリビューションを複数から同じバケットを読む場合は `Condition` を `ArnLike` + 配列にする、または Statement を分ける、などが必要です。
+- 設定手順の詳細は AWS 公式ドキュメントを参照: [CloudFront の読み取り専用権限をオリジンの S3 バケットポリシーに付与する（OAC）](https://docs.aws.amazon.com/ja_jp/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)。
 
 ## ワールドデータのパス書き換え
 
@@ -54,5 +109,6 @@ node scripts/migrate-world-models-to-cdn.mjs ./data/worlds.json https://dxxxxxxx
 
 ## 参考（公式）
 
+- [S3 オリジンへのアクセスを OAC で制限する](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)
 - [CloudFront — Range GETs](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/RangeGETs.html)
 - [S3 と CloudFront での静的コンテンツ](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html)

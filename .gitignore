@@ -7,6 +7,9 @@
 certs/*.pem
 certs/*.key
 certs/*.crt
+secrets/*.pem
+secrets/*.key
+secrets/*.crt
 
 # Dependencies
 node_modules/

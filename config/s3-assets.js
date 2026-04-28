@@ -54,6 +54,15 @@ export function getCloudFrontSignExpiresSeconds() {
     return Number.isFinite(n) && n >= 60 && n <= 86400 ? n : 900;
 }
 
+/** S3 への同時 PutObject 本数の上限（Prefab ZIP 等の一括アップロード用）。未設定時は 16。1〜128 にクランプ */
+export function getS3ModelsUploadConcurrency() {
+    const raw = process.env.META_MODELS_S3_UPLOAD_CONCURRENCY;
+    if (raw === undefined || String(raw).trim() === '') return 16;
+    const n = parseInt(String(raw).trim(), 10);
+    if (!Number.isFinite(n) || n < 1) return 16;
+    return Math.min(128, n);
+}
+
 /**
  * prefix を正規化（先頭および末尾スラッシュ除去後、DB には含めずキー構成にのみ使う）
  * @returns {string}
