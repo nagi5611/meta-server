@@ -1396,12 +1396,11 @@ function getSocketAuthTokenFromHttp(req) {
 }
 
 /**
- * S3 モデル本番モード時: /models GET はメタバース Socket 認証 Cookie または管理者 Basic のみ（直リンク抑止）
+ * メタバース Socket Cookie または管理者 Basic が有効か（HTTP）。ワールド編集の署名 URL 発行と同一条件
  * @param {import('express').Request} req
  * @returns {boolean}
  */
-function metaverseModelsAccessAllowed(req) {
-    if (!USE_S3_MODELS) return true;
+function isSocketAuthOrAdminBasic(req) {
     if (verifySocketAuthToken(getSocketAuthTokenFromHttp(req))) return true;
     const ah = req.headers.authorization;
     if (ah && ah.startsWith('Basic ')) {
@@ -1416,6 +1415,16 @@ function metaverseModelsAccessAllowed(req) {
         }
     }
     return false;
+}
+
+/**
+ * S3 モデル本番モード時: /models GET はメタバース Socket 認証 Cookie または管理者 Basic のみ（直リンク抑止）
+ * @param {import('express').Request} req
+ * @returns {boolean}
+ */
+function metaverseModelsAccessAllowed(req) {
+    if (!USE_S3_MODELS) return true;
+    return isSocketAuthOrAdminBasic(req);
 }
 
 /**
@@ -5230,7 +5239,7 @@ app.post('/api/metaverse/sign-asset-urls', async (req, res) => {
         if (!USE_S3_MODELS || !isS3ModelsConfigComplete()) {
             return res.status(503).json({ error: 'signing_unavailable' });
         }
-        if (!verifySocketAuthToken(getSocketAuthTokenFromHttp(req))) {
+        if (!isSocketAuthOrAdminBasic(req)) {
             return res.status(401).json({ error: 'unauthorized' });
         }
         const urlsIn = req.body?.urls;
