@@ -50,6 +50,21 @@ export async function resolveModelAssetHref(pathOrUrl) {
     const cfg = await getAssetModelsConfig();
 
     if (raw.startsWith('https://') || raw.startsWith('http://')) {
+        // ワールド等に同一オリジン絶対 URL が載っている場合、署名 API は CDN ホスト以外を拒否する（host mismatch 400）。
+        // 相対パス扱いへ落として CDN 正規 URL を組み立て署名させる。
+        try {
+            if (typeof window !== 'undefined') {
+                const abs = new URL(raw);
+                if (abs.origin === window.location.origin) {
+                    const pathAndQuery = `${abs.pathname.replace(/^\//, '')}${abs.search}`;
+                    if (pathAndQuery.length > 0) {
+                        return resolveModelAssetHref(pathAndQuery);
+                    }
+                }
+            }
+        } catch {
+            /* fall through */
+        }
         if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) {
             return raw;
         }
