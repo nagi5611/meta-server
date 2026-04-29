@@ -127,7 +127,7 @@ self.addEventListener('message', (event) => {
                 } catch (_) {
                     continue;
                 }
-                if (!pathname.startsWith('/models/') && !pathname.startsWith('/pdfs/')) continue;
+                if (!pathname.startsWith('/models/') && !pathname.startsWith('/pdfs/') && !pathname.startsWith('/env/')) continue;
                 const keys = await cache.keys();
                 for (const req of keys) {
                     try {

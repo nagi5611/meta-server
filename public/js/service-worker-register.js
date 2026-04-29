@@ -4,7 +4,7 @@ const CACHE_WRITE_USAGE_THRESHOLD = 0.92;
 
 /**
  * アセット相対パスを fetch と同じルート URL に変換（セグメントごと encode）
- * @param {string} assetPath - 例 models/foo.glb / pdfs/a.pdf
+ * @param {string} assetPath - 例 models/foo.glb / pdfs/a.pdf / env/default.hdr
  * @returns {string}
  */
 export function encodeAssetPathToUrlPath(assetPath) {
@@ -15,7 +15,7 @@ export function encodeAssetPathToUrlPath(assetPath) {
 
 /**
  * Service Worker にキャッシュ無効化を依頼（同一タブのアップロード直後など）
- * @param {string[]} urls - 同一オリジンの絶対パス（/models/... または /pdfs/...）
+ * @param {string[]} urls - 同一オリジンの絶対パス（/models/... /pdfs/... /env/...）
  */
 export async function notifyServiceWorkerInvalidate(urls) {
     const list = (urls || []).filter((u) => typeof u === 'string' && u.length > 0);
