@@ -5739,6 +5739,28 @@ app.get('/api/client-config', (req, res) => {
     });
 });
 
+/**
+ * CDN モード時、まだ metaverse_socket_auth が無いブラウザにゲスト用トークンを付与する。
+ * loadWorld が Socket 接続より先に走るため、初回のみ署名 API が 401 になる問題を防ぐ。
+ */
+app.post('/api/metaverse/bootstrap-asset-auth', (req, res) => {
+    try {
+        if (!USE_S3_MODELS || !isS3ModelsConfigComplete()) {
+            return res.status(204).end();
+        }
+        const existing = getSocketAuthTokenFromHttp(req);
+        if (verifySocketAuthToken(existing)) {
+            return res.status(204).end();
+        }
+        const token = signSocketAuthToken({ role: 'guest' });
+        setSocketAuthCookie(res, token);
+        return res.status(204).end();
+    } catch (e) {
+        console.error('POST /api/metaverse/bootstrap-asset-auth:', e);
+        return res.status(500).json({ error: 'bootstrap_failed' });
+    }
+});
+
 /** CloudFront で保護されている CDN 上のアセットへ GET するための署名 URL をまとめて発行する */
 app.post('/api/metaverse/sign-asset-urls', async (req, res) => {
     try {
