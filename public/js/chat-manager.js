@@ -161,7 +161,21 @@ class ChatManager {
             return;
         }
 
-        this.networkManager.socket.emit('chat-message', message);
+        this.networkManager.socket.emit('chat-message', message, (res) => {
+            if (!res || res.ok) {
+                return;
+            }
+            if (res.code === 'inappropriate') {
+                return;
+            }
+            if (res.code === 'room_rate') {
+                this.addSystemMessage('送信できませんでした');
+                return;
+            }
+            if (res.message) {
+                this.addSystemMessage(res.message);
+            }
+        });
     }
 
     addChatMessage(data, isOwnMessage = false) {

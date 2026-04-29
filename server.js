@@ -20,6 +20,7 @@ import { parse as parseCookieHeader } from 'cookie';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { signSocketAuthToken, verifySocketAuthToken, SOCKET_AUTH_TOKEN_MAX_AGE_MS } from './lib/socket-auth-token.js';
+import { moderateChatMessage } from './lib/chat-moderation.js';
 import {
     runGlbTextureResizeQueued,
     getModelUploadQueueStats,
@@ -1998,19 +1999,187 @@ function getServerLoadMetrics() {
 // ============================
 // Admin: Chat Log Collection
 // ============================
-const chatLogs = new Map(); // Map<roomId, Array<{timestamp, senderName, message}>>
+const chatLogs = new Map(); // Map<roomId, Array<{timestamp, senderName, message, senderId?}>>
 const MAX_CHAT_LOGS_PER_ROOM = 500;
 
-function addChatLog(roomId, senderName, message) {
+// ============================
+// Chat: AI moderation & rate limits (単一プロセス・メモリ保持)
+// GEMINI_API_KEY / 任意 GEMINI_MODEL — モデルIDは https://ai.google.dev/gemini-api/docs/models で要確認
+// ============================
+const CHAT_USER_MIN_INTERVAL_MS = 1000;
+const CHAT_ROOM_MAX_PER_WINDOW = 5;
+const CHAT_ROOM_WINDOW_MS = 1000;
+const CHAT_POINT_TTL_MS = 12 * 60 * 60 * 1000;
+const CHAT_MUTE_DURATION_MS = 6 * 60 * 60 * 1000;
+/** アクティブポイント数がこの値を超えたとき（11点以上）ミュート開始 */
+const CHAT_POINTS_THRESHOLD_MUTE = 10;
+const CHAT_APPROVED_MAX_AGE_MS = 60 * 60 * 1000;
+const CHAT_APPROVED_MAX_ENTRIES = 300;
+
+/** @type {Map<string, number>} */
+const chatUserLastSuccessAt = new Map();
+/** @type {Map<string, Array<{ ts: number, id: number }>>} ルーム1秒窓の送信枠（モデレーション待ち含む） */
+const chatRoomRecentSlots = new Map();
+let chatRoomSlotSeq = 0;
+/** @type {Map<string, Array<{timestamp:number,senderId:string,senderName:string,message:string}>>} */
+const chatApprovedByRoom = new Map();
+/** @type {Map<string, { pointAt: number[], muteUntil: number }>} */
+const chatModerationBySocket = new Map();
+/** @type {Set<string>} 同一ソケットの並行 chat-message 防止 */
+const chatModerationInFlight = new Set();
+
+/**
+ * Rate-limit ack 用にコールバックを安全に呼ぶ
+ * @param {unknown} callback
+ * @param {object} payload
+ */
+function chatReplyAck(callback, payload) {
+    if (typeof callback === 'function') {
+        try {
+            callback(payload);
+        } catch (_) {
+            /* ignore */
+        }
+    }
+}
+
+/**
+ * ルームの1秒窓内のスロットを整理する
+ * @param {string} roomId
+ * @param {number} now
+ * @returns {Array<{ ts: number, id: number }>}
+ */
+function pruneChatRoomSlots(roomId, now) {
+    let arr = chatRoomRecentSlots.get(roomId);
+    if (!arr) return [];
+    const cutoff = now - CHAT_ROOM_WINDOW_MS;
+    arr = arr.filter((e) => e.ts >= cutoff);
+    chatRoomRecentSlots.set(roomId, arr);
+    return arr;
+}
+
+/**
+ * ルームあたり1秒に5枠まで確保（6件目は不可）。成功時は枠を維持、失敗時は releaseChatRoomSlot を呼ぶ
+ * @param {string} roomId
+ * @param {number} now
+ * @returns {number|null} slot id
+ */
+function reserveChatRoomSlot(roomId, now) {
+    const arr = pruneChatRoomSlots(roomId, now);
+    if (arr.length >= CHAT_ROOM_MAX_PER_WINDOW) {
+        return null;
+    }
+    const id = ++chatRoomSlotSeq;
+    arr.push({ ts: now, id });
+    chatRoomRecentSlots.set(roomId, arr);
+    return id;
+}
+
+/**
+ * モデレーション失敗などで枠を返す
+ * @param {string} roomId
+ * @param {number|null} slotId
+ */
+function releaseChatRoomSlot(roomId, slotId) {
+    if (slotId == null) {
+        return;
+    }
+    const arr = chatRoomRecentSlots.get(roomId);
+    if (!arr || arr.length === 0) {
+        return;
+    }
+    const idx = arr.findIndex((e) => e.id === slotId);
+    if (idx >= 0) {
+        arr.splice(idx, 1);
+    }
+}
+
+/**
+ * モデレーション用: 通過済み履歴をテキスト化（最大300件・1時間以内）
+ * @param {string} roomId
+ * @param {number} now
+ * @returns {string}
+ */
+function getApprovedHistoryTableText(roomId, now) {
+    let arr = chatApprovedByRoom.get(roomId);
+    if (!arr || arr.length === 0) return '';
+    const cutoff = now - CHAT_APPROVED_MAX_AGE_MS;
+    const filtered = arr.filter((e) => e.timestamp >= cutoff).slice(-CHAT_APPROVED_MAX_ENTRIES);
+    return filtered
+        .map((e) => {
+            const t = new Date(e.timestamp).toISOString();
+            const safeMsg = String(e.message).replace(/\|/g, '｜').replace(/\r?\n/g, ' ');
+            return `${t} | ${e.senderId} | ${safeMsg}`;
+        })
+        .join('\n');
+}
+
+/**
+ * 通過済みメッセージをリングバッファへ追加
+ * @param {string} roomId
+ * @param {{timestamp:number,senderId:string,senderName:string,message:string}} entry
+ * @param {number} now
+ */
+function appendApprovedChat(roomId, entry, now) {
+    if (!chatApprovedByRoom.has(roomId)) {
+        chatApprovedByRoom.set(roomId, []);
+    }
+    const arr = chatApprovedByRoom.get(roomId);
+    arr.push(entry);
+    const cutoff = now - CHAT_APPROVED_MAX_AGE_MS;
+    let kept = arr.filter((e) => e.timestamp >= cutoff);
+    if (kept.length > CHAT_APPROVED_MAX_ENTRIES) {
+        kept = kept.slice(-CHAT_APPROVED_MAX_ENTRIES);
+    }
+    chatApprovedByRoom.set(roomId, kept);
+}
+
+/**
+ * 不適切時のポイント・ミュート更新（>10 で 6h）
+ * @param {string} socketId
+ * @param {number} now
+ */
+function registerChatInappropriate(socketId, now) {
+    let m = chatModerationBySocket.get(socketId);
+    if (!m) {
+        m = { pointAt: [], muteUntil: 0 };
+        chatModerationBySocket.set(socketId, m);
+    }
+    m.pointAt = m.pointAt.filter((t) => now - t < CHAT_POINT_TTL_MS);
+    m.pointAt.push(now);
+    m.pointAt = m.pointAt.filter((t) => now - t < CHAT_POINT_TTL_MS);
+    if (m.pointAt.length > CHAT_POINTS_THRESHOLD_MUTE) {
+        m.muteUntil = now + CHAT_MUTE_DURATION_MS;
+    }
+    return { activePoints: m.pointAt.length, mutedNow: m.muteUntil > now };
+}
+
+/**
+ * 現在ミュート中か
+ * @param {string} socketId
+ * @param {number} now
+ * @returns {boolean}
+ */
+function isChatMuted(socketId, now) {
+    const m = chatModerationBySocket.get(socketId);
+    if (!m) return false;
+    return m.muteUntil > now;
+}
+
+function addChatLog(roomId, senderName, message, senderId) {
     if (!chatLogs.has(roomId)) {
         chatLogs.set(roomId, []);
     }
     const logs = chatLogs.get(roomId);
-    logs.push({
+    const row = {
         timestamp: Date.now(),
         senderName: senderName,
         message: message
-    });
+    };
+    if (senderId) {
+        row.senderId = senderId;
+    }
+    logs.push(row);
     // Keep only last MAX_CHAT_LOGS_PER_ROOM entries
     if (logs.length > MAX_CHAT_LOGS_PER_ROOM) {
         logs.shift();
@@ -2538,10 +2707,6 @@ io.on('connection', (socket) => {
     // Track traffic (approximate via socket events)
     socket.on('player-update', () => {
         updateTrafficStats(socket.id, { bytesSent: 100, packetsSent: 1 });
-    });
-    
-    socket.on('chat-message', () => {
-        updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
     });
 
     // Join default room
@@ -3179,33 +3344,131 @@ io.on('connection', (socket) => {
     });
 
     // Handle disconnection
-    // Handle chat message
-    socket.on('chat-message', (message) => {
+    // Handle chat message（レート制限・Gemini モデレーション・ack 応答）
+    socket.on('chat-message', async (message, callback) => {
+        const now = Date.now();
+        const ack = (payload) => chatReplyAck(callback, payload);
+
+        if (chatModerationInFlight.has(socket.id)) {
+            ack({ ok: false, code: 'in_flight', message: '処理中のチャットがあります。' });
+            return;
+        }
+
         const currentRoom = socket.data.currentRoom;
-        if (!currentRoom) return;
+        if (!currentRoom) {
+            ack({ ok: false, code: 'no_room', message: 'ルームに参加していません。' });
+            return;
+        }
 
         const roomState = getRoomState(currentRoom);
         const player = roomState.players.get(socket.id);
-        
-        if (!player || !message || message.trim().length === 0) return;
 
-        const chatData = {
-            senderId: socket.id,
-            senderName: player.username,
-            message: message.trim(),
-            timestamp: Date.now()
-        };
+        if (!player || message == null || String(message).trim().length === 0) {
+            ack({ ok: false, code: 'invalid', message: '無効なメッセージです。' });
+            return;
+        }
 
-        console.log(`[CHAT] ${player.username}: ${message.trim()}`);
+        const text = String(message).trim();
 
-        // Save chat log
-        addChatLog(currentRoom, player.username, message.trim());
+        if (isChatMuted(socket.id, now)) {
+            ack({ ok: false, code: 'muted', message: 'チャットは一時的に利用できません。' });
+            return;
+        }
 
-        // Broadcast to others in room
-        socket.to(currentRoom).emit('chat-receive', chatData);
-        
-        // Echo back to sender
-        socket.emit('chat-my-message', chatData);
+        const lastOk = chatUserLastSuccessAt.get(socket.id) || 0;
+        if (now - lastOk < CHAT_USER_MIN_INTERVAL_MS) {
+            ack({ ok: false, code: 'user_rate', message: '送信間隔が短すぎます。' });
+            return;
+        }
+
+        const roomSlotId = reserveChatRoomSlot(currentRoom, now);
+        if (roomSlotId == null) {
+            ack({ ok: false, code: 'room_rate', message: '送信できませんでした' });
+            return;
+        }
+
+        const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
+        if (!apiKey) {
+            console.error('[CHAT_MOD] GEMINI_API_KEY is not set; rejecting chat');
+            ack({
+                ok: false,
+                code: 'moderation_config',
+                message: 'チャット検証が利用できません。しばらくしてから再度お試しください。',
+            });
+            releaseChatRoomSlot(currentRoom, roomSlotId);
+            return;
+        }
+
+        chatModerationInFlight.add(socket.id);
+        try {
+            const historyTableText =
+                getApprovedHistoryTableText(currentRoom, now) || '(過去の通過済みチャットはありません)';
+            const pendingLine = `${new Date(now).toISOString()} | ${socket.id} | ${text.replace(/\|/g, '｜').replace(/\r?\n/g, ' ')}`;
+
+            let moderation;
+            try {
+                moderation = await moderateChatMessage({
+                    apiKey,
+                    model: process.env.GEMINI_MODEL,
+                    historyTableText,
+                    pendingLine,
+                });
+            } catch (modErr) {
+                console.error('[CHAT_MOD] API error:', modErr);
+                releaseChatRoomSlot(currentRoom, roomSlotId);
+                ack({
+                    ok: false,
+                    code: 'moderation_error',
+                    message: 'チャットの検証に失敗しました。しばらくしてから再度お試しください。',
+                });
+                return;
+            }
+
+            if (moderation.inappropriate) {
+                const { activePoints, mutedNow } = registerChatInappropriate(socket.id, now);
+                const reason =
+                    (moderation.reason_ja && String(moderation.reason_ja).trim()) ||
+                    '不適切な内容の可能性があります。';
+                let alertText = reason;
+                if (activePoints > CHAT_POINTS_THRESHOLD_MUTE) {
+                    alertText = `${reason}（警告が多いため、しばらくチャットできません。）`;
+                }
+                socket.emit('admin-alert', { message: alertText });
+                ack({ ok: false, code: 'inappropriate', message: reason });
+                console.warn(`[CHAT_MOD] blocked socket=${socket.id} points=${activePoints} muted=${mutedNow}`);
+                return;
+            }
+
+            const chatData = {
+                senderId: socket.id,
+                senderName: player.username,
+                message: text,
+                timestamp: now,
+            };
+
+            console.log(`[CHAT] ${player.username}: ${text}`);
+            addChatLog(currentRoom, player.username, text, socket.id);
+            appendApprovedChat(
+                currentRoom,
+                {
+                    timestamp: now,
+                    senderId: socket.id,
+                    senderName: player.username,
+                    message: text,
+                },
+                now,
+            );
+
+            chatUserLastSuccessAt.set(socket.id, now);
+
+            socket.to(currentRoom).emit('chat-receive', chatData);
+            socket.emit('chat-my-message', chatData);
+            updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
+
+            ack({ ok: true });
+        } finally {
+            chatModerationInFlight.delete(socket.id);
+        }
     });
 
     // Handle emoji/stamp
