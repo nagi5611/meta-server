@@ -1071,7 +1071,7 @@ async function getClientConfigForModules() {
  * setting.js を dynamic import。ページオリジンで失敗したら moduleScriptOrigin とキャッシュバストで再試行する。
  * setting.js をデプロイし直したらこの版を上げる（ブラウザ・中間キャッシュが古いモジュールを掴み続けるのを避ける）
  */
-const SETTING_EDITOR_MODULE_VER = '2';
+const SETTING_EDITOR_MODULE_VER = '3';
 
 /**
  * @returns {Promise<{ initSettingEditor: () => Promise<void> }>}
@@ -5225,9 +5225,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // URL の ?panel= で初期表示パネルを指定（例: ?panel=world-edit）
+    // URL の ?panel= で初期表示パネルを指定（例: ?panel=panel-world-edit または従来どおり ?panel=world-edit）
     const params = new URLSearchParams(location.search);
-    const initialPanel = params.get('panel');
+    let initialPanel = params.get('panel');
+    if (initialPanel === 'world-edit') initialPanel = 'panel-world-edit';
     const validPanels = ['panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-chart', 'panel-chart-inactive'];
     if (initialPanel && validPanels.includes(initialPanel)) {
         switchPanel(initialPanel);
