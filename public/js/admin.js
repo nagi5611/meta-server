@@ -1071,7 +1071,9 @@ async function getClientConfigForModules() {
  * setting.js を dynamic import。ページオリジンで失敗したら moduleScriptOrigin とキャッシュバストで再試行する。
  * setting.js をデプロイし直したらこの版を上げる（ブラウザ・中間キャッシュが古いモジュールを掴み続けるのを避ける）
  */
-const SETTING_EDITOR_MODULE_VER = '3';
+const SETTING_EDITOR_MODULE_VER = '4';
+/** 強制再読込後に setting.js の import URL を一意にする（sessionStorage） */
+const SETTING_EDITOR_MODULE_BUST_KEY = 'ADMIN_JS_MODULE_BUST';
 
 /**
  * @returns {Promise<{ initSettingEditor: () => Promise<void> }>}
@@ -1093,10 +1095,18 @@ async function importSettingEditorModule() {
     if (modOrigin && !bases.includes(modOrigin)) bases.push(modOrigin);
 
     let lastErr = null;
+    const moduleBust = (() => {
+        try {
+            return sessionStorage.getItem(SETTING_EDITOR_MODULE_BUST_KEY);
+        } catch {
+            return null;
+        }
+    })();
+    const bustSuffix = moduleBust != null && moduleBust !== '' ? `&mb=${encodeURIComponent(moduleBust)}` : '';
     for (const base of bases) {
         for (const bust of [false, true]) {
             const qs = bust ? `&t=${Date.now()}` : '';
-            const url = `${base}/js/setting.js?v=${SETTING_EDITOR_MODULE_VER}${qs}`;
+            const url = `${base}/js/setting.js?v=${SETTING_EDITOR_MODULE_VER}${bustSuffix}${qs}`;
             try {
                 return await import(/* @vite-ignore */ url);
             } catch (e) {
@@ -1148,6 +1158,11 @@ function switchPanel(panelId) {
         }
         importSettingEditorModule()
             .then((m) => m.initSettingEditor())
+            .then(() => {
+                try {
+                    sessionStorage.removeItem(SETTING_EDITOR_MODULE_BUST_KEY);
+                } catch (_) { /* ignore */ }
+            })
             .catch((e) => {
                 console.error('Setting editor init failed:', e);
                 worldEditInitialized = false;
@@ -5305,6 +5320,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Command execution (Enter to execute) + selector tab completion
     setupCommandCompletion();
+
+    // 管理画面: SW・Cache Storage・ワールド編集ローカルキャッシュを消して完全再読み込み
+    document.getElementById('admin-cache-hard-reload')?.addEventListener('click', async () => {
+        if (
+            !confirm(
+                'Service Worker とブラウザの Cache Storage を削除し、ワールド編集のローカルキャッシュ（metaverse-admin-world-edit-cache-v1）も消します。\n次にページを再読み込みします。続けますか？',
+            )
+        ) {
+            return;
+        }
+        const btn = document.getElementById('admin-cache-hard-reload');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '処理中…';
+        }
+        try {
+            try {
+                sessionStorage.setItem(SETTING_EDITOR_MODULE_BUST_KEY, String(Date.now()));
+            } catch (_) { /* ignore */ }
+            try {
+                localStorage.removeItem('metaverse-admin-world-edit-cache-v1');
+            } catch (_) { /* ignore */ }
+            try {
+                const m = await import('/js/service-worker-register.js');
+                if (typeof m.purgeMetaverseClientCachesAndUnregisterSw === 'function') {
+                    await m.purgeMetaverseClientCachesAndUnregisterSw();
+                }
+            } catch (e) {
+                console.warn('admin cache purge:', e);
+            }
+            const u = new URL(window.location.href);
+            u.searchParams.set('_admin_rev', String(Date.now()));
+            window.location.replace(u.toString());
+        } catch (e) {
+            console.error('admin hard reload failed:', e);
+            alert('再読み込みの準備に失敗しました。');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '再読み込み（キャッシュ削除）';
+            }
+        }
+    });
 
     // メタバースへ入る（管理者）: Basic認証済みでトークン取得しメタバースへ遷移
     document.getElementById('back-to-metaverse').addEventListener('click', async () => {

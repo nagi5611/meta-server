@@ -58,3 +58,22 @@ async function registerMetaverseServiceWorkerAsync() {
         await applyStoragePressureToServiceWorker();
     } catch (_) { /* 非セキュアコンテキスト・拒否など */ }
 }
+
+/**
+ * Cache Storage をすべて削除し、このオリジンで登録された Service Worker を解除する（管理画面の強制再読み込み用）
+ * @returns {Promise<void>}
+ */
+export async function purgeMetaverseClientCachesAndUnregisterSw() {
+    if ('caches' in window) {
+        try {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+        } catch (_) { /* ignore */ }
+    }
+    if ('serviceWorker' in navigator) {
+        try {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map((r) => r.unregister()));
+        } catch (_) { /* ignore */ }
+    }
+}
