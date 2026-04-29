@@ -3341,13 +3341,23 @@ a.admin-menu-link:hover {
 }
 
 .world-load-label {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
     color: #1565c0;
-    margin-bottom: 12px;
+    margin-bottom: 6px;
+    text-align: center;
+    line-height: 1.4;
+}
+
+.world-load-asset {
+    font-size: 12px;
+    font-weight: 400;
+    color: rgba(21, 101, 192, 0.62);
+    margin: 0 0 12px;
     text-align: center;
     word-break: break-all;
     line-height: 1.45;
+    min-height: 1.45em;
 }
 
 .world-load-bar-wrap {

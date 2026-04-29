@@ -9,13 +9,13 @@ class WorldManager {
         this.currentWorld = null;
         this.onWorldChangeCallback = null;
         this.worlds = null; // Set by init() from API
-        /** @type {{ begin?: (o: { totalBytes: number }) => void, progress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void, end?: () => void } | null} */
+        /** @type {{ begin?: (o: { totalBytes: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }) => void, end?: () => void } | null} */
         this._worldLoadUi = null;
     }
 
     /**
      * ワールド読み込み中のロードバー等（メインクライアントから登録）
-     * @param {{ begin?: (o: { totalBytes: number }) => void, progress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void, end?: () => void } | null} handlers
+     * @param {{ begin?: (o: { totalBytes: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }) => void, end?: () => void } | null} handlers
      */
     setWorldLoadUiHandlers(handlers) {
         this._worldLoadUi = handlers || null;
@@ -112,6 +112,9 @@ class WorldManager {
 
         /** @type {{ completedBytes: number, totalBytes: number }} */
         const loadState = { completedBytes: 0, totalBytes: 0 };
+        if (totalAssets > 0) {
+            this._worldLoadUi?.begin?.({ totalBytes: 0, preparing: true });
+        }
         const bytePlan = totalAssets > 0
             ? await this.sceneManager.planWorldLoadBytes(world.models, world.pdfs || [])
             : null;
@@ -119,16 +122,12 @@ class WorldManager {
             loadState.totalBytes = bytePlan.totalBytes;
         }
 
-        const onByteProgress = ({ fileName, loadedBytes, totalBytes }) => {
-            this._worldLoadUi?.progress?.({
-                fileName,
-                loadedBytes,
-                totalBytes
-            });
+        const onByteProgress = (detail) => {
+            this._worldLoadUi?.progress?.(detail);
         };
 
         if (totalAssets > 0 && bytePlan) {
-            this._worldLoadUi?.begin?.({ totalBytes: bytePlan.totalBytes });
+            this._worldLoadUi?.begin?.({ totalBytes: bytePlan.totalBytes, preparing: false });
         }
 
         try {

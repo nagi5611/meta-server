@@ -22,6 +22,7 @@ class UIManager {
         this.onWatchVideo = null;
         this.worldLoadOverlay = null;
         this.worldLoadLabel = null;
+        this.worldLoadAsset = null;
         this.worldLoadBarFill = null;
         this.worldLoadPct = null;
         /** @type {HTMLElement|null} */
@@ -138,6 +139,7 @@ class UIManager {
 
         this.worldLoadOverlay = document.getElementById('world-load-overlay');
         this.worldLoadLabel = document.getElementById('world-load-label');
+        this.worldLoadAsset = document.getElementById('world-load-asset');
         this.worldLoadBarFill = document.getElementById('world-load-bar-fill');
         this.worldLoadPct = document.getElementById('world-load-pct');
 
@@ -204,14 +206,30 @@ class UIManager {
 
     /**
      * ワールドアセット読み込み開始時にオーバーを表示する
-     * @param {number} totalBytes - 読み込み予定の総バイト数（0 のときは空ワールド扱い）
+     * @param {number} totalBytes - 読み込み予定の総バイト数（準備フェーズでは 0）
+     * @param {{ preparing?: boolean }} [opts] - preparing: planWorldLoadBytes 前（署名・HEAD 等）
      */
-    showWorldLoadProgress(totalBytes) {
+    showWorldLoadProgress(totalBytes, opts = {}) {
         if (!this.worldLoadOverlay || !this.worldLoadLabel || !this.worldLoadBarFill) return;
+        const preparing = !!opts.preparing;
         this.worldLoadOverlay.style.display = 'flex';
         this.worldLoadOverlay.setAttribute('aria-busy', 'true');
         this.worldLoadOverlay.setAttribute('aria-hidden', 'false');
+        if (preparing) {
+            this.worldLoadLabel.textContent = 'ワールドを読み込んでいます';
+            if (this.worldLoadAsset) {
+                this.worldLoadAsset.textContent = '接続・署名・容量を確認しています…';
+            }
+            this.worldLoadBarFill.style.width = '0%';
+            if (this.worldLoadPct) {
+                this.worldLoadPct.textContent = '—';
+            }
+            return;
+        }
         this.worldLoadLabel.textContent = '読み込み中…';
+        if (this.worldLoadAsset) {
+            this.worldLoadAsset.textContent = '';
+        }
         const initialPct = totalBytes > 0 ? 0 : 100;
         this.worldLoadBarFill.style.width = `${initialPct}%`;
         if (this.worldLoadPct) {
@@ -221,14 +239,22 @@ class UIManager {
 
     /**
      * 読み込み中ファイル名とプログレスバーを更新する（総バイトベース）
-     * @param {string} fileName - 例: xxx.glb
-     * @param {number} loadedBytes - 現在までに読み込んだバイト相当
-     * @param {number} totalBytes - 見積もり総バイト数
+     * @param {{ fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }} detail
      */
-    updateWorldLoadProgress(fileName, loadedBytes, totalBytes) {
+    updateWorldLoadProgress(detail) {
         if (!this.worldLoadLabel || !this.worldLoadBarFill) return;
+        const { fileName, loadedBytes, totalBytes, loadKind, prefabTitle } = detail || {};
         const name = (fileName && String(fileName).trim()) || '—';
-        this.worldLoadLabel.textContent = `読み込み中（${name}）`;
+        this.worldLoadLabel.textContent = '読み込み中…';
+        if (this.worldLoadAsset) {
+            if (loadKind === 'prefab' && prefabTitle && String(prefabTitle).trim()) {
+                const t = String(prefabTitle).trim();
+                this.worldLoadAsset.textContent =
+                    name && name !== '—' ? `プレハブ「${t}」 — ${name}` : `プレハブ「${t}」`;
+            } else {
+                this.worldLoadAsset.textContent = name;
+            }
+        }
         const t = Math.max(1, Math.floor(Number(totalBytes)) || 1);
         const c = Math.min(Math.max(0, Number(loadedBytes) || 0), t);
         const pct = Math.round((c / t) * 100);
@@ -249,6 +275,9 @@ class UIManager {
         this.worldLoadBarFill.style.width = '0%';
         if (this.worldLoadPct) {
             this.worldLoadPct.textContent = '0%';
+        }
+        if (this.worldLoadAsset) {
+            this.worldLoadAsset.textContent = '';
         }
     }
 

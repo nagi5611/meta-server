@@ -662,7 +662,8 @@ class SceneManager {
                             wObj: FALLBACK,
                             contentLenObj: null,
                             prefabManifestPath: pfm,
-                            prefabManifestPlan: null
+                            prefabManifestPlan: null,
+                            prefabDisplayName: ''
                         },
                         bytes: FALLBACK
                     };
@@ -679,7 +680,8 @@ class SceneManager {
                             wObj: FALLBACK,
                             contentLenObj: null,
                             prefabManifestPath: pfm,
-                            prefabManifestPlan: null
+                            prefabManifestPlan: null,
+                            prefabDisplayName: String(man.displayName || '').trim()
                         },
                         bytes: FALLBACK
                     };
@@ -706,7 +708,8 @@ class SceneManager {
                         wObj: Math.max(1, sum),
                         contentLenObj: null,
                         prefabManifestPath: pfm,
-                        prefabManifestPlan: { parts: man.parts }
+                        prefabManifestPlan: { parts: man.parts },
+                        prefabDisplayName: String(man.displayName || '').trim()
                     },
                     bytes: Math.max(1, sum)
                 };
@@ -721,7 +724,8 @@ class SceneManager {
                         wObj: FALLBACK,
                         contentLenObj: null,
                         prefabManifestPath: pfm,
-                        prefabManifestPlan: null
+                        prefabManifestPlan: null,
+                        prefabDisplayName: ''
                     },
                     bytes: FALLBACK
                 };
@@ -833,7 +837,7 @@ class SceneManager {
      * Load multiple world models
      * @param {Array<Object|string>} modelConfigs - Array of model configs or paths
      * @param {function} onComplete - Callback when all models are loaded
-     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void, worldAircraftPhysics?: Record<string, unknown>|null }} [loadOptions]
+     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }) => void, worldAircraftPhysics?: Record<string, unknown>|null }} [loadOptions]
      */
     async loadWorldModels(modelConfigs, onComplete, loadOptions = {}) {
         const { bytePlan, loadState, onByteProgress, worldAircraftPhysics, worldLodSystem } = loadOptions;
@@ -862,8 +866,9 @@ class SceneManager {
         /**
          * モデルごとの進捗率から loadState / コールバックを更新（複数モデル同時読込用）
          * @param {string} fileName
+         * @param {Record<string, string>} [extra]
          */
-        const aggregateProgress = (fileName) => {
+        const aggregateProgress = (fileName, extra = {}) => {
             if (!useAggregatedProgress || !loadState || !bytePlan || !modelProgressFrac) return;
             let sum = 0;
             for (let i = 0; i < modelCount; i++) {
@@ -871,7 +876,7 @@ class SceneManager {
                 if (p) sum += modelProgressFrac[i] * p.totalFileBytes;
             }
             loadState.completedBytes = Math.min(tb, sum);
-            onByteProgress?.({ fileName, loadedBytes: loadState.completedBytes, totalBytes: tb });
+            onByteProgress?.({ fileName, loadedBytes: loadState.completedBytes, totalBytes: tb, ...extra });
         };
 
         /**
@@ -880,12 +885,13 @@ class SceneManager {
          * @param {string} fileName
          * @param {number} bytesDoneInModel
          * @param {number} fileBudget
+         * @param {Record<string, string>} [extra]
          */
-        const setModelBytesProgress = (idx, fileName, bytesDoneInModel, fileBudget) => {
+        const setModelBytesProgress = (idx, fileName, bytesDoneInModel, fileBudget, extra = {}) => {
             if (!modelProgressFrac) return;
             const denom = fileBudget > 0 ? fileBudget : 1;
             modelProgressFrac[idx] = Math.min(1, bytesDoneInModel / denom);
-            aggregateProgress(fileName);
+            aggregateProgress(fileName, extra);
         };
 
         /**
@@ -895,13 +901,14 @@ class SceneManager {
          * @param {number} totalInFile
          * @param {number} fileBudget
          * @param {number} baseBytes
+         * @param {Record<string, string>} [extra]
          */
-        const emitFromBase = (fileName, loadedInFile, totalInFile, fileBudget, baseBytes) => {
+        const emitFromBase = (fileName, loadedInFile, totalInFile, fileBudget, baseBytes, extra = {}) => {
             if (useAggregatedProgress || !onByteProgress || !bytePlan || !loadState) return;
             const denom = totalInFile > 0 ? totalInFile : fileBudget;
             const frac = denom > 0 ? Math.min(1, loadedInFile / denom) : 0;
             const loadedBytes = Math.min(tb, baseBytes + frac * fileBudget);
-            onByteProgress({ fileName, loadedBytes, totalBytes: tb });
+            onByteProgress({ fileName, loadedBytes, totalBytes: tb, ...extra });
         };
 
         /**
@@ -1018,14 +1025,25 @@ class SceneManager {
                     : 'model');
             const fileBudget = plan?.totalFileBytes ?? (5 * 1024 * 1024);
             const fileStart = useAggregatedProgress ? 0 : (loadState?.completedBytes ?? 0);
+            const progressExtraPrefab =
+                pfm
+                    ? {
+                        loadKind: 'prefab',
+                        prefabTitle:
+                            (plan?.prefabDisplayName && String(plan.prefabDisplayName).trim())
+                            || fileLabel.replace(/-prefab-manifest\.json$/i, '').replace(/\.json$/i, '')
+                            || fileLabel
+                    }
+                    : {};
 
             /**
              * 読み込み失敗・棄却時でもバーが止まらないよう、このアセット分の見積バイトを進捗に反映する
              */
             const snapBudgetDone = () => {
+                const extra = pfm ? progressExtraPrefab : {};
                 if (useAggregatedProgress && modelProgressFrac && loadState && bytePlan) {
                     modelProgressFrac[idx] = 1;
-                    aggregateProgress(plan?.fileLabel || fileLabel);
+                    aggregateProgress(plan?.fileLabel || fileLabel, extra);
                     return;
                 }
                 if (!loadState || !bytePlan || !plan) return;
@@ -1033,7 +1051,8 @@ class SceneManager {
                 onByteProgress?.({
                     fileName: plan.fileLabel,
                     loadedBytes: loadState.completedBytes,
-                    totalBytes: tb
+                    totalBytes: tb,
+                    ...extra
                 });
             };
 
@@ -1061,7 +1080,7 @@ class SceneManager {
                             const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
                             const doneInModel = (partIndex + f) * partW;
                             if (useAggregatedProgress) {
-                                setModelBytesProgress(idx, name || fileLabel, doneInModel, fileBudget);
+                                setModelBytesProgress(idx, name || fileLabel, doneInModel, fileBudget, progressExtraPrefab);
                             } else {
                                 const effIdx = partIndex;
                                 const basePart = fileStart + effIdx * partW;
@@ -1070,7 +1089,8 @@ class SceneManager {
                                     xhr.loaded,
                                     xhr.total || 0,
                                     partW,
-                                    basePart
+                                    basePart,
+                                    progressExtraPrefab
                                 );
                             }
                         }
@@ -1097,7 +1117,7 @@ class SceneManager {
                     if (loadState) {
                         if (useAggregatedProgress && modelProgressFrac) {
                             modelProgressFrac[idx] = 1;
-                            aggregateProgress(plan?.fileLabel || fileLabel);
+                            aggregateProgress(plan?.fileLabel || fileLabel, progressExtraPrefab);
                         } else {
                             loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
                         }
@@ -1242,7 +1262,7 @@ class SceneManager {
                 if (loadState) {
                     if (useAggregatedProgress && modelProgressFrac) {
                         modelProgressFrac[idx] = 1;
-                        aggregateProgress(plan?.fileLabel || fileLabel);
+                        aggregateProgress(plan?.fileLabel || fileLabel, {});
                     } else {
                         loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
                     }

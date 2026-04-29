@@ -181,9 +181,8 @@ class MetaverseApp {
         await this.worldManager.init();
 
         this.worldManager.setWorldLoadUiHandlers({
-            begin: ({ totalBytes }) => this.uiManager.showWorldLoadProgress(totalBytes),
-            progress: ({ fileName, loadedBytes, totalBytes }) =>
-                this.uiManager.updateWorldLoadProgress(fileName, loadedBytes, totalBytes),
+            begin: (opts) => this.uiManager.showWorldLoadProgress(opts.totalBytes, opts),
+            progress: (detail) => this.uiManager.updateWorldLoadProgress(detail),
             end: () => this.uiManager.hideWorldLoadProgress()
         });
 

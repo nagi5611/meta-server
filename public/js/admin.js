@@ -5331,9 +5331,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const btn = document.getElementById('admin-cache-hard-reload');
+        const adminHardReloadIconHtml = '<i class="bi bi-arrow-clockwise" aria-hidden="true"></i>';
         if (btn) {
             btn.disabled = true;
-            btn.textContent = '処理中…';
+            btn.innerHTML =
+                '<i class="bi bi-arrow-clockwise admin-cache-hard-reload-spin" aria-hidden="true"></i>';
         }
         try {
             try {
@@ -5358,7 +5360,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('再読み込みの準備に失敗しました。');
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = '再読み込み（キャッシュ削除）';
+                btn.innerHTML = adminHardReloadIconHtml;
             }
         }
     });

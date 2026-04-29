@@ -3294,6 +3294,17 @@ section h2 {
     color: #333;
 }
 
+@keyframes admin-cache-hard-reload-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.admin-cache-hard-reload-spin {
+    display: inline-block;
+    animation: admin-cache-hard-reload-spin 0.75s linear infinite;
+}
+
 /* ========== ダークモード (#1b1a15 / #14120b) ========== */
 body.admin-dark {
     background: #1b1a15;
