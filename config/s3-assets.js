@@ -96,6 +96,15 @@ export function isS3ModelsConfigComplete() {
     return !!(AWS_REGION && S3_BUCKET && CLOUDFRONT_BASE_URL_RAW && CLOUDFRONT_KEY_PAIR_ID);
 }
 
+/**
+ * PutObject / DeleteObject / 起動時同期に最低限必要な設定（CloudFront 署名は不要）
+ * @returns {boolean}
+ */
+export function isS3ModelsBucketConfigured() {
+    if (!USE_S3_MODELS) return false;
+    return !!(AWS_REGION && S3_BUCKET);
+}
+
 if (USE_S3_MODELS && !(AWS_REGION && S3_BUCKET && CLOUDFRONT_BASE_URL_RAW)) {
     console.warn(
         '[s3-assets] USE_S3_MODELS=1 but AWS_REGION / META_MODELS_S3_BUCKET / META_CDN_PUBLIC_BASE (or CLOUDFRONT_BASE_URL) is incomplete.',

@@ -34,7 +34,7 @@ import {
 } from './lib/prefab-bundle-upload.js';
 import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } from './lib/chart-bgm-transcode.js';
 import { normalizeWorldsLod } from './public/js/world-lod-normalize.js';
-import { USE_S3_MODELS, isS3ModelsConfigComplete, normalizedCdnBaseUrl } from './config/s3-assets.js';
+import { USE_S3_MODELS, isS3ModelsConfigComplete, isS3ModelsBucketConfigured, normalizedCdnBaseUrl } from './config/s3-assets.js';
 import { insertVersionBeforeExt, createModelVersionToken } from './lib/model-upload-version.js';
 import {
     uploadLocalModelsPathsOrRollbackS3,
@@ -43,6 +43,7 @@ import {
     canonicalCdnUrlForModelsRelative,
     tryUnlinkQuiet,
     publicAssetUrlCacheForModels,
+    deleteS3ModelObjectsByRelativePosix,
 } from './lib/s3-model-assets.js';
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
 
@@ -4772,7 +4773,7 @@ const STORAGE_BULK_DELETE_MAX = 500;
  * @param {string} storeRoot
  * @param {string} relPath
  * @param {{ missingOk?: boolean }} [options]
- * @returns {{ success: true, invUrls: string[], skipped?: boolean } | { success: false, error: string, invUrls: [] }}
+ * @returns {{ success: true, invUrls: string[], skipped?: boolean, s3ModelRelPaths?: string[] } | { success: false, error: string, invUrls: [] }}
  */
 function performStorageFileDelete(store, storeRoot, relPath, options) {
     const missingOk = !!(options && options.missingOk);
@@ -4800,12 +4801,15 @@ function performStorageFileDelete(store, storeRoot, relPath, options) {
                 for (const rp of relPaths) {
                     invUrls.push(publicAssetUrlForCache('models', rp));
                 }
-                return { success: true, invUrls, skipped: false };
+                return { success: true, invUrls, skipped: false, s3ModelRelPaths: relPaths };
             }
         }
         fs.unlinkSync(fileAbs);
         const mainRel = path.relative(storeRoot, fileAbs).split(path.sep).join('/');
         invUrls.push(publicAssetUrlForCache(/** @type {'models' | 'pdfs' | 'env' | 'images' | 'chart-bgm'} */ (store), mainRel));
+        if (store === 'models') {
+            return { success: true, invUrls, skipped: false, s3ModelRelPaths: [mainRel] };
+        }
         return { success: true, invUrls, skipped: false };
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -4813,7 +4817,7 @@ function performStorageFileDelete(store, storeRoot, relPath, options) {
     }
 }
 
-app.delete('/admin/storage-files', (req, res) => {
+app.delete('/admin/storage-files', async (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const store = typeof body.store === 'string' ? body.store.trim() : '';
     const storeRoot = STORAGE_FILE_STORE_ROOTS[/** @type {keyof typeof STORAGE_FILE_STORE_ROOTS} */ (store)];
@@ -4838,13 +4842,20 @@ app.delete('/admin/storage-files', (req, res) => {
         console.error('DELETE /admin/storage-files error:', result.error);
         return res.status(500).json({ error: 'Failed to delete file' });
     }
+    if (result.success && store === 'models' && result.s3ModelRelPaths?.length) {
+        try {
+            await deleteS3ModelObjectsByRelativePosix(result.s3ModelRelPaths);
+        } catch (e) {
+            console.error('DELETE /admin/storage-files S3:', e);
+        }
+    }
     if (result.invUrls.length) {
         io.emit('asset-invalidate', { urls: result.invUrls });
     }
     res.json({ success: true, deletedUrls: result.invUrls });
 });
 
-app.post('/admin/storage-files/bulk-delete', (req, res) => {
+app.post('/admin/storage-files/bulk-delete', async (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const store = typeof body.store === 'string' ? body.store.trim() : '';
     const storeRoot = STORAGE_FILE_STORE_ROOTS[/** @type {keyof typeof STORAGE_FILE_STORE_ROOTS} */ (store)];
@@ -4872,14 +4883,26 @@ app.post('/admin/storage-files/bulk-delete', (req, res) => {
     const allInvUrls = [];
     /** @type {{ relativePath: string, error: string }[]} */
     const errors = [];
+    /** @type {string[]} */
+    const allS3ModelRelPaths = [];
     let deletedCount = 0;
     for (const relPath of paths) {
         const result = performStorageFileDelete(store, storeRoot, relPath, { missingOk: true });
         if (result.success) {
             allInvUrls.push(...result.invUrls);
+            if (store === 'models' && result.s3ModelRelPaths?.length) {
+                allS3ModelRelPaths.push(...result.s3ModelRelPaths);
+            }
             if (!result.skipped) deletedCount++;
         } else {
             errors.push({ relativePath: relPath, error: result.error });
+        }
+    }
+    if (store === 'models' && allS3ModelRelPaths.length) {
+        try {
+            await deleteS3ModelObjectsByRelativePosix([...new Set(allS3ModelRelPaths)]);
+        } catch (e) {
+            console.error('POST /admin/storage-files/bulk-delete S3:', e);
         }
     }
     if (allInvUrls.length) {
@@ -4954,7 +4977,7 @@ app.post('/admin/upload-prefab-zip', uploadPrefabZip.single('zip'), async (req, 
             }
             return res.status(result.status).json({ error: result.error, code: result.code });
         }
-        if (USE_S3_MODELS && isS3ModelsConfigComplete()) {
+        if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
             try {
                 const absPaths = result.writtenFiles.map((f) => path.join(MODELS_DIR, f));
                 await uploadLocalModelsPathsOrRollbackS3(absPaths, MODELS_DIR);
@@ -5113,7 +5136,7 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
             invUrls.push(publicAssetUrlForCache('models', filename));
         }
 
-        if (USE_S3_MODELS && isS3ModelsConfigComplete()) {
+        if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
             try {
                 const absList = pathsToUndoOnFail.slice();
                 await uploadLocalModelsPathsOrRollbackS3(absList, MODELS_DIR);
@@ -5883,7 +5906,7 @@ function formatBytes(bytes) {
     await createPdfWorkers();
     await createVideoVcWorkers();
 
-    if (USE_S3_MODELS && isS3ModelsConfigComplete()) {
+    if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
         try {
             const r = await syncLocalModelsToS3OnStartup(MODELS_DIR);
             console.log('[s3-sync] startup', r);
