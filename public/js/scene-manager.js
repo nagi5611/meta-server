@@ -28,6 +28,7 @@ import {
 } from './model-load-limits.js';
 import { mergeAircraftPhysicsForObject } from './aircraft-physics-defaults.js';
 import { loadPrefabGroupFromManifest, normalizePrefabManifest } from './prefab-load-shared.js';
+import { loadClientConfigOnce } from './asset-resolve.js';
 
 /**
  * 足元 p・半径 R の球と AABB（ワールド空間 min/max）が交差するか
@@ -91,9 +92,6 @@ function lodDistanceFeetToPrefabBounds(feetWorld, box, centerOut) {
     return distancePointToAabb(feetWorld, box.min, box.max);
 }
 
-/** ワールド複数モデル読み込みの同時実行数（キャッシュヒット時の直列待ちを緩和） */
-const WORLD_MODEL_LOAD_CONCURRENCY = 24;
-
 /** Prefab LOD 境界のヒステリシス（±5%） */
 const PREFAB_LOD_HYSTERESIS = 0.05;
 
@@ -118,6 +116,23 @@ async function runWithConcurrency(concurrency, factories) {
     const workers = Math.min(Math.max(1, concurrency), Math.max(1, n));
     await Promise.all(Array.from({ length: workers }, () => worker()));
     return results;
+}
+
+/**
+ * /api/client-config の planLoadConcurrency（サーバー .env METAVERSE_PLAN_LOAD_CONCURRENCY）。1..128。
+ * @returns {Promise<number>}
+ */
+async function getClientPlanLoadConcurrency() {
+    const fallback = 24;
+    try {
+        const j = await loadClientConfigOnce();
+        const n = j && typeof j === 'object' ? j.planLoadConcurrency : undefined;
+        const num = Number(n);
+        if (Number.isFinite(num) && num >= 1) return Math.min(128, Math.floor(num));
+    } catch {
+        /* ignore */
+    }
+    return fallback;
 }
 
 class SceneManager {
@@ -639,9 +654,10 @@ class SceneManager {
      * @param {Object|string} config
      * @param {number} idx
      * @param {number} FALLBACK
+     * @param {number} concurrency - プレハブパーツ見積の同時実行上限（/api/client-config planLoadConcurrency）
      * @returns {Promise<{ idx: number, entry: object, bytes: number }|null>}
      */
-    async _planWorldLoadBytesForModel(config, idx, FALLBACK) {
+    async _planWorldLoadBytesForModel(config, idx, FALLBACK, concurrency) {
         const fullConfig = typeof config === 'string' ? { path: config } : config;
         const pfm = String(fullConfig.prefabManifest || '').trim();
         if (pfm) {
@@ -687,14 +703,18 @@ class SceneManager {
                     };
                 }
                 const nP = man.parts.length;
+                const partFactories = man.parts.map(
+                    (part) => async () => {
+                        const fp = part.file.startsWith('models/') ? part.file : `models/${part.file}`;
+                        const u = await this._resolveModelHref(fp);
+                        const len = await fetchModelContentLength(u);
+                        const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / nP));
+                        return w;
+                    }
+                );
+                const partWidths = await runWithConcurrency(concurrency, partFactories);
                 let sum = 0;
-                for (const part of man.parts) {
-                    const fp = part.file.startsWith('models/') ? part.file : `models/${part.file}`;
-                    const u = await this._resolveModelHref(fp);
-                    const len = await fetchModelContentLength(u);
-                    const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / nP));
-                    sum += w;
-                }
+                for (const w of partWidths) sum += w;
                 const mLen = await fetchModelContentLength(mUrl);
                 if (mLen != null && mLen > 0) {
                     sum += mLen;
@@ -797,11 +817,12 @@ class SceneManager {
      */
     async planWorldLoadBytes(modelConfigs, pdfConfigs) {
         const FALLBACK = 5 * 1024 * 1024;
+        const conc = await getClientPlanLoadConcurrency();
         const list = Array.isArray(modelConfigs) ? modelConfigs : [];
         const modelFactories = list.map(
-            (config, idx) => () => this._planWorldLoadBytesForModel(config, idx, FALLBACK)
+            (config, idx) => () => this._planWorldLoadBytesForModel(config, idx, FALLBACK, conc)
         );
-        const modelSlots = await runWithConcurrency(WORLD_MODEL_LOAD_CONCURRENCY, modelFactories);
+        const modelSlots = await runWithConcurrency(conc, modelFactories);
 
         const modelByIndex = new Map();
         let totalBytes = 0;
@@ -823,7 +844,7 @@ class SceneManager {
                 return { idx, entry: { fileLabel, totalFileBytes: totalFile }, bytes: totalFile };
             };
         });
-        const pdfSlots = await runWithConcurrency(WORLD_MODEL_LOAD_CONCURRENCY, pdfFactories);
+        const pdfSlots = await runWithConcurrency(conc, pdfFactories);
         const pdfByIndex = new Map();
         for (const slot of pdfSlots) {
             pdfByIndex.set(slot.idx, slot.entry);
@@ -859,7 +880,8 @@ class SceneManager {
         const modelCount = modelConfigs.length;
         /** bytePlan+loadState が無い場合は進捗の都合で並列度1 */
         const useAggregatedProgress = !!(bytePlan && loadState);
-        const concurrency = useAggregatedProgress ? WORLD_MODEL_LOAD_CONCURRENCY : 1;
+        const planConc = await getClientPlanLoadConcurrency();
+        const concurrency = useAggregatedProgress ? planConc : 1;
         /** @type {Float64Array|null} */
         const modelProgressFrac = useAggregatedProgress ? new Float64Array(modelCount) : null;
 

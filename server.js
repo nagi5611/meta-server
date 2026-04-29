@@ -91,6 +91,20 @@ const MODULE_SCRIPT_ORIGIN = (() => {
 /** /js モジュールに CORS を付与（静的ページと API のオリジンが異なる場合）。値は * か 1 件の Origin */
 const MODULE_SCRIPT_CORS_ORIGIN = String(process.env.MODULE_SCRIPT_CORS_ORIGIN || '').trim();
 
+/**
+ * ブラウザの planWorldLoadBytes / loadWorldModels 同時実行上限（モデル・PDF・プレハブパーツ見積を共通）。1..128、既定 24。
+ * @returns {number}
+ */
+function getPlanLoadConcurrencyFromEnv() {
+    const raw = process.env.METAVERSE_PLAN_LOAD_CONCURRENCY;
+    if (raw == null || String(raw).trim() === '') return 24;
+    const n = parseInt(String(raw), 10);
+    if (!Number.isFinite(n)) return 24;
+    return Math.min(128, Math.max(1, n));
+}
+/** @type {number} client-config でブラウザへ渡す値（起動時に確定） */
+const PLAN_LOAD_CONCURRENCY = getPlanLoadConcurrencyFromEnv();
+
 // Worlds config file (setting.html)
 const WORLDS_PATH = STORAGE_PATHS.WORLDS_PATH;
 /** 接続直後・change-world・admin-tp 後に Y クランプを抑止する時間（ms） */
@@ -5252,6 +5266,7 @@ app.get('/api/client-config', (req, res) => {
     res.json({
         chartFeaturesEnabled: CHART_FEATURES_ENABLED,
         moduleScriptOrigin: MODULE_SCRIPT_ORIGIN,
+        planLoadConcurrency: PLAN_LOAD_CONCURRENCY,
         assetModels: {
             mode: USE_S3_MODELS ? 'cdn' : 'local',
             cdnBaseUrl: USE_S3_MODELS ? normalizedCdnBaseUrl() : null,
