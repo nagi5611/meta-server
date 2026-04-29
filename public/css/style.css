@@ -797,6 +797,39 @@ body {
     line-height: 1.4;
 }
 
+.chat-moderation-warn-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+
+.chat-moderation-warn-label {
+    font-size: 12px;
+    color: #b45309;
+    font-weight: 600;
+}
+
+.chat-moderation-reveal-btn {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(2, 136, 209, 0.12);
+    color: #0288d1;
+    cursor: pointer;
+    line-height: 1.2;
+}
+
+.chat-moderation-reveal-btn:hover {
+    background: rgba(2, 136, 209, 0.22);
+}
+
+.chat-moderation-body {
+    margin-top: 6px;
+}
+
 .chat-message.system-message {
     background: rgba(147, 197, 253, 0.2);
     border-left-color: #0288d1;

@@ -2016,6 +2016,13 @@ const CHAT_POINTS_THRESHOLD_MUTE = 10;
 const CHAT_APPROVED_MAX_AGE_MS = 60 * 60 * 1000;
 const CHAT_APPROVED_MAX_ENTRIES = 300;
 
+/** 完全ブロック時の alert 文言プレフィックス（AI の reason が続く） */
+const CHAT_ALERT_FULL_BLOCK =
+    'チャット警告。今のチャットをブロックしました。理由は以下のとおりです。\n\n';
+/** 警告付き共有時の alert 文言プレフィックス */
+const CHAT_ALERT_WARN_SHARE =
+    'チャット警告。他のユーザーには警告表示付きで表示されます。理由は以下のとおりです。\n\n';
+
 /** @type {Map<string, number>} */
 const chatUserLastSuccessAt = new Map();
 /** @type {Map<string, Array<{ ts: number, id: number }>>} ルーム1秒窓の送信枠（モデレーション待ち含む） */
@@ -3425,17 +3432,63 @@ io.on('connection', (socket) => {
             }
 
             if (moderation.inappropriate) {
-                const { activePoints, mutedNow } = registerChatInappropriate(socket.id, now);
                 const reason =
                     (moderation.reason_ja && String(moderation.reason_ja).trim()) ||
                     '不適切な内容の可能性があります。';
-                let alertText = reason;
-                if (activePoints > CHAT_POINTS_THRESHOLD_MUTE) {
-                    alertText = `${reason}（警告が多いため、しばらくチャットできません。）`;
+                const absoluteBlock = moderation.absolute_broadcast_block === true;
+                const { activePoints, mutedNow } = registerChatInappropriate(socket.id, now);
+                const muteTail =
+                    activePoints > CHAT_POINTS_THRESHOLD_MUTE
+                        ? '\n\n（警告が多いため、しばらくチャットできません。）'
+                        : '';
+
+                const noBroadcastToOthers =
+                    absoluteBlock || activePoints > CHAT_POINTS_THRESHOLD_MUTE;
+
+                if (noBroadcastToOthers) {
+                    socket.emit('admin-alert', {
+                        message: CHAT_ALERT_FULL_BLOCK + reason + muteTail,
+                    });
+                    ack({ ok: false, code: 'inappropriate', message: reason });
+                    console.warn(
+                        `[CHAT_MOD] blocked socket=${socket.id} points=${activePoints} absolute=${absoluteBlock} muted=${mutedNow}`,
+                    );
+                    return;
                 }
-                socket.emit('admin-alert', { message: alertText });
-                ack({ ok: false, code: 'inappropriate', message: reason });
-                console.warn(`[CHAT_MOD] blocked socket=${socket.id} points=${activePoints} muted=${mutedNow}`);
+
+                socket.emit('admin-alert', {
+                    message: CHAT_ALERT_WARN_SHARE + reason,
+                });
+
+                const chatDataBase = {
+                    senderId: socket.id,
+                    senderName: player.username,
+                    message: text,
+                    timestamp: now,
+                };
+                const chatDataOthers = { ...chatDataBase, moderationWarning: true };
+                const chatDataSelf = { ...chatDataBase, moderationWarning: false };
+
+                console.log(`[CHAT] ${player.username}: ${text} (moderation warning to others)`);
+                addChatLog(currentRoom, player.username, text, socket.id);
+                appendApprovedChat(
+                    currentRoom,
+                    {
+                        timestamp: now,
+                        senderId: socket.id,
+                        senderName: player.username,
+                        message: text,
+                    },
+                    now,
+                );
+
+                chatUserLastSuccessAt.set(socket.id, now);
+
+                socket.to(currentRoom).emit('chat-receive', chatDataOthers);
+                socket.emit('chat-my-message', chatDataSelf);
+                updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
+
+                ack({ ok: true });
                 return;
             }
 

@@ -178,50 +178,97 @@ class ChatManager {
         });
     }
 
+    /**
+     * チャット1件を描画する。他者向け moderationWarning では本文を隠し目アイコンで切替
+     * @param {{ senderName: string, senderId: string, message: string, timestamp?: number, moderationWarning?: boolean }} data
+     * @param {boolean} isOwnMessage
+     */
     addChatMessage(data, isOwnMessage = false) {
         const messageDiv = document.createElement('div');
         messageDiv.className = 'chat-message';
-        
+
         if (isOwnMessage) {
             messageDiv.classList.add('my-message');
         }
 
-        // Check for mentions
+        const showModerationUi = data.moderationWarning === true && !isOwnMessage;
+
+        // Check for mentions（本文は data.message を参照）
         const mentions = this.extractMentions(data.message);
-        const isMentioned = mentions.some(m => m === `@${this.myUsername}`);
-        
+        const isMentioned = mentions.some((m) => m === `@${this.myUsername}`);
+
         if (isMentioned && !isOwnMessage) {
             messageDiv.classList.add('mention');
             this.playMentionSound();
         }
 
-        // Create message header
         const messageHeader = document.createElement('div');
         messageHeader.className = 'message-header';
         messageHeader.textContent = data.senderName;
 
-        // Add timestamp
         const messageTime = document.createElement('span');
         messageTime.className = 'message-time';
         const time = new Date(data.timestamp || Date.now());
-        messageTime.textContent = time.toLocaleTimeString('ja-JP', { 
-            hour: '2-digit', 
-            minute: '2-digit' 
+        messageTime.textContent = time.toLocaleTimeString('ja-JP', {
+            hour: '2-digit',
+            minute: '2-digit',
         });
         messageHeader.appendChild(messageTime);
 
-        // Create message text
-        const messageText = document.createElement('div');
-        messageText.className = 'message-text';
-        messageText.innerHTML = this.formatChatMessageHtml(data.message);
-
         messageDiv.appendChild(messageHeader);
-        messageDiv.appendChild(messageText);
+
+        if (showModerationUi) {
+            const warnRow = document.createElement('div');
+            warnRow.className = 'chat-moderation-warn-row';
+            const warnLabel = document.createElement('span');
+            warnLabel.className = 'chat-moderation-warn-label';
+            warnLabel.textContent = '不適切な内容である可能性があります';
+            const eyeBtn = document.createElement('button');
+            eyeBtn.type = 'button';
+            eyeBtn.className = 'chat-moderation-reveal-btn';
+            eyeBtn.setAttribute('aria-label', 'チャット内容を表示または隠す');
+            eyeBtn.title = '内容を表示';
+            eyeBtn.innerHTML = '<i class="bi bi-eye" aria-hidden="true"></i>';
+
+            const bodyWrap = document.createElement('div');
+            bodyWrap.className = 'chat-moderation-body';
+            bodyWrap.hidden = true;
+
+            const messageText = document.createElement('div');
+            messageText.className = 'message-text';
+            messageText.innerHTML = this.formatChatMessageHtml(data.message);
+
+            bodyWrap.appendChild(messageText);
+            warnRow.appendChild(warnLabel);
+            warnRow.appendChild(eyeBtn);
+            messageDiv.appendChild(warnRow);
+            messageDiv.appendChild(bodyWrap);
+
+            eyeBtn.addEventListener('click', () => {
+                bodyWrap.hidden = !bodyWrap.hidden;
+                const icon = eyeBtn.querySelector('i');
+                if (bodyWrap.hidden) {
+                    if (icon) {
+                        icon.className = 'bi bi-eye';
+                    }
+                    eyeBtn.title = '内容を表示';
+                } else {
+                    if (icon) {
+                        icon.className = 'bi bi-eye-slash';
+                    }
+                    eyeBtn.title = '内容を隠す';
+                }
+            });
+        } else {
+            const messageText = document.createElement('div');
+            messageText.className = 'message-text';
+            messageText.innerHTML = this.formatChatMessageHtml(data.message);
+            messageDiv.appendChild(messageText);
+        }
 
         this.chatMessages.appendChild(messageDiv);
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
 
-        // Animation
         messageDiv.style.opacity = '0';
         requestAnimationFrame(() => {
             messageDiv.style.transition = 'opacity 0.3s ease';
