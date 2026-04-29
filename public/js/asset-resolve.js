@@ -11,7 +11,7 @@ let configPromise = null;
  */
 export function loadClientConfigOnce() {
     if (!configPromise) {
-        configPromise = fetch('/api/client-config').then((r) => r.json());
+        configPromise = fetch('/api/client-config', { credentials: 'include' }).then((r) => r.json());
     }
     return configPromise;
 }

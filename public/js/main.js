@@ -133,7 +133,6 @@ class MetaverseApp {
         registerMetaverseServiceWorker();
 
         let chartFeaturesEnabled = true;
-        let assetModelsCdn = false;
         try {
             const cfgRes = await fetch('/api/client-config', { credentials: 'include' });
             if (cfgRes.ok) {
@@ -141,23 +140,9 @@ class MetaverseApp {
                 if (typeof cfg.chartFeaturesEnabled === 'boolean') {
                     chartFeaturesEnabled = cfg.chartFeaturesEnabled;
                 }
-                const am = cfg && typeof cfg === 'object' ? cfg.assetModels : null;
-                assetModelsCdn = !!(am && typeof am === 'object' && am.mode === 'cdn');
             }
         } catch (_) {
             /* 既定の true のまま */
-        }
-
-        // S3/CDN 時は署名・/models に Cookie が必要。初回プロファイルでは Socket より先に loadWorld が走るため先に付与する
-        if (assetModelsCdn) {
-            try {
-                await fetch('/api/metaverse/bootstrap-asset-auth', {
-                    method: 'POST',
-                    credentials: 'include',
-                });
-            } catch (_) {
-                /* loadWorld 側で失敗ログ */
-            }
         }
 
         // /admin セッション: Basic認証済みでトークン取得が必須
