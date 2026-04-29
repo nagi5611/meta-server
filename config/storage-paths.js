@@ -40,6 +40,7 @@ function getStoragePathsFromSrcDirectory(srcDirectory) {
         SRC_DIRECTORY: base,
         DATA_DIR: dataDir,
         MODELS_DIR: path.join(base, 'models'),
+        AVATARS_DIR: path.join(base, 'avatars'),
         PDFS_DIR: path.join(base, 'pdfs'),
         IMAGES_DIR: path.join(base, 'images'),
         /** IBL 用 HDR（/env/* で配信・アップロード先） */
@@ -59,6 +60,7 @@ function getStoragePathsFromExplicitEnv() {
         SRC_DIRECTORY: null,
         DATA_DIR: null,
         MODELS_DIR: modelsDir,
+        AVATARS_DIR: path.join(path.dirname(modelsDir), 'avatars'),
         PDFS_DIR: requireEnv('META_PDFS_DIR'),
         IMAGES_DIR: requireEnv('META_IMAGES_DIR'),
         /** 未設定時は models と同階層の env（META_SRC_DIRECTORY 運用と揃える） */
@@ -92,6 +94,7 @@ export function validateAndPrepareStoragePaths() {
         ensureDirExists(STORAGE_PATHS.DATA_DIR, 'META_SRC_DIRECTORY');
     }
     ensureDirExists(STORAGE_PATHS.MODELS_DIR, 'META_MODELS_DIR');
+    ensureDirExists(STORAGE_PATHS.AVATARS_DIR, 'META_AVATARS_DIR');
     ensureDirExists(STORAGE_PATHS.PDFS_DIR, 'META_PDFS_DIR');
     ensureDirExists(STORAGE_PATHS.IMAGES_DIR, 'META_IMAGES_DIR');
     ensureDirExists(STORAGE_PATHS.ENV_DIR, 'ENV_DIR');

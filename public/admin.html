@@ -361,6 +361,7 @@
                         <nav class="we-category-nav" aria-label="左パネルカテゴリ">
                             <button type="button" class="we-category-btn active" data-we-category="world">ワールド</button>
                             <button type="button" class="we-category-btn" data-we-category="model">モデル</button>
+                            <button type="button" class="we-category-btn" data-we-category="avatar">アバター</button>
                             <button type="button" class="we-category-btn" data-we-category="pdf">PDF</button>
                             <button type="button" class="we-category-btn" data-we-category="file">ファイル</button>
                         </nav>
@@ -388,6 +389,20 @@
                                         <select id="add-obj-mtl" class="prop-input full" aria-label="OBJ用MTLファイル"></select>
                                     </div>
                                     <button type="button" id="btn-add-model">モデルを追加</button>
+                                </section>
+                            </div>
+                            <div id="we-cat-avatar" class="we-category-pane">
+                                <section class="section">
+                                    <h2 class="section-title">アバター（GLB）</h2>
+                                    <p class="status-text" id="we-avatar-current-label">現在: <span id="we-avatar-current-filename">—</span></p>
+                                    <div class="field-row">
+                                        <label class="prop-label" for="we-avatar-file">ファイル</label>
+                                        <input type="file" id="we-avatar-file" class="prop-input full" accept=".glb,model/gltf-binary" />
+                                    </div>
+                                    <div class="btn-row">
+                                        <button type="button" id="btn-we-avatar-upload" class="btn-primary">アップロードして適用</button>
+                                    </div>
+                                    <p id="we-avatar-status" class="status-text" role="status"></p>
                                 </section>
                             </div>
                             <div id="we-cat-pdf" class="we-category-pane">

@@ -97,7 +97,11 @@ export async function resolveModelAssetHref(pathOrUrl) {
         return sameOriginPath;
     }
 
-    const base = String(cfg.cdnBaseUrl).replace(/\/+$/, '');
+    let base = String(cfg.cdnBaseUrl).replace(/\/+$/, '');
+    // META_CDN_PUBLIC_BASE が .../models で終わる構成でも、兄弟フォルダ avatars は CDN 上で並ぶ想定のため末尾 models を落として署名 URL と整合させる
+    if (pathStr.startsWith('avatars/') || /^[^/]+\/avatars\//.test(pathStr)) {
+        base = base.replace(/\/models\/?$/i, '');
+    }
     const canonical = `${base}/${encodedPath.replace(/^\/+/, '')}`;
     const uKey = canonical.split('#')[0];
     try {

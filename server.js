@@ -39,12 +39,21 @@ import { insertVersionBeforeExt, createModelVersionToken } from './lib/model-upl
 import {
     uploadLocalModelsPathsOrRollbackS3,
     syncLocalModelsToS3OnStartup,
-    uploadLocalModelsFile,
-    canonicalCdnUrlForModelsRelative,
     tryUnlinkQuiet,
     publicAssetUrlCacheForModels,
     deleteS3ModelObjectsByRelativePosix,
 } from './lib/s3-model-assets.js';
+import {
+    canonicalCdnUrlForAvatarRelative,
+    uploadLocalAvatarFile,
+    deleteAvatarFile,
+    setActiveAvatar,
+    readActiveAvatarMeta,
+    getActiveAvatarRelativePathForClient,
+    syncLocalAvatarsToS3OnStartup,
+    AVATAR_ACTIVE_META_REL_POSIX,
+    publicAssetUrlCacheForAvatars,
+} from './lib/s3-avatar-assets.js';
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -697,6 +706,7 @@ function writeCharts(charts) {
 }
 
 const MODELS_DIR = STORAGE_PATHS.MODELS_DIR;
+const AVATARS_DIR = STORAGE_PATHS.AVATARS_DIR;
 const PDFS_DIR = STORAGE_PATHS.PDFS_DIR;
 const IMAGES_DIR = STORAGE_PATHS.IMAGES_DIR;
 const CHART_BGM_DIR = STORAGE_PATHS.CHART_BGM_DIR;
@@ -757,6 +767,15 @@ const uploadPrefabZip = multer({
         cb(null, ext === '.zip' || byMime);
     },
 });
+/** アバター GLB のみ（avatars/ 保管） */
+const uploadAvatarGlb = multer({
+    storage: uploadStorage,
+    limits: { fileSize: MODEL_UPLOAD_MAX_BYTES },
+    fileFilter: (req, file, cb) => {
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        cb(null, ext === '.glb');
+    },
+});
 /**
  * multipart 由来の文字化けを避けるため、クライアント送信の UTF-8(base64) ファイル名を優先して正規化する。
  * @param {import('express').Request} req
@@ -791,7 +810,7 @@ function decodeLikelyMojibakeFilename(filename) {
 
 /**
  * クライアントのキャッシュ無効化用に、静的配信と同じ URL パスを組み立てる
- * @param {'models' | 'pdfs' | 'env' | 'images' | 'chart-bgm'} base
+ * @param {'models' | 'avatars' | 'pdfs' | 'env' | 'images' | 'chart-bgm'} base
  * @param {string} filename
  * @returns {string}
  */
@@ -807,6 +826,14 @@ function publicAssetUrlForCache(base, filename) {
             return '/images/' + tail;
         case 'chart-bgm':
             return '/chart-bgm/' + tail;
+        case 'avatars': {
+            if (USE_S3_MODELS) {
+                const posix = parts.join('/');
+                return publicAssetUrlCacheForAvatars(posix);
+            }
+            return '/avatars/' + tail;
+        }
+        case 'models':
         default: {
             if (USE_S3_MODELS) {
                 const posix = parts.join('/');
@@ -1729,6 +1756,13 @@ app.use('/models', (req, res, next) => {
         return res.status(403).type('txt').send('モデルは認証されたメタバースセッションからのみ取得できます');
     }
     modelsStaticMiddleware(req, res, next);
+});
+const avatarsStaticMiddleware = express.static(AVATARS_DIR);
+app.use('/avatars', (req, res, next) => {
+    if (USE_S3_MODELS && !metaverseModelsAccessAllowed(req)) {
+        return res.status(403).type('txt').send('アバターは認証されたメタバースセッションからのみ取得できます');
+    }
+    avatarsStaticMiddleware(req, res, next);
 });
 app.use('/pdfs', express.static(PDFS_DIR));
 app.use('/images', express.static(IMAGES_DIR));
@@ -5188,6 +5222,97 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
     }
 });
 
+/**
+ * アバター GLB を versioned ファイルとして avatars/ に保存し active.json を更新する（S3 連携あり）
+ */
+app.post('/admin/upload-avatar', uploadAvatarGlb.single('avatar'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file or invalid file (.glb only)' });
+    }
+    const versionedName = insertVersionBeforeExt('avatar.glb', createModelVersionToken());
+    const destPath = path.join(AVATARS_DIR, versionedName);
+    /** @type {string[]} */
+    const rollbackPaths = [];
+    /**
+     * アップロード失敗時に書き込んだローカルファイルを消す
+     */
+    const rollbackLocalWritten = () => {
+        for (const p of rollbackPaths) tryUnlinkQuiet(p);
+    };
+    try {
+        const prevMeta = readActiveAvatarMeta(AVATARS_DIR);
+        const prevFn =
+            prevMeta && typeof prevMeta.filename === 'string' ? prevMeta.filename.trim() : '';
+
+        if (!fs.existsSync(AVATARS_DIR)) {
+            fs.mkdirSync(AVATARS_DIR, { recursive: true });
+        }
+        fs.writeFileSync(destPath, req.file.buffer);
+        rollbackPaths.push(destPath);
+
+        if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
+            try {
+                await uploadLocalAvatarFile(destPath, AVATARS_DIR);
+            } catch (eUp) {
+                rollbackLocalWritten();
+                console.error('[upload-avatar] S3:', eUp);
+                return res.status(500).json({
+                    error: 'アバターを外部ストレージへ反映できませんでした。',
+                    code: 's3_upload_failed',
+                    detail: eUp instanceof Error ? eUp.message : String(eUp),
+                });
+            }
+        }
+
+        try {
+            await setActiveAvatar(AVATARS_DIR, versionedName);
+        } catch (eAct) {
+            rollbackLocalWritten();
+            if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
+                await deleteAvatarFile(versionedName, AVATARS_DIR).catch(() => {});
+            }
+            console.error('[upload-avatar] setActiveAvatar:', eAct);
+            return res.status(500).json({
+                error: 'active.json の更新に失敗しました。',
+                detail: eAct instanceof Error ? eAct.message : String(eAct),
+            });
+        }
+
+        if (
+            prevFn &&
+            prevFn !== versionedName &&
+            !prevFn.includes('/') &&
+            !prevFn.includes('..')
+        ) {
+            await deleteAvatarFile(prevFn, AVATARS_DIR);
+        }
+
+        /** @type {string[]} */
+        const invUrls = [
+            canonicalCdnUrlForAvatarRelative(versionedName),
+            canonicalCdnUrlForAvatarRelative(AVATAR_ACTIVE_META_REL_POSIX),
+        ];
+        io.emit('asset-invalidate', { urls: invUrls });
+
+        const payload = {
+            success: true,
+            filename: versionedName,
+            canonicalUrl: publicAssetUrlForCache('avatars', versionedName),
+        };
+        if (USE_S3_MODELS) {
+            payload.cdnBaseUrlHint = normalizedCdnBaseUrl();
+        }
+        res.json(payload);
+    } catch (err) {
+        rollbackLocalWritten();
+        console.error('POST /admin/upload-avatar error:', err);
+        res.status(500).json({
+            error: 'Failed to save avatar',
+            detail: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+
 app.get('/admin/pdfs', (req, res) => {
     try {
         if (!fs.existsSync(PDFS_DIR)) {
@@ -5346,6 +5471,51 @@ app.post('/api/metaverse/sign-asset-urls', async (req, res) => {
             error: 'sign_failed',
             detail: e instanceof Error ? e.message : String(e),
         });
+    }
+});
+
+/**
+ * アクティブなアバター GLB のパス・CDN URL・署名済み URL（あれば）
+ */
+app.get('/api/active-avatar', async (req, res) => {
+    try {
+        if (!metaverseModelsAccessAllowed(req)) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+        const meta = readActiveAvatarMeta(AVATARS_DIR);
+        const fn = meta && typeof meta.filename === 'string' ? meta.filename.trim() : '';
+        const fallbackPath = 'models/avatar.glb';
+        if (!fn || fn.includes('/') || fn.includes('..')) {
+            return res.json({
+                path: null,
+                canonicalUrl: null,
+                signedUrl: null,
+                fallbackPath,
+            });
+        }
+        const pathRel = getActiveAvatarRelativePathForClient(AVATARS_DIR);
+        let canonicalUrl = null;
+        let signedUrl = null;
+        if (USE_S3_MODELS) {
+            canonicalUrl = canonicalCdnUrlForAvatarRelative(fn);
+            if (isS3ModelsConfigComplete()) {
+                try {
+                    const uKey = canonicalUrl.split('#')[0];
+                    signedUrl = await signCloudFrontGetUrl(uKey);
+                } catch (e) {
+                    console.warn('[active-avatar] signCloudFrontGetUrl:', e);
+                }
+            }
+        }
+        res.json({
+            path: pathRel,
+            canonicalUrl,
+            signedUrl,
+            fallbackPath,
+        });
+    } catch (e) {
+        console.error('GET /api/active-avatar:', e);
+        res.status(500).json({ error: 'failed' });
     }
 });
 
@@ -5912,6 +6082,15 @@ function formatBytes(bytes) {
             console.log('[s3-sync] startup', r);
         } catch (e) {
             console.error('[s3-sync] startup failed:', e);
+        }
+    }
+
+    if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
+        try {
+            const ra = await syncLocalAvatarsToS3OnStartup(AVATARS_DIR);
+            console.log('[s3-avatar-sync] startup', ra);
+        } catch (e) {
+            console.error('[s3-avatar-sync] startup failed:', e);
         }
     }
 

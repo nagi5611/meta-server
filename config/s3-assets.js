@@ -34,6 +34,9 @@ export const S3_BUCKET = getEnvTrim('META_MODELS_S3_BUCKET') || getEnvTrim('AWS_
 /** S3 オブジェクトキー先頭（末尾スラッシュなしでも可）。例: prod/models */
 export const S3_KEY_PREFIX_RAW = getEnvTrim('META_MODELS_S3_PREFIX') || 'models';
 
+/** アバター GLB / active.json のキー先頭（モデルバケット内の別フォルダ）。例: prod/avatars */
+export const AVATARS_S3_PREFIX_RAW = getEnvTrim('META_AVATARS_S3_PREFIX') || 'avatars';
+
 /**
  * CloudFront の配送ドメイン（https:// で始める）
  * @type {string|null}
@@ -69,6 +72,14 @@ export function getS3ModelsUploadConcurrency() {
  */
 export function normalizedS3KeyPrefix() {
     return S3_KEY_PREFIX_RAW.replace(/^\/+|\/+$/g, '');
+}
+
+/**
+ * アバター用 S3 キー prefix（models と別フォルダ）
+ * @returns {string}
+ */
+export function normalizedAvatarsS3KeyPrefix() {
+    return AVATARS_S3_PREFIX_RAW.replace(/^\/+|\/+$/g, '');
 }
 
 /**

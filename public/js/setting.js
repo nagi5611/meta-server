@@ -3625,6 +3625,22 @@ function bindEvents() {
     // 左パネル: ワールド/モデル/PDF/ファイル カテゴリ切り替え（admin 統合時）。カテゴリクリックで展開もする
     const weLayout = document.querySelector('#panel-world-edit .setting-layout');
     const categoryNav = document.querySelector('.we-category-nav');
+    /**
+     * ワールド編集・左「アバター」パネルに現在のアクティブ GLB を表示する
+     */
+    async function refreshWeAvatarPanel() {
+        const fnEl = document.getElementById('we-avatar-current-filename');
+        const statusEl = document.getElementById('we-avatar-status');
+        if (!fnEl) return;
+        try {
+            const r = await fetch('/api/active-avatar', { credentials: 'include' });
+            const j = await r.json();
+            fnEl.textContent = typeof j.path === 'string' && j.path.length > 0 ? j.path : '(未設定)';
+        } catch {
+            fnEl.textContent = '(取得に失敗しました)';
+        }
+        if (statusEl) statusEl.textContent = '';
+    }
     if (categoryNav) {
         categoryNav.addEventListener('click', (e) => {
             const btn = e.target.closest('.we-category-btn');
@@ -3635,7 +3651,48 @@ function bindEvents() {
             btn.classList.add('active');
             const pane = document.getElementById('we-cat-' + cat);
             if (pane) pane.classList.add('active');
+            if (cat === 'avatar') {
+                refreshWeAvatarPanel().catch(() => {});
+            }
             if (weLayout) weLayout.classList.remove('we-left-collapsed');
+        });
+    }
+
+    const btnWeAvatarUpload = document.getElementById('btn-we-avatar-upload');
+    const weAvatarFile = document.getElementById('we-avatar-file');
+    const weAvatarStatus = document.getElementById('we-avatar-status');
+    if (btnWeAvatarUpload && weAvatarFile) {
+        btnWeAvatarUpload.addEventListener('click', async () => {
+            const f = weAvatarFile.files?.[0];
+            if (!f) {
+                if (weAvatarStatus) weAvatarStatus.textContent = 'ファイルを選択してください。';
+                return;
+            }
+            if (!String(f.name).toLowerCase().endsWith('.glb')) {
+                if (weAvatarStatus) weAvatarStatus.textContent = '.glb のみ対応です。';
+                return;
+            }
+            if (weAvatarStatus) weAvatarStatus.textContent = 'アップロード中…';
+            const fd = new FormData();
+            fd.append('avatar', f);
+            try {
+                const r = await fetch('/admin/upload-avatar', { method: 'POST', body: fd, credentials: 'include' });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    if (weAvatarStatus) {
+                        weAvatarStatus.textContent =
+                            typeof j.error === 'string' ? j.error : `失敗 (${r.status})`;
+                    }
+                    return;
+                }
+                if (weAvatarStatus) {
+                    weAvatarStatus.textContent = j.filename ? `適用しました: ${j.filename}` : '適用しました。';
+                }
+                await refreshWeAvatarPanel();
+                weAvatarFile.value = '';
+            } catch {
+                if (weAvatarStatus) weAvatarStatus.textContent = '通信エラー';
+            }
         });
     }
 

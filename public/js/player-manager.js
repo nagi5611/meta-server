@@ -12,10 +12,33 @@ class PlayerManager {
         this.gltfLoader = createGLTFLoaderWithDraco();
         /** @type {{ scene: THREE.Group, animations: THREE.AnimationClip[] } | null} */
         this.avatarModelCache = null;
+        /** アバター GLB が未設定時のフォールバック（/api/active-avatar が空のとき） */
         this.avatarPath = 'models/avatar.glb';
         /** Avatar GLB scale (change to resize model) */
         this.avatarScale = { x: 1.5, y: 1.5, z: 1.5 };
         this._headWorldOffset = new THREE.Vector3(0, 0.08, 0);
+    }
+
+    /**
+     * アクティブアバター URL を解決する（署名 URL / CDN / オリジンフォールバック）
+     * @returns {Promise<string>}
+     */
+    async resolveAvatarGltfUrl() {
+        try {
+            const r = await fetch('/api/active-avatar', { credentials: 'include' });
+            if (r.ok) {
+                const j = await r.json();
+                if (typeof j.signedUrl === 'string' && j.signedUrl.length > 0) {
+                    return j.signedUrl;
+                }
+                if (typeof j.path === 'string' && j.path.length > 0) {
+                    return resolveModelAssetHref(j.path);
+                }
+            }
+        } catch {
+            /* fall through */
+        }
+        return resolveModelAssetHref(this.avatarPath);
     }
 
     /**
@@ -31,14 +54,14 @@ class PlayerManager {
             return { scene: clonedScene, animations };
         }
 
-        const url = await resolveModelAssetHref(this.avatarPath);
+        const url = await this.resolveAvatarGltfUrl();
         return new Promise((resolve, reject) => {
             this.gltfLoader.load(
                 url,
                 (gltf) => {
                     const animations = gltf.animations || [];
                     this.avatarModelCache = { scene: gltf.scene, animations };
-                    console.log('Avatar model loaded:', this.avatarPath, 'animations:', animations.length);
+                    console.log('Avatar model loaded:', url, 'animations:', animations.length);
 
                     const clonedScene = animations.length > 0
                         ? SkeletonUtils.clone(gltf.scene)
