@@ -22,6 +22,7 @@
     <div id="admin-chart-save-toast" class="admin-chart-save-toast" role="status" aria-live="polite" hidden></div>
     <aside class="admin-sidebar">
         <nav class="admin-nav">
+            <button type="button" class="admin-nav-item" data-panel="panel-security"><i class="bi bi-shield-lock"></i> セキュリティ</button>
             <button type="button" class="admin-nav-item active" data-panel="panel-status"><i class="bi bi-speedometer2"></i> ステータス</button>
             <button type="button" class="admin-nav-item" data-panel="panel-players"><i class="bi bi-people"></i> プレイヤー一覧</button>
             <button type="button" class="admin-nav-item" data-panel="panel-comm"><i class="bi bi-broadcast"></i> 通信</button>
@@ -47,6 +48,39 @@
         </header>
 
         <div class="admin-panels">
+            <div id="panel-security" class="admin-panel panel-security">
+                <div class="sec-layout">
+                    <nav class="sec-left-nav" aria-label="セキュリティ内カテゴリ">
+                        <button type="button" class="sec-left-nav-btn active" data-sec-pane="sec-pane-chat">
+                            <i class="bi bi-chat-dots"></i> チャット
+                        </button>
+                    </nav>
+                    <div class="sec-main">
+                        <div id="sec-pane-chat" class="sec-pane active" role="tabpanel">
+                            <h2 class="sec-pane-title">チャット・表示名モデレーション</h2>
+                            <p class="hint sec-hint">禁止語は<strong>一般ユーザーの表示名</strong>と<strong>チャット本文</strong>に適用されます。比較時は文字を正規化し、登録語が<strong>部分的に含まれる</strong>場合もブロックします。</p>
+
+                            <section class="sec-ng-section">
+                                <h3>NGワード一覧</h3>
+                                <ul id="sec-chat-ng-list" class="sec-ng-list" aria-label="NGワードリスト"></ul>
+                                <div class="sec-ng-actions">
+                                    <button type="button" id="sec-chat-ng-add" class="btn btn-secondary">行を追加</button>
+                                    <button type="button" id="sec-chat-ng-save" class="btn btn-primary">一覧を保存</button>
+                                    <span id="sec-chat-ng-status" class="status-text"></span>
+                                </div>
+                            </section>
+
+                            <section class="sec-prompt-section">
+                                <h3>チャット用 Gemini システムプロンプト（閲覧のみ・コードと同期）</h3>
+                                <pre id="sec-prompt-chat" class="sec-prompt-pre" tabindex="0"></pre>
+                                <h3>表示ユーザー名用 Gemini システムプロンプト（閲覧のみ・コードと同期）</h3>
+                                <pre id="sec-prompt-username" class="sec-prompt-pre" tabindex="0"></pre>
+                            </section>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div id="panel-status" class="admin-panel active">
                 <section class="stats-section">
                     <h2>サーバー統計</h2>

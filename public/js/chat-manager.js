@@ -165,6 +165,12 @@ class ChatManager {
             if (!res || res.ok) {
                 return;
             }
+            if (res.code === 'ng_word') {
+                if (res.message) {
+                    this.addSystemMessage(res.message);
+                }
+                return;
+            }
             if (res.code === 'inappropriate') {
                 return;
             }

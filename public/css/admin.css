@@ -4228,3 +4228,183 @@ body.admin-dark .model-upload-row-bar {
 body.admin-dark .model-upload-overall-label {
     color: #9c9992;
 }
+
+/* —— セキュリティパネル（NG ワード・プロンプト閲覧） */
+.panel-security .sec-layout {
+    display: flex;
+    align-items: stretch;
+    min-height: min(70vh, 720px);
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+}
+
+.panel-security .sec-left-nav {
+    width: 168px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px 10px;
+    background: #fafafa;
+    border-right: 1px solid #e0e0e0;
+}
+
+.panel-security .sec-left-nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 12px 12px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #555;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.panel-security .sec-left-nav-btn:hover {
+    background: #f0f0f0;
+    color: #333;
+}
+
+.panel-security .sec-left-nav-btn.active {
+    background: #e3f2fd;
+    color: #1565c0;
+    font-weight: 600;
+}
+
+.panel-security .sec-main {
+    flex: 1;
+    min-width: 0;
+    padding: 20px 24px 28px;
+    overflow-y: auto;
+}
+
+.panel-security .sec-pane {
+    display: none;
+}
+
+.panel-security .sec-pane.active {
+    display: block;
+}
+
+.panel-security .sec-pane-title {
+    font-size: 1.35rem;
+    margin-bottom: 8px;
+    color: #333;
+}
+
+.panel-security .sec-hint {
+    margin-bottom: 22px;
+    max-width: 720px;
+}
+
+.panel-security .sec-ng-section h3,
+.panel-security .sec-prompt-section h3 {
+    font-size: 1.05rem;
+    margin: 18px 0 10px;
+    color: #444;
+}
+
+.panel-security .sec-ng-section h3:first-of-type {
+    margin-top: 0;
+}
+
+.panel-security .sec-ng-list {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    max-width: 640px;
+}
+
+.panel-security .sec-ng-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.panel-security .sec-ng-input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.panel-security .sec-ng-del {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+.panel-security .sec-ng-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
+}
+
+.panel-security .sec-prompt-pre {
+    margin: 0 0 20px;
+    padding: 14px 16px;
+    max-height: 320px;
+    overflow: auto;
+    background: #f7f9fc;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #333;
+}
+
+body.admin-dark .panel-security .sec-layout {
+    background: #1a1814;
+    border-color: #2d2a24;
+}
+
+body.admin-dark .panel-security .sec-left-nav {
+    background: #25231d;
+    border-right-color: #2d2a24;
+}
+
+body.admin-dark .panel-security .sec-left-nav-btn {
+    color: #b0ada5;
+}
+
+body.admin-dark .panel-security .sec-left-nav-btn:hover {
+    background: #2d2a24;
+    color: #e6e4df;
+}
+
+body.admin-dark .panel-security .sec-left-nav-btn.active {
+    background: #1a2836;
+    color: #90caf9;
+}
+
+body.admin-dark .panel-security .sec-pane-title,
+body.admin-dark .panel-security .sec-ng-section h3,
+body.admin-dark .panel-security .sec-prompt-section h3 {
+    color: #e6e4df;
+}
+
+body.admin-dark .panel-security .sec-ng-input {
+    background: #14120b;
+    border-color: #3d3a33;
+    color: #e6e4df;
+}
+
+body.admin-dark .panel-security .sec-prompt-pre {
+    background: #14120b;
+    border-color: #2d2a24;
+    color: #c8c6c0;
+}

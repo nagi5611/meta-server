@@ -34,6 +34,7 @@ let lastTrafficSample = null;
 let bandwidthHistory = [];
 let worldEditInitialized = false;
 let chartPanelInitialized = false;
+let securityPanelInitialized = false;
 /** サーバー ENABLE_CHART_FEATURES（/api/client-config および /admin/stats で更新） */
 let adminChartFeaturesEnabled = true;
 /** 譜面作成パネルで選択中の譜面ID */
@@ -1118,6 +1119,131 @@ async function importSettingEditorModule() {
 }
 
 /**
+ * セキュリティパネル: NG ワード入力行を追加する
+ * @param {string} [value]
+ */
+function ensureSecurityNgRow(value = '') {
+    const ul = document.getElementById('sec-chat-ng-list');
+    if (!ul) return null;
+    const li = document.createElement('li');
+    li.className = 'sec-ng-item';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'sec-ng-input';
+    inp.placeholder = '禁止語句';
+    inp.value = value;
+    inp.maxLength = 256;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'btn btn-secondary sec-ng-del';
+    del.textContent = '削除';
+    del.addEventListener('click', () => {
+        li.remove();
+        const u = document.getElementById('sec-chat-ng-list');
+        if (u && u.children.length === 0) ensureSecurityNgRow('');
+    });
+    li.appendChild(inp);
+    li.appendChild(del);
+    ul.appendChild(li);
+    return li;
+}
+
+/**
+ * NG ワード一覧を DOM から収集する
+ * @returns {string[]}
+ */
+function collectNgWordsFromDom() {
+    const ul = document.getElementById('sec-chat-ng-list');
+    if (!ul) return [];
+    return [...ul.querySelectorAll('.sec-ng-input')]
+        .map((i) => String(i.value || '').trim())
+        .filter(Boolean);
+}
+
+/**
+ * セキュリティ「チャット」タブのデータをサーバーから読み込む
+ */
+async function loadSecurityPanelChat() {
+    const st = document.getElementById('sec-chat-ng-status');
+    try {
+        const [wRes, pRes] = await Promise.all([
+            fetch('/admin/security/chat-ng-words', { credentials: 'same-origin' }),
+            fetch('/admin/security/chat-moderation-prompts', { credentials: 'same-origin' }),
+        ]);
+        if (!wRes.ok) throw new Error('NG list load failed');
+        if (!pRes.ok) throw new Error('prompt load failed');
+        const w = await wRes.json();
+        const p = await pRes.json();
+        const ul = document.getElementById('sec-chat-ng-list');
+        if (ul) {
+            ul.innerHTML = '';
+            const words = Array.isArray(w.words) ? w.words : [];
+            if (words.length === 0) {
+                ensureSecurityNgRow('');
+            } else {
+                for (const word of words) ensureSecurityNgRow(word);
+            }
+        }
+        const pc = document.getElementById('sec-prompt-chat');
+        const pu = document.getElementById('sec-prompt-username');
+        if (pc) pc.textContent = p.chatModeration || '';
+        if (pu) pu.textContent = p.usernameModeration || '';
+        if (st) st.textContent = '';
+    } catch (e) {
+        console.error(e);
+        if (st) st.textContent = '読み込みに失敗しました';
+    }
+}
+
+/**
+ * セキュリティパネルの一度だけイベント登録
+ */
+function initSecurityPanelOnce() {
+    if (securityPanelInitialized) return;
+    securityPanelInitialized = true;
+    document.getElementById('sec-chat-ng-add')?.addEventListener('click', () => {
+        ensureSecurityNgRow('');
+        const lastInp = document.getElementById('sec-chat-ng-list')?.lastElementChild?.querySelector('input');
+        if (lastInp) lastInp.focus();
+    });
+    document.getElementById('sec-chat-ng-save')?.addEventListener('click', async () => {
+        const statusEl = document.getElementById('sec-chat-ng-status');
+        const words = collectNgWordsFromDom();
+        try {
+            const res = await fetch('/admin/security/chat-ng-words', {
+                method: 'PUT',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ words }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'save failed');
+            if (statusEl) statusEl.textContent = '保存しました';
+            const ul = document.getElementById('sec-chat-ng-list');
+            if (ul && Array.isArray(data.words)) {
+                ul.innerHTML = '';
+                if (data.words.length === 0) ensureSecurityNgRow('');
+                else for (const word of data.words) ensureSecurityNgRow(word);
+            }
+        } catch (e) {
+            console.error(e);
+            if (statusEl) statusEl.textContent = '保存に失敗しました';
+        }
+    });
+    document.querySelectorAll('.sec-left-nav-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const pane = btn.getAttribute('data-sec-pane');
+            document.querySelectorAll('.sec-left-nav-btn').forEach((b) => {
+                b.classList.toggle('active', b === btn);
+            });
+            document.querySelectorAll('.sec-pane').forEach((p) => {
+                p.classList.toggle('active', p.id === pane);
+            });
+        });
+    });
+}
+
+/**
  * 指定したパネル ID を表示し、サイドメニューの active を更新する。
  * ワールド編集パネルは初表示時に setting.js を動的 import して init する。
  */
@@ -1184,6 +1310,10 @@ function switchPanel(panelId) {
             chartPanelInitialized = true;
             bindChartPanelEvents();
         }
+    }
+    if (panelId === 'panel-security') {
+        initSecurityPanelOnce();
+        loadSecurityPanelChat();
     }
 }
 
@@ -5244,7 +5374,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(location.search);
     let initialPanel = params.get('panel');
     if (initialPanel === 'world-edit') initialPanel = 'panel-world-edit';
-    const validPanels = ['panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-chart', 'panel-chart-inactive'];
+    if (initialPanel === 'security') initialPanel = 'panel-security';
+    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-chart', 'panel-chart-inactive'];
     if (initialPanel && validPanels.includes(initialPanel)) {
         switchPanel(initialPanel);
     }

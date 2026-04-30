@@ -20,7 +20,8 @@ import { parse as parseCookieHeader } from 'cookie';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { signSocketAuthToken, verifySocketAuthToken, SOCKET_AUTH_TOKEN_MAX_AGE_MS } from './lib/socket-auth-token.js';
-import { moderateChatMessage } from './lib/chat-moderation.js';
+import { moderateChatMessage, moderateUsername, getModerationSystemPromptsForAdmin } from './lib/chat-moderation.js';
+import { findNgPhraseMatch, getChatNgWords, saveChatNgWords } from './lib/chat-ng-words.js';
 import {
     runGlbTextureResizeQueued,
     getModelUploadQueueStats,
@@ -1576,6 +1577,86 @@ app.post('/api/auth/teacher/login', authLoginIpLimiter, (req, res) => {
     res.json(body);
 });
 
+/** 一般ログイン: ユーザー名を Gemini で検証する（ログインボタン時）。試行間隔は IP で最短3秒（checkGuestUsernameApiRate） */
+app.post('/api/auth/guest/username-moderate', async (req, res) => {
+    const raw = req.body?.username ?? req.body?.displayName;
+    const username = raw != null ? String(raw).trim() : '';
+
+    if (username.length < 2 || username.length > 20) {
+        return res.status(400).json({
+            ok: false,
+            code: 'invalid_username',
+            message: 'ユーザー名は2～20文字で入力してください',
+        });
+    }
+    if (username.toLowerCase() === 'admin') {
+        return res.status(400).json({
+            ok: false,
+            code: 'admin_reserved',
+            message: '「admin」は管理者専用のため使用できません',
+        });
+    }
+
+    const ngUser = findNgPhraseMatch(username);
+    if (ngUser) {
+        console.warn('[NAME_MOD] blocked guest username by NG list:', ngUser);
+        return res.status(400).json({
+            ok: false,
+            code: 'ng_word',
+            message: '禁止語リストに該当する表現が含まれています。',
+        });
+    }
+
+    const now = Date.now();
+    const ip = String(req.ip || req.socket?.remoteAddress || '').trim() || 'unknown';
+    const rate = checkGuestUsernameApiRate(ip, now);
+    if (!rate.ok) {
+        return res.status(429).json({
+            ok: false,
+            code: 'rate_limited',
+            message: '試行間隔が短すぎます。3秒以上空けてから再度お試しください。',
+            retryAfterMs: Math.ceil(rate.retryAfterMs),
+        });
+    }
+
+    const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
+    if (!apiKey) {
+        console.error('[NAME_MOD] GEMINI_API_KEY is not set; rejecting guest username check');
+        return res.status(503).json({
+            ok: false,
+            code: 'moderation_config',
+            message: 'ユーザー名の検証が利用できません。しばらくしてから再度お試しください。',
+        });
+    }
+
+    try {
+        const moderation = await moderateUsername({
+            apiKey,
+            model: process.env.GEMINI_MODEL,
+            displayName: username,
+        });
+        if (moderation.inappropriate) {
+            const reason =
+                (moderation.reason_ja && String(moderation.reason_ja).trim()) ||
+                '不適切な内容の可能性があります。';
+            console.warn(`[NAME_MOD] blocked inappropriate guest username (api) ip=${ip}`);
+            return res.status(400).json({
+                ok: false,
+                code: 'inappropriate',
+                message: reason,
+            });
+        }
+        return res.json({ ok: true });
+    } catch (err) {
+        console.error('[NAME_MOD] API error (guest/username-moderate):', err);
+        return res.status(503).json({
+            ok: false,
+            code: 'moderation_error',
+            message: 'ユーザー名の検証に失敗しました。しばらくしてから再度お試しください。',
+        });
+    }
+});
+
 app.post('/api/auth/register/student', authRegisterIpLimiter, requirePublicRegistrationEnabled, (req, res) => {
     const { username, password, displayName } = req.body || {};
     if (!username || !password) {
@@ -2035,6 +2116,35 @@ const chatApprovedByRoom = new Map();
 const chatModerationBySocket = new Map();
 /** @type {Set<string>} 同一ソケットの並行 chat-message 防止 */
 const chatModerationInFlight = new Set();
+
+// 一般ログイン: ユーザー名モデレーション API の IP 単位レート（最短試行間隔）
+const GUEST_USERNAME_MOD_MIN_MS = 3000;
+/** @type {Map<string, number>} IP → 直近の一般ログイン・ユーザー名チェック時刻 */
+const guestUsernameModLastByIp = new Map();
+/** @type {Set<string>} ゲストの並行 set-username モデレーション防止 */
+const guestUsernameSetInFlight = new Set();
+
+/**
+ * 一般ログイン用ユーザー名チェックの IP レート制限（3秒に1回まで）
+ * @param {string} ip
+ * @param {number} now
+ * @returns {{ ok: true } | { ok: false, retryAfterMs: number }}
+ */
+function checkGuestUsernameApiRate(ip, now) {
+    const key = ip && ip.trim() ? ip.trim() : 'unknown';
+    const last = guestUsernameModLastByIp.get(key);
+    if (last != null && now - last < GUEST_USERNAME_MOD_MIN_MS) {
+        return { ok: false, retryAfterMs: GUEST_USERNAME_MOD_MIN_MS - (now - last) };
+    }
+    guestUsernameModLastByIp.set(key, now);
+    if (guestUsernameModLastByIp.size > 20000) {
+        const cutoff = now - 3600000;
+        for (const [k, t] of guestUsernameModLastByIp) {
+            if (t < cutoff) guestUsernameModLastByIp.delete(k);
+        }
+    }
+    return { ok: true };
+}
 
 /**
  * Rate-limit ack 用にコールバックを安全に呼ぶ
@@ -3062,8 +3172,8 @@ io.on('connection', (socket) => {
 
     } // CHART_FEATURES_ENABLED: 太鼓ソケット
 
-    // Handle username setting
-    socket.on('set-username', (username) => {
+    // Handle username setting（ゲストのカスタム名は Gemini で二重チェック／API迂回対策）
+    socket.on('set-username', async (username) => {
         const currentRoom = socket.data.currentRoom;
         if (!currentRoom) return;
 
@@ -3082,6 +3192,75 @@ io.on('connection', (socket) => {
             socket.disconnect(true);
             console.log(`Player ${socket.id} attempted admin name, disconnected`);
             return;
+        }
+
+        const needsNameModeration =
+            !socket.data.isAdmin && socket.data.role == null && trimmed !== 'Guest';
+
+        if (needsNameModeration) {
+            if (trimmed.length < 2 || trimmed.length > 20) {
+                socket.emit('username-rejected', {
+                    error: 'invalid_username',
+                    message: 'ユーザー名は2～20文字で入力してください',
+                });
+                socket.disconnect(true);
+                return;
+            }
+            const ngName = findNgPhraseMatch(trimmed);
+            if (ngName) {
+                socket.emit('username-rejected', {
+                    error: 'ng_word',
+                    message: '禁止語リストに該当する表現が含まれています。',
+                });
+                socket.disconnect(true);
+                console.warn(`[NAME_MOD] disconnected socket=${socket.id} ng_word name=${ngName}`);
+                return;
+            }
+            if (guestUsernameSetInFlight.has(socket.id)) {
+                return;
+            }
+            guestUsernameSetInFlight.add(socket.id);
+            try {
+                const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
+                if (!apiKey) {
+                    socket.emit('username-rejected', {
+                        error: 'moderation_config',
+                        message: 'ユーザー名の検証が利用できません。しばらくしてから再度お試しください。',
+                    });
+                    socket.disconnect(true);
+                    return;
+                }
+                let moderation;
+                try {
+                    moderation = await moderateUsername({
+                        apiKey,
+                        model: process.env.GEMINI_MODEL,
+                        displayName: trimmed,
+                    });
+                } catch (modErr) {
+                    console.error('[NAME_MOD] set-username API error:', modErr);
+                    socket.emit('username-rejected', {
+                        error: 'moderation_error',
+                        message: 'ユーザー名の検証に失敗しました。しばらくしてから再度お試しください。',
+                    });
+                    socket.disconnect(true);
+                    return;
+                }
+                if (moderation.inappropriate) {
+                    const reason =
+                        (moderation.reason_ja && String(moderation.reason_ja).trim()) ||
+                        '不適切な内容の可能性があります。';
+                    socket.emit('username-rejected', {
+                        error: 'inappropriate_username',
+                        message: reason,
+                    });
+                    socket.disconnect(true);
+                    console.warn(`[NAME_MOD] disconnected socket=${socket.id} inappropriate_username`);
+                    return;
+                }
+            } finally {
+                guestUsernameSetInFlight.delete(socket.id);
+            }
         }
 
         player.username = trimmed;
@@ -3377,6 +3556,16 @@ io.on('connection', (socket) => {
         }
 
         const text = String(message).trim();
+
+        if (findNgPhraseMatch(text)) {
+            ack({
+                ok: false,
+                code: 'ng_word',
+                message: '禁止語リストに該当する表現が含まれています。',
+            });
+            console.warn(`[CHAT_MOD] blocked ng_word socket=${socket.id}`);
+            return;
+        }
 
         if (isChatMuted(socket.id, now)) {
             ack({ ok: false, code: 'muted', message: 'チャットは一時的に利用できません。' });
@@ -6422,6 +6611,40 @@ app.delete('/admin/users/teacher/:id', (req, res) => {
     const ok = deleteTeacher(id);
     if (!ok) return res.status(404).json({ error: 'not_found' });
     res.json({ success: true });
+});
+
+/** セキュリティ: チャット・表示名の NG ワード一覧 */
+app.get('/admin/security/chat-ng-words', (req, res) => {
+    try {
+        res.json({ words: getChatNgWords() });
+    } catch (err) {
+        console.error('GET /admin/security/chat-ng-words error:', err);
+        sendAdminServerError(res, err);
+    }
+});
+
+app.put('/admin/security/chat-ng-words', (req, res) => {
+    const words = req.body?.words;
+    if (!Array.isArray(words)) {
+        return res.status(400).json({ error: 'words array required' });
+    }
+    try {
+        saveChatNgWords(words);
+        res.json({ ok: true, words: getChatNgWords() });
+    } catch (err) {
+        console.error('PUT /admin/security/chat-ng-words error:', err);
+        res.status(500).json({ error: 'save failed' });
+    }
+});
+
+/** セキュリティ: Gemini モデレーション用システムプロンプト（閲覧のみ・コードと同期） */
+app.get('/admin/security/chat-moderation-prompts', (req, res) => {
+    try {
+        res.json(getModerationSystemPromptsForAdmin());
+    } catch (err) {
+        console.error('GET /admin/security/chat-moderation-prompts error:', err);
+        sendAdminServerError(res, err);
+    }
 });
 
 function formatBytes(bytes) {

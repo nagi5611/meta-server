@@ -210,9 +210,11 @@
         const usernameInput = document.getElementById('username');
         const loginBtn = document.getElementById('login-btn');
         const errorMessage = document.getElementById('error-message');
+        const GUEST_LOGIN_MIN_INTERVAL_MS = 3000;
+        let lastGuestLoginAttemptAt = 0;
 
         // フォーム送信処理
-        loginForm.addEventListener('submit', (e) => {
+        loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
             const username = usernameInput.value.trim();
@@ -231,17 +233,55 @@
                 return;
             }
 
-            // LocalStorageに保存（一般ユーザーはuserRoleなし）
-            localStorage.setItem('username', username);
-            localStorage.removeItem('userRole');
+            const nowTs = Date.now();
+            if (nowTs - lastGuestLoginAttemptAt < GUEST_LOGIN_MIN_INTERVAL_MS) {
+                errorMessage.textContent =
+                    `前回の試行から${GUEST_LOGIN_MIN_INTERVAL_MS / 1000}秒以上お待ちください`;
+                errorMessage.style.display = 'block';
+                usernameInput.focus();
+                return;
+            }
+            lastGuestLoginAttemptAt = nowTs;
 
-            // ログイン成功 - ゲーム画面へ遷移
-            loginBtn.textContent = 'ログイン中...';
+            loginBtn.textContent = '確認中...';
             loginBtn.disabled = true;
 
-            setTimeout(() => {
-                window.location.href = '/index.html' + window.location.search + window.location.hash;
-            }, 500);
+            try {
+                const res = await fetch('/api/auth/guest/username-moderate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username }),
+                });
+                const data = await res.json().catch(() => ({}));
+
+                if (!res.ok || !data.ok) {
+                    const msg =
+                        (data && typeof data.message === 'string' && data.message.trim()) ||
+                        (res.status === 429 ? '試行間隔が短すぎます。しばらくお待ちください。' : 'ログインできませんでした');
+                    errorMessage.textContent = msg;
+                    errorMessage.style.display = 'block';
+                    usernameInput.focus();
+                    loginBtn.textContent = 'ログイン';
+                    loginBtn.disabled = false;
+                    return;
+                }
+
+                // LocalStorageに保存（一般ユーザーはuserRoleなし）
+                localStorage.setItem('username', username);
+                localStorage.removeItem('userRole');
+
+                loginBtn.textContent = 'ログイン中...';
+
+                setTimeout(() => {
+                    window.location.href = '/index.html' + window.location.search + window.location.hash;
+                }, 300);
+            } catch (_) {
+                errorMessage.textContent = '通信エラーが発生しました';
+                errorMessage.style.display = 'block';
+                usernameInput.focus();
+                loginBtn.textContent = 'ログイン';
+                loginBtn.disabled = false;
+            }
         });
 
         // 入力時にエラーメッセージを非表示
