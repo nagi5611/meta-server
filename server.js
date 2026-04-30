@@ -21,7 +21,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { signSocketAuthToken, verifySocketAuthToken, SOCKET_AUTH_TOKEN_MAX_AGE_MS } from './lib/socket-auth-token.js';
 import { moderateChatMessage, moderateUsername, getModerationSystemPromptsForAdmin } from './lib/chat-moderation.js';
-import { findNgPhraseMatch, getChatNgWords, saveChatNgWords } from './lib/chat-ng-words.js';
+import { getChatNgWords, saveChatNgWords } from './lib/chat-ng-words.js';
 import {
     runGlbTextureResizeQueued,
     getModelUploadQueueStats,
@@ -1594,16 +1594,6 @@ app.post('/api/auth/guest/username-moderate', async (req, res) => {
             ok: false,
             code: 'admin_reserved',
             message: '「admin」は管理者専用のため使用できません',
-        });
-    }
-
-    const ngUser = findNgPhraseMatch(username);
-    if (ngUser) {
-        console.warn('[NAME_MOD] blocked guest username by NG list:', ngUser);
-        return res.status(400).json({
-            ok: false,
-            code: 'ng_word',
-            message: '禁止語リストに該当する表現が含まれています。',
         });
     }
 
@@ -3206,16 +3196,6 @@ io.on('connection', (socket) => {
                 socket.disconnect(true);
                 return;
             }
-            const ngName = findNgPhraseMatch(trimmed);
-            if (ngName) {
-                socket.emit('username-rejected', {
-                    error: 'ng_word',
-                    message: '禁止語リストに該当する表現が含まれています。',
-                });
-                socket.disconnect(true);
-                console.warn(`[NAME_MOD] disconnected socket=${socket.id} ng_word name=${ngName}`);
-                return;
-            }
             if (guestUsernameSetInFlight.has(socket.id)) {
                 return;
             }
@@ -3556,16 +3536,6 @@ io.on('connection', (socket) => {
         }
 
         const text = String(message).trim();
-
-        if (findNgPhraseMatch(text)) {
-            ack({
-                ok: false,
-                code: 'ng_word',
-                message: '禁止語リストに該当する表現が含まれています。',
-            });
-            console.warn(`[CHAT_MOD] blocked ng_word socket=${socket.id}`);
-            return;
-        }
 
         if (isChatMuted(socket.id, now)) {
             ack({ ok: false, code: 'muted', message: 'チャットは一時的に利用できません。' });

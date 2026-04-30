@@ -58,7 +58,7 @@
                     <div class="sec-main">
                         <div id="sec-pane-chat" class="sec-pane active" role="tabpanel">
                             <h2 class="sec-pane-title">チャット・表示名モデレーション</h2>
-                            <p class="hint sec-hint">禁止語は<strong>一般ユーザーの表示名</strong>と<strong>チャット本文</strong>に適用されます。比較時は文字を正規化し、登録語が<strong>部分的に含まれる</strong>場合もブロックします。</p>
+                            <p class="hint sec-hint">一覧は Gemini の<strong>システムプロンプト末尾に自動で埋め込まれ</strong>、登録語に<strong>近い意味・婉曲・表記ゆれ</strong>もモデルが読み取れる範囲で拒否の判断に使います。一覧を保存すると、下の閲覧用プロンプトも<strong>サーバー側の現在値</strong>に更新されます。</p>
 
                             <section class="sec-ng-section">
                                 <h3>NGワード一覧</h3>

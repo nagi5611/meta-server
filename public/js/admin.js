@@ -1163,6 +1163,18 @@ function collectNgWordsFromDom() {
 /**
  * セキュリティ「チャット」タブのデータをサーバーから読み込む
  */
+/**
+ * 閲覧用 pre にモデレーション用システム指示（現在の NG 込み）を反映する
+ * @param {{ chatModeration?: string, usernameModeration?: string }} p
+ */
+function applySecurityModerationPromptsToDom(p) {
+    if (!p || typeof p !== 'object') return;
+    const pc = document.getElementById('sec-prompt-chat');
+    const pu = document.getElementById('sec-prompt-username');
+    if (pc) pc.textContent = p.chatModeration || '';
+    if (pu) pu.textContent = p.usernameModeration || '';
+}
+
 async function loadSecurityPanelChat() {
     const st = document.getElementById('sec-chat-ng-status');
     try {
@@ -1184,10 +1196,7 @@ async function loadSecurityPanelChat() {
                 for (const word of words) ensureSecurityNgRow(word);
             }
         }
-        const pc = document.getElementById('sec-prompt-chat');
-        const pu = document.getElementById('sec-prompt-username');
-        if (pc) pc.textContent = p.chatModeration || '';
-        if (pu) pu.textContent = p.usernameModeration || '';
+        applySecurityModerationPromptsToDom(p);
         if (st) st.textContent = '';
     } catch (e) {
         console.error(e);
@@ -1224,6 +1233,11 @@ function initSecurityPanelOnce() {
                 ul.innerHTML = '';
                 if (data.words.length === 0) ensureSecurityNgRow('');
                 else for (const word of data.words) ensureSecurityNgRow(word);
+            }
+            const promptRes = await fetch('/admin/security/chat-moderation-prompts', { credentials: 'same-origin' });
+            if (promptRes.ok) {
+                const refreshed = await promptRes.json();
+                applySecurityModerationPromptsToDom(refreshed);
             }
         } catch (e) {
             console.error(e);
