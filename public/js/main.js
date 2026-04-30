@@ -1108,16 +1108,11 @@ class MetaverseApp {
             if (this.isMobileMode) {
                 MobileUIManager.updateMobileInfo(world?.name || '-', position, playerCount);
             } else {
-                const snapIds = new Set((players || []).map((p) => String(p.id)));
-                const orphanBlockedIds = this.playerBlockList
-                    .getAllIds()
-                    .filter((id) => !snapIds.has(String(id)));
                 this.uiManager.updateInfoPanel(
                     world?.name || '-',
                     position,
                     playerCount,
-                    players,
-                    orphanBlockedIds
+                    players
                 );
             }
             this.uiManager.updatePingDisplay(this.networkManager.getPingStatus());

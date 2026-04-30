@@ -17,7 +17,11 @@ export default class PlayerActionMenu {
         this._root = null;
         /** @type {string|null} */
         this._currentPlayerId = null;
-        this._boundDocClick = this._onDocumentClick.bind(this);
+        /** @type {HTMLElement|null} メニュー表示の起点（ここを押しても外クリック扱いにしない） */
+        this._openAnchorEl = null;
+        this._boundDocPointerDown = this._onDocumentPointerDown.bind(this);
+        /** @type {{ capture: boolean }} removeEventListener 用に同一参照 */
+        this._docPointerOpts = { capture: true };
     }
 
     /**
@@ -49,6 +53,19 @@ export default class PlayerActionMenu {
     }
 
     /**
+     * メニュー外の pointerdown で閉じる（click のバブルが止まってもキャプチャで拾える）
+     * @param {PointerEvent} e
+     */
+    _onDocumentPointerDown(e) {
+        if (!this._root || this._root.hidden) return;
+        const t = e.target;
+        if (!(t instanceof Node)) return;
+        if (this._root.contains(t)) return;
+        if (this._openAnchorEl && (t === this._openAnchorEl || this._openAnchorEl.contains(t))) return;
+        this.close();
+    }
+
+    /**
      * @param {string} playerId
      */
     _runBlock(playerId) {
@@ -69,10 +86,12 @@ export default class PlayerActionMenu {
         const { networkManager } = this._deps;
         const myId = networkManager?.myPlayerId;
         if (!target?.playerId || target.playerId === myId || !anchorEl || !this._root) {
+            this.close();
             return;
         }
         this.close();
         this._currentPlayerId = target.playerId;
+        this._openAnchorEl = anchorEl;
 
         const rect = anchorEl.getBoundingClientRect();
         const menu = this._root;
@@ -80,14 +99,10 @@ export default class PlayerActionMenu {
         menu.style.left = `${Math.min(rect.left, window.innerWidth - 160)}px`;
         menu.style.top = `${rect.bottom + 4}px`;
 
-        requestAnimationFrame(() => {
-            document.addEventListener('click', this._boundDocClick, false);
+        // 同一の開く操作の pointerdown / click が終わってから外側検知を付ける
+        queueMicrotask(() => {
+            document.addEventListener('pointerdown', this._boundDocPointerDown, this._docPointerOpts);
         });
-    }
-
-    _onDocumentClick(e) {
-        if (this._root && this._root.contains(e.target)) return;
-        this.close();
     }
 
     close() {
@@ -95,7 +110,8 @@ export default class PlayerActionMenu {
             this._root.hidden = true;
         }
         this._currentPlayerId = null;
-        document.removeEventListener('click', this._boundDocClick, false);
+        this._openAnchorEl = null;
+        document.removeEventListener('pointerdown', this._boundDocPointerDown, this._docPointerOpts);
     }
 
     destroy() {

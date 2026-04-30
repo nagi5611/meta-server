@@ -424,13 +424,8 @@ class UIManager {
     /**
      * Update info panel: ワールド名、座標、プレイヤー数、プレイヤー一覧
      * プレイヤー一覧はデータ変更時のみ更新（毎フレームのDOM差し替えでクリックが奪われるのを防ぐ）
-     * @param {string} worldName
-     * @param {{ x: number, y: number, z: number }} position
-     * @param {number} playerCount
-     * @param {object[]} [players]
-     * @param {string[]} [orphanBlockedIds] スナップショットにいないがローカルブロックのみ残っている ID
      */
-    updateInfoPanel(worldName, position, playerCount, players = [], orphanBlockedIds = []) {
+    updateInfoPanel(worldName, position, playerCount, players = []) {
         const worldEl = document.getElementById('world-name');
         const posEl = document.getElementById('position-display');
         const countEl = document.getElementById('player-count');
@@ -455,13 +450,12 @@ class UIManager {
         });
         const activeDisplayed = sorted.filter((p) => !isBlocked(p.id));
         const blockedDisplayed = sorted.filter((p) => isBlocked(p.id));
-        const orphanSorted = [...new Set((orphanBlockedIds || []).map((id) => String(id)))].sort();
 
         const rowSig = (p) =>
             `${p.id}:${p.vcVideoOn}|${p.vcMicOn}|${p.vcSpeakerOn}|${p.pingMs}|${p.fpsSample}|${p.perfTier}|${p.role || ''}`;
 
         // プレイヤー一覧: 変更時のみ DOM 更新（毎フレーム差し替えするとクリックが奪われる）
-        const listHash = `a:${activeDisplayed.map(rowSig).join(';')}|b:${blockedDisplayed.map(rowSig).join(';')}|o:${orphanSorted.join(',')}`;
+        const listHash = `a:${activeDisplayed.map(rowSig).join(';')}|b:${blockedDisplayed.map(rowSig).join(';')}`;
         if (listEl.dataset.listHash !== listHash) {
             listEl.dataset.listHash = listHash;
 
@@ -528,8 +522,7 @@ class UIManager {
                 )
                 .join('');
 
-            const hasBlockedSection = blockedDisplayed.length > 0 || orphanSorted.length > 0;
-            if (hasBlockedSection) {
+            if (blockedDisplayed.length > 0) {
                 html += '<div class="player-list-blocked-heading" role="presentation">ブロック済み</div>';
                 html += blockedDisplayed
                     .map((p, i) =>
@@ -540,13 +533,6 @@ class UIManager {
                             hasSegments,
                         })
                     )
-                    .join('');
-                html += orphanSorted
-                    .map((rawId) => {
-                        const safeId = escapeHtmlForUi(String(rawId));
-                        const label = escapeHtmlForUi('オフライン（クリックで解除）');
-                        return `<div class="player-list-item mic-off player-list-item--blocked player-list-item--blocked-offline" data-blocked-player-id="${safeId}"><span class="player-info"><span class="player-blocked-badge" title="ブロック済み"><i class="bi bi-slash-circle" aria-hidden="true"></i></span><span class="player-list-name-trigger player-list-name--blocked" role="button" tabindex="0">${label}</span></span></div>`;
-                    })
                     .join('');
             }
 
