@@ -17,11 +17,9 @@ export default class PlayerActionMenu {
         this._root = null;
         /** @type {string|null} */
         this._currentPlayerId = null;
-        /** @type {HTMLElement|null} メニュー表示の起点（ここを押しても外クリック扱いにしない） */
-        this._openAnchorEl = null;
-        this._boundDocPointerDown = this._onDocumentPointerDown.bind(this);
-        /** @type {{ capture: boolean }} removeEventListener 用に同一参照 */
-        this._docPointerOpts = { capture: true };
+        this._boundDocDismiss = this._onDocumentDismiss.bind(this);
+        /** removeEventListener 用に add と同一参照 */
+        this._docCaptureOpts = { capture: true };
     }
 
     /**
@@ -53,16 +51,34 @@ export default class PlayerActionMenu {
     }
 
     /**
-     * メニュー外の pointerdown で閉じる（click のバブルが止まってもキャプチャで拾える）
-     * @param {PointerEvent} e
+     * `.player-action-menu` 以外を押したら閉じる（キャプチャでバブル阻害の影響を受けにくい）
+     * @param {PointerEvent|MouseEvent|Event} e
      */
-    _onDocumentPointerDown(e) {
+    _onDocumentDismiss(e) {
         if (!this._root || this._root.hidden) return;
         const t = e.target;
         if (!(t instanceof Node)) return;
         if (this._root.contains(t)) return;
-        if (this._openAnchorEl && (t === this._openAnchorEl || this._openAnchorEl.contains(t))) return;
         this.close();
+    }
+
+    /**
+     * メニュー外検知リスナを付け直す（二重登録防止）
+     */
+    _attachOutsideDismissListeners() {
+        this._detachOutsideDismissListeners();
+        document.addEventListener('pointerdown', this._boundDocDismiss, this._docCaptureOpts);
+        document.addEventListener('mousedown', this._boundDocDismiss, this._docCaptureOpts);
+        document.addEventListener('click', this._boundDocDismiss, this._docCaptureOpts);
+    }
+
+    /**
+     * メニュー外検知リスナを外す
+     */
+    _detachOutsideDismissListeners() {
+        document.removeEventListener('pointerdown', this._boundDocDismiss, this._docCaptureOpts);
+        document.removeEventListener('mousedown', this._boundDocDismiss, this._docCaptureOpts);
+        document.removeEventListener('click', this._boundDocDismiss, this._docCaptureOpts);
     }
 
     /**
@@ -91,7 +107,6 @@ export default class PlayerActionMenu {
         }
         this.close();
         this._currentPlayerId = target.playerId;
-        this._openAnchorEl = anchorEl;
 
         const rect = anchorEl.getBoundingClientRect();
         const menu = this._root;
@@ -99,9 +114,10 @@ export default class PlayerActionMenu {
         menu.style.left = `${Math.min(rect.left, window.innerWidth - 160)}px`;
         menu.style.top = `${rect.bottom + 4}px`;
 
-        // 同一の開く操作の pointerdown / click が終わってから外側検知を付ける
+        // 開く操作のイベントが終わってから外側検知を付ける
         queueMicrotask(() => {
-            document.addEventListener('pointerdown', this._boundDocPointerDown, this._docPointerOpts);
+            if (!this._root || this._root.hidden) return;
+            this._attachOutsideDismissListeners();
         });
     }
 
@@ -110,8 +126,7 @@ export default class PlayerActionMenu {
             this._root.hidden = true;
         }
         this._currentPlayerId = null;
-        this._openAnchorEl = null;
-        document.removeEventListener('pointerdown', this._boundDocPointerDown, this._docPointerOpts);
+        this._detachOutsideDismissListeners();
     }
 
     destroy() {
