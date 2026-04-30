@@ -20,6 +20,8 @@ class UIManager {
     constructor() {
         this.teleportPrompt = null;
         this.onWatchVideo = null;
+        /** @type {((playerId: string, displayName: string, anchorEl: HTMLElement) => void)|null} */
+        this.onPlayerListNameMenu = null;
         this.worldLoadOverlay = null;
         this.worldLoadLabel = null;
         this.worldLoadAsset = null;
@@ -66,6 +68,14 @@ class UIManager {
      */
     setOnWatchVideo(fn) {
         this.onWatchVideo = fn;
+    }
+
+    /**
+     * プレイヤー一覧の名前クリック時（通報・ブロックメニュー用）
+     * @param {((playerId: string, displayName: string, anchorEl: HTMLElement) => void)|null} fn
+     */
+    setOnPlayerListNameMenu(fn) {
+        this.onPlayerListNameMenu = typeof fn === 'function' ? fn : null;
     }
 
     /**
@@ -132,6 +142,18 @@ class UIManager {
                     if (peerId) {
                         console.log('[視聴] ボタンクリック - peerId:', peerId);
                         this.onWatchVideo(peerId);
+                    }
+                    return;
+                }
+                const nameTrig = e.target.closest('.player-list-name-trigger');
+                if (nameTrig && this.onPlayerListNameMenu) {
+                    const pid = nameTrig.getAttribute('data-player-id');
+                    if (pid) {
+                        const rawDisplay =
+                            nameTrig.getAttribute('data-player-display-name') || nameTrig.textContent || '';
+                        const displayName = rawDisplay.trim() || 'Player';
+                        e.stopPropagation();
+                        this.onPlayerListNameMenu(pid, displayName, nameTrig);
                     }
                 }
             });
@@ -425,7 +447,8 @@ class UIManager {
                 const roleLabel = p.role === 'student' ? '[生徒]' : p.role === 'teacher' ? '[教師]' : p.role === 'admin' ? '[管理者]' : '';
                 const roleSpan = roleLabel ? `<span class="player-role" title="種別">${roleLabel}</span>` : '';
                 const watchBtn = p.vcVideoOn ? `<button type="button" class="player-watch-video-btn" data-peer-id="${p.id}" title="ビデオを視聴">視聴</button>` : '';
-                const playerInfo = `<span class="player-info"><span class="player-vc-status">${videoIcon}${micIcon}${spkIcon}</span> ${name}</span>`;
+                const safeId = escapeHtmlForUi(String(p.id ?? ''));
+                const playerInfo = `<span class="player-info"><span class="player-vc-status">${videoIcon}${micIcon}${spkIcon}</span> <span class="player-list-name-trigger" role="button" tabindex="0" data-player-id="${safeId}" data-player-display-name="${name}">${name}</span></span>`;
                 return `${sep}<div class="player-list-item ${micClass}">${playerInfo}${watchBtn}${pingSpan}${perfSpan}${roleSpan}</div>`;
             }).join('');
         }

@@ -8,6 +8,8 @@ import WorldManager from './world-manager.js';
 import TeleportManager from './teleport-manager.js';
 import UIManager from './ui-manager.js';
 import ChatManager from './chat-manager.js';
+import PlayerBlockList from './player-block-list.js';
+import PlayerActionMenu from './player-action-menu.js';
 import MenuManager from './menu-manager.js';
 import VoiceChatManager from './voice-chat-manager.js';
 import VideoChatManager from './video-chat-manager.js';
@@ -307,6 +309,8 @@ class MetaverseApp {
 
         // Initialize network（player-update の world と表示フィルタを初期ワールドに合わせる）
         this.networkManager = new NetworkManager(this.playerManager);
+        this.playerBlockList = new PlayerBlockList();
+        this.networkManager.setLocalPlayerBlockedCheck((id) => this.playerBlockList.has(id));
         this.networkManager.currentWorld = initialWorldId;
         this.networkManager.onAdminTp = (data) => this.onAdminTp(data);
         this.networkManager.onPhysicsYCorrection = (data) => {
@@ -438,6 +442,25 @@ class MetaverseApp {
             { initialMinimized: this.isMobileMode }
         );
         this.chatManager.setCharacterController(this.characterController);
+        this.chatManager.setPlayerBlockedCheck((id) => this.playerBlockList.has(id));
+        this.playerActionMenu = new PlayerActionMenu({
+            blockList: this.playerBlockList,
+            chatManager: this.chatManager,
+            networkManager: this.networkManager,
+            playerManager: this.playerManager,
+        });
+        this._onMetaversePlayerNameMenu = (ev) => {
+            const d = ev.detail;
+            if (!d?.anchorEl || !d.playerId) return;
+            this.playerActionMenu.open(d.anchorEl, {
+                playerId: d.playerId,
+                displayName: d.displayName || 'Player',
+            });
+        };
+        window.addEventListener('metaverse-player-name-menu', this._onMetaversePlayerNameMenu);
+        this.uiManager.setOnPlayerListNameMenu((playerId, displayName, anchorEl) => {
+            this.playerActionMenu.open(anchorEl, { playerId, displayName });
+        });
 
         if (this.isMobileMode) {
             MobileJoystickManager.init(this.characterController);

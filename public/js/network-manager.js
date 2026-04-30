@@ -31,6 +31,29 @@ class NetworkManager {
         this._onAircraftSnapshot = null;
         /** @type {((slotId: string) => void)|null} */
         this._onAircraftReleased = null;
+        /** @type {((playerId: string) => boolean)|null} ローカルブロック（クライアントのみ） */
+        this._isLocalPlayerBlocked = null;
+    }
+
+    /**
+     * リモート表示可否にローカルブロック判定をマージする（players-update 毎に上書きされても維持）
+     * @param {(playerId: string) => boolean|null|undefined} fn
+     */
+    setLocalPlayerBlockedCheck(fn) {
+        this._isLocalPlayerBlocked = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * サーバー条件とローカルブロックをマージしたリモート可視フラグ
+     * @param {{ id: string, adminInvisible?: boolean, pilotingAircraftId?: string|null }} player
+     * @returns {boolean}
+     */
+    _mergedRemoteVisibleForPlayer(player) {
+        const serverOk = !player.adminInvisible && !player.pilotingAircraftId;
+        const blocked =
+            typeof this._isLocalPlayerBlocked === 'function' &&
+            this._isLocalPlayerBlocked(player.id);
+        return serverOk && !blocked;
     }
 
     /**
@@ -103,7 +126,7 @@ class NetworkManager {
                         );
                         this.playerManager.setRemotePlayerVisible(
                             player.id,
-                            !player.adminInvisible && !player.pilotingAircraftId
+                            this._mergedRemoteVisibleForPlayer(player)
                         );
                     } catch (error) {
                         console.error(`Failed to create remote player ${player.id}:`, error);
@@ -131,7 +154,7 @@ class NetworkManager {
                     );
                     this.playerManager.setRemotePlayerVisible(
                         player.id,
-                        !player.adminInvisible && !player.pilotingAircraftId
+                        this._mergedRemoteVisibleForPlayer(player)
                     );
                     this.updatePlayerCount();
                 } catch (error) {
@@ -211,7 +234,7 @@ class NetworkManager {
                         }
                         this.playerManager.setRemotePlayerVisible(
                             player.id,
-                            !player.adminInvisible && !player.pilotingAircraftId
+                            this._mergedRemoteVisibleForPlayer(player)
                         );
                     } else {
                         // Hide players in different worlds

@@ -260,6 +260,59 @@ body {
     min-width: 0;
 }
 
+.player-list-name-trigger {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: rgba(51, 51, 51, 0.25);
+    text-underline-offset: 2px;
+}
+
+.player-list-name-trigger:hover {
+    color: #0288d1;
+}
+
+.player-action-menu {
+    position: fixed;
+    z-index: 10050;
+    min-width: 140px;
+    padding: 6px;
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.player-action-menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background: rgba(241, 245, 249, 0.9);
+    color: #334155;
+}
+
+.player-action-menu-item:hover {
+    background: rgba(2, 136, 209, 0.12);
+    color: #0288d1;
+}
+
+.player-action-menu-item[data-action="block"] {
+    color: #b91c1c;
+}
+
+.player-action-menu-item[data-action="block"]:hover {
+    background: rgba(220, 38, 38, 0.1);
+    color: #991b1b;
+}
+
 .player-ping {
     flex-shrink: 0;
     font-size: 11px;
@@ -778,6 +831,17 @@ body {
     color: #0288d1;
     margin-bottom: 4px;
     font-size: 12px;
+}
+
+.chat-message .message-header.message-header-actionable {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: rgba(2, 136, 209, 0.35);
+    text-underline-offset: 2px;
+}
+
+.chat-message .message-header.message-header-actionable:hover {
+    color: #0277bd;
 }
 
 .chat-message.my-message .message-header {

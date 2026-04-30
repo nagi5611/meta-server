@@ -41,7 +41,56 @@ class ChatManager {
         /** CharacterController（自分用エモート位置をカメラと同期） */
         this.characterController = null;
 
+        /** @type {((playerId: string) => boolean)|null} */
+        this._playerBlockedCheck = null;
+
         this.init();
+    }
+
+    /**
+     * ローカルブロック一覧に照らし相手を表示から除外するか
+     * @param {string|null|undefined} playerId
+     * @returns {boolean}
+     */
+    _isPlayerBlocked(playerId) {
+        if (playerId == null || playerId === '') return false;
+        return typeof this._playerBlockedCheck === 'function' && this._playerBlockedCheck(String(playerId));
+    }
+
+    /**
+     * @param {(playerId: string) => boolean|null|undefined} fn
+     */
+    setPlayerBlockedCheck(fn) {
+        this._playerBlockedCheck = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * 指定プレイヤーからのチャット DOM を除去する（ローカルブロック時）
+     * @param {string} playerId
+     */
+    removeChatMessagesBySenderId(playerId) {
+        if (!this.chatMessages || playerId == null || playerId === '') return;
+        const sel = `div.chat-message[data-sender-id="${CSS.escape(String(playerId))}"]`;
+        this.chatMessages.querySelectorAll(sel).forEach((el) => el.remove());
+    }
+
+    /**
+     * ブロック済みプレイヤー頭上の絵文字を消す
+     * @param {string} playerId
+     */
+    clearEmojiForBlockedPlayer(playerId) {
+        if (!playerId) return;
+        const data = this.playerEmojis.get(playerId);
+        if (data?.timeoutId) {
+            clearTimeout(data.timeoutId);
+        }
+        this.playerEmojis.delete(playerId);
+        const div = this.emojiDivs.get(playerId);
+        if (div?.parentElement) {
+            div.remove();
+        }
+        this.emojiDivs.delete(playerId);
+        this.updatePlayerEmojis();
     }
 
     init() {
@@ -114,6 +163,27 @@ class ChatManager {
                 this.hideEmojiMenu();
             }
         });
+
+        if (this.chatMessages) {
+            this.chatMessages.addEventListener('click', (e) => {
+                const header = e.target.closest('.message-header-actionable');
+                if (!header || !this.networkManager) return;
+                e.stopPropagation();
+                const root = header.closest('.chat-message');
+                const senderId = root?.getAttribute('data-sender-id');
+                if (!senderId || senderId === this.networkManager.myPlayerId) return;
+                const displayName =
+                    header.dataset.playerDisplayName ||
+                    (header.firstChild && header.firstChild.nodeType === Node.TEXT_NODE
+                        ? String(header.firstChild.textContent || '').trim()
+                        : 'Player');
+                window.dispatchEvent(
+                    new CustomEvent('metaverse-player-name-menu', {
+                        detail: { anchorEl: header, playerId: senderId, displayName },
+                    })
+                );
+            });
+        }
     }
 
     setupNetworkEvents() {
@@ -121,6 +191,9 @@ class ChatManager {
 
         // Receive chat message from others
         socket.on('chat-receive', (data) => {
+            if (data?.senderId != null && this._isPlayerBlocked(data.senderId)) {
+                return;
+            }
             this.addChatMessage(data, false);
             this.connectedPlayers.set(data.senderId, data.senderName);
         });
@@ -141,7 +214,9 @@ class ChatManager {
         // Player joined
         socket.on('player-joined', (playerState) => {
             this.connectedPlayers.set(playerState.id, playerState.username);
-            this.addSystemMessage(`${playerState.username} が参加しました`);
+            if (!this._isPlayerBlocked(playerState.id)) {
+                this.addSystemMessage(`${playerState.username} が参加しました`);
+            }
         });
 
         // Player left
@@ -229,6 +304,11 @@ class ChatManager {
         statusRow.className = 'chat-pending-status';
         statusRow.textContent = '送信しています…';
         messageDiv.appendChild(statusRow);
+
+        const myId = this.networkManager?.myPlayerId;
+        if (myId) {
+            messageDiv.setAttribute('data-sender-id', myId);
+        }
 
         this.chatMessages.appendChild(messageDiv);
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
@@ -325,11 +405,22 @@ class ChatManager {
      * @param {boolean} isOwnMessage
      */
     addChatMessage(data, isOwnMessage = false) {
+        if (!isOwnMessage && data?.senderId != null && this._isPlayerBlocked(data.senderId)) {
+            return;
+        }
+
         const messageDiv = document.createElement('div');
         messageDiv.className = 'chat-message';
 
         if (isOwnMessage) {
             messageDiv.classList.add('my-message');
+        }
+
+        const senderIdAttr = isOwnMessage
+            ? (this.networkManager?.myPlayerId || '')
+            : (data.senderId || '');
+        if (senderIdAttr) {
+            messageDiv.setAttribute('data-sender-id', senderIdAttr);
         }
 
         const showModerationUi = data.moderationWarning === true && !isOwnMessage;
@@ -346,6 +437,14 @@ class ChatManager {
         const messageHeader = document.createElement('div');
         messageHeader.className = 'message-header';
         messageHeader.textContent = data.senderName;
+
+        if (!isOwnMessage && data.senderId) {
+            messageHeader.classList.add('message-header-actionable');
+            messageHeader.setAttribute('role', 'button');
+            messageHeader.tabIndex = 0;
+            messageHeader.title = 'プレイヤーメニュー';
+            messageHeader.dataset.playerDisplayName = data.senderName || 'Player';
+        }
 
         const messageTime = document.createElement('span');
         messageTime.className = 'message-time';
@@ -532,6 +631,7 @@ class ChatManager {
 
     showPlayerEmoji(playerId, emoji) {
         if (!playerId || !emoji) return;
+        if (this._isPlayerBlocked(playerId)) return;
 
         // Safety check - wait until managers are ready
         if (!this.playerManager || !this.sceneManager) {
