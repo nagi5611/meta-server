@@ -2087,7 +2087,31 @@ const MAX_CHAT_LOGS_PER_ROOM = 500;
 // ============================
 // Chat: AI moderation & rate limits (単一プロセス・メモリ保持)
 // GEMINI_API_KEY / 任意 GEMINI_MODEL — モデルIDは https://ai.google.dev/gemini-api/docs/models で要確認
+// 低遅延の候補（2026/4/30 時点・プレビュー）: gemini-3.1-flash-lite-preview（公式ブログ等で 2.5 Flash 比の高速が喧伝。利用可否は models 一覧で要確認）
 // ============================
+
+/**
+ * Socket の chat-message ペイロードを正規化（従来の文字列と { text|message, clientSendId }）
+ * @param {unknown} raw
+ * @returns {{ text: string, clientSendId: string | null }}
+ */
+function parseSocketChatMessagePayload(raw) {
+    if (typeof raw === 'string') {
+        return { text: raw.trim(), clientSendId: null };
+    }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const msg = raw.text != null ? raw.text : raw.message;
+        const text = String(msg ?? '').trim();
+        let clientSendId = null;
+        if (typeof raw.clientSendId === 'string') {
+            const s = raw.clientSendId.trim().slice(0, 80);
+            if (/^[a-zA-Z0-9-]+$/.test(s) && s.length >= 8) clientSendId = s;
+        }
+        return { text, clientSendId };
+    }
+    return { text: '', clientSendId: null };
+}
+
 const CHAT_USER_MIN_INTERVAL_MS = 1000;
 const CHAT_ROOM_MAX_PER_WINDOW = 5;
 const CHAT_ROOM_WINDOW_MS = 1000;
@@ -3534,7 +3558,11 @@ io.on('connection', (socket) => {
     // Handle chat message（レート制限・Gemini モデレーション・ack 応答）
     socket.on('chat-message', async (message, callback) => {
         const now = Date.now();
-        const ack = (payload) => chatReplyAck(callback, payload);
+        const parsed = parseSocketChatMessagePayload(message);
+        const text = parsed.text;
+        const clientSendId = parsed.clientSendId;
+        const ack = (payload) =>
+            chatReplyAck(callback, clientSendId ? { ...payload, clientSendId } : payload);
 
         if (chatModerationInFlight.has(socket.id)) {
             ack({ ok: false, code: 'in_flight', message: '処理中のチャットがあります。' });
@@ -3550,14 +3578,10 @@ io.on('connection', (socket) => {
         const roomState = getRoomState(currentRoom);
         const player = roomState.players.get(socket.id);
 
-        if (!player || message == null || String(message).trim().length === 0) {
+        if (!player || !text) {
             ack({ ok: false, code: 'invalid', message: '無効なメッセージです。' });
             return;
         }
-
-        const text = String(message).trim();
-
-        const literalNg = findNgPhraseMatch(text);
         if (literalNg) {
             ack({
                 ok: false,
@@ -3656,6 +3680,7 @@ io.on('connection', (socket) => {
                     senderName: player.username,
                     message: text,
                     timestamp: now,
+                    ...(clientSendId ? { clientSendId } : {}),
                 };
                 const chatDataOthers = { ...chatDataBase, moderationWarning: true };
                 const chatDataSelf = { ...chatDataBase, moderationWarning: false };
@@ -3688,6 +3713,7 @@ io.on('connection', (socket) => {
                 senderName: player.username,
                 message: text,
                 timestamp: now,
+                ...(clientSendId ? { clientSendId } : {}),
             };
 
             console.log(`[CHAT] ${player.username}: ${text}`);

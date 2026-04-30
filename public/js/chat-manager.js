@@ -8,7 +8,7 @@ class ChatManager {
         this.networkManager = networkManager;
         this.playerManager = playerManager;
         this.sceneManager = sceneManager;
-        
+
         // UI Elements
         this.chatContainer = document.getElementById('chat-container');
         this.chatMessages = document.getElementById('chat-messages');
@@ -17,19 +17,21 @@ class ChatManager {
         this.chatMinimizeBtn = document.getElementById('chat-minimize-btn');
         this.emojiMenu = document.getElementById('emoji-menu');
         this.stampBtn = document.getElementById('stamp-btn');
-        
+        /** 楽観送信の clientSendId → DOM 要素 */
+        this.pendingOutgoingChatById = new Map();
+
         // State (モバイル時は初期で最小化)
         this.isMinimized = options.initialMinimized ?? false;
         this.myUsername = localStorage.getItem('username') || 'Guest';
         this.connectedPlayers = new Map(); // playerId -> username
-        
+
         // Emoji list
         this.emojiList = [
-            '😀','😂','😍','😎','😭','😡','👍','👏',
-            '🙌','🙏','🎉','💯','🔥','😳','🤔','😴',
-            '🥺','😱','🤩','😇','😅'
+            '😀', '😂', '😍', '😎', '😭', '😡', '👍', '👏',
+            '🙌', '🙏', '🎉', '💯', '🔥', '😳', '🤔', '😴',
+            '🥺', '😱', '🤩', '😇', '😅',
         ];
-        
+
         // Emoji display management
         this.playerEmojis = new Map(); // playerId -> {emoji, timeoutId}
         this.emojiDivs = new Map(); // playerId -> HTML element
@@ -64,9 +66,161 @@ class ChatManager {
         console.log('Chat Manager initialized!');
     }
 
+    /**
+     * 送信中に送信ボタンを無効化する
+     * @param {boolean} busy
+     */
+    setChatSendInFlightBusy(busy) {
+        if (this.chatSendBtn) {
+            this.chatSendBtn.disabled = !!busy;
+            this.chatSendBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
+        }
+    }
+
+    /**
+     * 楽観表示: 自分の未確定メッセージ行を追加する（送信中…）
+     * @param {string} clientSendId
+     * @param {string} text
+     */
+    addPendingOutgoingChatRow(clientSendId, text) {
+        if (!clientSendId || !this.chatMessages) return;
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'chat-message my-message chat-pending-out';
+        messageDiv.dataset.clientSendId = clientSendId;
+        messageDiv.dataset.pendingText = text;
+
+        const messageHeader = document.createElement('div');
+        messageHeader.className = 'message-header';
+        messageHeader.textContent = this.myUsername;
+
+        const messageTime = document.createElement('span');
+        messageTime.className = 'message-time';
+        messageTime.textContent = new Date().toLocaleTimeString('ja-JP', {
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+        messageHeader.appendChild(messageTime);
+        messageDiv.appendChild(messageHeader);
+
+        const statusRow = document.createElement('div');
+        statusRow.className = 'chat-pending-status';
+        statusRow.textContent = '送信中…';
+        messageDiv.appendChild(statusRow);
+
+        const messageText = document.createElement('div');
+        messageText.className = 'message-text';
+        messageText.innerHTML = this.formatChatMessageHtml(text);
+        messageDiv.appendChild(messageText);
+
+        this.chatMessages.appendChild(messageDiv);
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+        this.pendingOutgoingChatById.set(clientSendId, messageDiv);
+        this.setChatSendInFlightBusy(true);
+    }
+
+    /**
+     * 送信成功時に楽観行を除去する
+     * @param {string} clientSendId
+     */
+    removePendingOutgoingChatRow(clientSendId) {
+        const el = this.pendingOutgoingChatById.get(clientSendId);
+        if (el) {
+            el.remove();
+            this.pendingOutgoingChatById.delete(clientSendId);
+        }
+        if (this.pendingOutgoingChatById.size === 0) {
+            this.setChatSendInFlightBusy(false);
+        }
+    }
+
+    /**
+     * clientSendId が無い echo のとき、本文一致で楽観行を1件除去する
+     * @param {string} messageText
+     */
+    removePendingOutgoingChatByTextMatch(messageText) {
+        const want = String(messageText ?? '');
+        for (const [id, el] of this.pendingOutgoingChatById) {
+            const pt = el.dataset.pendingText;
+            if (pt === want) {
+                el.remove();
+                this.pendingOutgoingChatById.delete(id);
+                break;
+            }
+        }
+        if (this.pendingOutgoingChatById.size === 0) {
+            this.setChatSendInFlightBusy(false);
+        }
+    }
+
+    /**
+     * 送信失敗時に楽観行を取り消し線・理由表示に変える
+     * @param {string} clientSendId
+     * @param {{ ok?: boolean, code?: string, message?: string }|null} [res]
+     */
+    markPendingOutgoingChatFailed(clientSendId, res) {
+        const el = clientSendId ? this.pendingOutgoingChatById.get(clientSendId) : null;
+        if (el) {
+            el.classList.remove('chat-pending-out');
+            el.classList.add('chat-send-failed');
+            const statusRow = el.querySelector('.chat-pending-status');
+            if (statusRow) statusRow.textContent = '送信できませんでした';
+            const body = el.querySelector('.message-text');
+            if (body) body.classList.add('chat-strikethrough-body');
+            let reasonText =
+                res && typeof res.message === 'string' && res.message.trim()
+                    ? res.message.trim()
+                    : 'このメッセージは送信されませんでした';
+            if (res && res.code === 'in_flight' && (!res.message || !String(res.message).trim())) {
+                reasonText = '処理中のチャットがあります。';
+            }
+            const reason = document.createElement('div');
+            reason.className = 'chat-send-fail-reason';
+            reason.textContent = reasonText;
+            el.appendChild(reason);
+            this.pendingOutgoingChatById.delete(clientSendId);
+        }
+        this.setChatSendInFlightBusy(false);
+    }
+
+    /**
+     * メッセージを送信する（楽観表示 → サーバー ack）
+     * @param {string} message
+     */
+    sendMessage(message) {
+        if (!this.networkManager.socket) {
+            console.warn('Socket not connected');
+            return;
+        }
+        const clientSendId =
+            typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : `m${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+        this.addPendingOutgoingChatRow(clientSendId, message);
+        const failId = clientSendId;
+        this.networkManager.socket.emit('chat-message', { text: message, clientSendId }, (res) => {
+            if (!res || res.ok) {
+                return;
+            }
+            const rid = res.clientSendId || failId;
+            if (res.code === 'inappropriate' || res.code === 'ng_word') {
+                this.markPendingOutgoingChatFailed(rid, res);
+                return;
+            }
+            if (res.code === 'room_rate') {
+                this.markPendingOutgoingChatFailed(rid, {
+                    ...res,
+                    message: res.message || '送信できませんでした',
+                });
+                return;
+            }
+            this.markPendingOutgoingChatFailed(rid, res);
+        });
+    }
+
     setupUIEvents() {
         // Send message
         const sendMessage = () => {
+            if (this.chatSendBtn && this.chatSendBtn.disabled) return;
             const message = this.chatInput.value.trim();
             if (message) {
                 this.sendMessage(message);
@@ -122,6 +276,11 @@ class ChatManager {
 
         // Receive own chat message echo
         socket.on('chat-my-message', (data) => {
+            if (data.clientSendId) {
+                this.removePendingOutgoingChatRow(data.clientSendId);
+            } else {
+                this.removePendingOutgoingChatByTextMatch(data.message);
+            }
             this.addChatMessage(data, true);
         });
 
@@ -152,35 +311,6 @@ class ChatManager {
                     this.connectedPlayers.set(player.id, player.username);
                 }
             });
-        });
-    }
-
-    sendMessage(message) {
-        if (!this.networkManager.socket) {
-            console.warn('Socket not connected');
-            return;
-        }
-
-        this.networkManager.socket.emit('chat-message', message, (res) => {
-            if (!res || res.ok) {
-                return;
-            }
-            if (res.code === 'ng_word') {
-                if (res.message) {
-                    this.addSystemMessage(res.message);
-                }
-                return;
-            }
-            if (res.code === 'inappropriate') {
-                return;
-            }
-            if (res.code === 'room_rate') {
-                this.addSystemMessage('送信できませんでした');
-                return;
-            }
-            if (res.message) {
-                this.addSystemMessage(res.message);
-            }
         });
     }
 

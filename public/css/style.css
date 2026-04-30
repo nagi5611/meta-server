@@ -773,6 +773,47 @@ body {
     text-align: right;
 }
 
+.chat-message.chat-pending-out {
+    opacity: 0.92;
+}
+
+.chat-pending-status {
+    font-size: 11px;
+    color: #64748b;
+    margin: 4px 0 2px;
+    font-weight: 500;
+}
+
+.chat-message.my-message .chat-pending-status {
+    text-align: right;
+}
+
+.chat-message.chat-send-failed {
+    border-right-color: #94a3b8;
+    background: rgba(148, 163, 184, 0.14);
+}
+
+.chat-strikethrough-body {
+    text-decoration: line-through;
+    opacity: 0.65;
+}
+
+.chat-send-fail-reason {
+    font-size: 11px;
+    color: #b91c1c;
+    margin-top: 6px;
+    line-height: 1.35;
+}
+
+.chat-message.my-message .chat-send-fail-reason {
+    text-align: right;
+}
+
+#chat-send-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 .chat-message .message-header {
     font-weight: 600;
     color: #0288d1;
