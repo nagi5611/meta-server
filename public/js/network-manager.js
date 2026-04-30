@@ -1,6 +1,7 @@
 import { io } from 'socket.io-client';
 import * as THREE from 'three';
 import { notifyServiceWorkerInvalidate } from './service-worker-register.js';
+import { t } from './metaverse-i18n.js';
 
 class NetworkManager {
     constructor(playerManager) {
@@ -184,7 +185,7 @@ class NetworkManager {
 
         // admin 名でのログイン拒否時（管理者以外）→ エラー表示してログインへ
         this.socket.on('username-rejected', async (data) => {
-            const msg = data?.message || '「admin」は管理者専用です。';
+            const msg = data?.message || t('net.adminNameForbidden');
             try {
                 await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
             } catch (_) { /* ignore */ }
@@ -196,7 +197,7 @@ class NetworkManager {
         });
 
         this.socket.on('change-world-rejected', (data) => {
-            const msg = data?.message || 'このテレポーターは利用できません。';
+            const msg = data?.message || t('net.teleporterDenied');
             alert(msg);
         });
 
@@ -296,7 +297,7 @@ class NetworkManager {
 
         // Handle admin kick
         this.socket.on('admin-kicked', async (data) => {
-            const message = data && data.message ? data.message : '管理者によってキックされました。';
+            const message = data && data.message ? data.message : t('net.kicked');
             alert(message);
             try {
                 await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
@@ -436,7 +437,7 @@ class NetworkManager {
                 this.lastPlayersSnapshot = [];
             }
         } else if (typeof callback === 'function') {
-            callback({ error: 'not_connected', message: '接続されていません' });
+            callback({ error: 'not_connected', message: t('net.notConnected') });
         }
     }
 

@@ -3,6 +3,7 @@
 
 import { isMobile } from './mobile-utils.js';
 import { fetchChartBgmArrayBuffer } from './chart-bgm-fetch.js';
+import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 
 /**
  * ノーツ定義: { time: 秒, type: 'don'|'ka', volume?: 0.1〜3 } または { type: 'roll', startTime, endTime, volume?: 0.1〜3, rollCellVolumes?: Record<string, number> }
@@ -208,6 +209,13 @@ class TaikoGameManager {
         this._hitChartId = null;
         /** @type {number} 1..3 */
         this._hitPartIndex = 1;
+
+        window.addEventListener('metaverse-locale-changed', () => {
+            applyMetaverseI18nToDocument();
+            if (this._open && this._songSelectEl && this._songSelectEl.style.display !== 'none' && this._chartListEl) {
+                this._loadChartList();
+            }
+        });
     }
 
     /** WebAudioコンテキストを確保して返す（ユーザー操作後に resume すること） */
@@ -398,7 +406,7 @@ class TaikoGameManager {
             if (ids.length === 0) {
                 this._chartEmptyEl.style.display = 'block';
                 const li = document.createElement('li');
-                li.textContent = 'デモで遊ぶ';
+                li.textContent = t('taiko.playDemo');
                 li.className = 'taiko-chart-item-demo';
                 li.addEventListener('click', () => this._startGamePlay(DEMO_CHART, null));
                 this._chartListEl.appendChild(li);
@@ -427,9 +435,9 @@ class TaikoGameManager {
             });
         } catch (err) {
             this._chartEmptyEl.style.display = 'block';
-            this._chartEmptyEl.textContent = '譜面の取得に失敗しました';
+            this._chartEmptyEl.textContent = t('taiko.chartFetchFailed');
             const li = document.createElement('li');
-            li.textContent = 'デモで遊ぶ';
+            li.textContent = t('taiko.playDemo');
             li.addEventListener('click', () => this._startGamePlay(DEMO_CHART, null));
             this._chartListEl.appendChild(li);
         }
@@ -617,13 +625,13 @@ class TaikoGameManager {
         const wrap = document.getElementById('taiko-mp-part-buttons');
         if (!z || !wrap) return;
         if (hintEl) {
-            hintEl.textContent = `グループ「${z.groupId}」・${z.slotCount}人でプレイ。パートを選んでください。`;
+            hintEl.textContent = t('taiko.mpGroupHint', { group: z.groupId, count: String(z.slotCount) });
         }
         if (statusEl) statusEl.textContent = '';
         wrap.innerHTML = '';
 
         if (!this._socket || !this._socket.connected) {
-            if (statusEl) statusEl.textContent = '接続されていません。ページを再読み込みしてください。';
+            if (statusEl) statusEl.textContent = t('taiko.mpNotConnected');
             return;
         }
 
@@ -640,7 +648,7 @@ class TaikoGameManager {
             const pill = document.createElement('span');
             pill.className = 'taiko-mp-part-pill';
             pill.dataset.part = String(i);
-            pill.textContent = '未参加';
+            pill.textContent = t('taiko.mpNotJoined');
 
             row.appendChild(btn);
             row.appendChild(pill);
@@ -689,7 +697,7 @@ class TaikoGameManager {
             chartId: z.multiplayerChartId
         }, (ack) => {
             if (!ack || !ack.ok) {
-                if (statusEl) statusEl.textContent = 'ルームに入れませんでした。';
+                if (statusEl) statusEl.textContent = t('taiko.mpRoomFailed');
             }
         });
     }
@@ -714,7 +722,7 @@ class TaikoGameManager {
                 this._mpClaimedPart = partIndex;
                 const btn = document.querySelector(`#taiko-mp-part-buttons button[data-part="${partIndex}"]`);
                 const label = (btn && btn instanceof HTMLButtonElement && btn.textContent) ? btn.textContent : `${partIndex}P`;
-                if (statusEl) statusEl.textContent = `${label} を選択しました`;
+                if (statusEl) statusEl.textContent = t('taiko.mpPartSelected', { label });
 
                 // BGMの事前デコード完了まで ready を送らない（BGMなしなら即ready）
                 this._mpReadySent = false;
@@ -722,18 +730,19 @@ class TaikoGameManager {
                 if (pill && pill instanceof HTMLElement) {
                     pill.classList.remove('ready');
                     pill.classList.add('loading');
-                    pill.textContent = this._mpNeedsBgm ? 'BGM読込中' : '準備中';
+                    pill.textContent = this._mpNeedsBgm ? t('taiko.mpBgmLoading') : t('taiko.mpPreparing');
                 }
 
                 this._prepareMultiplayerBgmAndReady().catch((e) => {
-                    if (statusEl) statusEl.textContent = 'BGMの準備に失敗: ' + (e?.message || e);
+                    if (statusEl) statusEl.textContent = t('taiko.mpBgmFailed') + (e?.message || e);
                 });
             } else if (statusEl) {
-                statusEl.textContent = ack?.error === 'taken'
-                    ? 'このパートは埋まっています'
-                    : ack?.error === 'in_game'
-                        ? '演奏中はパートを変更できません'
-                        : '選択できませんでした';
+                statusEl.textContent =
+                    ack?.error === 'taken'
+                        ? t('taiko.mpPartFull')
+                        : ack?.error === 'in_game'
+                          ? t('taiko.mpCannotChangePlaying')
+                          : t('taiko.mpSelectFailed');
             }
         });
     }
@@ -759,7 +768,7 @@ class TaikoGameManager {
             if (pill && pill instanceof HTMLElement) {
                 pill.classList.remove('loading');
                 pill.classList.add('ready');
-                pill.textContent = 'OK';
+                pill.textContent = t('taiko.mpReadyOk');
             }
             return;
         }
@@ -773,7 +782,7 @@ class TaikoGameManager {
         if (pill && pill instanceof HTMLElement) {
             pill.classList.remove('loading');
             pill.classList.add('ready');
-            pill.textContent = 'OK';
+            pill.textContent = t('taiko.mpReadyOk');
         }
     }
 
@@ -819,15 +828,15 @@ class TaikoGameManager {
 
             pill.classList.remove('ready', 'loading');
             if (!taken) {
-                pill.textContent = '未参加';
+                pill.textContent = t('taiko.mpNotJoined');
                 return;
             }
             if (ready) {
                 pill.classList.add('ready');
-                pill.textContent = 'OK';
+                pill.textContent = t('taiko.mpReadyOk');
             } else {
                 pill.classList.add('loading');
-                pill.textContent = this._mpNeedsBgm ? 'BGM読込中' : '準備中';
+                pill.textContent = this._mpNeedsBgm ? t('taiko.mpBgmLoading') : t('taiko.mpPreparing');
             }
         });
 
@@ -836,8 +845,8 @@ class TaikoGameManager {
         if (payload.inGame && payload.startAt) {
             const leftMs = Math.max(0, Number(payload.startAt) - Date.now());
             const sec = Math.ceil(leftMs / 1000);
-            if (hintEl) hintEl.textContent = '満員になりました。まもなく開始します…';
-            if (statusEl) statusEl.textContent = `開始まで ${sec} 秒`;
+            if (hintEl) hintEl.textContent = t('taiko.mpFullStarting');
+            if (statusEl) statusEl.textContent = t('taiko.mpCountdown', { sec: String(sec) });
             const ring = document.querySelector('.taiko-mp-wait-ring');
             if (ring) ring.classList.add('countdown');
 
@@ -915,7 +924,9 @@ class TaikoGameManager {
                 const c = charts[payload.chartId];
                 const notes = this._notesForMultiplayerPart(c, part);
                 if (!notes || !Array.isArray(notes) || notes.length === 0) {
-                    window.alert(`パート${part}の譜面がありません。管理画面の譜面で${part === 1 ? '1P' : part === 2 ? '2P' : '3P'}を設定してください。`);
+                    const hint =
+                        part === 1 ? t('taiko.part1p') : part === 2 ? t('taiko.part2p') : t('taiko.part3p');
+                    window.alert(t('taiko.alertNoChartPart', { part: String(part), hint }));
                     this._mpZone = null;
                     this.close();
                     return;
@@ -932,7 +943,7 @@ class TaikoGameManager {
                 };
                 this._startGamePlay(notes, meta, { startAtPerfSec });
             } catch (e) {
-                window.alert('譜面の取得に失敗しました');
+                window.alert(t('taiko.alertChartFailed'));
                 this.close();
             }
         }, Math.max(0, startAtPerfSec * 1000 - performance.now()));
@@ -954,11 +965,11 @@ class TaikoGameManager {
         if (lobbyEl) lobbyEl.style.display = 'none';
 
         const songNameEl = document.getElementById('taiko-results-song-name');
-        if (songNameEl) songNameEl.textContent = '総合得点';
+        if (songNameEl) songNameEl.textContent = t('taiko.totalScoreTitle');
         const userEl = document.getElementById('taiko-results-username');
-        if (userEl) userEl.textContent = `合計 ${total}点`;
+        if (userEl) userEl.textContent = t('taiko.totalPoints', { total: String(total) });
         const diffEl = document.getElementById('taiko-results-difficulty');
-        if (diffEl) diffEl.textContent = 'マルチプレイ';
+        if (diffEl) diffEl.textContent = t('taiko.multiplayer');
         const scoreValEl = document.getElementById('taiko-results-score-value');
         if (scoreValEl) scoreValEl.textContent = String(total);
         const goodEl = document.getElementById('taiko-results-good');
@@ -984,7 +995,7 @@ class TaikoGameManager {
                     : (this._mpPartNames[p.partIndex] && this._mpPartNames[p.partIndex].trim())
                         ? this._mpPartNames[p.partIndex].trim()
                         : `P${p.partIndex}`;
-                li.textContent = `${name} ${p.score}点`;
+                li.textContent = t('taiko.mpResultLine', { name, score: String(p.score) });
                 listEl.appendChild(li);
             });
         }
@@ -1302,7 +1313,7 @@ class TaikoGameManager {
     _showJudgeText(result) {
         if (!this._judgeEl) return;
         clearTimeout(this._judgeTimer);
-        const labels = { good: '良', ok: '可', miss: '不可' };
+        const labels = { good: t('taiko.judge.good'), ok: t('taiko.judge.ok'), miss: t('taiko.judge.miss') };
         const label = labels[result] || result;
         this._judgeEl.textContent = label;
         this._judgeEl.className = `taiko-judge-text visible ${result}`;
@@ -1315,7 +1326,7 @@ class TaikoGameManager {
     _showRollHitEffect() {
         if (this._judgeEl) {
             clearTimeout(this._judgeTimer);
-            this._judgeEl.textContent = '連打';
+            this._judgeEl.textContent = t('taiko.judgeRoll');
             this._judgeEl.className = 'taiko-judge-text visible roll';
             this._judgeTimer = setTimeout(() => {
                 if (this._judgeEl) this._judgeEl.classList.remove('visible');
@@ -1398,7 +1409,7 @@ class TaikoGameManager {
                 const el = document.createElement('div');
                 if (note.type === 'roll') {
                     el.className = 'taiko-note taiko-note-roll';
-                    el.textContent = '連打';
+                    el.textContent = t('taiko.judgeRoll');
                     const duration = (note._wallEnd ?? 0) - (note._wallStart ?? 0);
                     const widthPx = Math.max(40, (duration / NOTE_TRAVEL_TIME) * laneSpan);
                     el.style.width = widthPx + 'px';
@@ -1418,7 +1429,7 @@ class TaikoGameManager {
                     });
                 } else {
                     el.className = `taiko-note ${note.type}`;
-                    el.textContent = note.type === 'don' ? 'ドン' : 'カッ';
+                    el.textContent = note.type === 'don' ? t('taiko.donTitle') : t('taiko.kaTitle');
                     const vm = clampChartNoteVolume(note.volume);
                     el.style.transform = `translateY(-50%) scale(${vm})`;
                     this._notesContainer?.appendChild(el);
@@ -1518,7 +1529,10 @@ class TaikoGameManager {
 
         const meta = this._chartMeta || {};
         const chartId = meta.id;
-        const username = typeof localStorage !== 'undefined' ? (localStorage.getItem('username') || 'プレイヤー') : 'プレイヤー';
+        const username =
+            typeof localStorage !== 'undefined'
+                ? localStorage.getItem('username') || t('taiko.resultsPlayer')
+                : t('taiko.resultsPlayer');
 
         // マルチ: 全員終了後に総合リザルトを出す（ここでは終了通知だけ送って待機表示へ）
         if (this._socket && this._mpZone && this._mpClaimedPart != null) {
@@ -1530,7 +1544,7 @@ class TaikoGameManager {
             const wrap = document.getElementById('taiko-mp-part-buttons');
             if (this._songSelectEl) this._songSelectEl.style.display = 'none';
             if (wrap) wrap.innerHTML = '';
-            if (hintEl) hintEl.textContent = '演奏終了。ほかのプレイヤーの終了を待っています…';
+            if (hintEl) hintEl.textContent = t('taiko.waitingOthers');
             if (statusEl) statusEl.textContent = '';
 
             this._socket.emit('taiko-mp-finish', {
@@ -1555,11 +1569,12 @@ class TaikoGameManager {
         const resultsEl = document.getElementById('taiko-results');
         if (!resultsEl) return;
 
-        document.getElementById('taiko-results-song-name').textContent = meta.name || '曲名';
+        document.getElementById('taiko-results-song-name').textContent = meta.name || t('taiko.resultsSongPlaceholder');
         document.getElementById('taiko-results-username').textContent = username;
-        const diffLabels = ['かんたん', 'ふつう', 'むずかしい', 'おに'];
-        const diff = meta.difficulty != null ? meta.difficulty : 1;
-        document.getElementById('taiko-results-difficulty').textContent = diffLabels[Math.min(diff, 3)] || 'ふつう';
+        const diffKeys = ['taiko.diff.easy', 'taiko.diff.normal', 'taiko.diff.hard', 'taiko.diff.extreme'];
+        const diffRaw = meta.difficulty != null ? Number(meta.difficulty) : 1;
+        const dIdx = Number.isFinite(diffRaw) ? Math.max(0, Math.min(3, Math.floor(diffRaw))) : 1;
+        document.getElementById('taiko-results-difficulty').textContent = t(diffKeys[dIdx] || 'taiko.diff.normal');
         document.getElementById('taiko-results-score-value').textContent = String(this._score);
         document.getElementById('taiko-results-good').textContent = String(this._judgeCounts.good);
         document.getElementById('taiko-results-ok').textContent = String(this._judgeCounts.ok);
@@ -1583,10 +1598,14 @@ class TaikoGameManager {
             const li = document.createElement('li');
             const entry = ranking[i];
             if (entry) {
-                li.textContent = `${i + 1} ${entry.username} ${entry.score}点`;
+                li.textContent = t('taiko.rankingLine', {
+                    rank: String(i + 1),
+                    name: entry.username,
+                    score: String(entry.score),
+                });
                 li.classList.remove('taiko-results-ranking-empty');
             } else {
-                li.textContent = `${i + 1} - -`;
+                li.textContent = t('taiko.rankingPlaceholder', { rank: String(i + 1) });
                 li.classList.add('taiko-results-ranking-empty');
             }
             listEl.appendChild(li);

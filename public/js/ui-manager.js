@@ -2,6 +2,8 @@
  * UIManager - Manages UI elements for the game
  */
 
+import { t } from './metaverse-i18n.js';
+
 /**
  * innerHTML 向けに文字列をエスケープする（表示名 XSS 対策）
  * @param {string} s
@@ -224,11 +226,11 @@ class UIManager {
     showMobileInteractButton(hintLabel) {
         if (!this.mobileInteractBtn) return;
         if (this.teleportPrompt) this.teleportPrompt.style.display = 'none';
-        const hint = (hintLabel && String(hintLabel).trim()) || 'アニメーションを再生';
+        const hint = (hintLabel && String(hintLabel).trim()) || t('ui.mobileAnimDefault');
         if (this.mobileInteractBtn.style.display === 'block' && this.mobileInteractBtn.getAttribute('title') === hint) {
             return;
         }
-        this.mobileInteractBtn.textContent = 'インタラクト';
+        this.mobileInteractBtn.textContent = t('mobile.interact');
         this.mobileInteractBtn.setAttribute('title', hint);
         this.mobileInteractBtn.setAttribute('aria-label', hint);
         this.mobileInteractBtn.setAttribute('aria-hidden', 'false');
@@ -267,9 +269,9 @@ class UIManager {
         this.worldLoadOverlay.setAttribute('aria-busy', 'true');
         this.worldLoadOverlay.setAttribute('aria-hidden', 'false');
         if (preparing) {
-            this.worldLoadLabel.textContent = 'ワールドを読み込んでいます';
+            this.worldLoadLabel.textContent = t('worldLoad.preparingLabel');
             if (this.worldLoadAsset) {
-                this.worldLoadAsset.textContent = '接続・署名・容量を確認しています…';
+                this.worldLoadAsset.textContent = t('worldLoad.preparingAsset');
             }
             this.worldLoadBarFill.style.width = '0%';
             if (this.worldLoadPct) {
@@ -277,7 +279,7 @@ class UIManager {
             }
             return;
         }
-        this.worldLoadLabel.textContent = '読み込み中…';
+        this.worldLoadLabel.textContent = t('worldLoad.loading');
         if (this.worldLoadAsset) {
             this.worldLoadAsset.textContent = '';
         }
@@ -296,19 +298,21 @@ class UIManager {
         if (!this.worldLoadLabel || !this.worldLoadBarFill) return;
         const { fileName, loadedBytes, totalBytes, loadKind, prefabTitle } = detail || {};
         const name = (fileName && String(fileName).trim()) || '—';
-        this.worldLoadLabel.textContent = '読み込み中…';
+        this.worldLoadLabel.textContent = t('worldLoad.loading');
         if (this.worldLoadAsset) {
             if (loadKind === 'prefab' && prefabTitle && String(prefabTitle).trim()) {
-                const t = String(prefabTitle).trim();
+                const pTitle = String(prefabTitle).trim();
                 this.worldLoadAsset.textContent =
-                    name && name !== '—' ? `プレハブ「${t}」 — ${name}` : `プレハブ「${t}」`;
+                    name && name !== '—'
+                        ? t('worldLoad.prefabLine', { title: pTitle, name })
+                        : t('worldLoad.prefabTitleOnly', { title: pTitle });
             } else {
                 this.worldLoadAsset.textContent = name;
             }
         }
-        const t = Math.max(1, Math.floor(Number(totalBytes)) || 1);
-        const c = Math.min(Math.max(0, Number(loadedBytes) || 0), t);
-        const pct = Math.round((c / t) * 100);
+        const totalB = Math.max(1, Math.floor(Number(totalBytes)) || 1);
+        const c = Math.min(Math.max(0, Number(loadedBytes) || 0), totalB);
+        const pct = Math.round((c / totalB) * 100);
         this.worldLoadBarFill.style.width = `${pct}%`;
         if (this.worldLoadPct) {
             this.worldLoadPct.textContent = `${pct}%`;
@@ -339,7 +343,7 @@ class UIManager {
     showTeleportPrompt(destinationName) {
         if (!this.teleportPrompt) return;
         this.hideMobileInteractButton();
-        this.teleportPrompt.textContent = `テレポート - ${destinationName}`;
+        this.teleportPrompt.textContent = `${t('ui.teleportPrefix')}${destinationName}`;
         this.teleportPrompt.style.display = 'block';
     }
 
@@ -359,7 +363,7 @@ class UIManager {
     showTaikoPrompt() {
         if (!this.teleportPrompt) return;
         this.hideMobileInteractButton();
-        this.teleportPrompt.textContent = '[E] 太鼓をたたく';
+        this.teleportPrompt.textContent = t('ui.taikoPrompt');
         this.teleportPrompt.style.display = 'block';
     }
 
@@ -369,7 +373,7 @@ class UIManager {
     showPdfPrompt() {
         if (!this.teleportPrompt) return;
         this.hideMobileInteractButton();
-        this.teleportPrompt.textContent = 'PDFを表示';
+        this.teleportPrompt.textContent = t('ui.pdfPrompt');
         this.teleportPrompt.style.display = 'block';
     }
 
@@ -380,7 +384,7 @@ class UIManager {
     showGlbAnimInteractPrompt(label) {
         if (!this.teleportPrompt) return;
         this.hideMobileInteractButton();
-        this.teleportPrompt.textContent = label || '[E] アニメーション';
+        this.teleportPrompt.textContent = label || t('ui.glbAnimDefault');
         this.teleportPrompt.style.display = 'block';
     }
 
@@ -409,7 +413,7 @@ class UIManager {
 
         container.classList.remove('ping-green', 'ping-yellow', 'ping-red', 'ping-none');
         if (noResponse) {
-            el.textContent = '応答なし';
+            el.textContent = t('ui.pingNone');
             container.classList.add('ping-none');
         } else if (pingMs != null) {
             el.textContent = `${pingMs}ms`;
@@ -472,29 +476,45 @@ class UIManager {
                 }
                 const micClass = p.vcVideoOn ? 'video-on' : (p.vcMicOn ? 'mic-on' : 'mic-off');
                 const sep = showSeparator ? '<div class="player-list-separator"></div>' : '';
-                const videoIcon = p.vcVideoOn ? '<i class="bi bi-camera-video-fill vc-status-icon video-on" title="ビデオON"></i>' : '';
-                const micIcon = p.vcMicOn ? '<i class="bi bi-mic vc-status-icon mic-on" title="マイクON"></i>' : '<i class="bi bi-mic-mute vc-status-icon mic-off" title="マイクOFF"></i>';
-                const spkIcon = p.vcSpeakerOn === true ? '<i class="bi bi-megaphone vc-status-icon speaker-on" title="スピーカーON"></i>' : '<i class="bi bi-megaphone-fill vc-status-icon speaker-off" title="スピーカーOFF"></i>';
+                const videoIcon = p.vcVideoOn
+                    ? `<i class="bi bi-camera-video-fill vc-status-icon video-on" title="${escapeHtmlForUi(t('ui.videoOnTitle'))}"></i>`
+                    : '';
+                const micIcon = p.vcMicOn
+                    ? `<i class="bi bi-mic vc-status-icon mic-on" title="${escapeHtmlForUi(t('ui.micOnTitle'))}"></i>`
+                    : `<i class="bi bi-mic-mute vc-status-icon mic-off" title="${escapeHtmlForUi(t('ui.micOffTitle'))}"></i>`;
+                const spkIcon =
+                    p.vcSpeakerOn === true
+                        ? `<i class="bi bi-megaphone vc-status-icon speaker-on" title="${escapeHtmlForUi(t('ui.spkOnTitle'))}"></i>`
+                        : `<i class="bi bi-megaphone-fill vc-status-icon speaker-off" title="${escapeHtmlForUi(t('ui.spkOffTitle'))}"></i>`;
                 const name = escapeHtmlForUi((p.displayName || p.username || 'Guest').trim() || 'Player');
                 const ping = p.pingMs != null ? p.pingMs : null;
                 const pingClass = ping == null ? 'ping-none' : (ping <= 100 ? 'ping-green' : ping <= 300 ? 'ping-yellow' : 'ping-red');
-                const pingText = ping != null ? `${ping}ms` : '応答なし';
-                const pingSpan = `<span class="player-ping ${pingClass}" title="応答時間">${pingText}</span>`;
+                const pingText = ping != null ? `${ping}ms` : t('ui.pingNone');
+                const pingSpan = `<span class="player-ping ${pingClass}" title="${escapeHtmlForUi(t('ui.pingTitle'))}">${pingText}</span>`;
                 const tier = p.perfTier != null ? String(p.perfTier) : '';
                 const fpsTxt = p.fpsSample != null ? `${p.fpsSample}fps` : '';
                 const perfSpan = (tier || fpsTxt)
-                    ? `<span class="player-perf" title="性能ティア / 直近FPSサンプル">${tier}${tier && fpsTxt ? ' ' : ''}${fpsTxt}</span>`
+                    ? `<span class="player-perf" title="${escapeHtmlForUi(t('ui.perfTitle'))}">${tier}${tier && fpsTxt ? ' ' : ''}${fpsTxt}</span>`
                     : '';
-                const roleLabel = p.role === 'student' ? '[生徒]' : p.role === 'teacher' ? '[教師]' : p.role === 'admin' ? '[管理者]' : '';
-                const roleSpan = roleLabel ? `<span class="player-role" title="種別">${roleLabel}</span>` : '';
+                const roleLabel =
+                    p.role === 'student'
+                        ? t('ui.roleStudent')
+                        : p.role === 'teacher'
+                          ? t('ui.roleTeacher')
+                          : p.role === 'admin'
+                            ? t('ui.roleAdmin')
+                            : '';
+                const roleSpan = roleLabel
+                    ? `<span class="player-role" title="${escapeHtmlForUi(t('ui.roleTitle'))}">${escapeHtmlForUi(roleLabel)}</span>`
+                    : '';
                 const safePeerId = escapeHtmlForUi(String(p.id ?? ''));
                 const watchBtn =
                     !blocked && p.vcVideoOn
-                        ? `<button type="button" class="player-watch-video-btn" data-peer-id="${safePeerId}" title="ビデオを視聴">視聴</button>`
+                        ? `<button type="button" class="player-watch-video-btn" data-peer-id="${safePeerId}" title="${escapeHtmlForUi(t('ui.watchVideoTitle'))}">${escapeHtmlForUi(t('ui.watchVideoBtn'))}</button>`
                         : '';
                 const safeId = escapeHtmlForUi(String(p.id ?? ''));
                 const blockedBadge = blocked
-                    ? '<span class="player-blocked-badge" title="ブロック済み（クリックで解除）"><i class="bi bi-slash-circle" aria-hidden="true"></i></span>'
+                    ? `<span class="player-blocked-badge" title="${escapeHtmlForUi(t('ui.blockedBadgeTitle'))}"><i class="bi bi-slash-circle" aria-hidden="true"></i></span>`
                     : '';
                 const nameClasses = blocked
                     ? 'player-list-name-trigger player-list-name--blocked'
@@ -523,7 +543,7 @@ class UIManager {
                 .join('');
 
             if (blockedDisplayed.length > 0) {
-                html += '<div class="player-list-blocked-heading" role="presentation">ブロック済み</div>';
+                html += `<div class="player-list-blocked-heading" role="presentation">${escapeHtmlForUi(t('ui.blockedHeading'))}</div>`;
                 html += blockedDisplayed
                     .map((p, i) =>
                         buildRow(p, i, {
@@ -548,9 +568,9 @@ class UIManager {
         if (!this.aircraftBoardPrompt) return;
         this.hideMobileInteractButton();
         const name = (label || '').trim();
-        const verb = mode === 'passenger' ? '同乗する' : '操縦する';
-        const t = name ? `${name} — ${verb}` : verb;
-        this.aircraftBoardPrompt.textContent = `${t}（クリック / E）`;
+        const verb = mode === 'passenger' ? t('ui.aircraftPassenger') : t('ui.aircraftPilot');
+        const head = name ? `${name} — ${verb}` : verb;
+        this.aircraftBoardPrompt.textContent = `${head}${t('ui.aircraftBoardSuffix')}`;
         this.aircraftBoardPrompt.style.display = 'block';
     }
 
@@ -563,12 +583,11 @@ class UIManager {
         if (!this.aircraftHud) return;
         this.aircraftHud.innerHTML = `
 <div class="aircraft-hud-actions">
-<button type="button" id="aircraft-hud-exit">降りる (F)</button>
-<button type="button" id="aircraft-hud-camera">視点 (V)</button>
+<button type="button" id="aircraft-hud-exit">${escapeHtmlForUi(t('ui.aircraftExit'))}</button>
+<button type="button" id="aircraft-hud-camera">${escapeHtmlForUi(t('ui.aircraftCamera'))}</button>
 </div>
 <div class="aircraft-hud-telemetry">
-<span class="aircraft-hud-line">速度 <strong id="aircraft-hud-speed">0</strong> m/s　姿勢 P <strong id="aircraft-hud-pitch">0</strong>° R <strong id="aircraft-hud-roll">0</strong>° Y <strong id="aircraft-hud-yaw">0</strong>°</span>
-<span class="aircraft-hud-line">角速度 ヨー <strong id="aircraft-hud-omegay">0</strong>　ピッチ <strong id="aircraft-hud-omegap">0</strong>　ロール <strong id="aircraft-hud-omegar">0</strong> rad/s　<strong id="aircraft-hud-ground">—</strong></span>
+${t('ui.aircraftHudLinesHtml')}
 </div>`;
         this.aircraftHud.style.display = 'flex';
     }
@@ -600,7 +619,7 @@ class UIManager {
         if (wy) wy.textContent = q(snap.omegaYaw, 2);
         if (wp) wp.textContent = q(snap.omegaPitch, 2);
         if (wr) wr.textContent = q(snap.omegaRoll, 2);
-        if (g) g.textContent = snap.grounded ? '接地' : '空中';
+        if (g) g.textContent = snap.grounded ? t('ui.aircraftGrounded') : t('ui.aircraftAirborne');
     }
 
     hideAircraftHud() {

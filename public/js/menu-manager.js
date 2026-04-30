@@ -4,6 +4,13 @@ import {
     VIEW_DISTANCE_M_MIN,
     VIEW_DISTANCE_M_MAX
 } from './ibl-setup.js';
+import {
+    t,
+    detectBrowserMetaverseLocale,
+    normalizeMetaverseLocale,
+    setMetaverseLocale,
+    applyMetaverseI18nToDocument
+} from './metaverse-i18n.js';
 
 /**
  * MenuManager - メニューバーと設定管理
@@ -75,7 +82,7 @@ class MenuManager {
 
         // Settings
         this.settings = {
-            language: 'ja',
+            language: detectBrowserMetaverseLocale(),
             micVolume: 33, // 0=0%, 33=100%等倍, 100=300%
             speakerVolume: 50,
             micDevice: '',
@@ -93,12 +100,22 @@ class MenuManager {
     
     init() {
         this.loadSettings();
+        setMetaverseLocale(this.settings.language);
+        applyMetaverseI18nToDocument();
         this.setupEventListeners();
         this.setupVideoEventListeners();
         this.updateSettingsUI();
         this.updateButtonStates();
         this.loadAudioDevices();
         this.loadVideoDevices();
+        window.addEventListener('metaverse-locale-changed', () => {
+            applyMetaverseI18nToDocument();
+            this.updateViewModeButton();
+            const btn = document.getElementById('mic-test-btn');
+            if (btn && !this.settingsAnalyzerInterval) {
+                btn.textContent = t('settings.micTestStart');
+            }
+        });
     }
 
     /**
@@ -166,12 +183,13 @@ class MenuManager {
             const devices = await navigator.mediaDevices.enumerateDevices();
             const cameraSelect = document.getElementById('video-camera-device');
             if (!cameraSelect) return;
-            cameraSelect.innerHTML = '<option value="">デフォルト</option>';
+            cameraSelect.innerHTML = `<option value="">${t('settings.defaultDevice')}</option>`;
             devices.forEach(device => {
                 if (device.kind === 'videoinput') {
                     const option = document.createElement('option');
                     option.value = device.deviceId;
-                    option.textContent = device.label || `カメラ ${cameraSelect.options.length}`;
+                    option.textContent =
+                        device.label || t('menu.cameraFallbackNumbered', { n: cameraSelect.options.length });
                     cameraSelect.appendChild(option);
                 }
             });
@@ -242,7 +260,7 @@ class MenuManager {
                 placeholder.style.display = 'none';
             } catch (e) {
                 video.style.display = 'none';
-                placeholder.textContent = 'カメラにアクセスできません';
+                placeholder.textContent = t('menu.videoNoCamera');
                 placeholder.style.display = 'block';
             }
         } else {
@@ -255,7 +273,7 @@ class MenuManager {
                     placeholder.style.display = 'none';
                 } else {
                     video.style.display = 'none';
-                    placeholder.textContent = '配信中';
+                    placeholder.textContent = t('menu.videoLive');
                     placeholder.style.display = 'block';
                 }
                 return;
@@ -276,12 +294,13 @@ class MenuManager {
                 stream.getVideoTracks()[0]?.addEventListener('ended', () => {
                     this.stopPreviewStream();
                     video.style.display = 'none';
-                    placeholder.textContent = '画面共有が終了しました';
+                    placeholder.textContent = t('menu.screenShareEnded');
                     placeholder.style.display = 'block';
                 });
             } catch (e) {
                 video.style.display = 'none';
-                placeholder.textContent = e.name === 'NotAllowedError' ? '画面共有がキャンセルされました' : '画面の取得に失敗しました';
+                placeholder.textContent =
+                    e.name === 'NotAllowedError' ? t('menu.screenShareCancelled') : t('menu.screenCaptureFailed');
                 placeholder.style.display = 'block';
             }
         }
@@ -336,7 +355,7 @@ class MenuManager {
             this.videoStopBtn.style.display = 'block';
             this.videoBtn?.classList.add('active');
         } catch (error) {
-            this.videoErrorEl.textContent = error.message || 'ビデオの開始に失敗しました';
+            this.videoErrorEl.textContent = error.message || t('menu.videoStartFailed');
             this.videoErrorEl.style.display = 'block';
         }
     }
@@ -366,19 +385,21 @@ class MenuManager {
             const speakerSelect = document.getElementById('speakerDevice');
             
             // Clear existing options (keep default)
-            micSelect.innerHTML = '<option value="">デフォルト</option>';
-            speakerSelect.innerHTML = '<option value="">デフォルト</option>';
+            micSelect.innerHTML = `<option value="">${t('settings.defaultDevice')}</option>`;
+            speakerSelect.innerHTML = `<option value="">${t('settings.defaultDevice')}</option>`;
             
             devices.forEach(device => {
                 if (device.kind === 'audioinput') {
                     const option = document.createElement('option');
                     option.value = device.deviceId;
-                    option.textContent = device.label || `マイク ${micSelect.options.length}`;
+                    option.textContent =
+                        device.label || t('menu.micFallbackNumbered', { n: micSelect.options.length });
                     micSelect.appendChild(option);
                 } else if (device.kind === 'audiooutput') {
                     const option = document.createElement('option');
                     option.value = device.deviceId;
-                    option.textContent = device.label || `スピーカー ${speakerSelect.options.length}`;
+                    option.textContent =
+                        device.label || t('menu.speakerFallbackNumbered', { n: speakerSelect.options.length });
                     speakerSelect.appendChild(option);
                 }
             });
@@ -464,8 +485,13 @@ class MenuManager {
         
         // Settings inputs
         document.getElementById('language').addEventListener('change', (e) => {
-            this.settings.language = e.target.value;
+            const v = e.target.value;
+            this.settings.language = normalizeMetaverseLocale(v) || 'ja';
             this.saveSettings();
+            setMetaverseLocale(this.settings.language);
+            window.dispatchEvent(
+                new CustomEvent('metaverse-locale-changed', { detail: { locale: this.settings.language } })
+            );
         });
         
         document.getElementById('micVolume').addEventListener('input', (e) => {
@@ -495,7 +521,7 @@ class MenuManager {
                 this.voiceChatManager.setMicDevice(e.target.value);
 
                 if (this.voiceChatManager.isMicEnabled) {
-                    this.showDeviceChangeNotification('マイクデバイスを変更しました。マイクを一度OFFにしてから再度ONにしてください。');
+                    this.showDeviceChangeNotification(t('menu.micDeviceChanged'));
                 }
             }
         });
@@ -827,9 +853,9 @@ class MenuManager {
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             const colors = ['#f97316', '#ea580c', '#f59e0b', '#eab308', '#facc15', '#a3e635', '#84cc16', '#22c55e', '#16a34a'];
 
-            btn.textContent = 'テストを中止';
+            btn.textContent = t('settings.micTestStop');
             btn.classList.add('stop');
-            statusEl.textContent = useServerLoopback ? '声を再生中です（サーバー経由）' : '声を再生中です';
+            statusEl.textContent = useServerLoopback ? t('menu.micPlaybackServer') : t('menu.micPlaybackLocal');
 
             this.settingsAnalyzerInterval = setInterval(() => {
                 const vol = parseInt(document.getElementById('micVolume')?.value ?? 33);
@@ -849,7 +875,7 @@ class MenuManager {
                 });
             }, 60);
         } catch (e) {
-            statusEl.textContent = 'マイクにアクセスできません';
+            statusEl.textContent = t('menu.micDenied');
         }
     }
 
@@ -875,7 +901,7 @@ class MenuManager {
         const statusEl = document.getElementById('mic-test-status');
         const segments = document.querySelectorAll('#settings-mic-analyzer .mic-analyzer-segment');
         if (btn) {
-            btn.textContent = 'テストを開始';
+            btn.textContent = t('settings.micTestStart');
             btn.classList.remove('stop');
         }
         if (statusEl) statusEl.textContent = '';
@@ -887,9 +913,14 @@ class MenuManager {
     
     loadSettings() {
         const saved = localStorage.getItem('metaverse-settings');
+        if (!saved) {
+            this.settings.language = detectBrowserMetaverseLocale();
+        }
         if (saved) {
             try {
                 this.settings = { ...this.settings, ...JSON.parse(saved) };
+                const nl = normalizeMetaverseLocale(this.settings.language);
+                this.settings.language = nl || detectBrowserMetaverseLocale();
                 if (!['first', 'third'].includes(this.settings.viewMode)) {
                     this.settings.viewMode = 'third';
                 }
@@ -903,6 +934,7 @@ class MenuManager {
                 console.error('Failed to load settings:', e);
             }
         }
+        setMetaverseLocale(this.settings.language);
     }
     
     saveSettings() {
@@ -967,7 +999,7 @@ class MenuManager {
         const isFirst = this.settings.viewMode === 'first';
         toggle.checked = isFirst;
         if (label) {
-            label.textContent = isFirst ? '1人称視点' : '3人称視点';
+            label.textContent = isFirst ? t('settings.viewFirst') : t('settings.viewThird');
         }
     }
 

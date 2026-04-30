@@ -40,14 +40,14 @@
     </div>
 
     <div id="info">
-        <h1>松山南高校 みんなでメタ</h1>
+        <h1 data-i18n="info.appTitle">松山南高校 みんなでメタ</h1>
         <div id="info-stats">
-            <p>ワールド: <span id="world-name">-</span></p>
-            <p>座標: <span id="position-display">0, 0, 0</span></p>
-            <p>プレイヤー数: <span id="player-count">0</span></p>
+            <p><span data-i18n="info.worldLabel"></span> <span id="world-name">-</span></p>
+            <p><span data-i18n="info.positionLabel"></span> <span id="position-display">0, 0, 0</span></p>
+            <p><span data-i18n="info.playerCountLabel"></span> <span id="player-count">0</span></p>
         </div>
-        <div id="player-list-container" title="Vキーで視聴開始／Shift+クリックまたはUでマウス解放">
-            <div id="ping-display" class="ping-display" title="サーバー応答時間">
+        <div id="player-list-container" data-i18n-title="info.playerListTitle" title="Vキーで視聴開始／Shift+クリックまたはUでマウス解放">
+            <div id="ping-display" class="ping-display" data-i18n-title="info.pingTitle" title="サーバー応答時間">
                 <i class="bi bi-bar-chart-fill"></i> <span id="ping-value">-</span>
             </div>
             <div id="player-list" class="player-list"></div>
@@ -57,19 +57,19 @@
     <!-- Admin: プレイヤー情報パネル（管理者のみ、アバタークリック時） -->
     <div id="admin-player-info-panel" class="admin-player-info-panel" style="display: none;">
         <div class="admin-player-info-header">
-            <span>プレイヤー情報</span>
-            <button type="button" id="admin-player-info-close" class="admin-player-info-close" title="閉じる">×</button>
+            <span data-i18n="admin.playerInfoTitle">プレイヤー情報</span>
+            <button type="button" id="admin-player-info-close" class="admin-player-info-close" data-i18n-title="admin.closeTitle" title="閉じる">×</button>
         </div>
         <div class="admin-player-info-body">
-            <div class="admin-player-info-row"><span class="label">ユーザー名</span><span id="admin-info-username">-</span></div>
-            <div class="admin-player-info-row"><span class="label">接続時間</span><span id="admin-info-connected">-</span></div>
+            <div class="admin-player-info-row"><span class="label" data-i18n="admin.username">ユーザー名</span><span id="admin-info-username">-</span></div>
+            <div class="admin-player-info-row"><span class="label" data-i18n="admin.connected">接続時間</span><span id="admin-info-connected">-</span></div>
             <div class="admin-player-info-row"><span class="label">Ping</span><span id="admin-info-ping">-</span></div>
             <div class="admin-player-info-row"><span class="label">FPS(1s)</span><span id="admin-info-fps">-</span></div>
             <div class="admin-player-info-row"><span class="label">Perf tier</span><span id="admin-info-perf-tier">-</span></div>
             <div class="admin-player-info-row"><span class="label">LoAF / longtask</span><span id="admin-info-loaf">-</span></div>
             <div class="admin-player-info-row"><span class="label">IP</span><span id="admin-info-ip">-</span></div>
-            <div class="admin-player-info-row"><span class="label">ブラウザ</span><span id="admin-info-browser">-</span></div>
-            <div class="admin-player-info-row"><span class="label">OS</span><span id="admin-info-os">-</span></div>
+            <div class="admin-player-info-row"><span class="label" data-i18n="admin.browser">ブラウザ</span><span id="admin-info-browser">-</span></div>
+            <div class="admin-player-info-row"><span class="label" data-i18n="admin.os">OS</span><span id="admin-info-os">-</span></div>
         </div>
     </div>
 
@@ -80,7 +80,7 @@
     <!-- ワールド切替時: モデル・PDF 読み込み完了まで -->
     <div id="world-load-overlay" class="world-load-overlay" style="display: none;" aria-hidden="true" role="status">
         <div class="world-load-panel">
-            <p id="world-load-label" class="world-load-label">読み込み中…</p>
+            <p id="world-load-label" class="world-load-label" data-i18n="worldLoad.loading">読み込み中…</p>
             <p id="world-load-asset" class="world-load-asset" aria-live="polite"></p>
             <div class="world-load-bar-wrap">
                 <div class="world-load-bar-track">
@@ -93,28 +93,28 @@
 
     <!-- PDF Viewer Overlay (E key near PDF object) -->
     <div id="pdf-viewer-overlay" class="pdf-viewer-overlay" style="display: none;">
-        <button type="button" id="pdf-viewer-close" class="pdf-viewer-close" title="閉じる">×</button>
+        <button type="button" id="pdf-viewer-close" class="pdf-viewer-close" data-i18n-title="pdf.closeTitle" title="閉じる">×</button>
         <div id="pdf-viewer-content" class="pdf-viewer-content">
             <div id="pdf-viewer-canvas-wrap" class="pdf-viewer-canvas-wrap">
                 <canvas id="pdf-viewer-canvas"></canvas>
                 <canvas id="pdf-viewer-draw-canvas" class="pdf-viewer-draw-canvas"></canvas>
             </div>
             <div id="pdf-viewer-sidebar" class="pdf-viewer-sidebar">
-                <div id="pdf-viewer-pen-sample" class="pdf-viewer-pen-sample" title="線の太さサンプル">
+                <div id="pdf-viewer-pen-sample" class="pdf-viewer-pen-sample" data-i18n-title="pdf.penThicknessSampleTitle" title="線の太さサンプル">
                     <div id="pdf-viewer-pen-sample-line" class="pdf-viewer-pen-sample-line"></div>
                 </div>
                 <div class="pdf-viewer-pen-thickness-wrap">
-                    <label for="pdf-viewer-pen-thickness" class="pdf-viewer-pen-thickness-label">太さ</label>
+                    <label for="pdf-viewer-pen-thickness" class="pdf-viewer-pen-thickness-label" data-i18n="pdf.penThickness">太さ</label>
                     <input type="range" id="pdf-viewer-pen-thickness" class="pdf-viewer-pen-thickness" min="1" max="20" value="3">
                 </div>
-                <button type="button" id="pdf-viewer-pen-btn" class="pdf-viewer-pen-btn" title="ペン">🖊</button>
+                <button type="button" id="pdf-viewer-pen-btn" class="pdf-viewer-pen-btn" data-i18n-title="pdf.penBtnTitle" title="ペン">🖊</button>
                 <div class="pdf-viewer-vc-wrap">
-                    <button type="button" id="pdf-viewer-mic-btn" class="pdf-viewer-mic-btn muted" title="PDF通話マイク">
+                    <button type="button" id="pdf-viewer-mic-btn" class="pdf-viewer-mic-btn muted" data-i18n-title="pdf.micTitle" title="PDF通話マイク">
                         <svg class="icon" id="pdf-viewer-mic-icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/>
                         </svg>
                     </button>
-                    <button type="button" id="pdf-viewer-speaker-btn" class="pdf-viewer-speaker-btn" title="PDF通話スピーカー">
+                    <button type="button" id="pdf-viewer-speaker-btn" class="pdf-viewer-speaker-btn" data-i18n-title="pdf.speakerTitle" title="PDF通話スピーカー">
                         <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
                         </svg>
@@ -127,32 +127,32 @@
     <!-- 太鼓ゲームオーバーレイ -->
     <div id="taiko-game-overlay" class="taiko-game-overlay" style="display:none;">
         <div id="taiko-song-select" class="taiko-song-select">
-            <h2 class="taiko-song-select-title">選曲</h2>
+            <h2 class="taiko-song-select-title" data-i18n="taiko.selectTitle">選曲</h2>
             <ul id="taiko-chart-list" class="taiko-chart-list"></ul>
-            <p id="taiko-chart-empty" class="taiko-chart-empty" style="display:none;">譜面がありません</p>
-            <button type="button" id="taiko-song-select-close" class="taiko-song-select-close">閉じる</button>
+            <p id="taiko-chart-empty" class="taiko-chart-empty" style="display:none;" data-i18n="taiko.chartEmpty">譜面がありません</p>
+            <button type="button" id="taiko-song-select-close" class="taiko-song-select-close" data-i18n="taiko.close">閉じる</button>
         </div>
         <div id="taiko-mp-lobby" class="taiko-song-select taiko-mp-lobby" style="display:none;">
-            <h2 class="taiko-song-select-title">マルチプレイ待機中</h2>
+            <h2 class="taiko-song-select-title" data-i18n="taiko.mpLobbyTitle">マルチプレイ待機中</h2>
             <div class="taiko-mp-wait-ring" aria-hidden="true">
                 <div class="taiko-mp-wait-ring-dot"></div>
             </div>
             <p id="taiko-mp-lobby-hint" class="taiko-mp-lobby-hint"></p>
             <div id="taiko-mp-part-buttons" class="taiko-mp-part-buttons"></div>
             <p id="taiko-mp-status" class="taiko-mp-status"></p>
-            <button type="button" id="taiko-mp-lobby-close" class="taiko-song-select-close">閉じる</button>
+            <button type="button" id="taiko-mp-lobby-close" class="taiko-song-select-close" data-i18n="taiko.close">閉じる</button>
         </div>
         <div class="taiko-game-container" id="taiko-game-container" style="display:none;">
             <div class="taiko-game-top-buttons">
-                <button type="button" id="taiko-game-hint" class="taiko-game-hint" title="ヒント">?</button>
-                <button type="button" id="taiko-game-close" class="taiko-game-close" title="閉じる">×</button>
+                <button type="button" id="taiko-game-hint" class="taiko-game-hint" data-i18n-title="taiko.gameHintTitle" title="ヒント">?</button>
+                <button type="button" id="taiko-game-close" class="taiko-game-close" data-i18n-title="pdf.closeTitle" title="閉じる">×</button>
             </div>
             <div class="taiko-game-header">
-                <div class="taiko-game-title" id="taiko-game-title">轟太鼓</div>
+                <div class="taiko-game-title" id="taiko-game-title" data-i18n="taiko.gameTitle">轟太鼓</div>
             </div>
             <div class="taiko-game-bar">
                 <div class="taiko-game-score-box">
-                    <div class="taiko-score-label">スコア</div>
+                    <div class="taiko-score-label" data-i18n="taiko.scoreLabel">スコア</div>
                     <div class="taiko-score-value" id="taiko-score">0</div>
                     <div class="taiko-score-max">MAX <span id="taiko-score-max">0</span></div>
                     <div class="taiko-score-rate" id="taiko-score-rate">0%</div>
@@ -166,15 +166,15 @@
                 </div>
             </div>
             <div class="taiko-game-input">
-                <div class="taiko-ka-zone" id="taiko-ka-zone" title="カッ"></div>
-                <div class="taiko-input-drum" id="taiko-drum" title="ドン">
+                <div class="taiko-ka-zone" id="taiko-ka-zone" data-i18n-title="taiko.kaTitle" title="カッ"></div>
+                <div class="taiko-input-drum" id="taiko-drum" data-i18n-title="taiko.donTitle" title="ドン">
                     <img src="images/taiko.png" alt="" class="taiko-drum-img">
                 </div>
             </div>
         </div>
         <div id="taiko-results" class="taiko-results" style="display:none;">
             <div class="taiko-results-header">
-                <div class="taiko-results-banner taiko-results-banner-left">成績発表</div>
+                <div class="taiko-results-banner taiko-results-banner-left" data-i18n="taiko.resultsLeftBanner">成績発表</div>
                 <div class="taiko-results-banner taiko-results-banner-right" id="taiko-results-song-name">曲名</div>
             </div>
             <div class="taiko-results-main">
@@ -189,54 +189,54 @@
                 </div>
                 <div class="taiko-results-center">
                     <div class="taiko-results-clear-row">
-                        <span class="taiko-results-clear-label">クリア</span>
+                        <span class="taiko-results-clear-label" data-i18n="taiko.clearLabel">クリア</span>
                         <div class="taiko-results-clear-bar">
                             <div class="taiko-results-clear-bar-fill" id="taiko-results-clear-fill"></div>
                         </div>
-                        <span class="taiko-results-soul">魂</span>
+                        <span class="taiko-results-soul" data-i18n="taiko.soul">魂</span>
                     </div>
                     <div class="taiko-results-stats-row">
                         <div class="taiko-results-score-box">
                             <span class="taiko-results-score-value" id="taiko-results-score-value">0</span>
-                            <span class="taiko-results-score-unit">点</span>
+                            <span class="taiko-results-score-unit" data-i18n="taiko.scoreUnit">点</span>
                         </div>
                         <div class="taiko-results-judgments-group">
                             <div class="taiko-results-judgments">
-                                <span>良 <strong id="taiko-results-good">0</strong></span>
-                                <span>可 <strong id="taiko-results-ok">0</strong></span>
-                                <span>不可 <strong id="taiko-results-miss">0</strong></span>
+                                <span><span data-i18n="taiko.judge.good">良</span> <strong id="taiko-results-good">0</strong></span>
+                                <span><span data-i18n="taiko.judge.ok">可</span> <strong id="taiko-results-ok">0</strong></span>
+                                <span><span data-i18n="taiko.judge.miss">不可</span> <strong id="taiko-results-miss">0</strong></span>
                             </div>
                             <div class="taiko-results-combo-stats">
-                                <span>最大コンボ数 <strong id="taiko-results-max-combo">0</strong></span>
-                                <span>連打数 <strong id="taiko-results-roll">0</strong></span>
+                                <span><span data-i18n="taiko.maxCombo">最大コンボ数</span> <strong id="taiko-results-max-combo">0</strong></span>
+                                <span><span data-i18n="taiko.rollCount">連打数</span> <strong id="taiko-results-roll">0</strong></span>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="taiko-results-ranking-area">
-                    <h3 class="taiko-results-ranking-title">ランキング</h3>
+                    <h3 class="taiko-results-ranking-title" data-i18n="taiko.rankingTitle">ランキング</h3>
                     <ol class="taiko-results-ranking-list" id="taiko-results-ranking-list"></ol>
                 </div>
             </div>
             <div class="taiko-results-band"></div>
             <div class="taiko-results-footer">
-                <button type="button" id="taiko-results-close" class="taiko-results-close">閉じる</button>
+                <button type="button" id="taiko-results-close" class="taiko-results-close" data-i18n="taiko.close">閉じる</button>
             </div>
         </div>
         <div id="taiko-hint-popup" class="taiko-hint-popup" style="display:none;" aria-hidden="true">
             <div class="taiko-hint-popup-backdrop"></div>
             <div class="taiko-hint-popup-content">
-                <h3 class="taiko-hint-title">操作方法</h3>
-                <div id="taiko-hint-body-pc" class="taiko-hint-body" style="display:none;">
+                <h3 class="taiko-hint-title" data-i18n="taiko.hintTitle">操作方法</h3>
+                <div id="taiko-hint-body-pc" class="taiko-hint-body" style="display:none;" data-i18n-html="taiko.hintPcHtml">
                     <p><strong>ドン</strong> … F キー（左） / J キー（右）</p>
                     <p><strong>カッ</strong> … D キー（左） / K キー（右）</p>
                     <p>マウスで太鼓・青い部分をクリックしても入力できます。</p>
                 </div>
-                <div id="taiko-hint-body-mobile" class="taiko-hint-body" style="display:none;">
+                <div id="taiko-hint-body-mobile" class="taiko-hint-body" style="display:none;" data-i18n-html="taiko.hintMobileHtml">
                     <p><strong>ドン</strong> … 中央の太鼓の画像をタップ</p>
                     <p><strong>カッ</strong> … 青い部分（太鼓の左右）をタップ</p>
                 </div>
-                <button type="button" class="taiko-hint-popup-close">閉じる</button>
+                <button type="button" class="taiko-hint-popup-close" data-i18n="taiko.close">閉じる</button>
             </div>
         </div>
     </div>
@@ -244,14 +244,14 @@
     <!-- Chat Container -->
     <div id="chat-container">
         <div id="chat-header">
-            <span><i class="bi bi-chat-left-text"></i> チャット</span>
+            <span><i class="bi bi-chat-left-text"></i> <span data-i18n="chat.header">チャット</span></span>
             <button id="chat-minimize-btn">−</button>
         </div>
         <div id="chat-messages">
             <!-- Messages will be added here dynamically -->
         </div>
         <div id="chat-input-container">
-            <input type="text" id="chat-input" placeholder="メッセージを入力... @でメンション" maxlength="200" autocomplete="off">
+            <input type="text" id="chat-input" data-i18n-placeholder="chat.placeholder" placeholder="メッセージを入力... @でメンション" maxlength="200" autocomplete="off">
             <button id="chat-send-btn"><i class="bi bi-send-fill"></i></button>
         </div>
     </div>
@@ -262,48 +262,48 @@
     </div>
 
     <!-- モバイル用メニュートグル (768px以下で表示) -->
-    <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-label="メニュー" aria-hidden="true">
+    <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" data-i18n-aria-label="menu.mobileToggleAria" aria-label="メニュー" aria-hidden="true">
         <i class="bi bi-list"></i>
     </button>
 
     <!-- Menu Bar -->
     <div id="menu-bar">
         <!-- Admin menu button (管理者のみ有効) -->
-        <button id="admin-menu-btn" class="menu-button admin-menu-button" title="あどみんメニュー" style="display: none;">
+        <button id="admin-menu-btn" class="menu-button admin-menu-button" data-i18n-title="menu.adminTitle" title="あどみんメニュー" style="display: none;">
             <i class="bi bi-shield-lock"></i>
         </button>
-        <button id="mic-btn" class="menu-button" title="マイクミュート">
+        <button id="mic-btn" class="menu-button" data-i18n-title="menu.micMuteTitle" title="マイクミュート">
             <svg class="icon" id="mic-icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/>
             </svg>
         </button>
-        <button id="speaker-btn" class="menu-button" title="スピーカーミュート">
+        <button id="speaker-btn" class="menu-button" data-i18n-title="menu.speakerMuteTitle" title="スピーカーミュート">
             <svg class="icon" id="speaker-icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
             </svg>
         </button>
-        <button id="stamp-btn" class="menu-button" title="スタンプ">
+        <button id="stamp-btn" class="menu-button" data-i18n-title="menu.stampTitle" title="スタンプ">
             <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
             </svg>
         </button>
-        <button id="video-btn" class="menu-button" title="ビデオ通話">
+        <button id="video-btn" class="menu-button" data-i18n-title="menu.videoTitle" title="ビデオ通話">
             <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
             </svg>
         </button>
-        <button id="help-btn" class="menu-button" type="button" title="操作方法" aria-label="操作方法">
+        <button id="help-btn" class="menu-button" type="button" data-i18n-title="menu.helpTitle" title="操作方法" data-i18n-aria-label="menu.helpAria" aria-label="操作方法">
             <i class="bi bi-question-circle"></i>
         </button>
-        <button id="restart-world-btn" class="menu-button" type="button" title="リスタート（初期地点へ）" aria-label="現在のワールドの初期地点へ戻る">
+        <button id="restart-world-btn" class="menu-button" type="button" data-i18n-title="menu.restartTitle" title="リスタート（初期地点へ）" data-i18n-aria-label="menu.restartAria" aria-label="現在のワールドの初期地点へ戻る">
             <i class="bi bi-arrow-clockwise"></i>
         </button>
-        <button id="settings-btn" class="menu-button" title="設定">
+        <button id="settings-btn" class="menu-button" data-i18n-title="menu.settingsTitle" title="設定">
             <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
             </svg>
         </button>
-        <button id="logout-btn" class="menu-button danger" title="退出">
+        <button id="logout-btn" class="menu-button danger" data-i18n-title="menu.logoutTitle" title="退出">
             <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.59L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
             </svg>
@@ -313,22 +313,22 @@
     <!-- Admin quick controls (透明化 / 飛行 / 高速移動) -->
     <div id="admin-menu" class="admin-menu" style="display: none;">
         <div class="admin-menu-header">
-            <span class="admin-menu-title">あどみんメニュー</span>
+            <span class="admin-menu-title" data-i18n="adminMenu.title">あどみんメニュー</span>
         </div>
         <div class="admin-menu-body">
             <label class="admin-menu-item">
                 <input type="checkbox" id="admin-invisible-toggle">
-                <span>透明化（ネームタグごと）</span>
+                <span data-i18n="adminMenu.invisible">透明化（ネームタグごと）</span>
             </label>
             <label class="admin-menu-item">
                 <input type="checkbox" id="admin-fly-toggle">
-                <span>飛行モード（落下なし）</span>
+                <span data-i18n="adminMenu.fly">飛行モード（落下なし）</span>
             </label>
             <label class="admin-menu-item">
                 <input type="checkbox" id="admin-speed-toggle">
-                <span>高速移動</span>
+                <span data-i18n="adminMenu.speed">高速移動</span>
             </label>
-            <a href="/admin.html" class="admin-menu-item admin-menu-link">管理画面（admin）を開く</a>
+            <a href="/admin.html" class="admin-menu-item admin-menu-link" data-i18n="adminMenu.openAdmin">管理画面（admin）を開く</a>
         </div>
     </div>
 
@@ -336,62 +336,62 @@
     <div id="help-modal" aria-hidden="true">
         <div id="help-modal-content">
             <div id="help-header">
-                <h3>操作方法</h3>
-                <button type="button" id="help-close-btn" aria-label="閉じる">×</button>
+                <h3 data-i18n="help.title">操作方法</h3>
+                <button type="button" id="help-close-btn" data-i18n-aria-label="help.closeAria" aria-label="閉じる">×</button>
             </div>
             <div id="help-body" class="help-body">
                 <section class="help-section">
-                    <h4>基本操作（PC）</h4>
+                    <h4 data-i18n="help.pcBasicTitle">基本操作（PC）</h4>
                     <ul class="help-list">
-                        <li>画面（3D）をクリックしてマウスポインターをロックし、マウス移動で視点を変えます。</li>
-                        <li><kbd>U</kbd> キー、または <kbd>Shift</kbd>＋クリック／<kbd>Ctrl</kbd>＋クリックでポインターロックを解除します。</li>
-                        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> で移動、<kbd>Space</kbd> でジャンプします。</li>
-                        <li><kbd>Shift</kbd> を押しながら移動するとダッシュします。</li>
+                        <li data-i18n="help.pcBasic1">画面（3D）をクリックしてマウスポインターをロックし、マウス移動で視点を変えます。</li>
+                        <li data-i18n-html="help.pcBasic2Html"><kbd>U</kbd> キー、または <kbd>Shift</kbd>＋クリック／<kbd>Ctrl</kbd>＋クリックでポインターロックを解除します。</li>
+                        <li data-i18n-html="help.pcBasic3Html"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> で移動、<kbd>Space</kbd> でジャンプします。</li>
+                        <li data-i18n-html="help.pcBasic4Html"><kbd>Shift</kbd> を押しながら移動するとダッシュします。</li>
                     </ul>
                 </section>
                 <section class="help-section">
-                    <h4>近くのオブジェクト（<kbd>E</kbd> キー）</h4>
-                    <p class="help-p">プロンプトが表示されているときに <kbd>E</kbd> を押すと、次の優先順で動作します（ワールドにより異なります）。</p>
+                    <h4 data-i18n="help.eKeyTitle">近くのオブジェクト（E キー）</h4>
+                    <p class="help-p" data-i18n="help.eKeyP">プロンプトが表示されているときに E を押すと、次の優先順で動作します（ワールドにより異なります）。</p>
                     <ol class="help-list ordered">
-                        <li>太鼓ゲームのゾーン</li>
-                        <li>PDF ビューアの開始</li>
-                        <li>テレポート</li>
+                        <li data-i18n="help.eKey1">太鼓ゲームのゾーン</li>
+                        <li data-i18n="help.eKey2">PDF ビューアの開始</li>
+                        <li data-i18n="help.eKey3">テレポート</li>
                     </ol>
                 </section>
                 <section class="help-section">
-                    <h4>ビデオ・音声・チャット</h4>
+                    <h4 data-i18n="help.mediaTitle">ビデオ・音声・チャット</h4>
                     <ul class="help-list">
-                        <li>下のメニューからマイク・スピーカー・ビデオ通話・スタンプを操作できます。</li>
-                        <li>誰かがビデオ配信中のとき、<kbd>V</kbd> キーでその配信を視聴できます（入力欄にフォーカスがあるときは無効）。</li>
-                        <li>プレイヤー一覧のユーザーを <kbd>Shift</kbd>＋クリックするか <kbd>U</kbd> でマウスを解放してからクリックすると、個別に視聴できます。</li>
-                        <li>チャットは画面のチャット欄から送信できます（<code>@</code> でメンション）。</li>
+                        <li data-i18n="help.media1">下のメニューからマイク・スピーカー・ビデオ通話・スタンプを操作できます。</li>
+                        <li data-i18n="help.media2">誰かがビデオ配信中のとき、V キーでその配信を視聴できます（入力欄にフォーカスがあるときは無効）。</li>
+                        <li data-i18n="help.media3">プレイヤー一覧のユーザーを Shift＋クリックするか U でマウスを解放してからクリックすると、個別に視聴できます。</li>
+                        <li data-i18n="help.media4">チャットは画面のチャット欄から送信できます（@ でメンション）。</li>
                     </ul>
                 </section>
                 <section class="help-section">
-                    <h4>PDF ビューア</h4>
+                    <h4 data-i18n="help.pdfTitle">PDF ビューア</h4>
                     <ul class="help-list">
-                        <li><kbd>Esc</kbd> で閉じます。パン・ズーム・ペン描画はオーバーレイ内の UI に従ってください。</li>
+                        <li data-i18n="help.pdf1">Esc で閉じます。パン・ズーム・ペン描画はオーバーレイ内の UI に従ってください。</li>
                     </ul>
                 </section>
                 <section class="help-section">
-                    <h4>設定・退出</h4>
+                    <h4 data-i18n="help.settingsTitle">設定・退出</h4>
                     <ul class="help-list">
-                        <li>歯車アイコンから一人称／三人称視点や描画・音声設定を変更できます。</li>
-                        <li>更新アイコンから、いまいるワールドの初期地点（スポーン）へ戻れます。</li>
-                        <li>退出ボタンからロビーへ戻るかログアウトを選べます。</li>
+                        <li data-i18n="help.settings1">歯車アイコンから一人称／三人称視点や描画・音声設定を変更できます。</li>
+                        <li data-i18n="help.settings2">更新アイコンから、いまいるワールドの初期地点（スポーン）へ戻れます。</li>
+                        <li data-i18n="help.settings3">退出ボタンからロビーへ戻るかログアウトを選べます。</li>
                     </ul>
                 </section>
                 <section class="help-section help-section-mobile">
-                    <h4>スマートフォン・タブレット</h4>
+                    <h4 data-i18n="help.mobileTitle">スマートフォン・タブレット</h4>
                     <ul class="help-list">
-                        <li>左下のジョイスティックで移動、画面右側のドラッグで視点操作、<span class="help-inline-btn">ジャンプ</span> ボタンでジャンプします。</li>
-                        <li>画面右上のメニュー（ハンバーガー）から下段のメニューバーにアクセスできます。</li>
+                        <li data-i18n-html="help.mobile1Html">左下のジョイスティックで移動、画面右側のドラッグで視点操作、<span class="help-inline-btn">ジャンプ</span> ボタンでジャンプします。</li>
+                        <li data-i18n="help.mobile2">画面右上のメニュー（ハンバーガー）から下段のメニューバーにアクセスできます。</li>
                     </ul>
                 </section>
                 <section class="help-section">
-                    <h4>管理者向け</h4>
+                    <h4 data-i18n="help.adminTitle">管理者向け</h4>
                     <ul class="help-list">
-                        <li>管理者のみ、シールドアイコンから透明化・飛行モード・高速移動などを切り替えられます。飛行中は <kbd>Space</kbd>（上昇）と <kbd>C</kbd>（下降）が使えます。</li>
+                        <li data-i18n-html="help.admin1Html">管理者のみ、シールドアイコンから透明化・飛行モード・高速移動などを切り替えられます。飛行中は Space（上昇）と C（下降）が使えます。</li>
                     </ul>
                 </section>
             </div>
@@ -401,11 +401,11 @@
     <!-- Exit Modal (ロビーに戻る / ログアウト) -->
     <div id="logout-modal">
         <div id="logout-modal-content">
-            <h3>退出</h3>
-            <p>ロビーに戻るか、ログアウトするか選んでください。</p>
+            <h3 data-i18n="logout.title">退出</h3>
+            <p data-i18n="logout.body">ロビーに戻るか、ログアウトするか選んでください。</p>
             <div class="logout-buttons">
-                <button class="logout-btn lobby" id="return-to-lobby-btn">ロビーに戻る</button>
-                <button class="logout-btn confirm" id="logout-confirm-btn">ログアウト</button>
+                <button class="logout-btn lobby" id="return-to-lobby-btn" data-i18n="logout.lobby">ロビーに戻る</button>
+                <button class="logout-btn confirm" id="logout-confirm-btn" data-i18n="logout.confirm">ログアウト</button>
             </div>
         </div>
     </div>
@@ -413,11 +413,11 @@
     <!-- リスタート（現在のワールドのスポーンへ） -->
     <div id="restart-modal" aria-hidden="true">
         <div id="restart-modal-content">
-            <h3>リスタート</h3>
-            <p>このワールドの<strong>初期地点（スポーン）</strong>に移動します。飛行機を操縦中の場合は降りてから移動します。</p>
+            <h3 data-i18n="restart.title">リスタート</h3>
+            <p data-i18n-html="restart.bodyHtml">このワールドの<strong>初期地点（スポーン）</strong>に移動します。飛行機を操縦中の場合は降りてから移動します。</p>
             <div class="logout-buttons">
-                <button type="button" class="logout-btn lobby" id="restart-spawn-confirm-btn">初期地点へ移動</button>
-                <button type="button" class="logout-btn secondary" id="restart-modal-cancel-btn">キャンセル</button>
+                <button type="button" class="logout-btn lobby" id="restart-spawn-confirm-btn" data-i18n="restart.confirm">初期地点へ移動</button>
+                <button type="button" class="logout-btn secondary" id="restart-modal-cancel-btn" data-i18n="restart.cancel">キャンセル</button>
             </div>
         </div>
     </div>
@@ -426,34 +426,35 @@
     <div id="settings-modal">
         <div id="settings-modal-content">
             <div id="settings-header">
-                <h3>設定</h3>
-                <button id="settings-close-btn">×</button>
+                <h3 data-i18n="settings.title">設定</h3>
+                <button id="settings-close-btn" data-i18n="settings.close">×</button>
             </div>
             <div id="settings-body">
                 <div id="settings-sidebar">
-                    <div class="settings-category active" data-section="general">一般</div>
-                    <div class="settings-category" data-section="audio">音声</div>
-                    <div class="settings-category" data-section="draw">描画</div>
+                    <div class="settings-category active" data-section="general" data-i18n="settings.cat.general">一般</div>
+                    <div class="settings-category" data-section="audio" data-i18n="settings.cat.audio">音声</div>
+                    <div class="settings-category" data-section="draw" data-i18n="settings.cat.draw">描画</div>
                 </div>
                 <div id="settings-content">
                     <div class="settings-section active" id="general-section">
-                        <h4>一般</h4>
+                        <h4 data-i18n="settings.generalHeading">一般</h4>
                         <div class="setting-item">
-                            <label for="language">言語:</label>
+                            <label for="language" data-i18n="settings.languageLabel">言語:</label>
                             <select id="language">
                                 <option value="ja">日本語</option>
                                 <option value="en">English</option>
+                                <option value="zh">中文（简体）</option>
                             </select>
-                            <div class="setting-description">表示言語を選択してください</div>
+                            <div class="setting-description" data-i18n="settings.languageHint">表示言語を選択してください</div>
                         </div>
                     </div>
                     <div class="settings-section" id="audio-section">
-                        <h4>音声</h4>
+                        <h4 data-i18n="settings.audioHeading">音声</h4>
                         <div class="setting-item mic-test-item">
-                            <label>マイクテスト</label>
-                            <p class="mic-test-desc">マイクに問題がありますか? テストを開始し、何でもいいので話してください。声を再生してお返しします。</p>
+                            <label data-i18n="settings.micTestLabel">マイクテスト</label>
+                            <p class="mic-test-desc" data-i18n="settings.micTestDesc">マイクに問題がありますか? テストを開始し、何でもいいので話してください。声を再生してお返しします。</p>
                             <div class="mic-test-row">
-                                <button type="button" id="mic-test-btn" class="mic-test-btn">テストを開始</button>
+                                <button type="button" id="mic-test-btn" class="mic-test-btn" data-i18n="settings.micTestStart">テストを開始</button>
                                 <div id="settings-mic-analyzer" class="mic-analyzer-segments">
                                     <!-- 40個のセグメントをJSで生成 -->
                                 </div>
@@ -461,79 +462,79 @@
                             <p id="mic-test-status" class="mic-test-status"></p>
                         </div>
                         <div class="setting-item">
-                            <label for="micDevice">使用するマイク:</label>
+                            <label for="micDevice" data-i18n="settings.micDeviceLabel">使用するマイク:</label>
                             <select id="micDevice">
-                                <option value="">デフォルト</option>
+                                <option value="" data-i18n="settings.defaultDevice">デフォルト</option>
                             </select>
-                            <div class="setting-description">使用するマイクデバイスを選択してください</div>
+                            <div class="setting-description" data-i18n="settings.micDeviceHint">使用するマイクデバイスを選択してください</div>
                         </div>
                         <div class="setting-item">
-                            <label for="speakerDevice">使用するスピーカー:</label>
+                            <label for="speakerDevice" data-i18n="settings.speakerDeviceLabel">使用するスピーカー:</label>
                             <select id="speakerDevice">
-                                <option value="">デフォルト</option>
+                                <option value="" data-i18n="settings.defaultDevice">デフォルト</option>
                             </select>
-                            <div class="setting-description">使用するスピーカーデバイスを選択してください</div>
+                            <div class="setting-description" data-i18n="settings.speakerDeviceHint">使用するスピーカーデバイスを選択してください</div>
                         </div>
                         <div class="setting-item">
-                            <label for="micVolume">マイク入力倍率: <span id="micVolumeValue">99</span>%</label>
+                            <label for="micVolume"><span data-i18n="settings.micVolumeLabel"></span> <span id="micVolumeValue">99</span>%</label>
                             <input type="range" id="micVolume" min="0" max="100" value="33">
-                            <div class="setting-description">マイクの入力音量倍率（0%で無音、100%で等倍、最大300%）</div>
+                            <div class="setting-description" data-i18n="settings.micVolumeHint">マイクの入力音量倍率（0%で無音、100%で等倍、最大300%）</div>
                         </div>
                         <div class="setting-item">
-                            <label for="speakerVolume">スピーカー音量:</label>
+                            <label for="speakerVolume" data-i18n="settings.speakerVolumeLabel">スピーカー音量:</label>
                             <input type="range" id="speakerVolume" min="0" max="100" value="50">
                             <span id="speakerVolumeValue">50</span>%
-                            <div class="setting-description">スピーカーの出力音量を調整します</div>
+                            <div class="setting-description" data-i18n="settings.speakerVolumeHint">スピーカーの出力音量を調整します</div>
                         </div>
                     </div>
                     <div class="settings-section" id="draw-section">
-                        <h4>描画</h4>
+                        <h4 data-i18n="settings.drawHeading">描画</h4>
                         <div class="setting-item">
-                            <label for="viewDistanceM">描画距離: <span id="viewDistanceMValue">50</span> m</label>
+                            <label for="viewDistanceM"><span data-i18n="settings.viewDistanceLabel"></span> <span id="viewDistanceMValue">50</span> <span data-i18n="settings.viewDistanceUnit">m</span></label>
                             <input type="range" id="viewDistanceM" min="10" max="150" step="1" value="50">
-                            <div class="setting-description">足元を中心とした球。範囲外のワールド・PDF・他プレイヤーは非表示（スカイドームは常に表示）</div>
+                            <div class="setting-description" data-i18n="settings.viewDistanceHint">足元を中心とした球。範囲外のワールド・PDF・他プレイヤーは非表示（スカイドームは常に表示）</div>
                         </div>
                         <div class="setting-item setting-row">
-                            <label for="showViewRangeSpheres">描画範囲の表示</label>
-                            <label class="toggle-switch" title="足元中心・描画距離の球（青）と2倍半径（黄）を半透明表示">
+                            <label for="showViewRangeSpheres" data-i18n="settings.showViewRangeLabel">描画範囲の表示</label>
+                            <label class="toggle-switch" data-i18n-title="settings.showViewRangeTitle" title="足元中心・描画距離の球（青）と2倍半径（黄）を半透明表示">
                                 <input type="checkbox" id="showViewRangeSpheres">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
-                        <div class="setting-description">デバッグ用。青系＝描画距離 R、黄系＝半径 2R</div>
+                        <div class="setting-description" data-i18n="settings.showViewRangeHint">デバッグ用。青系＝描画距離 R、黄系＝半径 2R</div>
                         <div class="setting-item setting-row">
-                            <label for="viewModeToggle">画面表示</label>
+                            <label for="viewModeToggle" data-i18n="settings.viewModeLabel">画面表示</label>
                             <div class="view-mode-control">
                                 <span id="viewModeLabel" class="view-mode-label">3人称視点</span>
-                                <label class="toggle-switch" title="1人称と3人称を切り替える">
+                                <label class="toggle-switch" data-i18n-title="settings.viewModeToggleTitle" title="1人称と3人称を切り替える">
                                     <input type="checkbox" id="viewModeToggle">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
                         </div>
-                        <div class="setting-description">1人称はアバターの頭部視点になります</div>
+                        <div class="setting-description" data-i18n="settings.viewModeHint">1人称はアバターの頭部視点になります</div>
                         <div class="setting-item">
-                            <label for="graphicsTier">描画品質:</label>
+                            <label for="graphicsTier" data-i18n="settings.graphicsTierLabel">描画品質:</label>
                             <select id="graphicsTier">
                                 <option value="high">高（シャドウ・AA 重視）</option>
                                 <option value="medium">中</option>
                                 <option value="low" selected>低（軽量）</option>
                             </select>
-                            <div class="setting-description">WebXR 中は自動で軽量設定になります</div>
+                            <div class="setting-description" data-i18n="settings.graphicsTierHint">WebXR 中は自動で軽量設定になります</div>
                         </div>
                         <div class="setting-item">
-                            <label for="toneMappingExposure">露出: <span id="toneMappingExposureValue">1.0</span></label>
+                            <label for="toneMappingExposure"><span data-i18n="settings.exposureLabel"></span> <span id="toneMappingExposureValue">1.0</span></label>
                             <input type="range" id="toneMappingExposure" min="0.3" max="2" step="0.05" value="1">
-                            <div class="setting-description">ACES Filmic の露出。HDR と直接光のバランス調整に使います</div>
+                            <div class="setting-description" data-i18n="settings.exposureHint">ACES Filmic の露出。HDR と直接光のバランス調整に使います</div>
                         </div>
                         <div class="setting-item">
-                            <label for="pixelRatioCap">ピクセル比:</label>
+                            <label for="pixelRatioCap" data-i18n="settings.pixelRatioLabel">ピクセル比:</label>
                             <select id="pixelRatioCap">
                                 <option value="1">1</option>
                                 <option value="2">2</option>
-                                <option value="full">デバイスどおり</option>
+                                <option value="full" data-i18n="settings.pixelRatioDevice">デバイスどおり</option>
                             </select>
-                            <div class="setting-description">低いほど軽くなります（WebXR 中は最大 1 に制限）</div>
+                            <div class="setting-description" data-i18n="settings.pixelRatioHint">低いほど軽くなります（WebXR 中は最大 1 に制限）</div>
                         </div>
                     </div>
                 </div>
@@ -545,36 +546,36 @@
     <div id="video-modal">
         <div id="video-modal-content">
             <div id="video-modal-header">
-                <h3>配信設定</h3>
-                <button id="video-modal-close-btn">×</button>
+                <h3 data-i18n="video.title">配信設定</h3>
+                <button id="video-modal-close-btn" data-i18n="settings.close">×</button>
             </div>
             <div id="video-modal-body">
                 <div id="video-preview-wrap">
-                    <div id="video-preview-label">プレビュー</div>
+                    <div id="video-preview-label" data-i18n="video.previewLabel">プレビュー</div>
                     <video id="video-preview" autoplay muted playsinline></video>
-                    <div id="video-preview-placeholder">プレビュー</div>
+                    <div id="video-preview-placeholder" data-i18n="video.previewLabel">プレビュー</div>
                 </div>
                 <div class="video-mode-toggle" role="tablist">
                     <label class="video-mode-tab">
                         <input type="radio" name="video-mode" value="camera" checked>
                         <span class="video-mode-icon">📷</span>
-                        <span>カメラ</span>
+                        <span data-i18n="video.cameraTab">カメラ</span>
                     </label>
                     <label class="video-mode-tab">
                         <input type="radio" name="video-mode" value="screen">
                         <span class="video-mode-icon">🖥</span>
-                        <span>画面共有</span>
+                        <span data-i18n="video.screenTab">画面共有</span>
                     </label>
                 </div>
                 <div id="video-camera-options" class="video-options">
                     <div class="setting-item">
-                        <label for="video-camera-device">カメラ</label>
+                        <label for="video-camera-device" data-i18n="video.cameraDevice">カメラ</label>
                         <select id="video-camera-device">
-                            <option value="">デフォルト</option>
+                            <option value="" data-i18n="settings.defaultDevice">デフォルト</option>
                         </select>
                     </div>
                     <div class="setting-item">
-                        <label for="video-camera-resolution">解像度</label>
+                        <label for="video-camera-resolution" data-i18n="video.resolution">解像度</label>
                         <select id="video-camera-resolution">
                             <option value="360p">360p (640×360)</option>
                             <option value="480p">480p (854×480)</option>
@@ -584,7 +585,7 @@
                         </select>
                     </div>
                     <div class="setting-item setting-row">
-                        <label for="video-camera-audio">音声を含める</label>
+                        <label for="video-camera-audio" data-i18n="video.includeAudio">音声を含める</label>
                         <label class="toggle-switch">
                             <input type="checkbox" id="video-camera-audio" checked>
                             <span class="toggle-slider"></span>
@@ -593,7 +594,7 @@
                 </div>
                 <div id="video-screen-options" class="video-options" style="display:none;">
                     <div class="setting-item">
-                        <label for="video-screen-resolution">解像度</label>
+                        <label for="video-screen-resolution" data-i18n="video.resolution">解像度</label>
                         <select id="video-screen-resolution">
                             <option value="360p">360p (640×360)</option>
                             <option value="480p">480p (854×480)</option>
@@ -604,8 +605,8 @@
                     </div>
                 </div>
                 <div class="video-action-buttons">
-                    <button id="video-start-btn" class="video-btn primary">開始</button>
-                    <button id="video-stop-btn" class="video-btn danger" style="display:none;">停止</button>
+                    <button id="video-start-btn" class="video-btn primary" data-i18n="video.start">開始</button>
+                    <button id="video-stop-btn" class="video-btn danger" style="display:none;" data-i18n="video.stop">停止</button>
                 </div>
                 <div id="video-modal-error" class="video-error" style="display:none;"></div>
             </div>
@@ -616,15 +617,15 @@
     <div id="mobile-controls" class="mobile-controls" aria-hidden="true">
         <div id="mobile-camera-drag-layer" class="mobile-camera-drag-layer" aria-hidden="true"></div>
         <div id="joystick-left-zone" class="joystick-zone joystick-left"></div>
-        <button id="mobile-interact-btn" class="mobile-interact-btn" type="button" style="display: none;" aria-hidden="true">インタラクト</button>
-        <button id="mobile-jump-btn" class="mobile-jump-btn" type="button" aria-label="ジャンプ">ジャンプ</button>
+        <button id="mobile-interact-btn" class="mobile-interact-btn" type="button" style="display: none;" aria-hidden="true" data-i18n="mobile.interact">インタラクト</button>
+        <button id="mobile-jump-btn" class="mobile-jump-btn" type="button" data-i18n-aria-label="mobile.jumpAria" aria-label="ジャンプ" data-i18n="mobile.jumpLabel">ジャンプ</button>
     </div>
 
     <!-- 縦画面時オーバーレイ (横に回転してください) -->
     <div id="mobile-landscape-overlay" class="mobile-landscape-overlay" aria-hidden="true">
         <div class="mobile-landscape-message">
             <i class="bi bi-phone-landscape" aria-hidden="true"></i>
-            <p>横に回転してください</p>
+            <p data-i18n="mobile.landscape">横に回転してください</p>
         </div>
     </div>
 

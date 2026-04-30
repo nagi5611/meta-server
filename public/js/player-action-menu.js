@@ -1,4 +1,5 @@
 // public/js/player-action-menu.js
+import { t } from './metaverse-i18n.js';
 /**
  * プレイヤー名クリック時のフローティングメニュー（通報プレースホルダ・ローカルブロック）
  */
@@ -32,8 +33,8 @@ export default class PlayerActionMenu {
         root.setAttribute('role', 'menu');
         root.hidden = true;
         root.innerHTML = `
-<button type="button" class="player-action-menu-item" data-action="report" role="menuitem">通報</button>
-<button type="button" class="player-action-menu-item" data-action="block" role="menuitem">ブロック</button>`;
+<button type="button" class="player-action-menu-item" data-action="report" role="menuitem">${t('playerAction.report')}</button>
+<button type="button" class="player-action-menu-item" data-action="block" role="menuitem">${t('playerAction.block')}</button>`;
         document.body.appendChild(root);
         root.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -43,7 +44,10 @@ export default class PlayerActionMenu {
             if (action === 'report') {
                 /* 通報機能は未実装（UI のみ） */
             } else if (action === 'block' && this._currentPlayerId) {
-                this._runBlock(this._currentPlayerId);
+                const pid = this._currentPlayerId;
+                this.close();
+                this._runBlock(pid);
+                return;
             }
             this.close();
         });
@@ -56,9 +60,9 @@ export default class PlayerActionMenu {
      */
     _onDocumentDismiss(e) {
         if (!this._root || this._root.hidden) return;
-        const t = e.target;
-        if (!(t instanceof Node)) return;
-        if (this._root.contains(t)) return;
+        const tgt = e.target;
+        if (!(tgt instanceof Node)) return;
+        if (this._root.contains(tgt)) return;
         this.close();
     }
 
@@ -107,6 +111,11 @@ export default class PlayerActionMenu {
         }
         this.close();
         this._currentPlayerId = target.playerId;
+
+        const reportBtn = this._root.querySelector('[data-action="report"]');
+        const blockBtn = this._root.querySelector('[data-action="block"]');
+        if (reportBtn) reportBtn.textContent = t('playerAction.report');
+        if (blockBtn) blockBtn.textContent = t('playerAction.block');
 
         const rect = anchorEl.getBoundingClientRect();
         const menu = this._root;

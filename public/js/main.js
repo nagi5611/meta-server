@@ -24,6 +24,7 @@ import { XrPlayerRig } from './xr-player-rig.js';
 import { registerMetaverseServiceWorker } from './service-worker-register.js';
 import AircraftController from './aircraft-controller.js';
 import AircraftManager from './aircraft-manager.js';
+import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 
 const DEFAULT_ROOM = 'lobby';
 
@@ -133,8 +134,7 @@ class MetaverseApp {
         console.log('Initializing Metaverse Simple...');
 
         registerMetaverseServiceWorker();
-
-        let chartFeaturesEnabled = true;
+        applyMetaverseI18nToDocument();
         try {
             const cfgRes = await fetch('/api/client-config', { credentials: 'include' });
             if (cfgRes.ok) {
@@ -152,7 +152,7 @@ class MetaverseApp {
             try {
                 const res = await fetch('/admin/enter-metaverse', { credentials: 'include' });
                 if (!res.ok) {
-                    alert('認証が必要です。Basic認証でログインしてください。');
+                    alert(t('main.needBasicAuth'));
                     window.location.href = '/admin.html' + window.location.search + window.location.hash;
                     return;
                 }
@@ -161,7 +161,7 @@ class MetaverseApp {
                 localStorage.setItem('username', username);
             } catch (err) {
                 console.error('Admin metaverse auth failed:', err);
-                alert('管理者認証に失敗しました。');
+                alert(t('main.adminAuthFailed'));
                 window.location.href = '/admin.html' + window.location.search + window.location.hash;
                 return;
             }
@@ -209,7 +209,7 @@ class MetaverseApp {
             if (this.aircraftManager) this.aircraftManager.forceLocalPilotingReset();
             this.networkManager.changeWorld(destinationWorld, { teleporterId }, (err) => {
                 if (err) {
-                    alert(err.message || 'このテレポーターは利用できません');
+                    alert(err.message || t('main.teleporterError'));
                     return;
                 }
                 this.worldManager.switchWorld(destinationWorld);

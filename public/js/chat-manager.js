@@ -1,4 +1,20 @@
 import * as THREE from 'three';
+import { t, getMetaverseLocale } from './metaverse-i18n.js';
+
+/**
+ * チャット時刻表示用 BCP 47 タグ（UI 言語に合わせる）
+ * @returns {string}
+ */
+function timeLocaleForMetaverse() {
+    switch (getMetaverseLocale()) {
+        case 'en':
+            return 'en-US';
+        case 'zh':
+            return 'zh-CN';
+        default:
+            return 'ja-JP';
+    }
+}
 
 /**
  * ChatManager - チャット機能を管理するクラス
@@ -113,7 +129,7 @@ class ChatManager {
         this.renderEmojiMenu();
         
         // Add welcome message
-        this.addSystemMessage('チャットシステムが初期化されました');
+        this.addSystemMessage(t('chat.systemInit'));
         
         console.log('Chat Manager initialized!');
     }
@@ -215,7 +231,7 @@ class ChatManager {
         socket.on('player-joined', (playerState) => {
             this.connectedPlayers.set(playerState.id, playerState.username);
             if (!this._isPlayerBlocked(playerState.id)) {
-                this.addSystemMessage(`${playerState.username} が参加しました`);
+                this.addSystemMessage(t('chat.joined', { name: playerState.username }));
             }
         });
 
@@ -223,7 +239,7 @@ class ChatManager {
         socket.on('player-left', (playerId) => {
             const username = this.connectedPlayers.get(playerId);
             if (username) {
-                this.addSystemMessage(`${username} が退出しました`);
+                this.addSystemMessage(t('chat.left', { name: username }));
                 this.connectedPlayers.delete(playerId);
             }
         });
@@ -265,8 +281,8 @@ class ChatManager {
         if (badge) badge.remove();
         const span = messageDiv.querySelector('.message-time');
         if (span != null) {
-            const t = typeof serverTimestamp === 'number' ? serverTimestamp : Date.now();
-            span.textContent = new Date(t).toLocaleTimeString('ja-JP', {
+            const t0 = typeof serverTimestamp === 'number' ? serverTimestamp : Date.now();
+            span.textContent = new Date(t0).toLocaleTimeString(timeLocaleForMetaverse(), {
                 hour: '2-digit',
                 minute: '2-digit',
             });
@@ -288,7 +304,7 @@ class ChatManager {
 
         const messageTime = document.createElement('span');
         messageTime.className = 'message-time';
-        messageTime.textContent = new Date().toLocaleTimeString('ja-JP', {
+        messageTime.textContent = new Date().toLocaleTimeString(timeLocaleForMetaverse(), {
             hour: '2-digit',
             minute: '2-digit',
         });
@@ -302,7 +318,7 @@ class ChatManager {
 
         const statusRow = document.createElement('div');
         statusRow.className = 'chat-pending-status';
-        statusRow.textContent = '送信しています…';
+        statusRow.textContent = t('chat.sending');
         messageDiv.appendChild(statusRow);
 
         const myId = this.networkManager?.myPlayerId;
@@ -336,7 +352,7 @@ class ChatManager {
         const txt =
             typeof res?.message === 'string' && res.message.trim()
                 ? res.message.trim()
-                : '送信されませんでした';
+                : t('chat.sendFailedBubble');
         badge.textContent = txt;
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
     }
@@ -348,7 +364,7 @@ class ChatManager {
         }
 
         if (this.chatAwaitingAck) {
-            this.addSystemMessage('送信しています。少しお待ちください');
+            this.addSystemMessage(t('chat.waitSend'));
             return;
         }
 
@@ -385,8 +401,8 @@ class ChatManager {
                 return;
             }
             if (res.code === 'room_rate') {
-                this.markOptimisticBubbleFailed(optimisticDiv, { message: '送信できませんでした' });
-                this.addSystemMessage('送信できませんでした');
+                this.markOptimisticBubbleFailed(optimisticDiv, { message: t('chat.sendFailed') });
+                this.addSystemMessage(t('chat.sendFailed'));
                 return;
             }
             if (res.message) {
@@ -394,8 +410,8 @@ class ChatManager {
                 this.addSystemMessage(res.message);
                 return;
             }
-            this.markOptimisticBubbleFailed(optimisticDiv, { message: '送信できませんでした' });
-            this.addSystemMessage('送信できませんでした');
+            this.markOptimisticBubbleFailed(optimisticDiv, { message: t('chat.sendFailed') });
+            this.addSystemMessage(t('chat.sendFailed'));
         });
     }
 
@@ -442,14 +458,14 @@ class ChatManager {
             messageHeader.classList.add('message-header-actionable');
             messageHeader.setAttribute('role', 'button');
             messageHeader.tabIndex = 0;
-            messageHeader.title = 'プレイヤーメニュー';
+            messageHeader.title = t('ui.playerMenuTitle');
             messageHeader.dataset.playerDisplayName = data.senderName || 'Player';
         }
 
         const messageTime = document.createElement('span');
         messageTime.className = 'message-time';
         const time = new Date(data.timestamp || Date.now());
-        messageTime.textContent = time.toLocaleTimeString('ja-JP', {
+        messageTime.textContent = time.toLocaleTimeString(timeLocaleForMetaverse(), {
             hour: '2-digit',
             minute: '2-digit',
         });
@@ -462,12 +478,12 @@ class ChatManager {
             warnRow.className = 'chat-moderation-warn-row';
             const warnLabel = document.createElement('span');
             warnLabel.className = 'chat-moderation-warn-label';
-            warnLabel.textContent = '不適切な内容である可能性があります';
+            warnLabel.textContent = t('chat.moderationWarn');
             const eyeBtn = document.createElement('button');
             eyeBtn.type = 'button';
             eyeBtn.className = 'chat-moderation-reveal-btn';
-            eyeBtn.setAttribute('aria-label', 'チャット内容を表示または隠す');
-            eyeBtn.title = '内容を表示';
+            eyeBtn.setAttribute('aria-label', t('chat.showContentAria'));
+            eyeBtn.title = t('chat.showContentTitle');
             eyeBtn.innerHTML = '<i class="bi bi-eye" aria-hidden="true"></i>';
 
             const bodyWrap = document.createElement('div');
@@ -491,12 +507,12 @@ class ChatManager {
                     if (icon) {
                         icon.className = 'bi bi-eye';
                     }
-                    eyeBtn.title = '内容を表示';
+                    eyeBtn.title = t('chat.showContentTitle');
                 } else {
                     if (icon) {
                         icon.className = 'bi bi-eye-slash';
                     }
-                    eyeBtn.title = '内容を隠す';
+                    eyeBtn.title = t('chat.hideContentTitle');
                 }
             });
         } else {
