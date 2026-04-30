@@ -773,47 +773,6 @@ body {
     text-align: right;
 }
 
-.chat-message.chat-pending-out {
-    opacity: 0.92;
-}
-
-.chat-pending-status {
-    font-size: 11px;
-    color: #64748b;
-    margin: 4px 0 2px;
-    font-weight: 500;
-}
-
-.chat-message.my-message .chat-pending-status {
-    text-align: right;
-}
-
-.chat-message.chat-send-failed {
-    border-right-color: #94a3b8;
-    background: rgba(148, 163, 184, 0.14);
-}
-
-.chat-strikethrough-body {
-    text-decoration: line-through;
-    opacity: 0.65;
-}
-
-.chat-send-fail-reason {
-    font-size: 11px;
-    color: #b91c1c;
-    margin-top: 6px;
-    line-height: 1.35;
-}
-
-.chat-message.my-message .chat-send-fail-reason {
-    text-align: right;
-}
-
-#chat-send-btn:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-}
-
 .chat-message .message-header {
     font-weight: 600;
     color: #0288d1;
@@ -877,6 +836,42 @@ body {
     text-align: center;
     font-style: italic;
     color: #1e40af;
+}
+
+/* 送信前の楽観表示・モデレーション失敗時の取り消し線 */
+.chat-message.chat-message-pending {
+    opacity: 0.94;
+}
+
+.chat-pending-status {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 6px;
+    line-height: 1.35;
+}
+
+.chat-message.my-message .chat-pending-status {
+    text-align: right;
+}
+
+.chat-message.chat-message-failed {
+    border-left-color: #dc2626;
+}
+
+.chat-message.my-message.chat-message-failed {
+    border-right-color: #dc2626;
+    background: rgba(254, 202, 202, 0.28);
+}
+
+.chat-message.chat-message-failed .message-text.message-text-strikethrough {
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+    opacity: 0.72;
+}
+
+.chat-message.chat-message-failed .chat-pending-status {
+    color: #b91c1c;
+    font-weight: 600;
 }
 
 .mention-text {
