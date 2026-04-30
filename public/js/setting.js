@@ -38,6 +38,7 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { encodeAssetPathToUrlPath, notifyServiceWorkerInvalidate } from './service-worker-register.js';
+import { resolveEnvAssetHref } from './asset-resolve.js';
 import { resolveModelAssetHref } from './asset-resolve.js';
 import {
     mergeAircraftPhysicsFromWorld,
@@ -659,9 +660,12 @@ function initScene() {
     scene.add(previewDir);
 
     requestAnimationFrame(() => {
-        loadSceneIBL(THREE, { scene, renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator }, { hdrUrl: DEFAULT_HDR_PATH }).then((r) => {
-            if (!r.ok) console.warn('[setting] IBL load skipped; place HDR at', DEFAULT_HDR_PATH);
-        });
+        (async () => {
+            const hdrUrl = await resolveEnvAssetHref(DEFAULT_HDR_PATH);
+            loadSceneIBL(THREE, { scene, renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator }, { hdrUrl }).then((r) => {
+                if (!r.ok) console.warn('[setting] IBL load skipped; place HDR at', DEFAULT_HDR_PATH);
+            });
+        })();
     });
 
     controls = new OrbitControls(camera, canvas);
@@ -4858,7 +4862,8 @@ function bindEvents() {
             await notifyServiceWorkerInvalidate([encodeAssetPathToUrlPath('env/default.hdr')]);
             if (scene && renderer) {
                 const bust = `${DEFAULT_HDR_PATH}?t=${Date.now()}`;
-                loadSceneIBL(THREE, { scene, renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator }, { hdrUrl: bust }).then((r) => {
+                const hdrUrl = await resolveEnvAssetHref(bust);
+                loadSceneIBL(THREE, { scene, renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator }, { hdrUrl }).then((r) => {
                     if (!r.ok) console.warn('[setting] IBL 再読み込みに失敗しました');
                 });
             }

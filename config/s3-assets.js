@@ -37,6 +37,9 @@ export const S3_KEY_PREFIX_RAW = getEnvTrim('META_MODELS_S3_PREFIX') || 'models'
 /** アバター GLB / active.json のキー先頭（モデルバケット内の別フォルダ）。例: prod/avatars */
 export const AVATARS_S3_PREFIX_RAW = getEnvTrim('META_AVATARS_S3_PREFIX') || 'avatars';
 
+/** IBL 用 HDR のキー先頭（モデルバケット内の別フォルダ）。例: prod/env */
+export const ENV_S3_PREFIX_RAW = getEnvTrim('META_ENV_S3_PREFIX') || 'env';
+
 /**
  * CloudFront の配送ドメイン（https:// で始める）
  * @type {string|null}
@@ -80,6 +83,14 @@ export function normalizedS3KeyPrefix() {
  */
 export function normalizedAvatarsS3KeyPrefix() {
     return AVATARS_S3_PREFIX_RAW.replace(/^\/+|\/+$/g, '');
+}
+
+/**
+ * IBL（Radiance HDR）用 S3 キー prefix
+ * @returns {string}
+ */
+export function normalizedEnvS3KeyPrefix() {
+    return ENV_S3_PREFIX_RAW.replace(/^\/+|\/+$/g, '');
 }
 
 /**

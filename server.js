@@ -55,6 +55,7 @@ import {
     AVATAR_ACTIVE_META_REL_POSIX,
     publicAssetUrlCacheForAvatars,
 } from './lib/s3-avatar-assets.js';
+import { syncLocalEnvToS3OnStartup, uploadLocalEnvFile, canonicalCdnUrlForEnvRelative } from './lib/s3-env-assets.js';
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -5676,7 +5677,7 @@ app.post('/admin/upload-pdf', uploadPdf.single('pdf'), (req, res) => {
 /**
  * IBL 用 HDR を ENV_DIR に default.hdr として保存（クライアントは /env/default.hdr を参照）
  */
-app.post('/admin/upload-hdr', uploadHdr.single('hdr'), (req, res) => {
+app.post('/admin/upload-hdr', uploadHdr.single('hdr'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file or invalid file (.hdr / RGBE のみ)' });
     }
@@ -5686,7 +5687,8 @@ app.post('/admin/upload-hdr', uploadHdr.single('hdr'), (req, res) => {
     }
     const destName = 'default.hdr';
     const destPath = path.join(ENV_DIR, destName);
-    if (fs.existsSync(destPath) && req.query.confirm !== '1') {
+    const existedBefore = fs.existsSync(destPath);
+    if (existedBefore && req.query.confirm !== '1') {
         return res.status(409).json({ error: 'file_exists', filename: destName });
     }
     try {
@@ -5694,6 +5696,21 @@ app.post('/admin/upload-hdr', uploadHdr.single('hdr'), (req, res) => {
             fs.mkdirSync(ENV_DIR, { recursive: true });
         }
         fs.writeFileSync(destPath, req.file.buffer);
+        if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
+            try {
+                await uploadLocalEnvFile(destPath, ENV_DIR);
+            } catch (eUp) {
+                if (!existedBefore) {
+                    tryUnlinkQuiet(destPath);
+                }
+                console.error('[upload-hdr] S3:', eUp);
+                return res.status(500).json({
+                    error: 'HDR を外部ストレージへ反映できませんでした。',
+                    code: 's3_upload_failed',
+                    detail: eUp instanceof Error ? eUp.message : String(eUp),
+                });
+            }
+        }
         const url = publicAssetUrlForCache('env', destName);
         io.emit('asset-invalidate', { urls: [url] });
         res.json({ success: true, filename: destName, url });
@@ -5747,6 +5764,10 @@ app.get('/api/client-config', (req, res) => {
             mode: USE_S3_MODELS ? 'cdn' : 'local',
             cdnBaseUrl: USE_S3_MODELS ? normalizedCdnBaseUrl() : null,
             cdnHostname,
+            iblDefaultHdrUrl:
+                USE_S3_MODELS && normalizedCdnBaseUrl()
+                    ? canonicalCdnUrlForEnvRelative('default.hdr')
+                    : null,
         },
     });
 });
@@ -6419,6 +6440,15 @@ function formatBytes(bytes) {
             console.log('[s3-avatar-sync] startup', ra);
         } catch (e) {
             console.error('[s3-avatar-sync] startup failed:', e);
+        }
+    }
+
+    if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
+        try {
+            const re = await syncLocalEnvToS3OnStartup(ENV_DIR);
+            console.log('[s3-env-sync] startup', re);
+        } catch (e) {
+            console.error('[s3-env-sync] startup failed:', e);
         }
     }
 

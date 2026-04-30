@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { createGLTFLoaderWithDraco } from './gltf-loader-draco.js';
-import { resolveModelAssetHref } from './asset-resolve.js';
+import { resolveModelAssetHref, resolveEnvAssetHref, loadClientConfigOnce } from './asset-resolve.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { MeshBVH, StaticGeometryGenerator } from 'three-mesh-bvh';
 import {
@@ -28,7 +28,6 @@ import {
 } from './model-load-limits.js';
 import { mergeAircraftPhysicsForObject } from './aircraft-physics-defaults.js';
 import { loadPrefabGroupFromManifest, normalizePrefabManifest } from './prefab-load-shared.js';
-import { loadClientConfigOnce } from './asset-resolve.js';
 
 /**
  * 足元 p・半径 R の球と AABB（ワールド空間 min/max）が交差するか
@@ -313,10 +312,11 @@ class SceneManager {
      */
     async _loadIBLAsync() {
         if (!this.scene || !this.renderer) return;
+        const hdrUrl = await resolveEnvAssetHref(DEFAULT_HDR_PATH);
         const result = await loadSceneIBL(
             THREE,
             { scene: this.scene, renderer: this.renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator },
-            { hdrUrl: DEFAULT_HDR_PATH }
+            { hdrUrl }
         );
         if (!result.ok) {
             console.warn('[SceneManager] IBL not available; PBR uses direct lights only until HDR is placed at', DEFAULT_HDR_PATH);
