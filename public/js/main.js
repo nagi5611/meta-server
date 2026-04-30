@@ -458,8 +458,13 @@ class MetaverseApp {
             });
         };
         window.addEventListener('metaverse-player-name-menu', this._onMetaversePlayerNameMenu);
+        this.uiManager.setPlayerBlockedCheck((id) => this.playerBlockList.has(id));
         this.uiManager.setOnPlayerListNameMenu((playerId, displayName, anchorEl) => {
             this.playerActionMenu.open(anchorEl, { playerId, displayName });
+        });
+        this.uiManager.setOnPlayerListBlockedClick((playerId) => {
+            this.playerBlockList.remove(playerId);
+            this.networkManager.reapplyRemoteVisibilityForPlayer(playerId);
         });
 
         if (this.isMobileMode) {
@@ -1103,11 +1108,16 @@ class MetaverseApp {
             if (this.isMobileMode) {
                 MobileUIManager.updateMobileInfo(world?.name || '-', position, playerCount);
             } else {
+                const snapIds = new Set((players || []).map((p) => String(p.id)));
+                const orphanBlockedIds = this.playerBlockList
+                    .getAllIds()
+                    .filter((id) => !snapIds.has(String(id)));
                 this.uiManager.updateInfoPanel(
                     world?.name || '-',
                     position,
                     playerCount,
-                    players
+                    players,
+                    orphanBlockedIds
                 );
             }
             this.uiManager.updatePingDisplay(this.networkManager.getPingStatus());

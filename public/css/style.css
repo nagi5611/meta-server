@@ -271,6 +271,51 @@ body {
     color: #0288d1;
 }
 
+.player-list-blocked-heading {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    text-transform: uppercase;
+    padding: 10px 10px 4px;
+    margin-top: 6px;
+    border-top: 1px solid rgba(148, 163, 184, 0.45);
+}
+
+.player-list-item.player-list-item--blocked {
+    cursor: pointer;
+    background: rgba(248, 113, 113, 0.12);
+    border: 1px dashed rgba(220, 38, 38, 0.35);
+}
+
+.player-list-item.player-list-item--blocked:hover {
+    background: rgba(248, 113, 113, 0.2);
+}
+
+.player-blocked-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-right: 6px;
+    color: #b91c1c;
+    font-size: 15px;
+}
+
+.player-list-item--blocked .player-list-name--blocked {
+    color: #991b1b;
+    text-decoration-color: rgba(153, 27, 27, 0.35);
+}
+
+.player-list-item--blocked .player-list-name--blocked:hover {
+    color: #7f1d1d;
+}
+
+.player-list-item.player-list-item--blocked-offline {
+    opacity: 0.92;
+    font-style: italic;
+}
+
 .player-action-menu {
     position: fixed;
     z-index: 10050;

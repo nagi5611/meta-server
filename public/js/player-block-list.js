@@ -67,4 +67,12 @@ export default class PlayerBlockList {
         this._ids.delete(String(id));
         this._save();
     }
+
+    /**
+     * 現在ブロック中の全プレイヤー ID（オフライン行の表示用）
+     * @returns {string[]}
+     */
+    getAllIds() {
+        return [...this._ids];
+    }
 }

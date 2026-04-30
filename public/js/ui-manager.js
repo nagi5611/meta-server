@@ -22,6 +22,10 @@ class UIManager {
         this.onWatchVideo = null;
         /** @type {((playerId: string, displayName: string, anchorEl: HTMLElement) => void)|null} */
         this.onPlayerListNameMenu = null;
+        /** @type {((playerId: string) => boolean)|null} */
+        this._playerBlockedCheck = null;
+        /** @type {((playerId: string) => void)|null} */
+        this.onPlayerListBlockedClick = null;
         this.worldLoadOverlay = null;
         this.worldLoadLabel = null;
         this.worldLoadAsset = null;
@@ -76,6 +80,22 @@ class UIManager {
      */
     setOnPlayerListNameMenu(fn) {
         this.onPlayerListNameMenu = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * プレイヤー一覧でブロック済みを分離表示するための判定
+     * @param {((playerId: string) => boolean)|null} fn
+     */
+    setPlayerBlockedCheck(fn) {
+        this._playerBlockedCheck = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * 一覧下部「ブロック済み」行の名前クリックでブロック解除
+     * @param {((playerId: string) => void)|null} fn
+     */
+    setOnPlayerListBlockedClick(fn) {
+        this.onPlayerListBlockedClick = typeof fn === 'function' ? fn : null;
     }
 
     /**
@@ -136,6 +156,15 @@ class UIManager {
         const listContainer = document.getElementById('player-list-container');
         if (listContainer) {
             listContainer.addEventListener('click', (e) => {
+                const blockedRow = e.target.closest('.player-list-item--blocked');
+                if (blockedRow && this.onPlayerListBlockedClick) {
+                    const pid = blockedRow.getAttribute('data-blocked-player-id');
+                    if (pid) {
+                        e.stopPropagation();
+                        this.onPlayerListBlockedClick(pid);
+                    }
+                    return;
+                }
                 const btn = e.target.closest('.player-watch-video-btn');
                 if (btn && this.onWatchVideo) {
                     const peerId = btn.getAttribute('data-peer-id');
@@ -395,8 +424,13 @@ class UIManager {
     /**
      * Update info panel: ワールド名、座標、プレイヤー数、プレイヤー一覧
      * プレイヤー一覧はデータ変更時のみ更新（毎フレームのDOM差し替えでクリックが奪われるのを防ぐ）
+     * @param {string} worldName
+     * @param {{ x: number, y: number, z: number }} position
+     * @param {number} playerCount
+     * @param {object[]} [players]
+     * @param {string[]} [orphanBlockedIds] スナップショットにいないがローカルブロックのみ残っている ID
      */
-    updateInfoPanel(worldName, position, playerCount, players = []) {
+    updateInfoPanel(worldName, position, playerCount, players = [], orphanBlockedIds = []) {
         const worldEl = document.getElementById('world-name');
         const posEl = document.getElementById('position-display');
         const countEl = document.getElementById('player-count');
@@ -408,24 +442,37 @@ class UIManager {
 
         if (!listEl) return;
 
+        const isBlocked = (id) =>
+            id != null &&
+            typeof this._playerBlockedCheck === 'function' &&
+            this._playerBlockedCheck(String(id));
+
         // ビデオON > マイクON > その他 の順でソート
         const sorted = [...players].sort((a, b) => {
             const va = (b.vcVideoOn ? 2 : 0) + (b.vcMicOn ? 1 : 0);
             const vb = (a.vcVideoOn ? 2 : 0) + (a.vcMicOn ? 1 : 0);
             return va - vb;
         });
-        const displayed = sorted;
+        const activeDisplayed = sorted.filter((p) => !isBlocked(p.id));
+        const blockedDisplayed = sorted.filter((p) => isBlocked(p.id));
+        const orphanSorted = [...new Set((orphanBlockedIds || []).map((id) => String(id)))].sort();
+
+        const rowSig = (p) =>
+            `${p.id}:${p.vcVideoOn}|${p.vcMicOn}|${p.vcSpeakerOn}|${p.pingMs}|${p.fpsSample}|${p.perfTier}|${p.role || ''}`;
 
         // プレイヤー一覧: 変更時のみ DOM 更新（毎フレーム差し替えするとクリックが奪われる）
-        const listHash = displayed.map(p => `${p.id}:${p.vcVideoOn}|${p.vcMicOn}|${p.vcSpeakerOn}|${p.pingMs}|${p.fpsSample}|${p.perfTier}|${p.role || ''}`).join(';');
+        const listHash = `a:${activeDisplayed.map(rowSig).join(';')}|b:${blockedDisplayed.map(rowSig).join(';')}|o:${orphanSorted.join(',')}`;
         if (listEl.dataset.listHash !== listHash) {
             listEl.dataset.listHash = listHash;
-            const videoOnCount = displayed.filter(p => p.vcVideoOn).length;
-            const micOnCount = displayed.filter(p => p.vcMicOn && !p.vcVideoOn).length;
-            const hasSegments = videoOnCount > 0 || (micOnCount > 0 && micOnCount < displayed.length - videoOnCount);
-            listEl.innerHTML = displayed.map((p, i) => {
+
+            const buildRow = (p, i, opts) => {
+                const blocked = opts.blocked === true;
+                const videoOnCount = opts.videoOnCount;
+                const micOnCount = opts.micOnCount;
+                const hasSegments = opts.hasSegments;
+
                 let showSeparator = false;
-                if (hasSegments) {
+                if (!blocked && hasSegments) {
                     if (videoOnCount > 0 && i === videoOnCount) showSeparator = true;
                     else if (videoOnCount === 0 && micOnCount > 0 && i === micOnCount) showSeparator = true;
                 }
@@ -446,11 +493,64 @@ class UIManager {
                     : '';
                 const roleLabel = p.role === 'student' ? '[生徒]' : p.role === 'teacher' ? '[教師]' : p.role === 'admin' ? '[管理者]' : '';
                 const roleSpan = roleLabel ? `<span class="player-role" title="種別">${roleLabel}</span>` : '';
-                const watchBtn = p.vcVideoOn ? `<button type="button" class="player-watch-video-btn" data-peer-id="${p.id}" title="ビデオを視聴">視聴</button>` : '';
+                const safePeerId = escapeHtmlForUi(String(p.id ?? ''));
+                const watchBtn =
+                    !blocked && p.vcVideoOn
+                        ? `<button type="button" class="player-watch-video-btn" data-peer-id="${safePeerId}" title="ビデオを視聴">視聴</button>`
+                        : '';
                 const safeId = escapeHtmlForUi(String(p.id ?? ''));
-                const playerInfo = `<span class="player-info"><span class="player-vc-status">${videoIcon}${micIcon}${spkIcon}</span> <span class="player-list-name-trigger" role="button" tabindex="0" data-player-id="${safeId}" data-player-display-name="${name}">${name}</span></span>`;
-                return `${sep}<div class="player-list-item ${micClass}">${playerInfo}${watchBtn}${pingSpan}${perfSpan}${roleSpan}</div>`;
-            }).join('');
+                const blockedBadge = blocked
+                    ? '<span class="player-blocked-badge" title="ブロック済み（クリックで解除）"><i class="bi bi-slash-circle" aria-hidden="true"></i></span>'
+                    : '';
+                const nameClasses = blocked
+                    ? 'player-list-name-trigger player-list-name--blocked'
+                    : 'player-list-name-trigger';
+                const itemClass = blocked ? `player-list-item ${micClass} player-list-item--blocked` : `player-list-item ${micClass}`;
+                const rowBlockedAttr = blocked ? ` data-blocked-player-id="${safeId}"` : '';
+                const playerInfo = `<span class="player-info">${blockedBadge}<span class="player-vc-status">${videoIcon}${micIcon}${spkIcon}</span> <span class="${nameClasses}" role="button" tabindex="0" data-player-id="${safeId}" data-player-display-name="${name}">${name}</span></span>`;
+                return `${sep}<div class="${itemClass}"${rowBlockedAttr}>${playerInfo}${watchBtn}${pingSpan}${perfSpan}${roleSpan}</div>`;
+            };
+
+            const videoOnCount = activeDisplayed.filter((p) => p.vcVideoOn).length;
+            const micOnCount = activeDisplayed.filter((p) => p.vcMicOn && !p.vcVideoOn).length;
+            const hasSegments =
+                videoOnCount > 0 ||
+                (micOnCount > 0 && micOnCount < activeDisplayed.length - videoOnCount);
+
+            let html = activeDisplayed
+                .map((p, i) =>
+                    buildRow(p, i, {
+                        blocked: false,
+                        videoOnCount,
+                        micOnCount,
+                        hasSegments,
+                    })
+                )
+                .join('');
+
+            const hasBlockedSection = blockedDisplayed.length > 0 || orphanSorted.length > 0;
+            if (hasBlockedSection) {
+                html += '<div class="player-list-blocked-heading" role="presentation">ブロック済み</div>';
+                html += blockedDisplayed
+                    .map((p, i) =>
+                        buildRow(p, i, {
+                            blocked: true,
+                            videoOnCount,
+                            micOnCount,
+                            hasSegments,
+                        })
+                    )
+                    .join('');
+                html += orphanSorted
+                    .map((rawId) => {
+                        const safeId = escapeHtmlForUi(String(rawId));
+                        const label = escapeHtmlForUi('オフライン（クリックで解除）');
+                        return `<div class="player-list-item mic-off player-list-item--blocked player-list-item--blocked-offline" data-blocked-player-id="${safeId}"><span class="player-info"><span class="player-blocked-badge" title="ブロック済み"><i class="bi bi-slash-circle" aria-hidden="true"></i></span><span class="player-list-name-trigger player-list-name--blocked" role="button" tabindex="0">${label}</span></span></div>`;
+                    })
+                    .join('');
+            }
+
+            listEl.innerHTML = html;
         }
     }
 

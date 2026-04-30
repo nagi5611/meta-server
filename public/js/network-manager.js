@@ -57,6 +57,18 @@ class NetworkManager {
     }
 
     /**
+     * ブロック解除直後などに、直近スナップショットに基づき1人分のリモート可視を再計算する
+     * @param {string} playerId
+     */
+    reapplyRemoteVisibilityForPlayer(playerId) {
+        if (!playerId || !this.playerManager) return;
+        const p = this.lastPlayersSnapshot?.find((x) => x.id === playerId);
+        if (!p || p.world !== this.currentWorld) return;
+        if (!this.playerManager.hasRemotePlayer(playerId)) return;
+        this.playerManager.setRemotePlayerVisible(playerId, this._mergedRemoteVisibleForPlayer(p));
+    }
+
+    /**
      * @param {{ getPose?: () => object|null, onSnapshot?: (list: object[]) => void, onReleased?: (slotId: string) => void }} bridge
      */
     setAircraftNetworkBridge(bridge) {
