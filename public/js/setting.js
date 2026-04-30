@@ -3624,6 +3624,56 @@ async function refreshWorldEditListsAfterStorageDelete(store) {
     }
 }
 
+/**
+ * IBL 用 default.hdr を POST /admin/upload-hdr で送り、エディタの scene.environment を再構築する
+ * @param {File} file
+ * @returns {Promise<{ ok: boolean, cancelled?: boolean, message?: string }>}
+ */
+async function uploadDefaultHdrForWorldEditor(file) {
+    /** @param {boolean} confirmOverwrite */
+    const postHdr = async (confirmOverwrite) => {
+        const form = new FormData();
+        form.append('hdr', file);
+        form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
+        let url = '/admin/upload-hdr';
+        if (confirmOverwrite) url += '?confirm=1';
+        return fetch(url, { method: 'POST', credentials: 'include', body: form });
+    };
+    let res = await postHdr(false);
+    if (res.status === 409) {
+        if (!confirm('default.hdr が既にあります。上書きしますか？')) {
+            return { ok: false, cancelled: true };
+        }
+        res = await postHdr(true);
+    }
+    if (res.status === 409) {
+        return { ok: false, message: '上書きには確認が必要です。' };
+    }
+    if (!res.ok) {
+        const t = await res.text();
+        let msg = t;
+        try {
+            const j = JSON.parse(t);
+            if (j && typeof j.error === 'string') msg = j.error;
+            else if (j && typeof j.detail === 'string') msg = j.detail;
+        } catch {
+            /* use raw text */
+        }
+        return { ok: false, message: msg || `失敗 (${res.status})` };
+    }
+    const data = await res.json();
+    if (!data.success) return { ok: false, message: 'アップロード応答が不正です' };
+    await notifyServiceWorkerInvalidate([encodeAssetPathToUrlPath('env/default.hdr')]);
+    if (scene && renderer) {
+        const bust = `${DEFAULT_HDR_PATH}?t=${Date.now()}`;
+        const hdrUrl = await resolveEnvAssetHref(bust);
+        loadSceneIBL(THREE, { scene, renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator }, { hdrUrl }).then((r) => {
+            if (!r.ok) console.warn('[setting] IBL 再読み込みに失敗しました');
+        });
+    }
+    return { ok: true };
+}
+
 // --- Event bindings ---
 function bindEvents() {
     // 左パネル: ワールド/モデル/PDF/ファイル カテゴリ切り替え（admin 統合時）。カテゴリクリックで展開もする
@@ -3645,6 +3695,26 @@ function bindEvents() {
         }
         if (statusEl) statusEl.textContent = '';
     }
+    /**
+     * ワールド編集・左「アバター」パネルに IBL 用 default.hdr の有無を表示する
+     */
+    async function refreshWeHdrPanel() {
+        const fnEl = document.getElementById('we-hdr-current-filename');
+        const statusEl = document.getElementById('we-hdr-status');
+        if (!fnEl) return;
+        try {
+            const r = await fetch('/api/env-ibl-hdr', { credentials: 'include' });
+            const j = await r.json().catch(() => ({}));
+            if (typeof j.present === 'boolean' && typeof j.path === 'string') {
+                fnEl.textContent = j.present ? j.path : '(未設定)';
+            } else {
+                fnEl.textContent = '(取得に失敗しました)';
+            }
+        } catch {
+            fnEl.textContent = '(取得に失敗しました)';
+        }
+        if (statusEl) statusEl.textContent = '';
+    }
     if (categoryNav) {
         categoryNav.addEventListener('click', (e) => {
             const btn = e.target.closest('.we-category-btn');
@@ -3657,6 +3727,7 @@ function bindEvents() {
             if (pane) pane.classList.add('active');
             if (cat === 'avatar') {
                 refreshWeAvatarPanel().catch(() => {});
+                refreshWeHdrPanel().catch(() => {});
             }
             if (weLayout) weLayout.classList.remove('we-left-collapsed');
         });
@@ -3696,6 +3767,40 @@ function bindEvents() {
                 weAvatarFile.value = '';
             } catch {
                 if (weAvatarStatus) weAvatarStatus.textContent = '通信エラー';
+            }
+        });
+    }
+
+    const btnWeHdrUpload = document.getElementById('btn-we-hdr-upload');
+    const weHdrFile = document.getElementById('we-hdr-file');
+    const weHdrStatus = document.getElementById('we-hdr-status');
+    if (btnWeHdrUpload && weHdrFile) {
+        btnWeHdrUpload.addEventListener('click', async () => {
+            const f = weHdrFile.files?.[0];
+            if (!f) {
+                if (weHdrStatus) weHdrStatus.textContent = 'ファイルを選択してください。';
+                return;
+            }
+            if (!String(f.name).toLowerCase().endsWith('.hdr')) {
+                if (weHdrStatus) weHdrStatus.textContent = '.hdr（Radiance RGBE）のみ対応です。';
+                return;
+            }
+            if (weHdrStatus) weHdrStatus.textContent = 'アップロード中…';
+            try {
+                const result = await uploadDefaultHdrForWorldEditor(f);
+                if (result.cancelled) {
+                    if (weHdrStatus) weHdrStatus.textContent = '';
+                    return;
+                }
+                if (!result.ok) {
+                    if (weHdrStatus) weHdrStatus.textContent = result.message || 'アップロードに失敗しました。';
+                    return;
+                }
+                if (weHdrStatus) weHdrStatus.textContent = '適用しました: default.hdr（プレビューに反映済み）';
+                await refreshWeHdrPanel();
+                weHdrFile.value = '';
+            } catch {
+                if (weHdrStatus) weHdrStatus.textContent = '通信エラー';
             }
         });
     }
@@ -4837,40 +4942,19 @@ function bindEvents() {
                 syncModelUploadCloseButtonVisibility();
             }
             setDualHdrUploadStatus('', '');
-            const postHdr = async (confirmOverwrite) => {
-                const form = new FormData();
-                form.append('hdr', file);
-                form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
-                let url = '/admin/upload-hdr';
-                if (confirmOverwrite) url += '?confirm=1';
-                return fetch(url, { method: 'POST', credentials: 'include', body: form });
-            };
-            let res = await postHdr(false);
-            if (res.status === 409) {
-                if (!confirm('default.hdr が既にあります。上書きしますか？')) {
-                    return;
-                }
-                res = await postHdr(true);
-            }
-            if (res.status === 409) {
-                setDualHdrUploadStatus('上書きには確認が必要です。', 'error');
+            const result = await uploadDefaultHdrForWorldEditor(file);
+            if (result.cancelled) {
                 return;
             }
-            if (!res.ok) throw new Error(await res.text());
-            const data = await res.json();
-            if (!data.success) throw new Error('アップロード応答が不正です');
-            await notifyServiceWorkerInvalidate([encodeAssetPathToUrlPath('env/default.hdr')]);
-            if (scene && renderer) {
-                const bust = `${DEFAULT_HDR_PATH}?t=${Date.now()}`;
-                const hdrUrl = await resolveEnvAssetHref(bust);
-                loadSceneIBL(THREE, { scene, renderer, RGBELoader, PMREMGenerator: THREE.PMREMGenerator }, { hdrUrl }).then((r) => {
-                    if (!r.ok) console.warn('[setting] IBL 再読み込みに失敗しました');
-                });
+            if (!result.ok) {
+                setDualHdrUploadStatus(result.message || 'アップロード失敗', 'error');
+                return;
             }
             setDualHdrUploadStatus('アップロードしました: default.hdr（プレビューに反映済み）', 'success');
+            await refreshWeHdrPanel();
             if (inModal) setModelUploadModalOpen(false);
         } catch (err) {
-            setDualHdrUploadStatus('アップロード失敗: ' + err.message, 'error');
+            setDualHdrUploadStatus('アップロード失敗: ' + (err instanceof Error ? err.message : String(err)), 'error');
         } finally {
             if (didSetBusy) {
                 modelUploadModalBusy = false;

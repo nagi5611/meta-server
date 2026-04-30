@@ -5868,6 +5868,26 @@ app.get('/api/active-avatar', async (req, res) => {
     }
 });
 
+/**
+ * IBL 用 default.hdr がサーバの ENV_DIR に存在するか（クライアントは /env/default.hdr を参照）
+ */
+app.get('/api/env-ibl-hdr', (req, res) => {
+    try {
+        if (!metaverseModelsAccessAllowed(req)) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+        const destPath = path.join(ENV_DIR, 'default.hdr');
+        const present = fs.existsSync(destPath);
+        res.json({
+            path: 'env/default.hdr',
+            present,
+        });
+    } catch (e) {
+        console.error('GET /api/env-ibl-hdr:', e);
+        res.status(500).json({ error: 'failed' });
+    }
+});
+
 app.use('/api/charts', (req, res, next) => {
     if (CHART_FEATURES_ENABLED) return next();
     const p = req.path || '';

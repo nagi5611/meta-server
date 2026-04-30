@@ -404,6 +404,19 @@
                                     </div>
                                     <p id="we-avatar-status" class="status-text" role="status"></p>
                                 </section>
+                                <section class="section">
+                                    <h2 class="section-title">IBL（HDR）</h2>
+                                    <p class="status-text" id="we-hdr-current-label">現在: <span id="we-hdr-current-filename">—</span></p>
+                                    <p class="hint" style="margin:4px 0 8px;">Radiance <code>.hdr</code> を <code>/env/default.hdr</code> として保存し、環境マップとして読み込みます。</p>
+                                    <div class="field-row">
+                                        <label class="prop-label" for="we-hdr-file">ファイル</label>
+                                        <input type="file" id="we-hdr-file" class="prop-input full" accept=".hdr" />
+                                    </div>
+                                    <div class="btn-row">
+                                        <button type="button" id="btn-we-hdr-upload" class="btn-primary">アップロードして適用</button>
+                                    </div>
+                                    <p id="we-hdr-status" class="status-text" role="status"></p>
+                                </section>
                             </div>
                             <div id="we-cat-pdf" class="we-category-pane">
                                 <section class="section">
