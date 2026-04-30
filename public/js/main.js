@@ -135,6 +135,8 @@ class MetaverseApp {
 
         registerMetaverseServiceWorker();
         applyMetaverseI18nToDocument();
+
+        let chartFeaturesEnabled = true;
         try {
             const cfgRes = await fetch('/api/client-config', { credentials: 'include' });
             if (cfgRes.ok) {
