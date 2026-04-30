@@ -2086,8 +2086,7 @@ const MAX_CHAT_LOGS_PER_ROOM = 500;
 
 // ============================
 // Chat: AI moderation & rate limits (単一プロセス・メモリ保持)
-// GEMINI_API_KEY / 任意 GEMINI_MODEL — モデルIDは https://ai.google.dev/gemini-api/docs/models で要確認
-// 低遅延の候補（2026/4/30 時点・プレビュー）: gemini-3.1-flash-lite-preview（公式ブログ等で 2.5 Flash 比の高速が喧伝。利用可否は models 一覧で要確認）
+// GEMINI_API_KEY / GEMINI_MODEL（未設定時の既定は gemini-3.1-flash-lite-preview／lib/chat-moderation.js）— https://ai.google.dev/gemini-api/docs/models
 // ============================
 
 /**
