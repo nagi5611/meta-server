@@ -2690,13 +2690,14 @@ section h2 {
 }
 
 .addon-config-dialog {
-    width: min(920px, 100%);
+    width: min(1200px, 96vw);
     max-height: min(80vh, 860px);
     overflow: auto;
     background: #fff;
-    border: 1px solid #dbe2ea;
+    border: 1px solid #bfdbfe;
     border-radius: 10px;
     padding: 14px;
+    box-shadow: 0 8px 24px rgba(30, 64, 175, 0.12);
 }
 
 .addon-config-header {
@@ -2714,8 +2715,22 @@ section h2 {
     margin-top: 8px;
 }
 
+.addon-config-table {
+    width: 100%;
+    table-layout: fixed;
+}
+
 .addon-config-table td {
     vertical-align: middle;
+}
+
+.addon-config-table td:nth-child(1),
+.addon-config-table td:nth-child(2) {
+    width: 42%;
+}
+
+.addon-config-table td:nth-child(3) {
+    width: 16%;
 }
 
 .addon-config-table td:last-child {
@@ -2729,13 +2744,28 @@ section h2 {
 .addon-config-key-input,
 .addon-config-value-input {
     width: 100%;
+    min-width: 0;
+}
+
+.addon-config-table .prop-input,
+.addon-config-new-row .prop-input {
+    border: 1px solid #bfdbfe;
+    background: #fff;
+}
+
+.addon-config-table .prop-input:focus,
+.addon-config-new-row .prop-input:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
 }
 
 .addon-config-new-row {
     margin-top: 10px;
     display: grid;
-    grid-template-columns: 1fr 1fr auto;
+    grid-template-columns: minmax(220px, 1.3fr) minmax(320px, 2fr) auto;
     gap: 8px;
+    align-items: center;
 }
 
 .stat-card {
@@ -3530,6 +3560,17 @@ body.admin-dark .addon-config-dialog {
 }
 body.admin-dark .addon-config-modal {
     background: rgba(0, 0, 0, 0.6);
+}
+body.admin-dark .addon-config-table .prop-input,
+body.admin-dark .addon-config-new-row .prop-input {
+    background: #14120b;
+    border-color: #3b82f6;
+    color: #e6e4df;
+}
+body.admin-dark .addon-config-table .prop-input:focus,
+body.admin-dark .addon-config-new-row .prop-input:focus {
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.3);
 }
 body.admin-dark .bandwidth-header .bandwidth-label,
 body.admin-dark .bandwidth-legend .legend-item {
