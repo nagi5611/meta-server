@@ -22,6 +22,13 @@ export function initAddonsRegistryDb() {
             plugin_id TEXT PRIMARY KEY NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS addon_config_kv (
+            plugin_id TEXT NOT NULL,
+            config_key TEXT NOT NULL,
+            config_value TEXT NOT NULL,
+            updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+            PRIMARY KEY (plugin_id, config_key)
+        );
     `);
     console.log('[addons-registry] addons_registry.db ready');
 }
@@ -59,6 +66,63 @@ export function setAddonEnabled(pluginId, enabled) {
     db.prepare(
         'INSERT INTO addon_enabled (plugin_id, enabled) VALUES (?, ?) ON CONFLICT(plugin_id) DO UPDATE SET enabled = excluded.enabled'
     ).run(pluginId, enabled ? 1 : 0);
+}
+
+/**
+ * @param {string} pluginId
+ * @returns {Array<{ key: string, value: string, updatedAt: number }>}
+ */
+export function getAddonConfigEntries(pluginId) {
+    if (!db) return [];
+    const rows = db.prepare(
+        `SELECT config_key, config_value, updated_at
+           FROM addon_config_kv
+          WHERE plugin_id = ?
+          ORDER BY config_key ASC`
+    ).all(pluginId);
+    return rows.map((row) => ({
+        key: row.config_key,
+        value: row.config_value,
+        updatedAt: Number(row.updated_at || 0),
+    }));
+}
+
+/**
+ * @param {string} pluginId
+ * @returns {Record<string, string>}
+ */
+export function getAddonConfigMap(pluginId) {
+    const entries = getAddonConfigEntries(pluginId);
+    /** @type {Record<string, string>} */
+    const map = {};
+    for (const row of entries) {
+        map[row.key] = row.value;
+    }
+    return map;
+}
+
+/**
+ * @param {string} pluginId
+ * @param {string} key
+ * @param {string} value
+ */
+export function setAddonConfigValue(pluginId, key, value) {
+    if (!db) throw new Error('addons registry not initialized');
+    db.prepare(
+        `INSERT INTO addon_config_kv (plugin_id, config_key, config_value, updated_at)
+         VALUES (?, ?, ?, strftime('%s','now'))
+         ON CONFLICT(plugin_id, config_key)
+         DO UPDATE SET config_value = excluded.config_value, updated_at = strftime('%s','now')`
+    ).run(pluginId, key, value);
+}
+
+/**
+ * @param {string} pluginId
+ * @param {string} key
+ */
+export function deleteAddonConfigValue(pluginId, key) {
+    if (!db) throw new Error('addons registry not initialized');
+    db.prepare('DELETE FROM addon_config_kv WHERE plugin_id = ? AND config_key = ?').run(pluginId, key);
 }
 
 /**

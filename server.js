@@ -59,7 +59,7 @@ import {
 import { syncLocalEnvToS3OnStartup, uploadLocalEnvFile, canonicalCdnUrlForEnvRelative } from './lib/s3-env-assets.js';
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
 import { loadAddonsAtStartup, registerAddonShutdownHooks, getAddonCatalogSnapshot } from './lib/plugin-bootstrap.js';
-import { setAddonEnabled } from './db/addons-registry.js';
+import { setAddonEnabled, getAddonConfigEntries, setAddonConfigValue, deleteAddonConfigValue } from './db/addons-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1861,6 +1861,49 @@ app.post('/admin/addons/enabled', express.json(), (req, res) => {
         });
     } catch (err) {
         console.error('POST /admin/addons/enabled error:', err);
+        sendAdminServerError(res, err);
+    }
+});
+
+app.get('/admin/addons/config', (req, res) => {
+    const pluginId = typeof req.query?.pluginId === 'string' ? req.query.pluginId.trim() : '';
+    if (!pluginId) {
+        return res.status(400).json({ error: 'pluginId string required' });
+    }
+    try {
+        const entries = getAddonConfigEntries(pluginId);
+        res.json({ ok: true, pluginId, entries, restartRequired: true });
+    } catch (err) {
+        console.error('GET /admin/addons/config error:', err);
+        sendAdminServerError(res, err);
+    }
+});
+
+app.post('/admin/addons/config', express.json(), (req, res) => {
+    const pluginId = typeof req.body?.pluginId === 'string' ? req.body.pluginId.trim() : '';
+    const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
+    const value = req.body?.value == null ? '' : String(req.body.value);
+    if (!pluginId) return res.status(400).json({ error: 'pluginId string required' });
+    if (!key) return res.status(400).json({ error: 'key string required' });
+    try {
+        setAddonConfigValue(pluginId, key, value);
+        res.json({ ok: true, restartRequired: true, message: '保存しました。Node を再起動してください。' });
+    } catch (err) {
+        console.error('POST /admin/addons/config error:', err);
+        sendAdminServerError(res, err);
+    }
+});
+
+app.delete('/admin/addons/config', express.json(), (req, res) => {
+    const pluginId = typeof req.body?.pluginId === 'string' ? req.body.pluginId.trim() : '';
+    const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
+    if (!pluginId) return res.status(400).json({ error: 'pluginId string required' });
+    if (!key) return res.status(400).json({ error: 'key string required' });
+    try {
+        deleteAddonConfigValue(pluginId, key);
+        res.json({ ok: true, restartRequired: true, message: '削除しました。Node を再起動してください。' });
+    } catch (err) {
+        console.error('DELETE /admin/addons/config error:', err);
         sendAdminServerError(res, err);
     }
 });

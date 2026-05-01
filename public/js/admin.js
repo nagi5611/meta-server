@@ -1337,6 +1337,196 @@ function switchPanel(panelId) {
 /**
  * アドオン一覧を取得して表示する（GET /admin/addons）
  */
+function ensureAddonConfigModal() {
+    const existing = document.getElementById('addon-config-modal');
+    if (existing) return existing;
+    const modal = document.createElement('div');
+    modal.id = 'addon-config-modal';
+    modal.className = 'addon-config-modal';
+    modal.hidden = true;
+    modal.innerHTML = `
+        <div class="addon-config-dialog" role="dialog" aria-modal="true" aria-labelledby="addon-config-modal-title">
+            <div class="addon-config-header">
+                <h3 id="addon-config-modal-title">アドオン設定</h3>
+                <button type="button" class="btn btn-icon" id="addon-config-modal-close" aria-label="閉じる">×</button>
+            </div>
+            <p class="hint">保存・削除後は Node プロセス再起動で反映されます。</p>
+            <div class="addon-config-table-wrap">
+                <table class="players-table addon-config-table">
+                    <thead>
+                        <tr><th>キー</th><th>値</th><th>操作</th></tr>
+                    </thead>
+                    <tbody id="addon-config-modal-tbody"></tbody>
+                </table>
+            </div>
+            <div class="addon-config-new-row">
+                <input id="addon-config-new-key" class="prop-input" type="text" placeholder="新規キー (例: systemdServiceName)">
+                <input id="addon-config-new-value" class="prop-input" type="text" placeholder="値">
+                <button type="button" class="btn btn-primary" id="addon-config-new-add">追加</button>
+            </div>
+            <p id="addon-config-modal-status" class="status-text" role="status"></p>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.hidden = true;
+    });
+    document.getElementById('addon-config-modal-close')?.addEventListener('click', () => {
+        modal.hidden = true;
+    });
+    return modal;
+}
+
+function setAddonCatalogStatusText(message) {
+    const statusEl = document.getElementById('addons-catalog-status');
+    if (statusEl) statusEl.textContent = message;
+}
+
+async function fetchAddonConfigEntries(pluginId) {
+    const res = await fetch(`/admin/addons/config?pluginId=${encodeURIComponent(pluginId)}`, {
+        credentials: 'same-origin',
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.ok) throw new Error(body.error || res.statusText);
+    return Array.isArray(body.entries) ? body.entries : [];
+}
+
+async function saveAddonConfigEntry(pluginId, key, value) {
+    const res = await fetch('/admin/addons/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ pluginId, key, value }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.ok) throw new Error(body.error || res.statusText);
+    return body;
+}
+
+async function deleteAddonConfigEntry(pluginId, key) {
+    const res = await fetch('/admin/addons/config', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ pluginId, key }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.ok) throw new Error(body.error || res.statusText);
+    return body;
+}
+
+function renderAddonConfigRows(tbody, pluginId, entries, statusEl, refreshFn) {
+    tbody.innerHTML = '';
+    for (const item of entries) {
+        const tr = document.createElement('tr');
+        const tdKey = document.createElement('td');
+        const tdVal = document.createElement('td');
+        const tdAct = document.createElement('td');
+        const keyInput = document.createElement('input');
+        keyInput.type = 'text';
+        keyInput.className = 'prop-input addon-config-key-input';
+        keyInput.value = String(item.key || '');
+        const valInput = document.createElement('input');
+        valInput.type = 'text';
+        valInput.className = 'prop-input addon-config-value-input';
+        valInput.value = String(item.value || '');
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'btn btn-primary';
+        saveBtn.textContent = '保存';
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn btn-secondary';
+        delBtn.textContent = '削除';
+
+        saveBtn.addEventListener('click', async () => {
+            const oldKey = String(item.key || '').trim();
+            const nextKey = keyInput.value.trim();
+            const nextVal = valInput.value;
+            if (!nextKey) {
+                statusEl.textContent = 'キーは必須です。';
+                return;
+            }
+            try {
+                if (oldKey !== nextKey && oldKey) {
+                    await deleteAddonConfigEntry(pluginId, oldKey);
+                }
+                await saveAddonConfigEntry(pluginId, nextKey, nextVal);
+                statusEl.textContent = '保存しました。Node を再起動してください。';
+                setAddonCatalogStatusText('アドオン設定を保存しました。Node を再起動してください。');
+                await refreshFn();
+            } catch (e) {
+                statusEl.textContent = String(e.message || e);
+            }
+        });
+
+        delBtn.addEventListener('click', async () => {
+            const key = keyInput.value.trim() || String(item.key || '').trim();
+            if (!key) return;
+            try {
+                await deleteAddonConfigEntry(pluginId, key);
+                statusEl.textContent = '削除しました。Node を再起動してください。';
+                setAddonCatalogStatusText('アドオン設定を削除しました。Node を再起動してください。');
+                await refreshFn();
+            } catch (e) {
+                statusEl.textContent = String(e.message || e);
+            }
+        });
+
+        tdKey.appendChild(keyInput);
+        tdVal.appendChild(valInput);
+        tdAct.append(saveBtn, delBtn);
+        tr.append(tdKey, tdVal, tdAct);
+        tbody.appendChild(tr);
+    }
+}
+
+async function openAddonConfigModal(pluginId) {
+    const modal = ensureAddonConfigModal();
+    const titleEl = document.getElementById('addon-config-modal-title');
+    const tbody = document.getElementById('addon-config-modal-tbody');
+    const statusEl = document.getElementById('addon-config-modal-status');
+    const newKeyEl = /** @type {HTMLInputElement | null} */ (document.getElementById('addon-config-new-key'));
+    const newValEl = /** @type {HTMLInputElement | null} */ (document.getElementById('addon-config-new-value'));
+    const addBtn = document.getElementById('addon-config-new-add');
+    if (!titleEl || !tbody || !statusEl || !newKeyEl || !newValEl || !addBtn) return;
+
+    modal.dataset.pluginId = pluginId;
+    titleEl.textContent = `アドオン設定: ${pluginId}`;
+    statusEl.textContent = '読み込み中…';
+    modal.hidden = false;
+
+    const refreshFn = async () => {
+        const entries = await fetchAddonConfigEntries(pluginId);
+        renderAddonConfigRows(tbody, pluginId, entries, statusEl, refreshFn);
+        statusEl.textContent = entries.length ? statusEl.textContent : '設定はまだありません。';
+    };
+
+    addBtn.onclick = async () => {
+        const key = newKeyEl.value.trim();
+        if (!key) {
+            statusEl.textContent = 'キーは必須です。';
+            return;
+        }
+        try {
+            await saveAddonConfigEntry(pluginId, key, newValEl.value);
+            newKeyEl.value = '';
+            newValEl.value = '';
+            statusEl.textContent = '保存しました。Node を再起動してください。';
+            setAddonCatalogStatusText('アドオン設定を保存しました。Node を再起動してください。');
+            await refreshFn();
+        } catch (e) {
+            statusEl.textContent = String(e.message || e);
+        }
+    };
+
+    try {
+        await refreshFn();
+    } catch (e) {
+        statusEl.textContent = String(e.message || e);
+    }
+}
+
 async function loadAddonCatalog() {
     const mount = document.getElementById('addons-catalog-mount');
     const statusEl = document.getElementById('addons-catalog-status');
@@ -1356,7 +1546,7 @@ async function loadAddonCatalog() {
         const table = document.createElement('table');
         table.className = 'players-table';
         const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th>ID</th><th>バージョン</th><th>整合性</th><th>有効（次回起動時）</th></tr>';
+        thead.innerHTML = '<tr><th>ID</th><th>バージョン</th><th>整合性</th><th>有効（次回起動時）</th><th>設定</th></tr>';
         table.appendChild(thead);
         const tbody = document.createElement('tbody');
 
@@ -1405,10 +1595,21 @@ async function loadAddonCatalog() {
             toggleWrap.appendChild(toggle);
             toggleWrap.appendChild(toggleTrack);
             tdEn.appendChild(toggleWrap);
+            const tdCfg = document.createElement('td');
+            const cfgBtn = document.createElement('button');
+            cfgBtn.type = 'button';
+            cfgBtn.className = 'btn btn-icon addon-config-open-btn';
+            cfgBtn.textContent = '...';
+            cfgBtn.title = `${id} の設定を開く`;
+            cfgBtn.addEventListener('click', () => {
+                void openAddonConfigModal(id);
+            });
+            tdCfg.appendChild(cfgBtn);
             tr.appendChild(tdId);
             tr.appendChild(tdVer);
             tr.appendChild(tdOk);
             tr.appendChild(tdEn);
+            tr.appendChild(tdCfg);
             tbody.appendChild(tr);
         }
         table.appendChild(tbody);

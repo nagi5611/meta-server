@@ -2673,6 +2673,71 @@ section h2 {
     margin-top: 10px;
 }
 
+.addon-config-open-btn {
+    min-width: 36px;
+    font-weight: 700;
+}
+
+.addon-config-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.addon-config-dialog {
+    width: min(920px, 100%);
+    max-height: min(80vh, 860px);
+    overflow: auto;
+    background: #fff;
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 14px;
+}
+
+.addon-config-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.addon-config-header h3 {
+    margin: 0;
+}
+
+.addon-config-table-wrap {
+    margin-top: 8px;
+}
+
+.addon-config-table td {
+    vertical-align: middle;
+}
+
+.addon-config-table td:last-child {
+    white-space: nowrap;
+}
+
+.addon-config-table .btn + .btn {
+    margin-left: 8px;
+}
+
+.addon-config-key-input,
+.addon-config-value-input {
+    width: 100%;
+}
+
+.addon-config-new-row {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 8px;
+}
+
 .stat-card {
     background: #fff;
     padding: 15px;
@@ -3458,6 +3523,13 @@ body.admin-dark .addon-enabled-toggle-track {
 }
 body.admin-dark .addon-enabled-toggle:hover .addon-enabled-toggle-track {
     border-color: #4b5563;
+}
+body.admin-dark .addon-config-dialog {
+    background: #1f1e19;
+    border-color: #2d2a24;
+}
+body.admin-dark .addon-config-modal {
+    background: rgba(0, 0, 0, 0.6);
 }
 body.admin-dark .bandwidth-header .bandwidth-label,
 body.admin-dark .bandwidth-legend .legend-item {
