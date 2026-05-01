@@ -1886,6 +1886,7 @@ app.use('/avatars', (req, res, next) => {
 app.use('/pdfs', express.static(PDFS_DIR));
 app.use('/images', express.static(IMAGES_DIR));
 app.use('/env', express.static(ENV_DIR));
+app.use('/addons', express.static(path.join(__dirname, 'addons')));
 if (CHART_FEATURES_ENABLED) {
     app.use('/chart-bgm', express.static(CHART_BGM_DIR, {
         setHeaders: (res, filePath) => {
