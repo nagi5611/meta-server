@@ -2744,13 +2744,17 @@ section h2 {
 .addon-config-key-input,
 .addon-config-value-input {
     width: 100%;
+    max-height: 60px;
+    flex: 1 1 auto;
     min-width: 0;
+    max-width: 300px;
 }
 
 .addon-config-table .prop-input,
 .addon-config-new-row .prop-input {
     border: 1px solid #bfdbfe;
     background: #fff;
+    color: #111827;
 }
 
 .addon-config-table .prop-input:focus,
