@@ -58,6 +58,8 @@ import {
 } from './lib/s3-avatar-assets.js';
 import { syncLocalEnvToS3OnStartup, uploadLocalEnvFile, canonicalCdnUrlForEnvRelative } from './lib/s3-env-assets.js';
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
+import { loadAddonsAtStartup, registerAddonShutdownHooks, getAddonCatalogSnapshot } from './lib/plugin-bootstrap.js';
+import { setAddonEnabled } from './db/addons-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1511,6 +1513,12 @@ function getSocketAuthTokenFromHandshake(socket) {
 }
 
 // ============================
+// Addons (plugin.json + hooks)
+// ============================
+await loadAddonsAtStartup({ app, io });
+registerAddonShutdownHooks(httpServer);
+
+// ============================
 // Auth API (student / teacher)
 // ============================
 app.get('/api/auth/session', (req, res) => {
@@ -1828,6 +1836,34 @@ app.get('/admin/', basicAuth, sendAdminMetaverseIndex);
 
 // Apply basic auth to admin API routes
 app.use('/admin', basicAuth);
+
+app.get('/admin/addons', (req, res) => {
+    try {
+        res.json(getAddonCatalogSnapshot());
+    } catch (err) {
+        console.error('GET /admin/addons error:', err);
+        sendAdminServerError(res, err);
+    }
+});
+
+app.post('/admin/addons/enabled', express.json(), (req, res) => {
+    const pluginId = req.body?.pluginId;
+    const enabled = Boolean(req.body?.enabled);
+    if (!pluginId || typeof pluginId !== 'string') {
+        return res.status(400).json({ error: 'pluginId string required' });
+    }
+    try {
+        setAddonEnabled(pluginId.trim(), enabled);
+        res.json({
+            ok: true,
+            restartRequired: true,
+            message: 'Restart the Node.js process to apply addon load/unload.',
+        });
+    } catch (err) {
+        console.error('POST /admin/addons/enabled error:', err);
+        sendAdminServerError(res, err);
+    }
+});
 
 // Serve bootstrap-icons from node_modules (for admin.html etc.)
 app.use('/vendor/bootstrap-icons', express.static(path.join(__dirname, 'node_modules/bootstrap-icons/font')));

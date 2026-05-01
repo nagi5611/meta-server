@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS sample_echo_kv (
+    k TEXT PRIMARY KEY NOT NULL,
+    v TEXT NOT NULL
+);

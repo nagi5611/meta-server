@@ -47,6 +47,7 @@
         "multer": "^2.0.2",
         "nipplejs": "^0.10.2",
         "pdfjs-dist": "^4.8.69",
+        "semver": "^7.7.4",
         "sharp": "^0.34.5",
         "socket.io": "^4.7.2",
         "socket.io-client": "^4.8.1",

@@ -49,12 +49,15 @@ function getStoragePathsFromSrcDirectory(srcDirectory) {
         CHARTS_PATH: path.join(dataDir, 'charts.json'),
         CHART_BGM_DIR: path.join(dataDir, 'chart-bgm'),
         DB_DIR: path.join(base, 'db'),
+        /** 各 addon 専用 SQLite（pluginId.db） */
+        PLUGIN_DATABASES_DIR: path.join(dataDir, 'plugin-databases'),
         SERVER_LOG_DIR: path.join(base, 'logs'),
     };
 }
 
 function getStoragePathsFromExplicitEnv() {
     const modelsDir = requireEnv('META_MODELS_DIR');
+    const metaDbDir = requireEnv('META_DB_DIR');
     const envOverride = getEnv('META_ENV_DIR');
     return {
         SRC_DIRECTORY: null,
@@ -68,7 +71,8 @@ function getStoragePathsFromExplicitEnv() {
         WORLDS_PATH: requireEnv('META_WORLDS_PATH'),
         CHARTS_PATH: requireEnv('META_CHARTS_PATH'),
         CHART_BGM_DIR: path.join(path.dirname(requireEnv('META_CHARTS_PATH')), 'chart-bgm'),
-        DB_DIR: requireEnv('META_DB_DIR'),
+        DB_DIR: metaDbDir,
+        PLUGIN_DATABASES_DIR: path.join(path.dirname(metaDbDir), 'plugin-databases'),
         SERVER_LOG_DIR: requireEnv('META_SERVER_LOG_DIR'),
     };
 }
@@ -104,6 +108,7 @@ export function validateAndPrepareStoragePaths() {
     ensureDirExists(STORAGE_PATHS.CHART_BGM_DIR, 'CHART_BGM_DIR');
 
     ensureDirExists(STORAGE_PATHS.DB_DIR, 'META_DB_DIR');
+    ensureDirExists(STORAGE_PATHS.PLUGIN_DATABASES_DIR, 'PLUGIN_DATABASES_DIR');
     ensureDirExists(STORAGE_PATHS.SERVER_LOG_DIR, 'META_SERVER_LOG_DIR');
 }
 

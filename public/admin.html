@@ -30,6 +30,7 @@
             <button type="button" class="admin-nav-item" data-panel="panel-user-register"><i class="bi bi-person-plus"></i> ユーザー登録</button>
             <button type="button" class="admin-nav-item" data-panel="panel-world-edit"><i class="bi bi-pencil-square"></i> ワールド編集</button>
             <button type="button" class="admin-nav-item" data-panel="panel-chart"><i class="bi bi-music-note-beamed"></i> 譜面作成</button>
+            <button type="button" class="admin-nav-item" data-panel="panel-addons"><i class="bi bi-puzzle"></i> アドオン</button>
         </nav>
     </aside>
 
@@ -79,6 +80,15 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <div id="panel-addons" class="admin-panel">
+                <section class="addons-section">
+                    <h2>アドオン</h2>
+                    <p class="hint">有効／無効を変更したあと、<strong>Node プロセスを再起動</strong>すると読み込みが反映されます（<code>docs/addons-restart-policy.md</code>）。</p>
+                    <div id="addons-catalog-mount" class="addons-catalog-mount"></div>
+                    <p id="addons-catalog-status" class="status-text" role="status"></p>
+                </section>
             </div>
 
             <div id="panel-status" class="admin-panel active">

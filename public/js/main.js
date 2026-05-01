@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import './addons/registry-game.js';
 import SceneManager from './scene-manager.js';
 import PhysicsManager from './physics-manager.js';
 import CharacterController from './character-controller.js';

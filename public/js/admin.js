@@ -1329,6 +1329,86 @@ function switchPanel(panelId) {
         initSecurityPanelOnce();
         loadSecurityPanelChat();
     }
+    if (panelId === 'panel-addons') {
+        loadAddonCatalog();
+    }
+}
+
+/**
+ * アドオン一覧を取得して表示する（GET /admin/addons）
+ */
+async function loadAddonCatalog() {
+    const mount = document.getElementById('addons-catalog-mount');
+    const statusEl = document.getElementById('addons-catalog-status');
+    if (!mount || !statusEl) return;
+    statusEl.textContent = '読み込み中…';
+    mount.innerHTML = '';
+    try {
+        const res = await fetch('/admin/addons', { credentials: 'same-origin' });
+        if (!res.ok) {
+            const t = await res.text();
+            throw new Error(t || res.statusText);
+        }
+        const data = await res.json();
+        const core = data.coreVersion || '?';
+        statusEl.textContent = `meta-server ${core} — トグル後は Node 再起動`;
+
+        const table = document.createElement('table');
+        table.className = 'players-table';
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr><th>ID</th><th>バージョン</th><th>整合性</th><th>有効（次回起動時）</th></tr>';
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+
+        for (const a of data.addons || []) {
+            const tr = document.createElement('tr');
+            const id = String(a.id || '');
+            const tdId = document.createElement('td');
+            const code = document.createElement('code');
+            code.textContent = id;
+            tdId.appendChild(code);
+            const tdVer = document.createElement('td');
+            tdVer.textContent = a.manifestOk ? String(a.version || '-') : '-';
+            const tdOk = document.createElement('td');
+            tdOk.textContent = a.manifestOk
+                ? (a.engineOk ? 'OK' : `エンジン: ${a.engineReason || 'NG'}`)
+                : (a.errors || []).join('; ');
+            const tdEn = document.createElement('td');
+            const toggle = document.createElement('input');
+            toggle.type = 'checkbox';
+            toggle.checked = Boolean(a.enabled);
+            toggle.title = '変更後はサーバー再起動が必要です';
+            toggle.addEventListener('change', async () => {
+                const next = toggle.checked;
+                try {
+                    const pr = await fetch('/admin/addons/enabled', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ pluginId: id, enabled: next }),
+                    });
+                    const js = await pr.json().catch(() => ({}));
+                    if (!pr.ok) throw new Error(js.error || pr.statusText);
+                    statusEl.textContent = js.message || '保存しました。Node を再起動してください。';
+                } catch (e) {
+                    console.error(e);
+                    toggle.checked = !next;
+                    statusEl.textContent = String(e.message || e);
+                }
+            });
+            tdEn.appendChild(toggle);
+            tr.appendChild(tdId);
+            tr.appendChild(tdVer);
+            tr.appendChild(tdOk);
+            tr.appendChild(tdEn);
+            tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        mount.appendChild(table);
+    } catch (e) {
+        console.error('loadAddonCatalog', e);
+        statusEl.textContent = String(e.message || e);
+    }
 }
 
 /** 保存キー: 管理画面テーマ 'light' | 'dark' */
@@ -5353,6 +5433,8 @@ document.addEventListener('DOMContentLoaded', () => {
         .then((m) => m.registerMetaverseServiceWorker())
         .catch(() => {});
 
+    import('./addons/registry-admin.js').catch((e) => console.warn('[addons] registry-admin', e));
+
     window.addEventListener('beforeunload', (e) => {
         if (!isChartEditorDirty()) return;
         e.preventDefault();
@@ -5389,7 +5471,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let initialPanel = params.get('panel');
     if (initialPanel === 'world-edit') initialPanel = 'panel-world-edit';
     if (initialPanel === 'security') initialPanel = 'panel-security';
-    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-chart', 'panel-chart-inactive'];
+    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-chart', 'panel-chart-inactive', 'panel-addons'];
     if (initialPanel && validPanels.includes(initialPanel)) {
         switchPanel(initialPanel);
     }
