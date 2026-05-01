@@ -36,7 +36,7 @@ import {
 } from './lib/prefab-bundle-upload.js';
 import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } from './lib/chart-bgm-transcode.js';
 import { normalizeWorldsLod } from './public/js/world-lod-normalize.js';
-import { USE_S3_MODELS, isS3ModelsConfigComplete, isS3ModelsBucketConfigured, normalizedCdnBaseUrl } from './config/s3-assets.js';
+import { USE_S3_MODELS, isS3ModelsConfigComplete, isS3ModelsBucketConfigured, normalizedCdnBaseUrl, normalizedAvatarsS3KeyPrefix } from './config/s3-assets.js';
 import { insertVersionBeforeExt, createModelVersionToken } from './lib/model-upload-version.js';
 import {
     uploadLocalModelsPathsOrRollbackS3,
@@ -56,6 +56,19 @@ import {
     AVATAR_ACTIVE_META_REL_POSIX,
     publicAssetUrlCacheForAvatars,
 } from './lib/s3-avatar-assets.js';
+import {
+    ensureAvatarRegistry,
+    readAvatarRegistry,
+    writeAvatarRegistry,
+    listAnimationClipsFromGlbBuffer,
+    hasCompleteAnimationMap,
+    AVATAR_REGISTRY_REL_POSIX,
+    AVATAR_REQUIRED_MAP_KEYS,
+    findAvatarById,
+    resolveAvatarId,
+    bumpRegistryVersion,
+    syncActiveAvatarFromDefault,
+} from './lib/avatar-registry.js';
 import { syncLocalEnvToS3OnStartup, uploadLocalEnvFile, canonicalCdnUrlForEnvRelative } from './lib/s3-env-assets.js';
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
 import { loadAddonsAtStartup, registerAddonShutdownHooks, getAddonCatalogSnapshot } from './lib/plugin-bootstrap.js';
@@ -617,6 +630,31 @@ const uploadAvatarGlb = multer({
         cb(null, ext === '.glb');
     },
 });
+
+/**
+ * Socket set-username は文字列または { username, avatarId } を許可する。
+ * @param {unknown} payload
+ * @returns {{ username: string, avatarId: string | null }}
+ */
+function parseSetUsernamePayload(payload) {
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        const obj = /** @type {{ username?: unknown, avatarId?: unknown }} */ (payload);
+        const username = typeof obj.username === 'string' ? obj.username.trim() : String(obj.username || '').trim();
+        const avatarId = typeof obj.avatarId === 'string' && obj.avatarId.trim() ? obj.avatarId.trim() : null;
+        return { username, avatarId };
+    }
+    return { username: String(payload || '').trim(), avatarId: null };
+}
+
+/**
+ * @param {string} relUnderAvatars
+ * @returns {string}
+ */
+function avatarPublicUrlForCache(relUnderAvatars) {
+    const rel = String(relUnderAvatars || '').replace(/^\/+/, '').replace(/\\/g, '/');
+    if (!rel) return publicAssetUrlForCache('avatars', AVATAR_ACTIVE_META_REL_POSIX);
+    return publicAssetUrlForCache('avatars', rel);
+}
 /**
  * multipart 由来の文字化けを避けるため、クライアント送信の UTF-8(base64) ファイル名を優先して正規化する。
  * @param {import('express').Request} req
@@ -2764,6 +2802,7 @@ io.on('connection', (socket) => {
         timestamp: 0, // Will be updated on first player-update
         adminInvisible: false,
         animState: 'idle',
+        avatarId: null,
         serverLowAssistPrev: null,
         serverLowAssistAt: Date.now(),
         pilotingAircraftId: null
@@ -3091,16 +3130,15 @@ io.on('connection', (socket) => {
     } // CHART_FEATURES_ENABLED: 太鼓ソケット
 
     // Handle username setting（ゲストのカスタム名は Gemini で二重チェック／API迂回対策）
-    socket.on('set-username', async (username) => {
+    socket.on('set-username', async (payload) => {
         const currentRoom = socket.data.currentRoom;
         if (!currentRoom) return;
 
         const roomState = getRoomState(currentRoom);
         const player = roomState.players.get(socket.id);
-
-        if (!player || !username || username.trim().length === 0) return;
-
-        const trimmed = username.trim();
+        const parsed = parseSetUsernamePayload(payload);
+        if (!player || !parsed.username || parsed.username.length === 0) return;
+        const trimmed = parsed.username;
         // "admin" は管理者トークン検証済みのみ許可。拒否時はエラーで切断
         if (trimmed.toLowerCase() === 'admin' && !socket.data.isAdmin) {
             socket.emit('username-rejected', {
@@ -3182,6 +3220,12 @@ io.on('connection', (socket) => {
         }
 
         player.username = trimmed;
+        try {
+            const reg = await ensureAvatarRegistry(AVATARS_DIR);
+            player.avatarId = resolveAvatarId(reg, AVATARS_DIR, parsed.avatarId);
+        } catch {
+            player.avatarId = null;
+        }
         console.log(`Player ${socket.id} set username to: ${player.username}`);
 
         const info = clientInfo.get(socket.id);
@@ -3201,7 +3245,8 @@ io.on('connection', (socket) => {
         socket.to(currentRoom).emit('player-username-updated', {
             id: socket.id,
             username: player.username,
-            displayName
+            displayName,
+            avatarId: player.avatarId || null,
         });
     });
 
@@ -3354,6 +3399,7 @@ io.on('connection', (socket) => {
             timestamp: 0,
             adminInvisible: !!(oldPlayerState && oldPlayerState.adminInvisible),
             animState: normalizePlayerAnimState(oldPlayerState?.animState) || 'idle',
+            avatarId: oldPlayerState?.avatarId || null,
             serverLowAssistPrev: null,
             serverLowAssistAt: Date.now(),
             pilotingAircraftId: null
@@ -4611,6 +4657,7 @@ setInterval(() => {
                 adminInvisible: !!player.adminInvisible,
                 pilotingAircraftId: player.pilotingAircraftId || null,
                 animState: normalizePlayerAnimState(player.animState),
+                avatarId: player.avatarId || null,
                 vcMicOn,
                 vcSpeakerOn,
                 vcVideoOn,
@@ -5579,9 +5626,9 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
 });
 
 /**
- * アバター GLB を versioned ファイルとして avatars/ に保存し active.json を更新する（S3 連携あり）
+ * アバター GLB を versioned ファイルとして avatars/ に保存し registry へ追加する（S3 連携あり）
  */
-app.post('/admin/upload-avatar', uploadAvatarGlb.single('avatar'), async (req, res) => {
+async function addAvatarToRegistry(req, res, makeDefault) {
     if (!req.file) {
         return res.status(400).json({ error: 'No file or invalid file (.glb only)' });
     }
@@ -5596,15 +5643,13 @@ app.post('/admin/upload-avatar', uploadAvatarGlb.single('avatar'), async (req, r
         for (const p of rollbackPaths) tryUnlinkQuiet(p);
     };
     try {
-        const prevMeta = readActiveAvatarMeta(AVATARS_DIR);
-        const prevFn =
-            prevMeta && typeof prevMeta.filename === 'string' ? prevMeta.filename.trim() : '';
-
         if (!fs.existsSync(AVATARS_DIR)) {
             fs.mkdirSync(AVATARS_DIR, { recursive: true });
         }
         fs.writeFileSync(destPath, req.file.buffer);
         rollbackPaths.push(destPath);
+
+        const clips = await listAnimationClipsFromGlbBuffer(req.file.buffer);
 
         if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
             try {
@@ -5620,8 +5665,25 @@ app.post('/admin/upload-avatar', uploadAvatarGlb.single('avatar'), async (req, r
             }
         }
 
+        const reg = await ensureAvatarRegistry(AVATARS_DIR);
+        const entry = {
+            id: crypto.randomUUID(),
+            glbFilename: versionedName,
+            isDefault: false,
+            animationClips: clips,
+            animationMap: {},
+        };
+        const hasAnyDefault = reg.avatars.some((a) => !!a.isDefault);
+        if (makeDefault || !hasAnyDefault) {
+            for (const a of reg.avatars) a.isDefault = false;
+            entry.isDefault = true;
+        }
+        reg.avatars.push(entry);
+        bumpRegistryVersion(reg);
+        writeAvatarRegistry(AVATARS_DIR, reg);
+
         try {
-            await setActiveAvatar(AVATARS_DIR, versionedName);
+            await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
         } catch (eAct) {
             rollbackLocalWritten();
             if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
@@ -5629,30 +5691,25 @@ app.post('/admin/upload-avatar', uploadAvatarGlb.single('avatar'), async (req, r
             }
             console.error('[upload-avatar] setActiveAvatar:', eAct);
             return res.status(500).json({
-                error: 'active.json の更新に失敗しました。',
+                error: 'avatar registry の更新に失敗しました。',
                 detail: eAct instanceof Error ? eAct.message : String(eAct),
             });
-        }
-
-        if (
-            prevFn &&
-            prevFn !== versionedName &&
-            !prevFn.includes('/') &&
-            !prevFn.includes('..')
-        ) {
-            await deleteAvatarFile(prevFn, AVATARS_DIR);
         }
 
         /** @type {string[]} */
         const invUrls = [
             canonicalCdnUrlForAvatarRelative(versionedName),
             canonicalCdnUrlForAvatarRelative(AVATAR_ACTIVE_META_REL_POSIX),
+            avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
         ];
         io.emit('asset-invalidate', { urls: invUrls });
 
         const payload = {
             success: true,
+            avatarId: entry.id,
             filename: versionedName,
+            animationClips: entry.animationClips,
+            registryVersion: reg.registryVersion,
             canonicalUrl: publicAssetUrlForCache('avatars', versionedName),
         };
         if (USE_S3_MODELS) {
@@ -5666,6 +5723,103 @@ app.post('/admin/upload-avatar', uploadAvatarGlb.single('avatar'), async (req, r
             error: 'Failed to save avatar',
             detail: err instanceof Error ? err.message : String(err),
         });
+    }
+}
+
+app.post('/admin/upload-avatar', uploadAvatarGlb.single('avatar'), async (req, res) => {
+    return addAvatarToRegistry(req, res, true);
+});
+
+app.get('/admin/avatars', async (req, res) => {
+    try {
+        const reg = await ensureAvatarRegistry(AVATARS_DIR);
+        res.json(reg);
+    } catch (e) {
+        console.error('GET /admin/avatars:', e);
+        res.status(500).json({ error: 'avatar_registry_read_failed' });
+    }
+});
+
+app.post('/admin/avatars', uploadAvatarGlb.single('avatar'), async (req, res) => {
+    const makeDefault = req.query.makeDefault === '1' || req.query.default === '1';
+    return addAvatarToRegistry(req, res, makeDefault);
+});
+
+app.patch('/admin/avatars/:id', express.json(), async (req, res) => {
+    const avatarId = String(req.params.id || '').trim();
+    if (!avatarId) return res.status(400).json({ error: 'invalid_id' });
+    try {
+        const reg = await ensureAvatarRegistry(AVATARS_DIR);
+        const reqVer = Number(req.body?.registryVersion);
+        if (!Number.isFinite(reqVer) || Math.trunc(reqVer) !== Math.trunc(Number(reg.registryVersion) || 0)) {
+            return res.status(409).json({
+                error: 'registry_version_conflict',
+                registryVersion: reg.registryVersion,
+            });
+        }
+        const entry = findAvatarById(reg, avatarId);
+        if (!entry) return res.status(404).json({ error: 'avatar_not_found' });
+        const rawMap = req.body?.animationMap;
+        if (!rawMap || typeof rawMap !== 'object') {
+            return res.status(400).json({ error: 'animationMap_required' });
+        }
+        const abs = path.join(AVATARS_DIR, path.basename(entry.glbFilename));
+        if (!fs.existsSync(abs)) return res.status(400).json({ error: 'avatar_file_missing' });
+        const buf = await fs.promises.readFile(abs);
+        entry.animationClips = await listAnimationClipsFromGlbBuffer(buf);
+
+        /** @type {Record<string, number>} */
+        const animationMap = {};
+        for (const k of AVATAR_REQUIRED_MAP_KEYS) {
+            const n = Number(rawMap[k]);
+            if (!Number.isFinite(n)) return res.status(400).json({ error: `invalid_${k}` });
+            animationMap[k] = Math.trunc(n);
+        }
+        entry.animationMap = animationMap;
+        if (!hasCompleteAnimationMap(entry)) {
+            return res.status(400).json({ error: 'animationMap_incomplete' });
+        }
+        bumpRegistryVersion(reg);
+        writeAvatarRegistry(AVATARS_DIR, reg);
+        await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
+        io.emit('asset-invalidate', {
+            urls: [
+                avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
+                canonicalCdnUrlForAvatarRelative(path.basename(entry.glbFilename)),
+            ],
+        });
+        res.json({ success: true, registryVersion: reg.registryVersion, entry });
+    } catch (e) {
+        console.error('PATCH /admin/avatars/:id:', e);
+        res.status(500).json({ error: 'avatar_update_failed' });
+    }
+});
+
+app.post('/admin/avatars/:id/default', async (req, res) => {
+    const avatarId = String(req.params.id || '').trim();
+    if (!avatarId) return res.status(400).json({ error: 'invalid_id' });
+    try {
+        const reg = await ensureAvatarRegistry(AVATARS_DIR);
+        const entry = findAvatarById(reg, avatarId);
+        if (!entry) return res.status(404).json({ error: 'avatar_not_found' });
+        if (!hasCompleteAnimationMap(entry)) {
+            return res.status(400).json({ error: 'avatar_not_ready' });
+        }
+        for (const a of reg.avatars) a.isDefault = String(a.id) === avatarId;
+        bumpRegistryVersion(reg);
+        writeAvatarRegistry(AVATARS_DIR, reg);
+        await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
+        io.emit('asset-invalidate', {
+            urls: [
+                avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
+                canonicalCdnUrlForAvatarRelative(path.basename(entry.glbFilename)),
+                canonicalCdnUrlForAvatarRelative(AVATAR_ACTIVE_META_REL_POSIX),
+            ],
+        });
+        res.json({ success: true, registryVersion: reg.registryVersion });
+    } catch (e) {
+        console.error('POST /admin/avatars/:id/default:', e);
+        res.status(500).json({ error: 'avatar_default_update_failed' });
     }
 });
 
@@ -5863,12 +6017,104 @@ app.post('/api/metaverse/sign-asset-urls', async (req, res) => {
 });
 
 /**
+ * ログイン画面用: 選択可能なアバター一覧
+ */
+app.get('/api/avatars', async (req, res) => {
+    try {
+        if (!metaverseModelsAccessAllowed(req)) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+        const reg = await ensureAvatarRegistry(AVATARS_DIR);
+        /** @type {any[]} */
+        const avatars = [];
+        for (const a of reg.avatars || []) {
+            if (!hasCompleteAnimationMap(a)) continue;
+            const fn = path.basename(String(a.glbFilename || ''));
+            if (!fn) continue;
+            const pref = normalizedAvatarsS3KeyPrefix();
+            const item = {
+                id: a.id,
+                glbPath: pref ? `${pref}/${fn}` : `avatars/${fn}`,
+                isDefault: !!a.isDefault,
+            };
+            if (USE_S3_MODELS) {
+                item.canonicalUrl = canonicalCdnUrlForAvatarRelative(fn);
+                if (isS3ModelsConfigComplete()) {
+                    try {
+                        item.signedUrl = await signCloudFrontGetUrl(item.canonicalUrl.split('#')[0]);
+                    } catch {
+                        item.signedUrl = null;
+                    }
+                }
+            }
+            avatars.push(item);
+        }
+        res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+        res.json({ avatars });
+    } catch (e) {
+        console.error('GET /api/avatars:', e);
+        res.status(500).json({ error: 'failed' });
+    }
+});
+
+/**
+ * クライアント用: avatarId 単位の URL / animationMap
+ */
+app.get('/api/avatar/:id', async (req, res) => {
+    try {
+        if (!metaverseModelsAccessAllowed(req)) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+        const reg = await ensureAvatarRegistry(AVATARS_DIR);
+        const entry = findAvatarById(reg, req.params.id);
+        if (!entry || !hasCompleteAnimationMap(entry)) {
+            return res.status(404).json({ error: 'not_found' });
+        }
+        const fn = path.basename(String(entry.glbFilename || ''));
+        if (!fn) return res.status(404).json({ error: 'not_found' });
+        const pref = normalizedAvatarsS3KeyPrefix();
+        const pathRel = pref ? `${pref}/${fn}` : `avatars/${fn}`;
+        let canonicalUrl = null;
+        let signedUrl = null;
+        if (USE_S3_MODELS) {
+            canonicalUrl = canonicalCdnUrlForAvatarRelative(fn);
+            if (isS3ModelsConfigComplete()) {
+                try {
+                    signedUrl = await signCloudFrontGetUrl(canonicalUrl.split('#')[0]);
+                } catch {
+                    signedUrl = null;
+                }
+            }
+        }
+        res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+        res.json({
+            id: entry.id,
+            path: pathRel,
+            canonicalUrl,
+            signedUrl,
+            animationMap: entry.animationMap || {},
+            animationClips: entry.animationClips || [],
+            fallbackPath: 'models/avatar.glb',
+        });
+    } catch (e) {
+        console.error('GET /api/avatar/:id:', e);
+        res.status(500).json({ error: 'failed' });
+    }
+});
+
+/**
  * アクティブなアバター GLB のパス・CDN URL・署名済み URL（あれば）
  */
 app.get('/api/active-avatar', async (req, res) => {
     try {
         if (!metaverseModelsAccessAllowed(req)) {
             return res.status(403).json({ error: 'forbidden' });
+        }
+        try {
+            const reg = await ensureAvatarRegistry(AVATARS_DIR);
+            await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
+        } catch (eReg) {
+            console.warn('[active-avatar] registry sync:', eReg);
         }
         const meta = readActiveAvatarMeta(AVATARS_DIR);
         const fn = meta && typeof meta.filename === 'string' ? meta.filename.trim() : '';
@@ -6229,6 +6475,7 @@ app.post('/admin/command', async (req, res) => {
                     timestamp: 0,
                     adminInvisible: !!(oldPlayer && oldPlayer.adminInvisible),
                     animState: normalizePlayerAnimState(oldPlayer?.animState) || 'idle',
+                    avatarId: oldPlayer?.avatarId || null,
                     pilotingAircraftId: null,
                     serverLowAssistPrev: null,
                     serverLowAssistAt: Date.now()
@@ -6513,6 +6760,11 @@ function formatBytes(bytes) {
     }
     initDb();
     initUserSessionsDb();
+    try {
+        await ensureAvatarRegistry(AVATARS_DIR);
+    } catch (e) {
+        console.error('[avatar-registry] startup init failed:', e);
+    }
     // Initialize mediasoup workers (room VC + PDF VC)
     await createWorkers();
     await createPdfWorkers();
