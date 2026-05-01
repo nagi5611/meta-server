@@ -143,6 +143,7 @@ async function resolveAvatarUrlForPreview(pathRel) {
 }
 
 /** @typedef {{ id: string, glbPath?: string, signedUrl?: string|null, canonicalUrl?: string|null, isDefault?: boolean }} LoginAvatarDto */
+/** @typedef {{ animationMap?: Record<string, string> }} LoginAvatarDetailDto */
 
 /** @typedef {{ dispose: () => void }} LoginAvatarPickerHandle */
 
@@ -156,6 +157,87 @@ async function resolveAvatarModelUrl(entry) {
     const gp = typeof entry.glbPath === 'string' ? entry.glbPath.trim() : '';
     if (gp) return resolveAvatarUrlForPreview(gp);
     return '';
+}
+
+/** @type {Map<string, LoginAvatarDetailDto>} */
+const avatarDetailCache = new Map();
+
+/**
+ * アバター詳細（animationMap）を取得してキャッシュする
+ * @param {string} avatarId
+ * @returns {Promise<LoginAvatarDetailDto>}
+ */
+async function fetchAvatarDetail(avatarId) {
+    const id = String(avatarId || '').trim();
+    if (!id) return {};
+    if (avatarDetailCache.has(id)) {
+        return avatarDetailCache.get(id) || {};
+    }
+    try {
+        const res = await fetch(`/api/avatar/${encodeURIComponent(id)}`, { credentials: 'include' });
+        if (!res.ok) {
+            avatarDetailCache.set(id, {});
+            return {};
+        }
+        const j = await res.json().catch(() => ({}));
+        const detail =
+            j && typeof j === 'object' ? /** @type {LoginAvatarDetailDto} */ (j) : /** @type {LoginAvatarDetailDto} */ ({});
+        avatarDetailCache.set(id, detail);
+        return detail;
+    } catch {
+        avatarDetailCache.set(id, {});
+        return {};
+    }
+}
+
+/**
+ * 指定名に一致する AnimationClip を返す（完全一致優先、部分一致フォールバック）
+ * @param {import('three').AnimationClip[]} clips
+ * @param {string[]} preferredNames
+ * @returns {import('three').AnimationClip | null}
+ */
+function findClipByPreferredNames(clips, preferredNames) {
+    if (!Array.isArray(clips) || clips.length === 0) return null;
+    const exact = preferredNames
+        .map((n) => String(n || '').trim().toLowerCase())
+        .filter((n) => n.length > 0);
+    for (const name of exact) {
+        const clip = clips.find((c) => String(c?.name || '').trim().toLowerCase() === name);
+        if (clip) return clip;
+    }
+    for (const name of exact) {
+        const clip = clips.find((c) => String(c?.name || '').trim().toLowerCase().includes(name));
+        if (clip) return clip;
+    }
+    return null;
+}
+
+/**
+ * idle/walk/run/jump の順で再生クリップ列を作る（欠損時は先頭クリップへフォールバック）
+ * @param {import('three').AnimationClip[]} clips
+ * @param {Record<string, string> | undefined} animationMap
+ * @returns {import('three').AnimationClip[]}
+ */
+function buildPreviewClipSequence(clips, animationMap) {
+    if (!Array.isArray(clips) || clips.length === 0) return [];
+    const map = animationMap && typeof animationMap === 'object' ? animationMap : {};
+    const keyCandidates = {
+        idle: [String(map.idle || ''), 'idle', 'wait', 'stand'],
+        walk: [String(map.walk || ''), 'walk', 'walking'],
+        run: [String(map.run || ''), 'run', 'running'],
+        jump: [String(map.jump || ''), 'jump', 'jumping'],
+    };
+    /** @type {import('three').AnimationClip[]} */
+    const seq = [];
+    for (const k of ['idle', 'walk', 'run', 'jump']) {
+        const clip = findClipByPreferredNames(
+            clips,
+            keyCandidates[/** @type {'idle'|'walk'|'run'|'jump'} */ (k)]
+        );
+        if (clip) seq.push(clip);
+    }
+    if (seq.length === 0) seq.push(clips[0]);
+    return seq;
 }
 
 /**
@@ -274,7 +356,7 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
     let rafLayout = 0;
     let disposed = false;
 
-    /** @type {Array<{avatarId: string, canvas: HTMLCanvasElement, renderer: import('three').WebGLRenderer, scene: import('three').Scene, camera: import('three').PerspectiveCamera, mixer: import('three').AnimationMixer | null, raf: number | null } | null>} */
+    /** @type {Array<{avatarId: string, canvas: HTMLCanvasElement, renderer: import('three').WebGLRenderer, scene: import('three').Scene, camera: import('three').PerspectiveCamera, mixer: import('three').AnimationMixer | null, raf: number | null, disposeExtra: (() => void) | null } | null>} */
     const previewStates = Array.from({ length: entries.length }, () => null);
 
     function getViewportWidth() {
@@ -346,6 +428,7 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
             cancelAnimationFrame(st.raf);
             st.raf = null;
         }
+        if (typeof st.disposeExtra === 'function') st.disposeExtra();
         st.renderer.dispose();
         if (st.canvas.parentElement) st.canvas.parentElement.removeChild(st.canvas);
         previewStates[idx] = null;
@@ -378,7 +461,10 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
         canvas.height = 128;
         wrap.appendChild(canvas);
 
-        const url = await resolveAvatarModelUrl(entry);
+        const [url, avatarDetail] = await Promise.all([
+            resolveAvatarModelUrl(entry),
+            fetchAvatarDetail(entry.id),
+        ]);
         if (!url || disposed) {
             return;
         }
@@ -403,7 +489,16 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
         /** @type {import('three').AnimationMixer | null} */
         let mixer = null;
 
-        previewStates[idx] = { avatarId: entry.id, canvas, renderer, scene, camera, mixer: null, raf: null };
+        previewStates[idx] = {
+            avatarId: entry.id,
+            canvas,
+            renderer,
+            scene,
+            camera,
+            mixer: null,
+            raf: null,
+            disposeExtra: null,
+        };
         loader.load(
             url,
             (gltf) => {
@@ -415,13 +510,41 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
                 const size = box.getSize(new THREE.Vector3());
                 const sz = Math.max(size.x, size.y, size.z) || 1;
                 // ユーザー指定: 既存比 0.2 倍
-                model.scale.multiplyScalar(0.29 / sz);
+                model.scale.multiplyScalar(0.40 / sz);
                 root.add(model);
                 root.position.set(0, 0.02, 0);
                 scene.add(root);
                 if (gltf.animations && gltf.animations.length) {
                     mixer = new THREE.AnimationMixer(root);
-                    mixer.clipAction(gltf.animations[0]).play();
+                    const clipSequence = buildPreviewClipSequence(gltf.animations, avatarDetail.animationMap);
+                    let sequenceIndex = 0;
+                    /** @type {import('three').AnimationAction | null} */
+                    let currentAction = null;
+                    const playSequenceAt = (idxAction) => {
+                        if (!mixer || clipSequence.length === 0) return;
+                        sequenceIndex = idxAction % clipSequence.length;
+                        const clip = clipSequence[sequenceIndex];
+                        const action = mixer.clipAction(clip);
+                        action.reset();
+                        action.setLoop(THREE.LoopRepeat, 5);
+                        action.clampWhenFinished = false;
+                        action.enabled = true;
+                        action.fadeIn(0.15);
+                        action.play();
+                        if (currentAction && currentAction !== action) {
+                            currentAction.fadeOut(0.15);
+                        }
+                        currentAction = action;
+                    };
+                    const handleFinished = (ev) => {
+                        if (!currentAction || ev?.action !== currentAction) return;
+                        playSequenceAt(sequenceIndex + 1);
+                    };
+                    mixer.addEventListener('finished', handleFinished);
+                    playSequenceAt(0);
+                    st.disposeExtra = () => {
+                        if (mixer) mixer.removeEventListener('finished', handleFinished);
+                    };
                     st.mixer = mixer;
                 }
                 hint.style.display = 'none';
