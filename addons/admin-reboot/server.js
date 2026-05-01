@@ -1,5 +1,4 @@
 // addons/admin-reboot/server.js - Admin ステータスに再起動APIを提供
-import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { HOOKS } from '../../lib/hook-registry.js';
 
@@ -19,19 +18,7 @@ function parseBoolean(value, fallback) {
 }
 
 /**
- * OSごとの再起動コマンドを返す。
- * @returns {{ command: string, args: string[] } | null}
- */
-function getSystemRebootCommand() {
-    const platform = os.platform();
-    if (platform === 'win32') return { command: 'shutdown', args: ['/r', '/t', '0'] };
-    if (platform === 'linux') return { command: 'systemctl', args: ['reboot'] };
-    if (platform === 'darwin') return { command: 'shutdown', args: ['-r', 'now'] };
-    return null;
-}
-
-/**
- * システム再起動コマンドを非同期で起動する。
+ * コマンドを非同期で起動する。
  * @param {{ command: string, args: string[] }} spec
  */
 function runDetachedCommand(spec) {
@@ -50,7 +37,9 @@ export default {
      */
     async register(ctx) {
         const allowNodeRestart = parseBoolean(ctx.config.allowNodeRestart, true);
-        const allowSystemReboot = parseBoolean(ctx.config.allowSystemReboot, false);
+        const serviceName = typeof ctx.config.systemdServiceName === 'string' && ctx.config.systemdServiceName.trim()
+            ? ctx.config.systemdServiceName.trim()
+            : 'metaverse-simple';
 
         ctx.hooks.on(HOOKS.EXPRESS_SETUP, ({ app }) => {
             app.get('/admin/addons/admin-reboot/capabilities', (_req, res) => {
@@ -58,8 +47,8 @@ export default {
                     ok: true,
                     plugin: ctx.pluginId,
                     allowNodeRestart,
-                    allowSystemReboot,
-                    platform: os.platform(),
+                    strategy: 'systemctl-restart',
+                    serviceName,
                 });
             });
 
@@ -67,28 +56,11 @@ export default {
                 if (!allowNodeRestart) {
                     return res.status(403).json({ ok: false, error: 'node_restart_disabled' });
                 }
-                res.json({
-                    ok: true,
-                    message: 'Node.js プロセスの再起動を要求しました。プロセスマネージャー配下なら自動復帰します。',
-                });
-                setTimeout(() => {
-                    process.exit(0);
-                }, 180);
-            });
-
-            app.post('/admin/addons/admin-reboot/reboot-system', (_req, res) => {
-                if (!allowSystemReboot) {
-                    return res.status(403).json({ ok: false, error: 'system_reboot_disabled' });
-                }
-                const rebootSpec = getSystemRebootCommand();
-                if (!rebootSpec) {
-                    return res.status(400).json({ ok: false, error: 'unsupported_platform' });
-                }
                 try {
-                    runDetachedCommand(rebootSpec);
+                    runDetachedCommand({ command: 'systemctl', args: ['restart', serviceName] });
                     return res.json({
                         ok: true,
-                        message: `OS再起動コマンドを実行しました: ${rebootSpec.command} ${rebootSpec.args.join(' ')}`,
+                        message: `systemctl restart ${serviceName} を実行しました。`,
                     });
                 } catch (error) {
                     const message = error instanceof Error ? error.message : String(error);

@@ -33,19 +33,17 @@ function mountAdminRebootPanel() {
     section.className = 'stats-section addon-admin-reboot-section';
     section.innerHTML = `
         <h2>Admin Reboot</h2>
-        <p class="status-text">Node 再起動と OS 再起動を実行します（管理者専用）。</p>
+        <p class="status-text">systemctl restart による Node サーバー再起動を実行します（管理者専用）。</p>
         <div class="addon-admin-reboot-actions">
-            <button type="button" class="btn btn-primary" id="addon-admin-reboot-node-btn">サーバー再起動 (Node)</button>
-            <button type="button" class="btn btn-secondary" id="addon-admin-reboot-system-btn">システム再起動 (OS)</button>
+            <button type="button" class="btn btn-primary" id="addon-admin-reboot-node-btn">サーバー再起動 (systemctl)</button>
         </div>
         <p class="status-text" id="addon-admin-reboot-status" role="status"></p>
     `;
     statusPanel.appendChild(section);
 
     const nodeBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById('addon-admin-reboot-node-btn'));
-    const systemBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById('addon-admin-reboot-system-btn'));
     const statusEl = document.getElementById('addon-admin-reboot-status');
-    if (!nodeBtn || !systemBtn || !statusEl) return;
+    if (!nodeBtn || !statusEl) return;
 
     const setStatus = (text, isError = false) => {
         statusEl.textContent = text;
@@ -55,7 +53,6 @@ function mountAdminRebootPanel() {
 
     const setBusy = (busy) => {
         nodeBtn.disabled = busy;
-        systemBtn.disabled = busy;
     };
 
     const initCapabilities = async () => {
@@ -66,15 +63,13 @@ function mountAdminRebootPanel() {
             const cap = await res.json().catch(() => ({}));
             if (!res.ok || !cap.ok) throw new Error(cap.error || res.statusText);
             nodeBtn.disabled = !cap.allowNodeRestart;
-            systemBtn.disabled = !cap.allowSystemReboot;
             setStatus(
-                `platform=${cap.platform} / Node再起動=${cap.allowNodeRestart ? '可' : '不可'} / OS再起動=${cap.allowSystemReboot ? '可' : '不可'}`,
+                `方式=${cap.strategy || 'systemctl-restart'} / service=${cap.serviceName || '-'} / Node再起動=${cap.allowNodeRestart ? '可' : '不可'}`,
                 false
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             nodeBtn.disabled = true;
-            systemBtn.disabled = true;
             setStatus(`機能の初期化に失敗: ${message}`, true);
         }
     };
@@ -88,17 +83,6 @@ function mountAdminRebootPanel() {
         setBusy(false);
         if (!result.ok) return setStatus(`Node再起動に失敗: ${result.error || 'unknown_error'}`, true);
         setStatus(result.message || 'Node再起動を要求しました。', false);
-    });
-
-    systemBtn.addEventListener('click', async () => {
-        const ok = window.confirm('OS を再起動します。即時影響があります。実行しますか？');
-        if (!ok) return;
-        setBusy(true);
-        setStatus('OS再起動を要求中...');
-        const result = await callRebootApi('/admin/addons/admin-reboot/reboot-system');
-        setBusy(false);
-        if (!result.ok) return setStatus(`OS再起動に失敗: ${result.error || 'unknown_error'}`, true);
-        setStatus(result.message || 'OS再起動を要求しました。', false);
     });
 
     void initCapabilities();

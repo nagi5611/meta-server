@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "main": "server.js",
     "engines": {
-        "meta-server": ">=1.0.0"
+        "meta-server": ">=1.0.2"
     },
     "socketPrefix": "addon:admin-reboot"
 }
