@@ -37,7 +37,13 @@ import {
 import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } from './lib/chart-bgm-transcode.js';
 import { normalizeWorldsLod } from './public/js/world-lod-normalize.js';
 import { USE_S3_MODELS, isS3ModelsConfigComplete, isS3ModelsBucketConfigured, normalizedCdnBaseUrl } from './config/s3-assets.js';
-import { insertVersionBeforeExt, createModelVersionToken } from './lib/model-upload-version.js';
+import { insertVersionBeforeExt, insertContentHashStemBeforeExt, createModelVersionToken } from './lib/model-upload-version.js';
+import {
+    envUseModelContentHashFilenames,
+    manifestUpsertUploadedModel,
+    manifestRemoveByResolvedPaths,
+    buildModelManifestCatalog,
+} from './lib/model-manifest.js';
 import {
     uploadLocalModelsPathsOrRollbackS3,
     syncLocalModelsToS3OnStartup,
@@ -1747,8 +1753,15 @@ app.delete('/admin/addons/config', express.json(), (req, res) => {
 // Serve bootstrap-icons from node_modules (for admin.html etc.)
 app.use('/vendor/bootstrap-icons', express.static(path.join(__dirname, 'node_modules/bootstrap-icons/font')));
 
-// /models: アップロード先。本番 S3 モードでは Cookie / Basic 付きのみ配信
-const modelsStaticMiddleware = express.static(MODELS_DIR);
+// /models: アップロード先。本番 S3 モードでは Cookie / Basic 付きのみ配信 — コンテンツハッシュ付き名前は強いブラウザキャッシュ
+const modelsStaticMiddleware = express.static(MODELS_DIR, {
+    setHeaders: (res, filePath) => {
+        const bn = path.basename(String(filePath || ''));
+        if (/\.([a-f0-9]{12,64})\.(glb|obj)$/i.test(bn)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+    },
+});
 app.use('/models', (req, res, next) => {
     if (USE_S3_MODELS && !metaverseModelsAccessAllowed(req)) {
         return res.status(403).type('txt').send('モデルは認証されたメタバースセッションからのみ取得できます');
@@ -5188,6 +5201,7 @@ function performStorageFileDelete(store, storeRoot, relPath, options) {
             const relOne = path.relative(storeRoot, fileAbs).split(path.sep).join('/');
             if (relOne.toLowerCase().endsWith('-prefab-manifest.json')) {
                 const { relPaths } = removePrefabBundleFromDisk(storeRoot, relOne);
+                manifestRemoveByResolvedPaths(storeRoot, relPaths);
                 for (const rp of relPaths) {
                     invUrls.push(publicAssetUrlForCache('models', rp));
                 }
@@ -5198,6 +5212,7 @@ function performStorageFileDelete(store, storeRoot, relPath, options) {
         const mainRel = path.relative(storeRoot, fileAbs).split(path.sep).join('/');
         invUrls.push(publicAssetUrlForCache(/** @type {'models' | 'pdfs' | 'env' | 'images' | 'chart-bgm'} */ (store), mainRel));
         if (store === 'models') {
+            manifestRemoveByResolvedPaths(storeRoot, [mainRel]);
             return { success: true, invUrls, skipped: false, s3ModelRelPaths: [mainRel] };
         }
         return { success: true, invUrls, skipped: false };
@@ -5389,6 +5404,18 @@ app.post('/admin/upload-prefab-zip', uploadPrefabZip.single('zip'), async (req, 
         if (invUrls.length) {
             io.emit('asset-invalidate', { urls: invUrls });
         }
+        try {
+            for (const wf of result.writtenFiles) {
+                if (!/\.(glb|obj)$/i.test(wf)) continue;
+                await manifestUpsertUploadedModel(MODELS_DIR, {
+                    logicalFilename: wf,
+                    resolvedRelativePosix: wf,
+                    buffer: null,
+                });
+            }
+        } catch (mPf) {
+            console.warn('[upload-prefab-zip] manifest update:', mPf);
+        }
         return res.json({
             success: true,
             prefabManifest: result.manifestRelativePath,
@@ -5411,23 +5438,26 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file or invalid file' });
     }
-    let filename = getSafeUploadedFilename(req, req.file.originalname);
-    const ext = path.extname(filename).toLowerCase();
+    const logicalUploadName = getSafeUploadedFilename(req, req.file.originalname);
+    const ext = path.extname(logicalUploadName).toLowerCase();
     if (!MODEL_UPLOAD_EXTS.has(ext)) {
         return res.status(400).json({ error: 'File type not allowed for model upload' });
     }
-    if (USE_S3_MODELS) {
-        filename = insertVersionBeforeExt(filename, createModelVersionToken());
+    const useHashNames = envUseModelContentHashFilenames();
+    let stagingFilename = logicalUploadName;
+    if (USE_S3_MODELS && !useHashNames) {
+        stagingFilename = insertVersionBeforeExt(logicalUploadName, createModelVersionToken());
     }
-    const destPath = path.join(MODELS_DIR, filename);
+    const baseFilenameForObjsplit = useHashNames ? logicalUploadName : stagingFilename;
+    const basenameNoExt = path.basename(baseFilenameForObjsplit, ext);
+    const conflictProbePath = path.join(MODELS_DIR, useHashNames ? logicalUploadName : stagingFilename);
     const splitGlbByObjects = req.body?.splitGlbByObjects === '1' || req.body?.splitGlbByObjects === 'true';
-    const basenameNoExt = path.basename(filename, ext);
     const existingObjSplits = ext === '.glb' ? listObjectSplitFilesForBase(MODELS_DIR, basenameNoExt) : [];
     const uploadConflict =
-        fs.existsSync(destPath) ||
+        fs.existsSync(conflictProbePath) ||
         (splitGlbByObjects && ext === '.glb' && existingObjSplits.length > 0);
     if (!USE_S3_MODELS && uploadConflict && req.query.confirm !== '1') {
-        return res.status(409).json({ error: 'file_exists', filename });
+        return res.status(409).json({ error: 'file_exists', filename: logicalUploadName });
     }
     /** @type {string[]} — ディスク確定済み・アップロード連動で消すファイル */
     const pathsToUndoOnFail = [];
@@ -5487,7 +5517,7 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
                 try {
                     objectSplit = await runGlbObjectSplitFromBuffer(outBuffer, {
                         modelsDir: MODELS_DIR,
-                        baseFilename: filename,
+                        baseFilename: baseFilenameForObjsplit,
                     });
                 } catch (e) {
                     console.warn('[upload] object split error:', e);
@@ -5498,14 +5528,21 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
                 !!objectSplit?.applied &&
                 Array.isArray(objectSplit.partFiles) &&
                 objectSplit.partFiles.length >= 2;
-            if (multiSplit && fs.existsSync(destPath)) {
+            const monoStalePath = path.join(MODELS_DIR, stagingFilename);
+            if (multiSplit && fs.existsSync(monoStalePath)) {
                 try {
-                    fs.unlinkSync(destPath);
+                    fs.unlinkSync(monoStalePath);
                 } catch (e) {
-                    console.warn('[upload] remove mono glb before objsplit:', destPath, e);
+                    console.warn('[upload] remove mono glb before objsplit:', monoStalePath, e);
                 }
             }
         }
+        let diskFilename = stagingFilename;
+        if (!multiSplit && useHashNames && (ext === '.glb' || ext === '.obj')) {
+            const h16 = crypto.createHash('sha256').update(outBuffer).digest('hex').slice(0, 16);
+            diskFilename = insertContentHashStemBeforeExt(logicalUploadName, h16);
+        }
+        const destPath = path.join(MODELS_DIR, diskFilename);
         if (!multiSplit) {
             fs.writeFileSync(destPath, outBuffer);
             pathsToUndoOnFail.push(destPath);
@@ -5523,7 +5560,7 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
                 invUrls.push(publicAssetUrlForCache('models', f));
             }
         } else {
-            invUrls.push(publicAssetUrlForCache('models', filename));
+            invUrls.push(publicAssetUrlForCache('models', diskFilename));
         }
 
         if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
@@ -5536,9 +5573,28 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
         }
 
         io.emit('asset-invalidate', { urls: invUrls });
+        try {
+            if (multiSplit && objectSplit?.partFiles?.length) {
+                for (const f of objectSplit.partFiles) {
+                    await manifestUpsertUploadedModel(MODELS_DIR, {
+                        logicalFilename: f,
+                        resolvedRelativePosix: f,
+                        buffer: null,
+                    });
+                }
+            } else {
+                await manifestUpsertUploadedModel(MODELS_DIR, {
+                    logicalFilename: logicalUploadName,
+                    resolvedRelativePosix: diskFilename,
+                    buffer: outBuffer,
+                });
+            }
+        } catch (mErr) {
+            console.warn('[upload] manifest update:', mErr);
+        }
         const payload = {
             success: true,
-            filename: multiSplit ? objectSplit.partFiles[0] : filename,
+            filename: multiSplit ? objectSplit.partFiles[0] : diskFilename,
         };
         if (USE_S3_MODELS) {
             if (multiSplit && objectSplit?.partFiles) {
@@ -5547,7 +5603,7 @@ app.post('/admin/upload', upload.single('model'), async (req, res) => {
                 );
                 payload.cdnBaseUrlHint = normalizedCdnBaseUrl();
             } else {
-                payload.canonicalUrl = publicAssetUrlForCache('models', filename);
+                payload.canonicalUrl = publicAssetUrlForCache('models', diskFilename);
                 payload.cdnBaseUrlHint = normalizedCdnBaseUrl();
             }
         }
@@ -5859,6 +5915,28 @@ app.post('/api/metaverse/sign-asset-urls', async (req, res) => {
             error: 'sign_failed',
             detail: e instanceof Error ? e.message : String(e),
         });
+    }
+});
+
+/**
+ * models/ 配下の GLB/OBJ の論理パス・実体・キャッシュ無効化用の版情報（認可は GET /models と同一）
+ */
+app.get('/api/model-manifest', (req, res) => {
+    try {
+        if (!metaverseModelsAccessAllowed(req)) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+        res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+        const { items, manifestGeneration } = buildModelManifestCatalog(MODELS_DIR);
+        res.json({
+            schemaVersion: 1,
+            manifestGeneration,
+            contentHashFilenames: envUseModelContentHashFilenames(),
+            items,
+        });
+    } catch (e) {
+        console.error('GET /api/model-manifest:', e);
+        res.status(500).json({ error: 'manifest_failed' });
     }
 });
 

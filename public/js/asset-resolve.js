@@ -2,7 +2,85 @@
 
 /** @typedef {{ mode?: 'cdn'|'local', cdnBaseUrl?: string | null, cdnHostname?: string | null, iblDefaultHdrUrl?: string | null }} AssetModelsCfg */
 
-/** @type {Promise<unknown> | null} */
+/** @typedef {{ logicalPath: string, resolvedPath: string, version: string, contentHash: string | null, size: number, updatedAt: string }} ModelManifestItemDto */
+
+/** @type {{ manifestGeneration: number|null, itemsByLogical: Map<string, ModelManifestItemDto>, contentHashFilenames: boolean } | null} */
+let modelManifestCache = null;
+/** @type {Promise<{ manifestGeneration: number|null, itemsByLogical: Map<string, ModelManifestItemDto>, contentHashFilenames: boolean } | null> | null} */
+let modelManifestInflight = null;
+
+/** サーバ側の資産更新後にマニフェストのクライアントキャッシュを無効化する */
+export function clearModelManifestCache() {
+    modelManifestCache = null;
+    modelManifestInflight = null;
+}
+
+/**
+ * Fetch 用。models/ 相対・絶対クエリなしのパスを論理キーに正規化する
+ * @param {string} rawPath
+ * @returns {string}
+ */
+export function canonicalModelsLogicalKey(rawPath) {
+    let s = String(rawPath || '').trim();
+    const hash = s.indexOf('#');
+    if (hash >= 0) s = s.slice(0, hash);
+    const q = s.indexOf('?');
+    if (q >= 0) s = s.slice(0, q);
+    s = s.replace(/^\/+/, '').replace(/\\/g, '/');
+    if (!s.toLowerCase().startsWith('models/')) {
+        s = `models/${s}`;
+    }
+    return s;
+}
+
+/**
+ * BASE.<hex>.{glb|obj} 形式のファイル名か
+ * @param {string} basename
+ * @returns {boolean}
+ */
+function looksContentHashedModelsBasename(basename) {
+    return /\.([a-f0-9]{12,64})\.(glb|obj)$/i.test(String(basename || ''));
+}
+
+/**
+ * /api/model-manifest をキャッシュ付きで読み、論理パス → 条項のマップを返す
+ * @returns {Promise<{ manifestGeneration: number|null, itemsByLogical: Map<string, ModelManifestItemDto>, contentHashFilenames: boolean } | null>}
+ */
+async function fetchModelManifestIndexOnce() {
+    if (modelManifestCache) return modelManifestCache;
+    if (modelManifestInflight) return modelManifestInflight;
+    modelManifestInflight = (async () => {
+        try {
+            const r = await fetch('/api/model-manifest', { credentials: 'include' });
+            if (!r.ok) {
+                modelManifestInflight = null;
+                return null;
+            }
+            const data = await r.json();
+            const itemsByLogical = new Map();
+            for (const it of Array.isArray(data.items) ? data.items : []) {
+                if (!it || typeof it !== 'object') continue;
+                const lp = typeof it.logicalPath === 'string' ? it.logicalPath.trim() : '';
+                if (!lp) continue;
+                itemsByLogical.set(lp, /** @type {ModelManifestItemDto} */ (it));
+            }
+            const cached = {
+                manifestGeneration:
+                    typeof data.manifestGeneration === 'number' ? data.manifestGeneration : null,
+                itemsByLogical,
+                contentHashFilenames: !!data.contentHashFilenames,
+            };
+            modelManifestCache = cached;
+            modelManifestInflight = null;
+            return cached;
+        } catch {
+            modelManifestInflight = null;
+            return null;
+        }
+    })();
+    return modelManifestInflight;
+}
+
 let configPromise = null;
 
 /**
@@ -89,9 +167,53 @@ export async function resolveModelAssetHref(pathOrUrl) {
         return originUrlFromCdnUrl(raw);
     }
 
-    const pathStr = raw.startsWith('/') ? raw.slice(1) : raw;
+    const hashIdxRel = raw.indexOf('#');
+    const rawNoHashRel = hashIdxRel >= 0 ? raw.slice(0, hashIdxRel) : raw;
+    const trailingHashRel = hashIdxRel >= 0 ? raw.slice(hashIdxRel) : '';
+
+    const qIdxRel = rawNoHashRel.indexOf('?');
+    const existingQueryRel = qIdxRel >= 0 ? rawNoHashRel.slice(qIdxRel + 1) : '';
+    const pathOnlyForLookup = (qIdxRel >= 0 ? rawNoHashRel.slice(0, qIdxRel) : rawNoHashRel).trim();
+
+    let pathStr = pathOnlyForLookup.startsWith('/') ? pathOnlyForLookup.slice(1) : pathOnlyForLookup;
+
+    /** @type {string[]} */
+    const queryPieces = [];
+    if (existingQueryRel) {
+        queryPieces.push(existingQueryRel);
+    }
+
+    const pLow = pathStr.toLowerCase();
+    const looksLikeModelsRef =
+        pLow.startsWith('models/') ||
+        (!pLow.startsWith('avatars/') && /\.(glb|obj)$/i.test(pathStr.split('/').pop() || ''));
+
+    if (pathStr && looksLikeModelsRef) {
+        try {
+            const idx = await fetchModelManifestIndexOnce();
+            if (idx?.itemsByLogical) {
+                const key = canonicalModelsLogicalKey(pathStr);
+                const ent = idx.itemsByLogical.get(key);
+                if (ent?.resolvedPath) {
+                    pathStr = ent.resolvedPath.replace(/^models\//, '').replace(/^\//, '');
+                    const bn = pathStr.split('/').pop() || '';
+                    const skipVersQs =
+                        looksContentHashedModelsBasename(bn) ||
+                        (idx.contentHashFilenames &&
+                            !!(ent.contentHash && String(ent.contentHash).length >= 12));
+                    if (!skipVersQs && ent.version) {
+                        queryPieces.push(`_mmv=${encodeURIComponent(ent.version)}`);
+                    }
+                }
+            }
+        } catch {
+            /* ignore manifest */
+        }
+    }
+
     const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
-    const sameOriginPath = '/' + encodedPath;
+    const queryStr = queryPieces.length ? `?${queryPieces.join('&')}` : '';
+    const sameOriginPath = '/' + encodedPath + queryStr + trailingHashRel;
 
     if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) {
         return sameOriginPath;
@@ -102,7 +224,7 @@ export async function resolveModelAssetHref(pathOrUrl) {
     if (pathStr.startsWith('avatars/') || /^[^/]+\/avatars\//.test(pathStr)) {
         base = base.replace(/\/models\/?$/i, '');
     }
-    const canonical = `${base}/${encodedPath.replace(/^\/+/, '')}`;
+    const canonical = `${base}/${encodedPath.replace(/^\/+/, '')}${queryStr}`;
     const uKey = canonical.split('#')[0];
     try {
         const res = await fetch('/api/metaverse/sign-asset-urls', {
@@ -115,7 +237,10 @@ export async function resolveModelAssetHref(pathOrUrl) {
             const j = await res.json();
             const signed = j.signed && typeof j.signed === 'object' ? j.signed[uKey] : null;
             if (typeof signed === 'string' && signed.length > 0) {
-                return signed;
+                const signedHash = signed.indexOf('#');
+                const signedHadHash = signedHash >= 0;
+                const signedBase = signedHadHash ? signed.slice(0, signedHash) : signed;
+                return `${signedBase}${trailingHashRel}`;
             }
         }
     } catch {

@@ -10,7 +10,8 @@
         "dev": "concurrently \"nodemon server.js\" \"wait-on http://localhost:3000 --timeout 30000 && vite\"",
         "dev:vcdebug": "concurrently \"cross-env VC_DEBUG_STATS=1 nodemon server.js\" \"wait-on http://localhost:3000 --timeout 30000 && vite\"",
         "build": "vite build",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "test": "node --test tests/model-manifest.spec.mjs"
     },
     "keywords": [
         "metaverse",

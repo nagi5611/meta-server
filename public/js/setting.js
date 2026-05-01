@@ -38,8 +38,7 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { encodeAssetPathToUrlPath, notifyServiceWorkerInvalidate } from './service-worker-register.js';
-import { resolveEnvAssetHref } from './asset-resolve.js';
-import { resolveModelAssetHref } from './asset-resolve.js';
+import { resolveEnvAssetHref, resolveModelAssetHref, clearModelManifestCache } from './asset-resolve.js';
 import {
     mergeAircraftPhysicsFromWorld,
     clipAircraftPhysicsPartialFromUser,
@@ -5154,6 +5153,7 @@ function bindEvents() {
                     inv.push(encodeAssetPathToUrlPath('models/' + uploadData.filename));
                 }
                 await notifyServiceWorkerInvalidate(inv);
+                clearModelManifestCache();
                 await fetchModels();
                 if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
                 applyTextureResizeStatus(uploadData, ui);
@@ -5222,6 +5222,7 @@ function bindEvents() {
                             invR.push(encodeAssetPathToUrlPath('models/' + uploadDataRetry.filename));
                         }
                         await notifyServiceWorkerInvalidate(invR);
+                        clearModelManifestCache();
                         await fetchModels();
                         if (name.toLowerCase().endsWith('.mtl')) needMtlRefresh = true;
                         applyTextureResizeStatus(uploadDataRetry, ui);
@@ -5359,6 +5360,7 @@ function bindEvents() {
                 encodeAssetPathToUrlPath('models/' + String(rel).replace(/^\/+/, ''))
             );
             if (inv.length) await notifyServiceWorkerInvalidate(inv);
+            clearModelManifestCache();
             await fetchModels();
             renderModelList();
             const pm = data.prefabManifest || '';
