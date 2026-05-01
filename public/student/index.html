@@ -305,6 +305,13 @@
         passwordInput.addEventListener('input', () => { errorMessage.style.display = 'none'; });
         usernameInput.focus();
     </script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        }
+    }
+    </script>
     <script type="module">
         import { mountLoginAvatarPicker } from '/js/login-avatar-picker.js';
         const m = document.getElementById('login-avatar-mount');
