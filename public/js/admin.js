@@ -1374,10 +1374,16 @@ async function loadAddonCatalog() {
                 ? (a.engineOk ? 'OK' : `エンジン: ${a.engineReason || 'NG'}`)
                 : (a.errors || []).join('; ');
             const tdEn = document.createElement('td');
+            const toggleWrap = document.createElement('label');
+            toggleWrap.className = 'addon-enabled-toggle';
+            toggleWrap.title = '変更後はサーバー再起動が必要です';
             const toggle = document.createElement('input');
             toggle.type = 'checkbox';
+            toggle.className = 'addon-enabled-toggle-input';
             toggle.checked = Boolean(a.enabled);
-            toggle.title = '変更後はサーバー再起動が必要です';
+            const toggleTrack = document.createElement('span');
+            toggleTrack.className = 'addon-enabled-toggle-track';
+            toggleTrack.setAttribute('aria-hidden', 'true');
             toggle.addEventListener('change', async () => {
                 const next = toggle.checked;
                 try {
@@ -1396,7 +1402,9 @@ async function loadAddonCatalog() {
                     statusEl.textContent = String(e.message || e);
                 }
             });
-            tdEn.appendChild(toggle);
+            toggleWrap.appendChild(toggle);
+            toggleWrap.appendChild(toggleTrack);
+            tdEn.appendChild(toggleWrap);
             tr.appendChild(tdId);
             tr.appendChild(tdVer);
             tr.appendChild(tdOk);
