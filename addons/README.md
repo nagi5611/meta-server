@@ -34,3 +34,5 @@
 ## サンプル
 
 `addons/sample-echo/` — `GET /api/addons/sample-echo/hello` と Socket `addon:sample-echo:ping` / `addon:sample-echo:pong`。
+
+`addons/aircraft/` — ワールド設定の機体載せ・複数ユーザー同期・`players-update.aircraft`。詳細は `addons/aircraft/README.md`。

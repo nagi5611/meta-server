@@ -129,7 +129,7 @@ details[open] > .block-header::before {
 
 .prop-input {
     flex: 1 1 auto;
-    max-height: 30px;
+    height: 30px;
     min-width: 0;
     max-width: 300px;
     background: #484848;

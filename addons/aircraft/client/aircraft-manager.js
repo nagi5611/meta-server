@@ -1,4 +1,4 @@
-// public/js/aircraft-manager.js — 近接・搭乗・サーバー同期・駐機位置リセット
+// addons/aircraft/client/aircraft-manager.js — 近接・搭乗・サーバー同期・駐機位置リセット
 
 import * as THREE from 'three';
 import AircraftController from './aircraft-controller.js';

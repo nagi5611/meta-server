@@ -44,7 +44,7 @@ import {
     mergeAircraftPhysicsFromWorld,
     clipAircraftPhysicsPartialFromUser,
     DEFAULT_AIRCRAFT_PHYSICS
-} from './aircraft-physics-defaults.js';
+} from '../../addons/aircraft/client/aircraft-physics-defaults.js';
 
 // --- State ---
 let scene, camera, renderer, controls, transformControls;

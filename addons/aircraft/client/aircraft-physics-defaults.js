@@ -1,4 +1,4 @@
-// public/js/aircraft-physics-defaults.js — 飛行機操縦の数値デフォルト（THREE に依存しない）
+// addons/aircraft/client/aircraft-physics-defaults.js — 飛行機操縦の数値デフォルト（THREE に依存しない）
 
 /** @type {Readonly<{ maxSpeed: number, thrustAccel: number, drag: number, yawAccelGround: number, yawAccelAir: number, pitchAccelGround: number, pitchAccelAir: number, rollAccel: number, yawMaxRateGround: number, yawMaxRateAir: number, pitchMaxRateGround: number, pitchMaxRateAir: number, rollMaxRate: number, angularDecel: number, yawGroundFrictionLeft: number, yawGroundFrictionRight: number, groundTireLateralDecel: number, groundTireRollingDecel: number, wheelBrakeDecel: number, sideslipDamping: number, excessClimbDamping: number, gravity: number, liftPerHorizontalSpeed: number }>} */
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({

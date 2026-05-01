@@ -1,4 +1,4 @@
-// public/js/aircraft-controller.js — キネマティック飛行（四元数・-Z 前進・BVH 下向きレイ接地）
+// addons/aircraft/client/aircraft-controller.js — キネマティック飛行（四元数・-Z 前進・BVH 下向きレイ接地）
 
 import * as THREE from 'three';
 import { mergeAircraftPhysicsFromWorld } from './aircraft-physics-defaults.js';

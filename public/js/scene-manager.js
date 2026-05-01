@@ -26,7 +26,7 @@ import {
     fetchModelContentLength,
     countTrianglesInObject
 } from './model-load-limits.js';
-import { mergeAircraftPhysicsForObject } from './aircraft-physics-defaults.js';
+import { mergeAircraftPhysicsForObject } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
 import { loadPrefabGroupFromManifest, normalizePrefabManifest } from './prefab-load-shared.js';
 
 /**

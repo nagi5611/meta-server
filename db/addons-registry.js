@@ -133,9 +133,14 @@ export function seedFirstRunDefaultAddons(addonsRoot) {
     if (!db) return;
     const row = db.prepare('SELECT COUNT(*) as c FROM addon_enabled').get();
     if (row.c > 0) return;
-    const manifestPath = path.join(addonsRoot, 'sample-echo', 'plugin.json');
-    if (fs.existsSync(manifestPath)) {
+    const sampleManifest = path.join(addonsRoot, 'sample-echo', 'plugin.json');
+    if (fs.existsSync(sampleManifest)) {
         db.prepare('INSERT INTO addon_enabled (plugin_id, enabled) VALUES (?, 1)').run('sample-echo');
         console.log('[addons-registry] first run: enabled addon sample-echo');
+    }
+    const aircraftManifest = path.join(addonsRoot, 'aircraft', 'plugin.json');
+    if (fs.existsSync(aircraftManifest)) {
+        db.prepare('INSERT INTO addon_enabled (plugin_id, enabled) VALUES (?, 1)').run('aircraft');
+        console.log('[addons-registry] first run: enabled addon aircraft');
     }
 }

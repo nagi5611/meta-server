@@ -60,6 +60,14 @@ import { syncLocalEnvToS3OnStartup, uploadLocalEnvFile, canonicalCdnUrlForEnvRel
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
 import { loadAddonsAtStartup, registerAddonShutdownHooks, getAddonCatalogSnapshot } from './lib/plugin-bootstrap.js';
 import { setAddonEnabled, getAddonConfigEntries, setAddonConfigValue, deleteAddonConfigValue } from './db/addons-registry.js';
+import { setAircraftServerDeps } from './lib/aircraft-server/deps-registry.js';
+import { validateWorldsAircraft, validateWorldsAircraftPhysics } from './lib/aircraft-server/validate-worlds.js';
+import {
+    releaseAllAircraftForPlayerInRoom,
+    buildAircraftSnapshotList,
+    ensureRoomAircraftState,
+    applyAircraftPoseFromPlayerUpdate,
+} from './lib/aircraft-server/room-aircraft.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -276,79 +284,6 @@ function validateWorldsPhysicsAssist(worlds) {
     return errors;
 }
 
-/** aircraftPhysics / models[].aircraft.aircraftPhysics の数値レンジ（POST /admin/worlds 用） */
-const AIRCRAFT_PHYSICS_LIMITS = {
-    maxSpeed: [1, 500],
-    thrustAccel: [0.1, 200],
-    drag: [0.5, 0.99999],
-    yawAccel: [0.05, 40],
-    yawAccelGround: [0.05, 40],
-    yawAccelAir: [0.05, 40],
-    pitchAccel: [0.05, 40],
-    pitchAccelGround: [0.05, 40],
-    pitchAccelAir: [0.05, 40],
-    rollAccel: [0.05, 40],
-    yawMaxRate: [0.02, 10],
-    yawMaxRateGround: [0.02, 10],
-    yawMaxRateAir: [0.02, 10],
-    pitchMaxRate: [0.02, 10],
-    pitchMaxRateGround: [0.02, 10],
-    pitchMaxRateAir: [0.02, 10],
-    rollMaxRate: [0.02, 10],
-    angularDecel: [0, 30],
-    yawGroundFrictionLeft: [0, 30],
-    yawGroundFrictionRight: [0, 30],
-    groundTireLateralDecel: [0, 500],
-    groundTireRollingDecel: [0, 500],
-    wheelBrakeDecel: [0.5, 200],
-    gravity: [0, 50],
-    liftPerHorizontalSpeed: [0, 5],
-    sideslipDamping: [0, 10],
-    excessClimbDamping: [0, 10]
-};
-
-/**
- * aircraftPhysics オブジェクトのキーごとにレンジ検証する
- * @param {unknown} ap
- * @param {string} pathLabel 例: ワールド「lobby」: aircraftPhysics
- * @param {string[]} errors
- */
-function appendAircraftPhysicsValidationErrors(ap, pathLabel, errors) {
-    if (ap == null) return;
-    if (typeof ap !== 'object' || Array.isArray(ap)) {
-        errors.push(`${pathLabel} はオブジェクトである必要があります`);
-        return;
-    }
-    for (const [key, [lo, hi]] of Object.entries(AIRCRAFT_PHYSICS_LIMITS)) {
-        if (!(key in ap)) continue;
-        const v = ap[key];
-        if (typeof v !== 'number' || !Number.isFinite(v)) {
-            errors.push(`${pathLabel}.${key} は有限の数値にしてください`);
-            continue;
-        }
-        if (v < lo || v > hi) {
-            errors.push(`${pathLabel}.${key} は ${lo}〜${hi} にしてください`);
-        }
-    }
-}
-
-/**
- * aircraftPhysics（飛行機操縦の数値）検証（POST /admin/worlds 用）
- * @param {Record<string, unknown>} worlds
- * @returns {string[]}
- */
-function validateWorldsAircraftPhysics(worlds) {
-    const errors = [];
-    if (!worlds || typeof worlds !== 'object') return errors;
-    for (const [wid, w] of Object.entries(worlds)) {
-        if (!w || typeof w !== 'object') continue;
-        const ap = w.aircraftPhysics;
-        if (ap == null) continue;
-        appendAircraftPhysicsValidationErrors(ap, `ワールド「${wid}」: aircraftPhysics`, errors);
-    }
-    return errors;
-}
-
 /**
  * 表示用床プレーンの寸法（floorWidth / floorDepth）検証（POST /admin/worlds 用）
  * @param {Record<string, unknown>} worlds
@@ -431,105 +366,6 @@ function validateWorldsPlayBoundsAndColliders(worlds) {
         }
     }
     return errors;
-}
-
-/**
- * aircraft メタデータの検証（同一ワールド内 id 一意）
- * @param {Record<string, unknown>} worlds
- * @returns {string[]}
- */
-function validateWorldsAircraft(worlds) {
-    const errors = [];
-    if (!worlds || typeof worlds !== 'object') return errors;
-    for (const [wid, w] of Object.entries(worlds)) {
-        if (!w || typeof w !== 'object' || !Array.isArray(w.models)) continue;
-        const seen = new Set();
-        w.models.forEach((m, i) => {
-            const a = m && m.aircraft;
-            if (!a || typeof a !== 'object') return;
-            const id = String(a.id || '').trim();
-            if (!id) {
-                errors.push(`ワールド「${wid}」オブジェクト#${i + 1}: aircraft.id が必要です`);
-                return;
-            }
-            if (seen.has(id)) {
-                errors.push(`ワールド「${wid}」: aircraft.id「${id}」が重複しています`);
-            }
-            seen.add(id);
-            const r = a.radius;
-            if (r != null && (typeof r !== 'number' || !Number.isFinite(r) || r <= 0)) {
-                errors.push(`ワールド「${wid}」 aircraft「${id}」: radius は正の有限数値にしてください`);
-            }
-            if (a.aircraftPhysics != null) {
-                appendAircraftPhysicsValidationErrors(
-                    a.aircraftPhysics,
-                    `ワールド「${wid}」 aircraft「${id}」: aircraftPhysics`,
-                    errors
-                );
-            }
-        });
-    }
-    return errors;
-}
-
-/**
- * @param {string} worldId
- * @param {string} slotId
- * @returns {boolean}
- */
-function worldContainsAircraftSlot(worldId, slotId) {
-    const worlds = readWorlds();
-    const w = worlds[worldId];
-    if (!w || !Array.isArray(w.models)) return false;
-    const sid = String(slotId || '').trim();
-    return w.models.some((m) => m && m.aircraft && String(m.aircraft.id || '').trim() === sid);
-}
-
-/**
- * @param {import('socket.io').Server} ioSrv
- * @param {string} roomId
- * @param {string} socketId
- */
-function releaseAllAircraftForPlayerInRoom(ioSrv, roomId, socketId) {
-    const rs = roomStates.get(roomId);
-    if (!rs || !rs.aircraft) return;
-    const released = [];
-    for (const [slotId, pilotId] of rs.aircraft.pilots) {
-        if (pilotId === socketId) {
-            rs.aircraft.pilots.delete(slotId);
-            rs.aircraft.poses.delete(slotId);
-            released.push(slotId);
-        }
-    }
-    const player = rs.players.get(socketId);
-    if (player) player.pilotingAircraftId = null;
-    for (const slotId of released) {
-        ioSrv.to(roomId).emit('aircraft-released', { slotId });
-    }
-}
-
-/**
- * @param {{ aircraft?: { pilots: Map<string, string>, poses: Map<string, { position: object, quaternion: object }> } }} rs
- * @returns {{ id: string, pilotId: string, position: object, quaternion: object }[]}
- */
-function buildAircraftSnapshotList(rs) {
-    if (!rs?.aircraft?.pilots?.size) return [];
-    const list = [];
-    for (const [slotId, pilotSocketId] of rs.aircraft.pilots) {
-        const pose = rs.aircraft.poses.get(slotId);
-        if (!pose || !pose.position || !pose.quaternion) continue;
-        const p = pose.position;
-        const q = pose.quaternion;
-        if (![p.x, p.y, p.z].every((n) => typeof n === 'number' && Number.isFinite(n))) continue;
-        if (![q.x, q.y, q.z, q.w].every((n) => typeof n === 'number' && Number.isFinite(n))) continue;
-        list.push({
-            id: slotId,
-            pilotId: pilotSocketId,
-            position: { x: p.x, y: p.y, z: p.z },
-            quaternion: { x: q.x, y: q.y, z: q.z, w: q.w }
-        });
-    }
-    return list;
 }
 
 /**
@@ -2698,6 +2534,8 @@ function getRoomState(roomId) {
     return rs;
 }
 
+setAircraftServerDeps({ getRoomState, readWorlds });
+
 // VC: Cleanup peer resources
 async function cleanupVCPeer(socketId) {
     const peer = vcPeers.get(socketId);
@@ -3447,77 +3285,10 @@ io.on('connection', (socket) => {
             player.animState = normalizePlayerAnimState(data.animState);
         }
 
-        const pilotSlot = player.pilotingAircraftId;
-        if (pilotSlot && data.aircraftPose && String(data.aircraftPose.slotId || '') === String(pilotSlot)) {
-            if (!roomState.aircraft) {
-                roomState.aircraft = { pilots: new Map(), poses: new Map() };
-            }
-            const ap = data.aircraftPose;
-            const pq = ap.position;
-            const qq = ap.quaternion;
-            if (pq && qq
-                && [pq.x, pq.y, pq.z].every((n) => typeof n === 'number' && Number.isFinite(n))
-                && [qq.x, qq.y, qq.z, qq.w].every((n) => typeof n === 'number' && Number.isFinite(n))) {
-                roomState.aircraft.poses.set(pilotSlot, {
-                    position: { x: pq.x, y: pq.y, z: pq.z },
-                    quaternion: { x: qq.x, y: qq.y, z: qq.z, w: qq.w },
-                    timestamp: incomingTimestamp
-                });
-            }
-        }
+        applyAircraftPoseFromPlayerUpdate(roomState, player, data, incomingTimestamp);
 
         player.timestamp = incomingTimestamp;
         player.world = currentRoom;
-    });
-
-    socket.on('aircraft-board', (data, callback) => {
-        const slotId = data && String(data.slotId || '').trim();
-        const world = socket.data.currentRoom;
-        if (!slotId || !world) {
-            if (typeof callback === 'function') callback({ ok: false, error: 'bad_request' });
-            return;
-        }
-        if (!worldContainsAircraftSlot(world, slotId)) {
-            if (typeof callback === 'function') callback({ ok: false, error: 'invalid_slot' });
-            return;
-        }
-        const rs = getRoomState(world);
-        if (rs.aircraft.pilots.has(slotId)) {
-            if (typeof callback === 'function') callback({ ok: false, error: 'busy' });
-            return;
-        }
-        const pl = rs.players.get(socket.id);
-        if (!pl) {
-            if (typeof callback === 'function') callback({ ok: false, error: 'no_player' });
-            return;
-        }
-        if (pl.pilotingAircraftId) {
-            if (typeof callback === 'function') callback({ ok: false, error: 'already_piloting' });
-            return;
-        }
-        rs.aircraft.pilots.set(slotId, socket.id);
-        pl.pilotingAircraftId = slotId;
-        if (typeof callback === 'function') callback({ ok: true });
-    });
-
-    socket.on('aircraft-exit', (data, callback) => {
-        const world = socket.data.currentRoom;
-        if (!world) {
-            if (typeof callback === 'function') callback({ ok: false, error: 'no_room' });
-            return;
-        }
-        const rs = getRoomState(world);
-        const pl = rs.players.get(socket.id);
-        const slotId = (data && String(data.slotId || '').trim()) || (pl && pl.pilotingAircraftId);
-        if (!slotId || rs.aircraft.pilots.get(slotId) !== socket.id) {
-            if (typeof callback === 'function') callback({ ok: false, error: 'not_pilot' });
-            return;
-        }
-        rs.aircraft.pilots.delete(slotId);
-        rs.aircraft.poses.delete(slotId);
-        if (pl) pl.pilotingAircraftId = null;
-        io.to(world).emit('aircraft-released', { slotId });
-        if (typeof callback === 'function') callback({ ok: true });
     });
 
     // Handle world/room change (callback は Socket.io ack: テレポーター権限拒否時や完了時に使用)
@@ -4850,9 +4621,7 @@ setInterval(() => {
             };
         });
         
-        if (!roomState.aircraft) {
-            roomState.aircraft = { pilots: new Map(), poses: new Map() };
-        }
+        ensureRoomAircraftState(roomState);
         const aircraftList = buildAircraftSnapshotList(roomState);
 
         const snapshot = {

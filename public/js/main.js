@@ -23,8 +23,7 @@ import { createMetaverseVRButton } from './vr-entry-button.js';
 import WebXRLocomotion from './webxr-locomotion.js';
 import { XrPlayerRig } from './xr-player-rig.js';
 import { registerMetaverseServiceWorker } from './service-worker-register.js';
-import AircraftController from './aircraft-controller.js';
-import AircraftManager from './aircraft-manager.js';
+import { initAircraftSubsystem } from '../../addons/aircraft/client/init.js';
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 
 const DEFAULT_ROOM = 'lobby';
@@ -339,47 +338,7 @@ class MetaverseApp {
         };
         this.setupClientPerfObservers();
 
-        this.aircraftController = new AircraftController(
-            this.sceneManager.getCamera(),
-            this.physicsManager
-        );
-        // 初回 loadWorld 時は onWorldChange 未登録のため onWorldChanged が走らない。直リンクでもワールドの aircraftPhysics を反映する
-        const initialWorldForAircraft = this.worldManager.getCurrentWorld();
-        if (initialWorldForAircraft) {
-            this.aircraftController.applyWorldPhysics(initialWorldForAircraft.aircraftPhysics);
-        }
-        this.aircraftManager = new AircraftManager(
-            this.sceneManager,
-            this.aircraftController,
-            this.characterController,
-            this.networkManager,
-            this.uiManager
-        );
-        this.aircraftManager.setMobileMode(this.isMobileMode);
-        this.aircraftManager.refreshSlotsFromScene();
-
-        this.uiManager.setAircraftBoardHandler(() => {
-            this.aircraftManager.tryBoardNearest();
-        });
-        this.teleportManager.setAircraftBoardHandler(() => {
-            if (this.characterController.isInputActive()) return false;
-            if (!this.aircraftManager?.nearestSlot || !this.aircraftManager.canBoard()) return false;
-            void this.aircraftManager.tryBoardNearest();
-            return true;
-        });
-        this.uiManager.setAircraftHudHandlers({
-            onExit: () => this.aircraftManager.exitPiloting(),
-            onToggleCamera: () => this.aircraftManager.toggleCameraMode()
-        });
-
-        this.networkManager.setAircraftNetworkBridge({
-            getPose: () => this.aircraftManager.getAircraftPoseForNetwork(),
-            onSnapshot: (list) => this.aircraftManager.applyNetworkAircraftSnapshot(
-                list,
-                this.networkManager.myPlayerId
-            ),
-            onReleased: (slotId) => this.aircraftManager.onAircraftReleased(slotId)
-        });
+        initAircraftSubsystem(this);
 
         this.networkManager.connect();
         this.networkManager.startSendingUpdates(this.characterController);
@@ -534,7 +493,7 @@ class MetaverseApp {
             const hideForAircraft = !!(this.aircraftManager && (this.aircraftManager.isPiloting || this.aircraftManager.isPassenger));
             this.playerManager.setLocalPlayerVisible(!hideForFirst && !hideForAdmin && !hideForAircraft);
         };
-        this.aircraftManager.setOnPilotingChange(() => this.refreshLocalAvatarVisibility());
+        this.aircraftManager?.setOnPilotingChange?.(() => this.refreshLocalAvatarVisibility());
 
         this.characterController.setViewMode(this.menuManager.settings.viewMode || 'third');
         this.refreshLocalAvatarVisibility();
