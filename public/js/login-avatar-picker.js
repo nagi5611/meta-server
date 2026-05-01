@@ -1,9 +1,11 @@
-// public/js/login-avatar-picker.js — ログイン画面で選択可能アバター一覧・プレビュー（THREE を CDN から動的 import）
+// public/js/login-avatar-picker.js — ログイン: アバター横スクロールカルーセル（中央が選択・CDN の three）
 const THREE_MOD = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 const GLTF_LOADER_MOD =
     'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 
-/** @type {{ THREE: typeof import('three'), GLTFLoader: typeof import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader } | null} */
+const STYLE_ID = 'login-avatar-picker-carousel-styles';
+
+/** @type {Promise<{ THREE: typeof import('three'), GLTFLoader: typeof import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader }> | null} */
 let threeModulesPromise = null;
 
 function loadThreeModules() {
@@ -15,6 +17,110 @@ function loadThreeModules() {
         })();
     }
     return threeModulesPromise;
+}
+
+function ensureCarouselStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const st = document.createElement('style');
+    st.id = STYLE_ID;
+    st.textContent = `
+.lap-root { margin-bottom: 20px; user-select: none; -webkit-user-select: none; }
+.lap-carousel-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #555;
+  margin: 0 0 6px 4px;
+  text-align: left;
+}
+.lap-viewport {
+  position: relative;
+  width: 100%;
+  height: 168px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #fafafa;
+  border: 1px solid #e0e0e0;
+  touch-action: none;
+  cursor: grab;
+}
+.lap-viewport:active { cursor: grabbing; }
+.lap-diamond {
+  position: absolute;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  background: #0288d1;
+  transform: translateX(-50%) rotate(45deg);
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0.85;
+}
+.lap-diamond--top { top: 10px; }
+.lap-diamond--bottom { bottom: 10px; }
+.lap-track {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  will-change: transform;
+  height: 100%;
+  padding: 0;
+}
+.lap-card {
+  flex-shrink: 0;
+  width: 86px;
+  height: 86px;
+  margin-right: 14px;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #ececec, #f7f7f7);
+  border: 2px solid #ddd;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.18s ease-out, box-shadow 0.18s ease-out, border-color 0.18s ease-out;
+  position: relative;
+  z-index: 1;
+}
+.lap-card:last-child { margin-right: 0; }
+.lap-card--center {
+  z-index: 2;
+  box-shadow: 0 8px 24px rgba(2, 136, 209, 0.18);
+  border-color: #0288d1;
+}
+.lap-card-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #0288d1;
+  color: #fff;
+  font-weight: 600;
+}
+.lap-card-canvas-wrap {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.lap-card-canvas-wrap canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+.lap-card-hint {
+  font-size: 11px;
+  color: #888;
+  text-align: center;
+  padding: 4px;
+  line-height: 1.2;
+}
+`;
+    document.head.appendChild(st);
 }
 
 /**
@@ -37,6 +143,18 @@ async function resolveAvatarUrlForPreview(pathRel) {
 /** @typedef {{ dispose: () => void }} LoginAvatarPickerHandle */
 
 /**
+ * @param {LoginAvatarDto} entry
+ * @returns {Promise<string>}
+ */
+async function resolveAvatarModelUrl(entry) {
+    const su = typeof entry.signedUrl === 'string' ? entry.signedUrl.trim() : '';
+    if (su) return su;
+    const gp = typeof entry.glbPath === 'string' ? entry.glbPath.trim() : '';
+    if (gp) return resolveAvatarUrlForPreview(gp);
+    return '';
+}
+
+/**
  * ログインコンテナ直下にマウントし、アバター選択 UI を構築する
  * @param {HTMLElement|null} mount
  * @param {{ onSelectionChange?: (id: string) => void }} [opts]
@@ -45,7 +163,9 @@ async function resolveAvatarUrlForPreview(pathRel) {
 export async function mountLoginAvatarPicker(mount, opts = {}) {
     if (!mount) return null;
     mount.innerHTML = '';
+    mount.classList.add('lap-root');
     await fetch('/api/client-config', { credentials: 'include' }).catch(() => {});
+
     const status = document.createElement('p');
     status.className = 'login-avatar-msg';
     status.setAttribute('role', 'status');
@@ -74,190 +194,336 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
     }
 
     mount.style.display = 'block';
-
-    const title = document.createElement('div');
-    title.className = 'login-avatar-heading';
-    title.textContent = 'アバターを選択';
-
-    /** @type {HTMLDivElement} */
-    const previewWrap = document.createElement('div');
-    previewWrap.className = 'login-avatar-preview-wrap';
-    const canvas = document.createElement('canvas');
-    canvas.className = 'login-avatar-canvas';
-    canvas.width = 220;
-    canvas.height = 220;
-    previewWrap.appendChild(canvas);
-
-    /** @type {HTMLDivElement} */
-    const listEl = document.createElement('div');
-    listEl.className = 'login-avatar-choice-list';
+    ensureCarouselStyles();
 
     const LS_AVATAR = 'metaverseAvatarId';
-    const defaultEntry = list.find((a) => a.isDefault) || list[0];
+    const entries = /** @type {LoginAvatarDto[]} */ (list);
+    const defaultEntry = entries.find((a) => a.isDefault) || entries[0];
     let saved = localStorage.getItem(LS_AVATAR);
-    if (!saved || !list.some((a) => a.id === saved)) {
+    if (!saved || !entries.some((a) => a.id === saved)) {
         saved = defaultEntry?.id || '';
     }
-    if (!saved) {
-        saved = defaultEntry?.id || list[0].id;
-    }
+    if (!saved) saved = defaultEntry.id;
 
-    /** @type {LoginAvatarDto[]} */
-    const entries = list;
-    /** @type {string} */
-    let selectedId = saved;
-
+    let selectedIndex = Math.max(0, entries.findIndex((e) => e.id === saved));
     const onChangeCb = typeof opts.onSelectionChange === 'function' ? opts.onSelectionChange : null;
 
-    entries.forEach((entry) => {
-        const lab = document.createElement('label');
-        lab.className = 'login-avatar-choice-item';
-        const radio = document.createElement('input');
-        radio.type = 'radio';
-        radio.name = 'login-avatar-choice';
-        radio.value = entry.id;
-        radio.checked = entry.id === selectedId;
-        const cap = document.createElement('span');
-        cap.innerHTML = `${entry.isDefault ? '<strong>[既定]</strong> ' : ''}<code>${String(entry.id).slice(0, 8)}…</code>`;
-        lab.appendChild(radio);
-        lab.appendChild(cap);
-        listEl.appendChild(lab);
-        radio.addEventListener('change', () => {
-            if (!radio.checked) return;
-            selectedId = entry.id;
-            localStorage.setItem(LS_AVATAR, selectedId);
-            void renderPreview(entry);
-            onChangeCb?.(selectedId);
-        });
-    });
+    const CARD = 86;
+    const GAP = 14;
+    const STEP = CARD + GAP;
 
-    mount.appendChild(title);
-    mount.appendChild(previewWrap);
-    mount.appendChild(listEl);
+    const label = document.createElement('div');
+    label.className = 'lap-carousel-label';
+    label.textContent = 'アバターを選択';
 
-    let rafWatch = null;
-    let disposed = false;
-    /** @type {import('three').WebGLRenderer | null} */
-    let renderer = null;
-    /** @type {import('three').PerspectiveCamera | null} */
-    let camera = null;
-    /** @type {import('three').Scene | null} */
-    let scene = null;
-    /** @type {ReturnType<import('three').AnimationMixer>|null} */
-    let mixer = null;
-    /** @type {{ scene: import('three').Group } | null} */
-    let pivot = null;
-    /** @type {Promise<void> | null} */
-    let loadSeq = null;
+    const viewport = document.createElement('div');
+    viewport.className = 'lap-viewport';
+    viewport.setAttribute('role', 'listbox');
+    viewport.setAttribute('aria-label', 'アバター一覧');
 
-    async function ensureRenderer() {
-        if (renderer) return;
-        const { THREE } = await loadThreeModules();
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-        renderer.setSize(canvas.width, canvas.height);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(40, canvas.width / canvas.height, 0.1, 100);
-        camera.position.set(0, 1.35, 2.25);
-        camera.lookAt(0, 0.9, 0);
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.0));
-        const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-        dir.position.set(2, 4, 5);
-        scene.add(dir);
+    const diamondTop = document.createElement('div');
+    diamondTop.className = 'lap-diamond lap-diamond--top';
+    const diamondBot = document.createElement('div');
+    diamondBot.className = 'lap-diamond lap-diamond--bottom';
 
-        function tick() {
-            if (disposed || !renderer || !scene || !camera) return;
-            rafWatch = requestAnimationFrame(tick);
-            const dt = 1 / 60;
-            if (mixer) mixer.update(dt);
-            renderer.render(scene, camera);
+    const track = document.createElement('div');
+    track.className = 'lap-track';
+
+    /** @type {HTMLElement[]} */
+    const cards = [];
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const card = document.createElement('div');
+        card.className = 'lap-card';
+        card.dataset.index = String(i);
+        card.setAttribute('role', 'option');
+        card.setAttribute('aria-selected', entry.id === saved ? 'true' : 'false');
+        if (entry.isDefault) {
+            const b = document.createElement('span');
+            b.className = 'lap-card-badge';
+            b.textContent = '既定';
+            card.appendChild(b);
         }
-        tick();
+        const wrap = document.createElement('div');
+        wrap.className = 'lap-card-canvas-wrap';
+        wrap.style.display = 'none';
+        const hint = document.createElement('div');
+        hint.className = 'lap-card-hint';
+        hint.textContent = '…';
+        card.appendChild(hint);
+        card.appendChild(wrap);
+        track.appendChild(card);
+        cards.push(card);
+    }
+
+    viewport.appendChild(diamondTop);
+    viewport.appendChild(track);
+    viewport.appendChild(diamondBot);
+
+    mount.appendChild(label);
+    mount.appendChild(viewport);
+
+    let translateX = 0;
+    let dragging = false;
+    let startPointerX = 0;
+    let startTranslate = 0;
+    let rafLayout = 0;
+    let disposed = false;
+
+    /** @type {HTMLCanvasElement | null} */
+    let centerCanvas = null;
+    /** @type {import('three').WebGLRenderer | null} */
+    let centerRenderer = null;
+    /** @type {import('three').Scene | null} */
+    let centerScene = null;
+    /** @type {import('three').PerspectiveCamera | null} */
+    let centerCamera = null;
+    /** @type {import('three').AnimationMixer | null} */
+    let centerMixer = null;
+    /** @type {number | null} */
+    let centerRaf = null;
+    /** @type {string | null} */
+    let loadedPreviewForId = null;
+    /** @type {number | null} */
+    let previewCardIndex = null;
+
+    function getViewportWidth() {
+        return viewport.clientWidth || 320;
+    }
+
+    function translateForIndex(idx) {
+        const V = getViewportWidth();
+        return V / 2 - CARD / 2 - idx * STEP;
+    }
+
+    function clampTranslate(tx) {
+        const V = getViewportWidth();
+        const maxIdx = entries.length - 1;
+        const minT = translateForIndex(maxIdx);
+        const maxT = translateForIndex(0);
+        return Math.min(maxT, Math.max(minT, tx));
+    }
+
+    function applyTrackTransform(animate) {
+        track.style.transition = animate ? 'transform 0.22s ease-out' : 'none';
+        track.style.transform = `translate3d(${translateX}px, -50%, 0)`;
+    }
+
+    function updateCardScales() {
+        const V = getViewportWidth();
+        const cx = V / 2;
+        for (let i = 0; i < cards.length; i++) {
+            const card = cards[i];
+            const cardLeft = translateX + i * STEP;
+            const cardCenter = cardLeft + CARD / 2;
+            const dist = Math.abs(cardCenter - cx);
+            const t = Math.min(1, dist / (STEP * 0.95));
+            const scale = 1.15 - t * 0.38;
+            card.style.transform = `scale(${scale.toFixed(3)})`;
+            const isCenter = dist < CARD * 0.35;
+            card.classList.toggle('lap-card--center', isCenter);
+            card.setAttribute('aria-selected', isCenter ? 'true' : 'false');
+        }
+    }
+
+    function scheduleLayout() {
+        if (rafLayout) cancelAnimationFrame(rafLayout);
+        rafLayout = requestAnimationFrame(() => {
+            rafLayout = 0;
+            updateCardScales();
+        });
+    }
+
+    function snapToIndex(idx, animate) {
+        const i = Math.max(0, Math.min(entries.length - 1, idx));
+        selectedIndex = i;
+        translateX = translateForIndex(i);
+        applyTrackTransform(animate);
+        scheduleLayout();
+        const id = entries[i].id;
+        localStorage.setItem(LS_AVATAR, id);
+        onChangeCb?.(id);
+        void loadCenterPreview(entries[i]);
+    }
+
+    function disposeCenterPreview() {
+        if (centerRaf != null) {
+            cancelAnimationFrame(centerRaf);
+            centerRaf = null;
+        }
+        centerMixer = null;
+        if (centerRenderer) {
+            centerRenderer.dispose();
+            centerRenderer = null;
+        }
+        centerScene = null;
+        centerCamera = null;
+        loadedPreviewForId = null;
+        if (centerCanvas && centerCanvas.parentElement) {
+            centerCanvas.parentElement.removeChild(centerCanvas);
+        }
+        centerCanvas = null;
+        if (previewCardIndex != null && cards[previewCardIndex]) {
+            const c = cards[previewCardIndex];
+            const hint = c.querySelector('.lap-card-hint');
+            const wrap = c.querySelector('.lap-card-canvas-wrap');
+            if (hint) hint.style.display = '';
+            if (wrap) {
+                wrap.innerHTML = '';
+                wrap.style.display = 'none';
+            }
+        }
+        previewCardIndex = null;
     }
 
     /**
-     * 選択中モデルをプレビューに読み込む
+     * 中央カードのみ GLB プレビューを表示する
      * @param {LoginAvatarDto} entry
      */
-    async function renderPreview(entry) {
-        if (!entry || disposed) return;
-        await ensureRenderer();
+    async function loadCenterPreview(entry) {
+        if (disposed || !entry) return;
+        const idx = entries.indexOf(entry);
+        if (idx < 0) return;
+        const card = cards[idx];
+        const wrap = card.querySelector('.lap-card-canvas-wrap');
+        const hint = card.querySelector('.lap-card-hint');
+        if (!wrap || !hint) return;
+
+        if (loadedPreviewForId === entry.id && centerCanvas) return;
+
+        disposeCenterPreview();
+        loadedPreviewForId = entry.id;
+        previewCardIndex = idx;
+
+        hint.style.display = 'none';
+        wrap.style.display = 'block';
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        wrap.appendChild(canvas);
+        centerCanvas = canvas;
+
+        const url = await resolveAvatarModelUrl(entry);
+        if (!url || disposed) {
+            hint.style.display = '';
+            wrap.style.display = 'none';
+            loadedPreviewForId = null;
+            previewCardIndex = null;
+            return;
+        }
+
         const { THREE, GLTFLoader } = await loadThreeModules();
+        centerRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+        centerRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        centerRenderer.setSize(canvas.width, canvas.height, false);
+        centerScene = new THREE.Scene();
+        centerCamera = new THREE.PerspectiveCamera(42, canvas.width / canvas.height, 0.1, 100);
+        centerCamera.position.set(0, 1.2, 2.1);
+        centerCamera.lookAt(0, 0.85, 0);
+        centerScene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
+        const dir = new THREE.DirectionalLight(0xffffff, 0.55);
+        dir.position.set(2, 4, 5);
+        centerScene.add(dir);
 
-        /** @returns {Promise<string>} */
-        const resolveUrl = async () => {
-            const su = typeof entry.signedUrl === 'string' ? entry.signedUrl.trim() : '';
-            if (su) return su;
-            const gp = typeof entry.glbPath === 'string' ? entry.glbPath.trim() : '';
-            if (gp) return resolveAvatarUrlForPreview(gp);
-            return '';
-        };
-
-        /** @returns {Promise<void>} */
-        const run = async () => {
-            const url = await resolveUrl();
-            if (!url || !scene || !THREE) return;
-            loadSeq = (async () => {
-                mixer = null;
-                if (pivot) {
-                    scene.remove(pivot);
-                    pivot.scene.traverse((ch) => {
-                        if (!ch.geometry) return;
-                        ch.geometry.dispose();
-                        const m = ch.material;
-                        if (Array.isArray(m)) {
-                            for (const mm of m) mm.dispose();
-                        } else if (m) m.dispose();
-                    });
-                    pivot = null;
+        const loader = new GLTFLoader();
+        loader.load(
+            url,
+            (gltf) => {
+                if (disposed || loadedPreviewForId !== entry.id) return;
+                const root = new THREE.Group();
+                const model = gltf.scene;
+                const box = new THREE.Box3().setFromObject(model);
+                const size = box.getSize(new THREE.Vector3());
+                const sz = Math.max(size.x, size.y, size.z) || 1;
+                model.scale.multiplyScalar(1.45 / sz);
+                root.add(model);
+                root.position.set(0, 0.02, 0);
+                centerScene.add(root);
+                if (gltf.animations && gltf.animations.length) {
+                    centerMixer = new THREE.AnimationMixer(root);
+                    centerMixer.clipAction(gltf.animations[0]).play();
                 }
-                const loader = new GLTFLoader();
-                loader.load(url, (gltf) => {
-                    if (disposed) return;
-                    const rootGroup = new THREE.Group();
-                    const model = gltf.scene;
-                    const box = new THREE.Box3().setFromObject(model);
-                    const size = box.getSize(new THREE.Vector3());
-                    const sz = Math.max(size.x, size.y, size.z) || 1;
-                    model.scale.multiplyScalar(1.6 / sz);
-                    rootGroup.add(model);
-                    rootGroup.position.set(0, 0.05, 0);
-                    pivot = { scene: rootGroup };
-                    scene.add(rootGroup);
-                    if (gltf.animations && gltf.animations.length && pivot.scene) {
-                        mixer = new THREE.AnimationMixer(rootGroup);
-                        mixer.clipAction(gltf.animations[0]).play();
-                    }
-                });
-            })();
-            await loadSeq;
-        };
+            },
+            undefined,
+            () => {
+                if (!disposed) {
+                    hint.style.display = '';
+                    wrap.style.display = 'none';
+                    loadedPreviewForId = null;
+                    previewCardIndex = null;
+                }
+            }
+        );
 
-        void run().catch(() => {});
+        const tick = () => {
+            if (disposed || !centerRenderer || !centerScene || !centerCamera) return;
+            centerRaf = requestAnimationFrame(tick);
+            if (centerMixer) centerMixer.update(1 / 60);
+            centerRenderer.render(centerScene, centerCamera);
+        };
+        tick();
     }
 
-    selectedId =
-        [...listEl.querySelectorAll('input[name="login-avatar-choice"]:checked')]?.[0]?.value ||
-        selectedId;
+    translateX = translateForIndex(selectedIndex);
+    applyTrackTransform(false);
+    scheduleLayout();
+    void loadCenterPreview(entries[selectedIndex]);
 
-    localStorage.setItem(LS_AVATAR, selectedId);
+    function nearestIndexFromTranslate(tx) {
+        const V = getViewportWidth();
+        const ideal = V / 2 - CARD / 2 - tx;
+        const idx = Math.round(ideal / STEP);
+        return Math.max(0, Math.min(entries.length - 1, idx));
+    }
 
-    await renderPreview(entries.find((e) => e.id === selectedId) || defaultEntry || entries[0]);
-    onChangeCb?.(selectedId);
+    viewport.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        dragging = true;
+        startPointerX = e.clientX;
+        startTranslate = translateX;
+        viewport.setPointerCapture(e.pointerId);
+        track.style.transition = 'none';
+    });
+
+    viewport.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        translateX = clampTranslate(startTranslate + (e.clientX - startPointerX));
+        applyTrackTransform(false);
+        scheduleLayout();
+    });
+
+    viewport.addEventListener('pointerup', (e) => {
+        if (!dragging) return;
+        dragging = false;
+        try {
+            viewport.releasePointerCapture(e.pointerId);
+        } catch {
+            /* ignore */
+        }
+        const idx = nearestIndexFromTranslate(translateX);
+        snapToIndex(idx, true);
+    });
+
+    viewport.addEventListener('pointercancel', () => {
+        dragging = false;
+        snapToIndex(selectedIndex, true);
+    });
+
+    const onResize = () => {
+        translateX = translateForIndex(selectedIndex);
+        applyTrackTransform(false);
+        scheduleLayout();
+    };
+    window.addEventListener('resize', onResize);
 
     return {
         dispose() {
             disposed = true;
-            if (rafWatch) cancelAnimationFrame(rafWatch);
-            if (renderer) {
-                renderer.dispose();
-                renderer = null;
-            }
-            mixer = null;
-            pivot = null;
-            scene = null;
-            camera = null;
+            window.removeEventListener('resize', onResize);
+            if (rafLayout) cancelAnimationFrame(rafLayout);
+            disposeCenterPreview();
             mount.innerHTML = '';
+            mount.classList.remove('lap-root');
             mount.style.display = 'none';
         },
     };
