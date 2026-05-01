@@ -4605,3 +4605,69 @@ body.admin-dark .panel-security .sec-prompt-pre {
     border-color: #2d2a24;
     color: #c8c6c0;
 }
+
+/* panel-avatar-management (public/admin.html) */
+.admin-avatar-upload-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+.admin-avatar-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+}
+.admin-avatar-list-mount {
+    margin-top: 8px;
+}
+.admin-avatar-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.admin-avatar-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(2, 136, 209, 0.25);
+    border-radius: 8px;
+    background: rgba(2, 136, 209, 0.04);
+}
+.admin-avatar-row-default::after {
+    content: 'デフォルト';
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #0288d1;
+    color: #fff;
+}
+.admin-avatar-row-incomplete .admin-avatar-row-status {
+    color: #c62828;
+}
+.admin-avatar-editor {
+    margin-top: 16px;
+    padding: 12px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.6);
+}
+body.admin-dark .admin-avatar-editor {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.25);
+}
+.admin-avatar-map-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+@media (max-width: 520px) {
+    .admin-avatar-map-grid {
+        grid-template-columns: 1fr;
+    }
+}

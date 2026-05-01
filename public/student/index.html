@@ -28,7 +28,7 @@
             border-radius: 20px;
             border: 2px solid #2e7d32;
             box-shadow: 0 4px 20px rgba(46, 125, 50, 0.15);
-            max-width: 400px;
+            max-width: 480px;
             width: 90%;
             animation: slideIn 0.5s ease-out;
         }
@@ -143,6 +143,48 @@
             margin: 0 8px;
             color: #ccc;
         }
+
+        #login-avatar-mount {
+            display: none;
+            margin-bottom: 20px;
+        }
+
+        .login-avatar-heading {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #555;
+            font-size: 14px;
+        }
+
+        .login-avatar-choice-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 8px;
+            max-height: 180px;
+            overflow: auto;
+        }
+
+        .login-avatar-choice-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .login-avatar-preview-wrap {
+            display: flex;
+            justify-content: center;
+            margin: 8px 0;
+        }
+
+        .login-avatar-canvas {
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+            background: #fafafa;
+            max-width: 100%;
+        }
     </style>
 </head>
 
@@ -152,6 +194,8 @@
             <h1>Metaverse Simple</h1>
             <p>生徒ログイン</p>
         </div>
+
+        <div id="login-avatar-mount" aria-live="polite"></div>
 
         <form id="login-form">
             <div class="form-group">
@@ -260,6 +304,11 @@
         usernameInput.addEventListener('input', () => { errorMessage.style.display = 'none'; });
         passwordInput.addEventListener('input', () => { errorMessage.style.display = 'none'; });
         usernameInput.focus();
+    </script>
+    <script type="module">
+        import { mountLoginAvatarPicker } from '/js/login-avatar-picker.js';
+        const m = document.getElementById('login-avatar-mount');
+        if (m) void mountLoginAvatarPicker(m);
     </script>
 </body>
 

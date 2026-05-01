@@ -10,8 +10,8 @@ class PlayerManager {
         this.localPlayer = null;
         this.remotePlayers = new Map();
         this.gltfLoader = createGLTFLoaderWithDraco();
-        /** @type {{ scene: THREE.Group, animations: THREE.AnimationClip[] } | null} */
-        this.avatarModelCache = null;
+        /** @type {Map<string, { scene: THREE.Group, animations: THREE.AnimationClip[] }>} */
+        this._avatarUrlModelCache = new Map();
         /** アバター GLB が未設定時のフォールバック（/api/active-avatar が空のとき） */
         this.avatarPath = 'models/avatar.glb';
         /** Avatar GLB scale (change to resize model) */
@@ -20,10 +20,10 @@ class PlayerManager {
     }
 
     /**
-     * アクティブアバター URL を解決する（署名 URL / CDN / オリジンフォールバック）
+     * フォールバック: active-avatar API（Registry 未選択時）
      * @returns {Promise<string>}
      */
-    async resolveAvatarGltfUrl() {
+    async resolveFallbackActiveAvatarUrl() {
         try {
             const r = await fetch('/api/active-avatar', { credentials: 'include' });
             if (r.ok) {
@@ -42,31 +42,94 @@ class PlayerManager {
     }
 
     /**
-     * Load avatar model from GLB file (with animations if present)
-     * @returns {Promise<{ scene: THREE.Group, animations: THREE.AnimationClip[] }>}
+     * 明示 avatarId または localStorage の選択に基づき GLB URL とアニメインデックスマップを解決する
+     * @param {string|null} [explicitAvatarId]
+     * @returns {Promise<{ url: string, animationMap: Record<string, number>|null }>}
      */
-    async loadAvatarModel() {
-        if (this.avatarModelCache) {
-            const { scene, animations } = this.avatarModelCache;
+    async resolveAvatarSessionUrlAndMap(explicitAvatarId = null) {
+        /** @type {string|null} */
+        let avatarId = null;
+        if (typeof explicitAvatarId === 'string' && explicitAvatarId.trim() !== '') {
+            avatarId = explicitAvatarId.trim();
+        } else {
+            try {
+                const s = localStorage.getItem('metaverseAvatarId');
+                if (s && s.trim()) avatarId = s.trim();
+            } catch (_) {
+                avatarId = null;
+            }
+        }
+        if (avatarId) {
+            try {
+                const r = await fetch(`/api/avatar/${encodeURIComponent(avatarId)}`, {
+                    credentials: 'include',
+                });
+                if (r.ok) {
+                    const j = await r.json();
+                    let url = '';
+                    if (typeof j.signedUrl === 'string' && j.signedUrl.length > 0) {
+                        url = j.signedUrl;
+                    } else if (typeof j.path === 'string' && j.path.length > 0) {
+                        url = resolveModelAssetHref(j.path);
+                    }
+                    /** @type {Record<string, number>|null} */
+                    let animationMap = null;
+                    if (j.animationMap && typeof j.animationMap === 'object') {
+                        animationMap = /** @type {Record<string, number>} */ (j.animationMap);
+                    }
+                    if (url) {
+                        return { url, animationMap };
+                    }
+                }
+            } catch {
+                /* fallback */
+            }
+        }
+        const url = await this.resolveFallbackActiveAvatarUrl();
+        return { url, animationMap: null };
+    }
+
+    /**
+     * アクティブアバター URL を解決する（署名 URL / CDN / オリジンフォールバック）
+     * @returns {Promise<string>}
+     */
+    async resolveAvatarGltfUrl() {
+        const { url } = await this.resolveAvatarSessionUrlAndMap(null);
+        return url;
+    }
+
+    /**
+     * Load avatar model from GLB file (with animations if present)
+     * @param {string|null} [remoteAvatarId] 他プレイヤー用 avatarId（未指定時は自プレイヤーの localStorage 選択）
+     * @returns {Promise<{ scene: THREE.Group, animations: THREE.AnimationClip[], animationMap: Record<string, number>|null }>}
+     */
+    async loadAvatarModel(remoteAvatarId = null) {
+        const { url, animationMap } =
+            typeof remoteAvatarId === 'string' && remoteAvatarId.trim() !== ''
+                ? await this.resolveAvatarSessionUrlAndMap(remoteAvatarId.trim())
+                : await this.resolveAvatarSessionUrlAndMap(null);
+
+        const cached = this._avatarUrlModelCache.get(url);
+        if (cached) {
+            const { scene, animations } = cached;
             const clonedScene = animations.length > 0
                 ? SkeletonUtils.clone(scene)
                 : scene.clone();
-            return { scene: clonedScene, animations };
+            return { scene: clonedScene, animations, animationMap };
         }
 
-        const url = await this.resolveAvatarGltfUrl();
         return new Promise((resolve, reject) => {
             this.gltfLoader.load(
                 url,
                 (gltf) => {
                     const animations = gltf.animations || [];
-                    this.avatarModelCache = { scene: gltf.scene, animations };
+                    this._avatarUrlModelCache.set(url, { scene: gltf.scene, animations });
                     console.log('Avatar model loaded:', url, 'animations:', animations.length);
 
                     const clonedScene = animations.length > 0
                         ? SkeletonUtils.clone(gltf.scene)
                         : gltf.scene.clone();
-                    resolve({ scene: clonedScene, animations });
+                    resolve({ scene: clonedScene, animations, animationMap });
                 },
                 (progress) => {
                     if (progress.total) {
@@ -83,16 +146,47 @@ class PlayerManager {
     }
 
     /**
-     * Create AnimationMixer and actions for idle(0) / jump(1) / dash(2) / walk(3). Loops and plays idle initially.
+     * Create AnimationMixer and actions for idle / walk / dash / jump。animationMap は Registry のクリップ index（run→dash）
      * @param {THREE.Object3D} root
      * @param {THREE.AnimationClip[]} animations
+     * @param {Record<string, number>|null|undefined} animationMap
      * @returns {{ mixer: THREE.AnimationMixer, actions: { idle, jump, walk, dash } | null } | null}
      */
-    setupAvatarAnimation(root, animations) {
+    setupAvatarAnimation(root, animations, animationMap) {
         if (!animations || animations.length === 0) return null;
         const mixer = new AnimationMixer(root);
-        const hasIdleWalkDash = animations.length >= 4; // need indices 0, 2, 3
-        const jumpClip = animations.find((a) => a.name && /jump/i.test(a.name)) || (animations.length >= 2 ? animations[1] : null);
+
+        /** @returns {THREE.AnimationClip|null} */
+        const clipAt = (ix) =>
+            typeof ix === 'number' && Number.isFinite(ix) ? animations[Math.trunc(ix)] || null : null;
+
+        if (animationMap && typeof animationMap === 'object') {
+            const idleI = animationMap.idle;
+            const walkI = animationMap.walk;
+            const jumpI = animationMap.jump;
+            const runI = animationMap.run;
+            const idleC = clipAt(idleI);
+            const walkC = clipAt(walkI);
+            const dashC = clipAt(runI);
+            const jumpC = clipAt(jumpI);
+            if (idleC && walkC && dashC && jumpC) {
+                const idle = mixer.clipAction(idleC);
+                const walk = mixer.clipAction(walkC);
+                const dash = mixer.clipAction(dashC);
+                const jump = mixer.clipAction(jumpC);
+                [idle, dash, walk].forEach((a) => a.setLoop(THREE.LoopRepeat));
+                jump.setLoop(THREE.LoopOnce);
+                jump.clampWhenFinished = true;
+                idle.play();
+                return { mixer, actions: { idle, walk, dash, jump } };
+            }
+        }
+
+        const hasIdleWalkDash = animations.length >= 4; // legacy indices 0, 2, 3
+
+        const jumpClip =
+            animations.find((a) => a.name && /jump/i.test(a.name)) ||
+            (animations.length >= 2 ? animations[1] : null);
         if (hasIdleWalkDash) {
             const idle = mixer.clipAction(animations[0]);
             const dash = mixer.clipAction(animations[2]);
@@ -141,7 +235,7 @@ class PlayerManager {
         console.log('Creating local player avatar...');
         
         try {
-            const { scene: avatarModel, animations } = await this.loadAvatarModel();
+            const { scene: avatarModel, animations, animationMap } = await this.loadAvatarModel(null);
             
             this.localPlayer = new THREE.Group();
             this.localPlayer.position.set(position.x, position.y, position.z);
@@ -150,7 +244,7 @@ class PlayerManager {
             avatarModel.scale.set(this.avatarScale.x, this.avatarScale.y, this.avatarScale.z);
             this.localPlayer.add(avatarModel);
             this.localPlayer.userData.headBone = this.findHeadBone(avatarModel);
-            const anim = this.setupAvatarAnimation(avatarModel, animations);
+            const anim = this.setupAvatarAnimation(avatarModel, animations, animationMap);
             if (anim) {
                 this.localPlayer.userData.mixer = anim.mixer;
                 this.localPlayer.userData.avatarActions = anim.actions;
@@ -247,8 +341,9 @@ class PlayerManager {
      * @param {{ x: number, y: number, z: number }} [position]
      * @param {string|null} [username]
      * @param {'idle'|'walk'|'dash'|'jump'} [animState]
+     * @param {string|null} [avatarId]
      */
-    async createRemotePlayer(playerId, position = { x: 0, y: 2, z: 0 }, username = null, animState = 'idle') {
+    async createRemotePlayer(playerId, position = { x: 0, y: 2, z: 0 }, username = null, animState = 'idle', avatarId = null) {
         console.log(`Creating remote player: ${playerId}`);
         
         const displayName = username || `Player ${playerId.substring(0, 4)}`;
@@ -260,6 +355,7 @@ class PlayerManager {
         placeholder.userData.username = displayName;
         placeholder.userData.isLoading = true;
         placeholder.userData.networkAnimState = 'idle';
+        placeholder.userData.metaverseAvatarId = avatarId || null;
         
         // Add name tag to placeholder
         this.addNameTag(placeholder, displayName);
@@ -270,7 +366,7 @@ class PlayerManager {
         this.remotePlayers.set(playerId, placeholder);
         
         try {
-            const { scene: avatarModel, animations } = await this.loadAvatarModel();
+            const { scene: avatarModel, animations, animationMap } = await this.loadAvatarModel(avatarId);
             
             const remotePlayer = new THREE.Group();
             remotePlayer.position.copy(placeholder.position);
@@ -279,7 +375,7 @@ class PlayerManager {
             avatarModel.position.y = 0;
             avatarModel.scale.set(this.avatarScale.x, this.avatarScale.y, this.avatarScale.z);
             remotePlayer.add(avatarModel);
-            const anim = this.setupAvatarAnimation(avatarModel, animations);
+            const anim = this.setupAvatarAnimation(avatarModel, animations, animationMap);
             if (anim) {
                 remotePlayer.userData.mixer = anim.mixer;
                 remotePlayer.userData.avatarActions = anim.actions;
@@ -291,6 +387,7 @@ class PlayerManager {
             remotePlayer.userData.username = displayName;
             remotePlayer.userData.isLoading = false;
             remotePlayer.userData.networkAnimState = 'idle';
+            remotePlayer.userData.metaverseAvatarId = avatarId || null;
             remotePlayer.userData.networkVisible = placeholder.userData.networkVisible !== false;
             remotePlayer.userData.distanceVisible = placeholder.userData.distanceVisible !== false;
             
@@ -663,6 +760,17 @@ class PlayerManager {
 
     hasRemotePlayer(playerId) {
         return this.remotePlayers.has(playerId);
+    }
+
+    /**
+     * リモートプレイヤーに紐付いた avatarId（未設定時は null）
+     * @param {string} playerId
+     * @returns {string|null}
+     */
+    getRemotePlayerAvatarId(playerId) {
+        const player = this.remotePlayers.get(playerId);
+        const v = player?.userData?.metaverseAvatarId;
+        return v != null ? String(v) : null;
     }
 
     removeRemotePlayer(playerId) {

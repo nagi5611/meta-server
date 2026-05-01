@@ -1,7 +1,6 @@
 import { io } from 'socket.io-client';
 import * as THREE from 'three';
 import { notifyServiceWorkerInvalidate } from './service-worker-register.js';
-import { clearModelManifestCache } from './asset-resolve.js';
 import { t } from './metaverse-i18n.js';
 
 class NetworkManager {
@@ -119,7 +118,6 @@ class NetworkManager {
 
         this.socket.on('asset-invalidate', (payload) => {
             const urls = payload && Array.isArray(payload.urls) ? payload.urls : [];
-            clearModelManifestCache();
             if (urls.length) notifyServiceWorkerInvalidate(urls);
         });
 

@@ -29,6 +29,7 @@
             <button type="button" class="admin-nav-item" data-panel="panel-logs"><i class="bi bi-journal-text"></i> ログ</button>
             <button type="button" class="admin-nav-item" data-panel="panel-user-register"><i class="bi bi-person-plus"></i> ユーザー登録</button>
             <button type="button" class="admin-nav-item" data-panel="panel-world-edit"><i class="bi bi-pencil-square"></i> ワールド編集</button>
+            <button type="button" class="admin-nav-item" data-panel="panel-avatar-management"><i class="bi bi-person-badge"></i> アバター管理</button>
             <button type="button" class="admin-nav-item" data-panel="panel-chart"><i class="bi bi-music-note-beamed"></i> 譜面作成</button>
             <button type="button" class="admin-nav-item" data-panel="panel-addons"><i class="bi bi-puzzle"></i> アドオン</button>
         </nav>
@@ -1030,6 +1031,47 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <div id="panel-avatar-management" class="admin-panel">
+                <section class="section">
+                    <h2 class="section-title">アバター管理</h2>
+                    <p class="hint">GLB を追加し、各アバターで <strong>idle / walk / jump / run</strong>（走り＝ゲーム内のダッシュ）にクリップを割り当てます。4つそろうまでログイン一覧には出ません。デフォルトはログイン画面の初期選択になります。</p>
+                    <div class="admin-avatar-upload-row">
+                        <input type="file" id="admin-avatar-upload-file" accept=".glb,model/gltf-binary" />
+                        <label class="admin-avatar-check"><input type="checkbox" id="admin-avatar-upload-default" /> アップロード後にデフォルトにする</label>
+                        <button type="button" id="btn-admin-avatar-upload" class="btn btn-primary">アップロード</button>
+                    </div>
+                    <p id="admin-avatar-upload-status" class="status-text" role="status"></p>
+                    <div id="admin-avatar-list-mount" class="admin-avatar-list-mount"></div>
+                    <div id="admin-avatar-editor" class="admin-avatar-editor" hidden>
+                        <h3 class="section-subtitle">選択中のアバター</h3>
+                        <p class="status-text" id="admin-avatar-editor-meta"></p>
+                        <div class="admin-avatar-map-grid">
+                            <div class="field-row">
+                                <label class="prop-label" for="admin-avatar-map-idle">idle</label>
+                                <select id="admin-avatar-map-idle" class="prop-input full"></select>
+                            </div>
+                            <div class="field-row">
+                                <label class="prop-label" for="admin-avatar-map-walk">walk</label>
+                                <select id="admin-avatar-map-walk" class="prop-input full"></select>
+                            </div>
+                            <div class="field-row">
+                                <label class="prop-label" for="admin-avatar-map-jump">jump</label>
+                                <select id="admin-avatar-map-jump" class="prop-input full"></select>
+                            </div>
+                            <div class="field-row">
+                                <label class="prop-label" for="admin-avatar-map-run">run（ダッシュ）</label>
+                                <select id="admin-avatar-map-run" class="prop-input full"></select>
+                            </div>
+                        </div>
+                        <div class="btn-row" style="margin-top:10px;">
+                            <button type="button" id="btn-admin-avatar-save-map" class="btn btn-primary">マッピング保存</button>
+                            <button type="button" id="btn-admin-avatar-set-default" class="btn btn-secondary">デフォルトに設定</button>
+                        </div>
+                        <p id="admin-avatar-editor-status" class="status-text" role="status"></p>
+                    </div>
+                </section>
             </div>
 
             <div id="panel-chart-inactive" class="admin-panel">

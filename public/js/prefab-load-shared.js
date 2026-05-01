@@ -41,7 +41,7 @@ export function buildEncodedModelUrlFromPath(assetPath) {
 
 /**
  * @param {object} manifest
- * @returns {{ version: number, prefabGroupId: string, displayName: string, parts: { file: string, version?: string, contentHash?: string | null, size?: number, updatedAt?: string }[] }}
+ * @returns {{ version: number, prefabGroupId: string, displayName: string, parts: { file: string }[] }}
  */
 export function normalizePrefabManifest(manifest) {
     const v = manifest && typeof manifest === 'object' ? manifest : {};
@@ -51,18 +51,7 @@ export function normalizePrefabManifest(manifest) {
         prefabGroupId: String(v.prefabGroupId || '').trim(),
         displayName: String(v.displayName || '').trim() || 'prefab',
         parts: parts
-            .map((p) => ({
-                file: String(p?.file || '').replace(/^\//, '').trim(),
-                version: typeof p?.version === 'string' ? p.version : undefined,
-                contentHash:
-                    typeof p?.contentHash === 'string'
-                        ? p.contentHash
-                        : p?.contentHash === null
-                          ? null
-                          : undefined,
-                size: typeof p?.size === 'number' ? p.size : undefined,
-                updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : undefined,
-            }))
+            .map((p) => ({ file: String(p?.file || '').replace(/^\//, '').trim() }))
             .filter((p) => p.file.toLowerCase().endsWith('.glb'))
     };
 }

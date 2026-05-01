@@ -35,6 +35,10 @@ let bandwidthHistory = [];
 let worldEditInitialized = false;
 let chartPanelInitialized = false;
 let securityPanelInitialized = false;
+/** アバター管理: GET /admin/avatars のキャッシュ（パネル内 UI 用） */
+let adminAvatarRegistryCache = null;
+/** アバター管理: フォーム編集中のエントリ ID */
+let adminAvatarEditId = null;
 /** サーバー ENABLE_CHART_FEATURES（/api/client-config および /admin/stats で更新） */
 let adminChartFeaturesEnabled = true;
 /** 譜面作成パネルで選択中の譜面ID */
@@ -1257,6 +1261,246 @@ function initSecurityPanelOnce() {
     });
 }
 
+const ADMIN_AVATAR_MAP_KEYS = ['idle', 'walk', 'jump', 'run'];
+
+/**
+ * 管理パネル用: アバターがログイン候補として十分か（4 モーション）
+ * @param {object} entry
+ */
+function adminAvatarEntryIsSelectable(entry) {
+    const clips = entry && Array.isArray(entry.animationClips) ? entry.animationClips : [];
+    const m = entry && entry.animationMap && typeof entry.animationMap === 'object' ? entry.animationMap : {};
+    if (clips.length === 0) return false;
+    for (const k of ADMIN_AVATAR_MAP_KEYS) {
+        const v = m[k];
+        if (typeof v !== 'number' || !Number.isFinite(v)) return false;
+        const ii = Math.trunc(v);
+        if (ii < 0 || ii >= clips.length) return false;
+    }
+    return true;
+}
+
+/**
+ * アニメ割当セレクトをクリップ一覧で埋める
+ * @param {HTMLSelectElement|null} sel
+ * @param {{ index: number, label?: string, name?: string }[]} clips
+ * @param {number|null|undefined} selectedIndex
+ */
+function fillAdminAvatarMapSelect(sel, clips, selectedIndex) {
+    if (!sel) return;
+    sel.innerHTML = '';
+    const ph = document.createElement('option');
+    ph.value = '';
+    ph.textContent = '—選択—';
+    sel.appendChild(ph);
+    for (const c of clips) {
+        const opt = document.createElement('option');
+        opt.value = String(c.index);
+        opt.textContent = c.label || c.name || `clip_${c.index}`;
+        sel.appendChild(opt);
+    }
+    const want =
+        typeof selectedIndex === 'number' && Number.isFinite(selectedIndex)
+            ? String(Math.trunc(selectedIndex))
+            : '';
+    if (want !== '' && [...sel.options].some((o) => o.value === want)) sel.value = want;
+    else sel.value = '';
+}
+
+/**
+ * アバター行を選択しマッピング UI を開く
+ * @param {object} entry
+ * @param {number} registryVersion
+ */
+function openAdminAvatarEditor(entry, registryVersion) {
+    const editor = document.getElementById('admin-avatar-editor');
+    const metaEl = document.getElementById('admin-avatar-editor-meta');
+    if (!editor || !metaEl || !entry) return;
+    adminAvatarEditId = entry.id;
+    metaEl.innerHTML = `ID: <code>${escapeHtml(String(entry.id))}</code><br>ファイル: <code>${escapeHtml(String(entry.glbFilename || ''))}</code><br>registryVersion: <strong>${escapeHtml(String(registryVersion))}</strong>`;
+    const clips = Array.isArray(entry.animationClips) ? entry.animationClips : [];
+    const m = entry.animationMap || {};
+    fillAdminAvatarMapSelect(document.getElementById('admin-avatar-map-idle'), clips, m.idle);
+    fillAdminAvatarMapSelect(document.getElementById('admin-avatar-map-walk'), clips, m.walk);
+    fillAdminAvatarMapSelect(document.getElementById('admin-avatar-map-jump'), clips, m.jump);
+    fillAdminAvatarMapSelect(document.getElementById('admin-avatar-map-run'), clips, m.run);
+    const st = document.getElementById('admin-avatar-editor-status');
+    if (st) st.textContent = '';
+    editor.hidden = false;
+}
+
+/**
+ * 管理パネル: アバター一覧を再読込する
+ */
+async function refreshAdminAvatarManagementPanel() {
+    const mount = document.getElementById('admin-avatar-list-mount');
+    if (!mount) return;
+    mount.textContent = '読み込み中…';
+    try {
+        const r = await fetch('/admin/avatars', { credentials: 'include' });
+        const reg = await r.json().catch(() => null);
+        if (!r.ok || !reg || !Array.isArray(reg.avatars)) {
+            mount.textContent = '一覧の取得に失敗しました。';
+            adminAvatarRegistryCache = null;
+            return;
+        }
+        adminAvatarRegistryCache = reg;
+        mount.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.className = 'admin-avatar-rows';
+        for (const a of reg.avatars) {
+            const row = document.createElement('div');
+            row.className = 'admin-avatar-row';
+            if (a.isDefault) row.classList.add('admin-avatar-row-default');
+            if (!adminAvatarEntryIsSelectable(a)) row.classList.add('admin-avatar-row-incomplete');
+            const selBtn = document.createElement('button');
+            selBtn.type = 'button';
+            selBtn.className = 'btn btn-secondary';
+            selBtn.textContent = '選択・編集';
+            selBtn.addEventListener('click', () => openAdminAvatarEditor(a, reg.registryVersion));
+            const fname = document.createElement('span');
+            fname.innerHTML = `<strong>${escapeHtml(String(a.glbFilename || ''))}</strong>`;
+            const st = document.createElement('span');
+            st.className = 'admin-avatar-row-status';
+            st.textContent = adminAvatarEntryIsSelectable(a) ? 'ログイン候補: 準備済み' : 'ログイン候補: 4モーション未設定';
+            row.appendChild(fname);
+            row.appendChild(st);
+            row.appendChild(selBtn);
+            wrap.appendChild(row);
+        }
+        mount.appendChild(wrap);
+        if (adminAvatarEditId) {
+            const still = reg.avatars.find((x) => x.id === adminAvatarEditId);
+            if (still) openAdminAvatarEditor(still, reg.registryVersion);
+        }
+    } catch (e) {
+        console.error('[admin avatar]', e);
+        mount.textContent = '一覧の取得に失敗しました。';
+    }
+}
+
+/**
+ * アバター管理パネルのボタンを一度だけ紐付けする
+ */
+function setupAdminAvatarManagementPanel() {
+    const btnUp = document.getElementById('btn-admin-avatar-upload');
+    const inp = document.getElementById('admin-avatar-upload-file');
+    const chk = document.getElementById('admin-avatar-upload-default');
+    const st = document.getElementById('admin-avatar-upload-status');
+    if (btnUp && inp && !btnUp.dataset.bound) {
+        btnUp.dataset.bound = '1';
+        btnUp.addEventListener('click', async () => {
+            const f = inp.files && inp.files[0];
+            if (!f) {
+                if (st) st.textContent = 'ファイルを選択してください。';
+                return;
+            }
+            if (st) st.textContent = 'アップロード中…';
+            const fd = new FormData();
+            fd.append('avatar', f);
+            const q = chk && chk.checked ? '?makeDefault=1' : '';
+            try {
+                const r = await fetch(`/admin/avatars${q}`, { method: 'POST', body: fd, credentials: 'include' });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    if (st) st.textContent = j.detail || j.error || 'アップロードに失敗しました。';
+                    return;
+                }
+                inp.value = '';
+                if (st) st.textContent = 'アップロードしました。';
+                await refreshAdminAvatarManagementPanel();
+            } catch (e) {
+                if (st) st.textContent = '通信エラー';
+                console.error(e);
+            }
+        });
+    }
+    const btnSave = document.getElementById('btn-admin-avatar-save-map');
+    if (btnSave && !btnSave.dataset.bound) {
+        btnSave.dataset.bound = '1';
+        btnSave.addEventListener('click', async () => {
+            const stEd = document.getElementById('admin-avatar-editor-status');
+            if (!adminAvatarEditId || !adminAvatarRegistryCache) {
+                if (stEd) stEd.textContent = '先にアバターを選択してください。';
+                return;
+            }
+            const regV = adminAvatarRegistryCache.registryVersion;
+            const readSel = (id) => {
+                const el = document.getElementById(id);
+                if (!el) return NaN;
+                const n = parseInt(String(el.value), 10);
+                return n;
+            };
+            const animationMap = {
+                idle: readSel('admin-avatar-map-idle'),
+                walk: readSel('admin-avatar-map-walk'),
+                jump: readSel('admin-avatar-map-jump'),
+                run: readSel('admin-avatar-map-run'),
+            };
+            if (Object.values(animationMap).some((n) => !Number.isFinite(n))) {
+                if (stEd) stEd.textContent = 'idle / walk / jump / run をすべて選択してください。';
+                return;
+            }
+            if (stEd) stEd.textContent = '保存中…';
+            try {
+                const r = await fetch(`/admin/avatars/${encodeURIComponent(adminAvatarEditId)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ registryVersion: regV, animationMap }),
+                });
+                const j = await r.json().catch(() => ({}));
+                if (r.status === 409) {
+                    if (stEd) stEd.textContent = '他で更新されています。一覧を再読み込みしました。';
+                    await refreshAdminAvatarManagementPanel();
+                    return;
+                }
+                if (!r.ok) {
+                    if (stEd) stEd.textContent = j.error || '保存に失敗しました。';
+                    return;
+                }
+                adminAvatarRegistryCache = { ...adminAvatarRegistryCache, registryVersion: j.registryVersion };
+                if (stEd) stEd.textContent = '保存しました。';
+                await refreshAdminAvatarManagementPanel();
+            } catch (e) {
+                console.error(e);
+                if (stEd) stEd.textContent = '通信エラー';
+            }
+        });
+    }
+    const btnDef = document.getElementById('btn-admin-avatar-set-default');
+    if (btnDef && !btnDef.dataset.bound) {
+        btnDef.dataset.bound = '1';
+        btnDef.addEventListener('click', async () => {
+            const stEd = document.getElementById('admin-avatar-editor-status');
+            if (!adminAvatarEditId) {
+                if (stEd) stEd.textContent = '先にアバターを選択してください。';
+                return;
+            }
+            if (stEd) stEd.textContent = 'デフォルトに設定中…';
+            try {
+                const r = await fetch(`/admin/avatars/${encodeURIComponent(adminAvatarEditId)}/default`, {
+                    method: 'POST',
+                    credentials: 'include',
+                });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    if (stEd) stEd.textContent = j.message || j.error || '設定に失敗しました。';
+                    return;
+                }
+                if (stEd) stEd.textContent = 'デフォルトにしました。';
+                adminAvatarRegistryCache = adminAvatarRegistryCache
+                    ? { ...adminAvatarRegistryCache, registryVersion: j.registryVersion }
+                    : null;
+                await refreshAdminAvatarManagementPanel();
+            } catch (e) {
+                console.error(e);
+                if (stEd) stEd.textContent = '通信エラー';
+            }
+        });
+    }
+}
+
 /**
  * 指定したパネル ID を表示し、サイドメニューの active を更新する。
  * ワールド編集パネルは初表示時に setting.js を動的 import して init する。
@@ -1331,6 +1575,9 @@ function switchPanel(panelId) {
     }
     if (panelId === 'panel-addons') {
         loadAddonCatalog();
+    }
+    if (panelId === 'panel-avatar-management') {
+        void refreshAdminAvatarManagementPanel();
     }
 }
 
@@ -5644,6 +5891,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     import('./addons/registry-admin.js').catch((e) => console.warn('[addons] registry-admin', e));
 
+    setupAdminAvatarManagementPanel();
+
     window.addEventListener('beforeunload', (e) => {
         if (!isChartEditorDirty()) return;
         e.preventDefault();
@@ -5680,7 +5929,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let initialPanel = params.get('panel');
     if (initialPanel === 'world-edit') initialPanel = 'panel-world-edit';
     if (initialPanel === 'security') initialPanel = 'panel-security';
-    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-chart', 'panel-chart-inactive', 'panel-addons'];
+    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-avatar-management', 'panel-chart', 'panel-chart-inactive', 'panel-addons'];
     if (initialPanel && validPanels.includes(initialPanel)) {
         switchPanel(initialPanel);
     }
