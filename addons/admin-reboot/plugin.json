@@ -1,0 +1,9 @@
+{
+    "id": "admin-reboot",
+    "version": "1.0.0",
+    "main": "server.js",
+    "engines": {
+        "meta-server": ">=1.0.0"
+    },
+    "socketPrefix": "addon:admin-reboot"
+}

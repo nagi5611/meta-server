@@ -1,0 +1,4 @@
+{
+    "allowNodeRestart": true,
+    "allowSystemReboot": false
+}

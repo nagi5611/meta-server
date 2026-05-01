@@ -2662,6 +2662,17 @@ section h2 {
     gap: 15px;
 }
 
+.addon-admin-reboot-section {
+    margin-top: 16px;
+}
+
+.addon-admin-reboot-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+}
+
 .stat-card {
     background: #fff;
     padding: 15px;
@@ -2837,7 +2848,8 @@ section h2 {
 .addon-enabled-toggle-track {
     position: absolute;
     inset: 0;
-    background: #cbd5e1;
+    background: #e5e7eb;
+    border: 1px solid #cbd5e1;
     border-radius: 26px;
     transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -2856,7 +2868,8 @@ section h2 {
 }
 
 .addon-enabled-toggle-input:checked + .addon-enabled-toggle-track {
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: #2563eb;
+    border-color: #1d4ed8;
 }
 
 .addon-enabled-toggle-input:checked + .addon-enabled-toggle-track::before {
@@ -2864,16 +2877,17 @@ section h2 {
 }
 
 .addon-enabled-toggle:hover .addon-enabled-toggle-track {
-    background: #b0bac9;
+    border-color: #94a3b8;
 }
 
 .addon-enabled-toggle-input:checked:hover + .addon-enabled-toggle-track {
-    background: linear-gradient(135deg, #7c8ef0, #8a5db4);
+    background: #1d4ed8;
+    border-color: #1e40af;
 }
 
 .addon-enabled-toggle-input:focus-visible + .addon-enabled-toggle-track {
     outline: none;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.28);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
 }
 
 .socket-id {
@@ -3439,10 +3453,11 @@ body.admin-dark .users-table tr:hover {
     background: #25231d;
 }
 body.admin-dark .addon-enabled-toggle-track {
-    background: #4b5563;
+    background: #1f2937;
+    border-color: #374151;
 }
 body.admin-dark .addon-enabled-toggle:hover .addon-enabled-toggle-track {
-    background: #606a78;
+    border-color: #4b5563;
 }
 body.admin-dark .bandwidth-header .bandwidth-label,
 body.admin-dark .bandwidth-legend .legend-item {
