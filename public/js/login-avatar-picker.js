@@ -2,10 +2,13 @@
 const THREE_MOD = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 const GLTF_LOADER_MOD =
     'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+const DRACO_LOADER_MOD =
+    'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/DRACOLoader.js';
+const DRACO_DECODER_PATH = 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/';
 
 const STYLE_ID = 'login-avatar-picker-carousel-styles';
 
-/** @type {Promise<{ THREE: typeof import('three'), GLTFLoader: typeof import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader }> | null} */
+/** @type {Promise<{ THREE: typeof import('three'), GLTFLoader: typeof import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader, DRACOLoader: typeof import('three/examples/jsm/loaders/DRACOLoader.js').DRACOLoader }> | null} */
 let threeModulesPromise = null;
 
 function loadThreeModules() {
@@ -13,7 +16,8 @@ function loadThreeModules() {
         threeModulesPromise = (async () => {
             const THREE = await import(/* @vite-ignore */ THREE_MOD);
             const { GLTFLoader } = await import(/* @vite-ignore */ GLTF_LOADER_MOD);
-            return { THREE, GLTFLoader };
+            const { DRACOLoader } = await import(/* @vite-ignore */ DRACO_LOADER_MOD);
+            return { THREE, GLTFLoader, DRACOLoader };
         })();
     }
     return threeModulesPromise;
@@ -246,10 +250,10 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
         }
         const wrap = document.createElement('div');
         wrap.className = 'lap-card-canvas-wrap';
-        wrap.style.display = 'none';
+        wrap.style.display = 'block';
         const hint = document.createElement('div');
         hint.className = 'lap-card-hint';
-        hint.textContent = '…';
+        hint.textContent = '読み込み中';
         card.appendChild(hint);
         card.appendChild(wrap);
         track.appendChild(card);
@@ -270,22 +274,8 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
     let rafLayout = 0;
     let disposed = false;
 
-    /** @type {HTMLCanvasElement | null} */
-    let centerCanvas = null;
-    /** @type {import('three').WebGLRenderer | null} */
-    let centerRenderer = null;
-    /** @type {import('three').Scene | null} */
-    let centerScene = null;
-    /** @type {import('three').PerspectiveCamera | null} */
-    let centerCamera = null;
-    /** @type {import('three').AnimationMixer | null} */
-    let centerMixer = null;
-    /** @type {number | null} */
-    let centerRaf = null;
-    /** @type {string | null} */
-    let loadedPreviewForId = null;
-    /** @type {number | null} */
-    let previewCardIndex = null;
+    /** @type {Array<{avatarId: string, canvas: HTMLCanvasElement, renderer: import('three').WebGLRenderer, scene: import('three').Scene, camera: import('three').PerspectiveCamera, mixer: import('three').AnimationMixer | null, raf: number | null } | null>} */
+    const previewStates = Array.from({ length: entries.length }, () => null);
 
     function getViewportWidth() {
         return viewport.clientWidth || 320;
@@ -343,123 +333,113 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
         const id = entries[i].id;
         localStorage.setItem(LS_AVATAR, id);
         onChangeCb?.(id);
-        void loadCenterPreview(entries[i]);
-    }
-
-    function disposeCenterPreview() {
-        if (centerRaf != null) {
-            cancelAnimationFrame(centerRaf);
-            centerRaf = null;
-        }
-        centerMixer = null;
-        if (centerRenderer) {
-            centerRenderer.dispose();
-            centerRenderer = null;
-        }
-        centerScene = null;
-        centerCamera = null;
-        loadedPreviewForId = null;
-        if (centerCanvas && centerCanvas.parentElement) {
-            centerCanvas.parentElement.removeChild(centerCanvas);
-        }
-        centerCanvas = null;
-        if (previewCardIndex != null && cards[previewCardIndex]) {
-            const c = cards[previewCardIndex];
-            const hint = c.querySelector('.lap-card-hint');
-            const wrap = c.querySelector('.lap-card-canvas-wrap');
-            if (hint) hint.style.display = '';
-            if (wrap) {
-                wrap.innerHTML = '';
-                wrap.style.display = 'none';
-            }
-        }
-        previewCardIndex = null;
     }
 
     /**
-     * 中央カードのみ GLB プレビューを表示する
-     * @param {LoginAvatarDto} entry
+     * 指定カードのGLBプレビューを破棄
+     * @param {number} idx
      */
-    async function loadCenterPreview(entry) {
+    function disposeCardPreview(idx) {
+        const st = previewStates[idx];
+        if (!st) return;
+        if (st.raf != null) {
+            cancelAnimationFrame(st.raf);
+            st.raf = null;
+        }
+        st.renderer.dispose();
+        if (st.canvas.parentElement) st.canvas.parentElement.removeChild(st.canvas);
+        previewStates[idx] = null;
+    }
+
+    function disposeAllCardPreviews() {
+        for (let i = 0; i < previewStates.length; i++) disposeCardPreview(i);
+    }
+
+    /**
+     * 各カードの GLB プレビューを表示する（Draco 圧縮対応）
+     * @param {LoginAvatarDto} entry
+     * @param {number} idx
+     */
+    async function loadCardPreview(entry, idx) {
         if (disposed || !entry) return;
-        const idx = entries.indexOf(entry);
-        if (idx < 0) return;
+        if (idx < 0 || idx >= cards.length) return;
+        if (previewStates[idx] && previewStates[idx].avatarId === entry.id) return;
+
+        disposeCardPreview(idx);
         const card = cards[idx];
         const wrap = card.querySelector('.lap-card-canvas-wrap');
         const hint = card.querySelector('.lap-card-hint');
         if (!wrap || !hint) return;
-
-        if (loadedPreviewForId === entry.id && centerCanvas) return;
-
-        disposeCenterPreview();
-        loadedPreviewForId = entry.id;
-        previewCardIndex = idx;
-
-        hint.style.display = 'none';
+        hint.style.display = '';
         wrap.style.display = 'block';
+        wrap.innerHTML = '';
         const canvas = document.createElement('canvas');
         canvas.width = 128;
         canvas.height = 128;
         wrap.appendChild(canvas);
-        centerCanvas = canvas;
 
         const url = await resolveAvatarModelUrl(entry);
         if (!url || disposed) {
-            hint.style.display = '';
-            wrap.style.display = 'none';
-            loadedPreviewForId = null;
-            previewCardIndex = null;
             return;
         }
 
-        const { THREE, GLTFLoader } = await loadThreeModules();
-        centerRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-        centerRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        centerRenderer.setSize(canvas.width, canvas.height, false);
-        centerScene = new THREE.Scene();
-        centerCamera = new THREE.PerspectiveCamera(42, canvas.width / canvas.height, 0.1, 100);
-        centerCamera.position.set(0, 1.2, 2.1);
-        centerCamera.lookAt(0, 0.85, 0);
-        centerScene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
+        const { THREE, GLTFLoader, DRACOLoader } = await loadThreeModules();
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(canvas.width, canvas.height, false);
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(42, canvas.width / canvas.height, 0.1, 100);
+        camera.position.set(0, 1.2, 2.1);
+        camera.lookAt(0, 0.85, 0);
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
         const dir = new THREE.DirectionalLight(0xffffff, 0.55);
         dir.position.set(2, 4, 5);
-        centerScene.add(dir);
+        scene.add(dir);
 
         const loader = new GLTFLoader();
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
+        loader.setDRACOLoader(dracoLoader);
+        /** @type {import('three').AnimationMixer | null} */
+        let mixer = null;
+
+        previewStates[idx] = { avatarId: entry.id, canvas, renderer, scene, camera, mixer: null, raf: null };
         loader.load(
             url,
             (gltf) => {
-                if (disposed || loadedPreviewForId !== entry.id) return;
+                const st = previewStates[idx];
+                if (disposed || !st || st.avatarId !== entry.id) return;
                 const root = new THREE.Group();
                 const model = gltf.scene;
                 const box = new THREE.Box3().setFromObject(model);
                 const size = box.getSize(new THREE.Vector3());
                 const sz = Math.max(size.x, size.y, size.z) || 1;
-                model.scale.multiplyScalar(1.45 / sz);
+                // ユーザー指定: 既存比 0.2 倍
+                model.scale.multiplyScalar(0.29 / sz);
                 root.add(model);
                 root.position.set(0, 0.02, 0);
-                centerScene.add(root);
+                scene.add(root);
                 if (gltf.animations && gltf.animations.length) {
-                    centerMixer = new THREE.AnimationMixer(root);
-                    centerMixer.clipAction(gltf.animations[0]).play();
+                    mixer = new THREE.AnimationMixer(root);
+                    mixer.clipAction(gltf.animations[0]).play();
+                    st.mixer = mixer;
                 }
+                hint.style.display = 'none';
             },
             undefined,
             () => {
                 if (!disposed) {
-                    hint.style.display = '';
-                    wrap.style.display = 'none';
-                    loadedPreviewForId = null;
-                    previewCardIndex = null;
+                    hint.textContent = '読み込み失敗';
                 }
             }
         );
 
         const tick = () => {
-            if (disposed || !centerRenderer || !centerScene || !centerCamera) return;
-            centerRaf = requestAnimationFrame(tick);
-            if (centerMixer) centerMixer.update(1 / 60);
-            centerRenderer.render(centerScene, centerCamera);
+            const st = previewStates[idx];
+            if (disposed || !st) return;
+            st.raf = requestAnimationFrame(tick);
+            if (st.mixer) st.mixer.update(1 / 60);
+            st.renderer.render(st.scene, st.camera);
         };
         tick();
     }
@@ -467,7 +447,9 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
     translateX = translateForIndex(selectedIndex);
     applyTrackTransform(false);
     scheduleLayout();
-    void loadCenterPreview(entries[selectedIndex]);
+    for (let i = 0; i < entries.length; i++) {
+        void loadCardPreview(entries[i], i);
+    }
 
     function nearestIndexFromTranslate(tx) {
         const V = getViewportWidth();
@@ -521,7 +503,7 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
             disposed = true;
             window.removeEventListener('resize', onResize);
             if (rafLayout) cancelAnimationFrame(rafLayout);
-            disposeCenterPreview();
+            disposeAllCardPreviews();
             mount.innerHTML = '';
             mount.classList.remove('lap-root');
             mount.style.display = 'none';
