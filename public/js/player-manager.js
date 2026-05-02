@@ -250,7 +250,10 @@ class PlayerManager {
                 this.localPlayer.userData.avatarActions = anim.actions;
                 this.localPlayer.userData.animationState = 'idle';
             }
-            
+            if (animations?.length) {
+                this.localPlayer.userData.avatarAnimationClips = animations;
+            }
+
             this.scene.add(this.localPlayer);
             console.log('Local player created with GLB avatar', animations.length ? '(animated)' : '');
         } catch (error) {
@@ -565,7 +568,7 @@ class PlayerManager {
         this.localPlayer.quaternion.copy(rotation);
 
         const actions = this.localPlayer.userData.avatarActions;
-        if (actions && movementState) {
+        if (actions && movementState && !this.localPlayer.userData.addonCustomAnimActive) {
             const isGrounded = movementState.isGrounded !== false;
             const newState = !isGrounded && actions.jump ? 'jump'
                 : movementState.isDashing ? 'dash'

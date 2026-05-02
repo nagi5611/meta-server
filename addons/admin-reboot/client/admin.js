@@ -34,7 +34,6 @@ function mountAdminRebootPanel() {
     section.className = 'stats-section addon-admin-reboot-section';
     section.innerHTML = `
         <h2>Admin Reboot</h2>
-        <p class="status-text">systemctl restart による Node サーバー再起動を実行します（管理者専用）。</p>
         <div class="addon-admin-reboot-pin-row" id="addon-admin-reboot-pin-row" hidden>
             <label class="addon-admin-reboot-pin-label" for="addon-admin-reboot-pin">再起動 PIN</label>
             <input type="password" class="addon-admin-reboot-pin-input" id="addon-admin-reboot-pin" name="addon-admin-reboot-pin" autocomplete="off" />

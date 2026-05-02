@@ -24,6 +24,7 @@ import WebXRLocomotion from './webxr-locomotion.js';
 import { XrPlayerRig } from './xr-player-rig.js';
 import { registerMetaverseServiceWorker } from './service-worker-register.js';
 import { initAircraftSubsystem } from '../../addons/aircraft/client/init.js';
+import { initAvatorScalableAnimations } from '../../addons/avator-scalable-animations/client/init.js';
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 
 const DEFAULT_ROOM = 'lobby';
@@ -339,6 +340,7 @@ class MetaverseApp {
         this.setupClientPerfObservers();
 
         initAircraftSubsystem(this);
+        initAvatorScalableAnimations(this);
 
         this.networkManager.connect();
         this.networkManager.startSendingUpdates(this.characterController);
