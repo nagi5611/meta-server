@@ -1,4 +1,5 @@
 {
     "allowNodeRestart": true,
+    "allowServerUpdate": true,
     "systemdServiceName": "metaverse-simple"
 }

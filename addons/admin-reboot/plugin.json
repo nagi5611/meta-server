@@ -1,6 +1,6 @@
 {
     "id": "admin-reboot",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "main": "server.js",
     "engines": {
         "meta-server": ">=1.0.0"

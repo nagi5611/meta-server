@@ -2716,6 +2716,11 @@ body.admin-dark .addon-admin-reboot-pin-input {
     padding: 24px;
 }
 
+/* [hidden] の display:none が .addon-config-modal の flex より負けないようにする */
+.addon-config-modal[hidden] {
+    display: none !important;
+}
+
 .addon-config-dialog {
     width: min(1200px, 96vw);
     max-height: min(80vh, 860px);

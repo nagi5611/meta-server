@@ -54,6 +54,8 @@ function mountAdminRebootPanel() {
     if (!nodeBtn || !updateBtn || !statusEl) return;
     /** @type {boolean} */
     let pinRequired = false;
+    /** @type {{ allowNodeRestart: unknown, updateOk: boolean } | null} */
+    let capState = null;
 
     const setStatus = (text, isError = false) => {
         statusEl.textContent = text;
@@ -62,8 +64,16 @@ function mountAdminRebootPanel() {
     };
 
     const setBusy = (busy) => {
-        nodeBtn.disabled = busy;
-        updateBtn.disabled = busy;
+        if (busy) {
+            nodeBtn.disabled = true;
+            updateBtn.disabled = true;
+        } else if (capState) {
+            nodeBtn.disabled = !capState.allowNodeRestart;
+            updateBtn.disabled = !capState.updateOk;
+        } else {
+            nodeBtn.disabled = false;
+            updateBtn.disabled = false;
+        }
     };
 
     const initCapabilities = async () => {
@@ -80,15 +90,17 @@ function mountAdminRebootPanel() {
             if (pinInput && !pinRequired) {
                 pinInput.value = '';
             }
-            nodeBtn.disabled = !cap.allowNodeRestart;
             const updateOk = cap.allowServerUpdate !== false && cap.restartScriptPresent === true;
-            updateBtn.disabled = !updateOk;
+            capState = { allowNodeRestart: cap.allowNodeRestart, updateOk };
+            nodeBtn.disabled = !capState.allowNodeRestart;
+            updateBtn.disabled = !capState.updateOk;
             setStatus(
                 `方式=${cap.strategy || 'systemctl-restart'} / service=${cap.serviceName || '-'} / Node再起動=${cap.allowNodeRestart ? '可' : '不可'} / アップデート=${updateOk ? '可' : '不可'} / PIN=${pinRequired ? '必須' : '未設定'}`,
                 false
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            capState = null;
             nodeBtn.disabled = true;
             updateBtn.disabled = true;
             setStatus(`機能の初期化に失敗: ${message}`, true);
