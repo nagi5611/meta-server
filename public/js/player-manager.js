@@ -253,6 +253,9 @@ class PlayerManager {
             if (animations?.length) {
                 this.localPlayer.userData.avatarAnimationClips = animations;
             }
+            if (animationMap && typeof animationMap === 'object') {
+                this.localPlayer.userData.avatarAnimationMap = animationMap;
+            }
 
             this.scene.add(this.localPlayer);
             console.log('Local player created with GLB avatar', animations.length ? '(animated)' : '');

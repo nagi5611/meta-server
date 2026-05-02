@@ -43,9 +43,28 @@ function resolveClip(clips, binding) {
 }
 
 /**
+ * アバター registry の scalable_* インデックスを優先してクリップを解決する。
+ * @param {import('three').AnimationClip[]} clips
+ * @param {Record<string, number>|undefined} avatarMap
+ * @param {{ slotKey?: string, clipIndex?: number, clipName?: string }} binding
+ * @returns {import('three').AnimationClip | null}
+ */
+function resolveClipForBinding(clips, avatarMap, binding) {
+    const sk = binding.slotKey;
+    if (sk && avatarMap && typeof avatarMap === 'object') {
+        const ix = avatarMap[sk];
+        if (typeof ix === 'number' && Number.isFinite(ix)) {
+            const clip = clips[Math.trunc(ix)] || null;
+            if (clip) return clip;
+        }
+    }
+    return resolveClip(clips, binding);
+}
+
+/**
  * アドオン用の追加アニメーションを再生する。
  * @param {{ playerManager?: { localPlayer?: import('three').Object3D }, characterController: { getAnimationState: () => string } }} app
- * @param {{ name: string, key: string, clipIndex?: number, clipName?: string }} binding
+ * @param {{ name: string, key: string, slotKey?: string, clipIndex?: number, clipName?: string }} binding
  */
 function playAddonClip(app, binding) {
     const lp = app.playerManager?.localPlayer;
@@ -53,7 +72,8 @@ function playAddonClip(app, binding) {
     const mixer = lp?.userData?.mixer;
     if (!lp || !mixer || !clips?.length) return;
 
-    const clip = resolveClip(clips, binding);
+    const avatarMap = lp.userData.avatarAnimationMap;
+    const clip = resolveClipForBinding(clips, avatarMap, binding);
     if (!clip) return;
 
     const actions = lp.userData.avatarActions;

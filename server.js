@@ -71,7 +71,13 @@ import {
 } from './lib/avatar-registry.js';
 import { syncLocalEnvToS3OnStartup, uploadLocalEnvFile, canonicalCdnUrlForEnvRelative } from './lib/s3-env-assets.js';
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
-import { loadAddonsAtStartup, registerAddonShutdownHooks, getAddonCatalogSnapshot } from './lib/plugin-bootstrap.js';
+import {
+    loadAddonsAtStartup,
+    registerAddonShutdownHooks,
+    getAddonCatalogSnapshot,
+    getAddonsRoot,
+} from './lib/plugin-bootstrap.js';
+import { getScalableAnimationSlotsForAdmin } from './lib/avator-scalable-bindings.js';
 import { setAddonEnabled, getAddonConfigEntries, setAddonConfigValue, deleteAddonConfigValue } from './db/addons-registry.js';
 import { setAircraftServerDeps } from './lib/aircraft-server/deps-registry.js';
 import { validateWorldsAircraft, validateWorldsAircraftPhysics } from './lib/aircraft-server/validate-worlds.js';
@@ -5733,7 +5739,8 @@ app.post('/admin/upload-avatar', uploadAvatarGlb.single('avatar'), async (req, r
 app.get('/admin/avatars', async (req, res) => {
     try {
         const reg = await ensureAvatarRegistry(AVATARS_DIR);
-        res.json(reg);
+        const scalableAnimationSlots = getScalableAnimationSlotsForAdmin(getAddonsRoot());
+        res.json({ ...reg, scalableAnimationSlots });
     } catch (e) {
         console.error('GET /admin/avatars:', e);
         res.status(500).json({ error: 'avatar_registry_read_failed' });
@@ -5775,6 +5782,31 @@ app.patch('/admin/avatars/:id', express.json(), async (req, res) => {
             if (!Number.isFinite(n)) return res.status(400).json({ error: `invalid_${k}` });
             animationMap[k] = Math.trunc(n);
         }
+
+        const scalableSlots = getScalableAnimationSlotsForAdmin(getAddonsRoot());
+        const prevMap = entry.animationMap && typeof entry.animationMap === 'object' ? entry.animationMap : {};
+        for (const slot of scalableSlots) {
+            const sk = slot.slotKey;
+            if (Object.prototype.hasOwnProperty.call(rawMap, sk)) {
+                const rawVal = rawMap[sk];
+                if (rawVal === null || rawVal === '' || rawVal === undefined) {
+                    continue;
+                }
+                const n = Number(rawVal);
+                if (!Number.isFinite(n)) return res.status(400).json({ error: `invalid_${sk}` });
+                const ti = Math.trunc(n);
+                if (ti < 0 || ti >= entry.animationClips.length) {
+                    return res.status(400).json({ error: `out_of_range_${sk}` });
+                }
+                animationMap[sk] = ti;
+            } else if (typeof prevMap[sk] === 'number' && Number.isFinite(prevMap[sk])) {
+                const ti = Math.trunc(prevMap[sk]);
+                if (ti >= 0 && ti < entry.animationClips.length) {
+                    animationMap[sk] = ti;
+                }
+            }
+        }
+
         entry.animationMap = animationMap;
         if (!hasCompleteAnimationMap(entry)) {
             return res.status(400).json({ error: 'animationMap_incomplete' });

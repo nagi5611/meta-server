@@ -39,6 +39,8 @@ let securityPanelInitialized = false;
 let adminAvatarRegistryCache = null;
 /** アバター管理: フォーム編集中のエントリ ID */
 let adminAvatarEditId = null;
+/** GET /admin/avatars の scalableAnimationSlots（avator-scalable-animations） */
+let adminAvatarScalableSlots = [];
 /** サーバー ENABLE_CHART_FEATURES（/api/client-config および /admin/stats で更新） */
 let adminChartFeaturesEnabled = true;
 /** 譜面作成パネルで選択中の譜面ID */
@@ -1308,6 +1310,44 @@ function fillAdminAvatarMapSelect(sel, clips, selectedIndex) {
 }
 
 /**
+ * avator-scalable-animations のスロット用セレクトを描画する。
+ * @param {object} entry
+ */
+function renderAdminScalableAvatarMapRows(entry) {
+    const mount = document.getElementById('admin-avatar-map-scalable-mount');
+    if (!mount) return;
+    mount.innerHTML = '';
+    const clips = Array.isArray(entry.animationClips) ? entry.animationClips : [];
+    const m = entry.animationMap && typeof entry.animationMap === 'object' ? entry.animationMap : {};
+    if (!adminAvatarScalableSlots.length) return;
+
+    const title = document.createElement('p');
+    title.className = 'hint';
+    title.style.marginTop = '10px';
+    title.textContent = '追加モーション（avator-scalable-animations / 環境変数 bindings に対応）';
+    mount.appendChild(title);
+
+    for (const slot of adminAvatarScalableSlots) {
+        const row = document.createElement('div');
+        row.className = 'field-row';
+        const selId = `admin-avatar-map-${slot.slotKey}`;
+        const label = document.createElement('label');
+        label.className = 'prop-label';
+        label.setAttribute('for', selId);
+        const keyHint = slot.key != null && String(slot.key).trim() !== '' ? `（操作キー: ${String(slot.key)}）` : '';
+        label.textContent = `${String(slot.name || slot.slotKey)}${keyHint}`;
+        const sel = document.createElement('select');
+        sel.id = selId;
+        sel.className = 'prop-input full';
+        row.appendChild(label);
+        row.appendChild(sel);
+        mount.appendChild(row);
+        const ix = m[slot.slotKey];
+        fillAdminAvatarMapSelect(sel, clips, typeof ix === 'number' ? ix : undefined);
+    }
+}
+
+/**
  * アバター行を選択しマッピング UI を開く
  * @param {object} entry
  * @param {number} registryVersion
@@ -1324,6 +1364,7 @@ function openAdminAvatarEditor(entry, registryVersion) {
     fillAdminAvatarMapSelect(document.getElementById('admin-avatar-map-walk'), clips, m.walk);
     fillAdminAvatarMapSelect(document.getElementById('admin-avatar-map-jump'), clips, m.jump);
     fillAdminAvatarMapSelect(document.getElementById('admin-avatar-map-run'), clips, m.run);
+    renderAdminScalableAvatarMapRows(entry);
     const st = document.getElementById('admin-avatar-editor-status');
     if (st) st.textContent = '';
     editor.hidden = false;
@@ -1342,9 +1383,11 @@ async function refreshAdminAvatarManagementPanel() {
         if (!r.ok || !reg || !Array.isArray(reg.avatars)) {
             mount.textContent = '一覧の取得に失敗しました。';
             adminAvatarRegistryCache = null;
+            adminAvatarScalableSlots = [];
             return;
         }
         adminAvatarRegistryCache = reg;
+        adminAvatarScalableSlots = Array.isArray(reg.scalableAnimationSlots) ? reg.scalableAnimationSlots : [];
         mount.innerHTML = '';
         const wrap = document.createElement('div');
         wrap.className = 'admin-avatar-rows';
@@ -1376,6 +1419,7 @@ async function refreshAdminAvatarManagementPanel() {
     } catch (e) {
         console.error('[admin avatar]', e);
         mount.textContent = '一覧の取得に失敗しました。';
+        adminAvatarScalableSlots = [];
     }
 }
 
@@ -1437,7 +1481,18 @@ function setupAdminAvatarManagementPanel() {
                 jump: readSel('admin-avatar-map-jump'),
                 run: readSel('admin-avatar-map-run'),
             };
-            if (Object.values(animationMap).some((n) => !Number.isFinite(n))) {
+            for (const slot of adminAvatarScalableSlots) {
+                const el = document.getElementById(`admin-avatar-map-${slot.slotKey}`);
+                if (!el) continue;
+                const v = el.value;
+                if (v === '' || v == null) {
+                    animationMap[slot.slotKey] = null;
+                } else {
+                    const n = parseInt(String(v), 10);
+                    if (Number.isFinite(n)) animationMap[slot.slotKey] = n;
+                }
+            }
+            if (!['idle', 'walk', 'jump', 'run'].every((k) => Number.isFinite(animationMap[k]))) {
                 if (stEd) stEd.textContent = 'idle / walk / jump / run をすべて選択してください。';
                 return;
             }

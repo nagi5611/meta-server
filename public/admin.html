@@ -1036,7 +1036,7 @@
             <div id="panel-avatar-management" class="admin-panel">
                 <section class="section">
                     <h2 class="section-title">アバター管理</h2>
-                    <p class="hint">GLB を追加し、各アバターで <strong>idle / walk / jump / run</strong>（走り＝ゲーム内のダッシュ）にクリップを割り当てます。4つそろうまでログイン一覧には出ません。デフォルトはログイン画面の初期選択になります。</p>
+                    <p class="hint">GLB を追加し、各アバターで <strong>idle / walk / jump / run</strong>（走り＝ゲーム内のダッシュ）にクリップを割り当てます。4つそろうまでログイン一覧には出ません。デフォルトはログイン画面の初期選択になります。<strong>avator-scalable-animations</strong> アドオンで <code>bindings</code>（名前・操作キー）を定義している場合、ここに追加モーション用の列が表示されます（レジストリの <code>scalable_*</code> に保存されます）。</p>
                     <div class="admin-avatar-upload-row">
                         <input type="file" id="admin-avatar-upload-file" accept=".glb,model/gltf-binary" />
                         <label class="admin-avatar-check"><input type="checkbox" id="admin-avatar-upload-default" /> アップロード後にデフォルトにする</label>
@@ -1064,6 +1064,7 @@
                                 <label class="prop-label" for="admin-avatar-map-run">run（ダッシュ）</label>
                                 <select id="admin-avatar-map-run" class="prop-input full"></select>
                             </div>
+                            <div id="admin-avatar-map-scalable-mount" class="admin-avatar-map-scalable-mount"></div>
                         </div>
                         <div class="btn-row" style="margin-top:10px;">
                             <button type="button" id="btn-admin-avatar-save-map" class="btn btn-primary">マッピング保存</button>
