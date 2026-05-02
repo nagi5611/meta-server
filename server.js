@@ -50,6 +50,7 @@ import {
     uploadLocalAvatarFile,
     deleteAvatarFile,
     setActiveAvatar,
+    clearActiveAvatarMeta,
     readActiveAvatarMeta,
     getActiveAvatarRelativePathForClient,
     syncLocalAvatarsToS3OnStartup,
@@ -5852,6 +5853,45 @@ app.post('/admin/avatars/:id/default', async (req, res) => {
     } catch (e) {
         console.error('POST /admin/avatars/:id/default:', e);
         res.status(500).json({ error: 'avatar_default_update_failed' });
+    }
+});
+
+/**
+ * レジストリからアバターを外し、対応する GLB をローカル・S3 から削除する。
+ */
+app.delete('/admin/avatars/:id', async (req, res) => {
+    const avatarId = String(req.params.id || '').trim();
+    if (!avatarId) return res.status(400).json({ error: 'invalid_id' });
+    try {
+        const reg = await ensureAvatarRegistry(AVATARS_DIR);
+        const entry = findAvatarById(reg, avatarId);
+        if (!entry) return res.status(404).json({ error: 'avatar_not_found' });
+        const glbBase = path.basename(entry.glbFilename);
+        const wasDefault = !!entry.isDefault;
+        reg.avatars = reg.avatars.filter((a) => String(a.id) !== avatarId);
+        if (wasDefault && reg.avatars.length > 0) {
+            for (const a of reg.avatars) a.isDefault = false;
+            reg.avatars[0].isDefault = true;
+        }
+        bumpRegistryVersion(reg);
+        writeAvatarRegistry(AVATARS_DIR, reg);
+        await deleteAvatarFile(glbBase, AVATARS_DIR);
+        if (reg.avatars.length === 0) {
+            await clearActiveAvatarMeta(AVATARS_DIR);
+        } else {
+            await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
+        }
+        io.emit('asset-invalidate', {
+            urls: [
+                avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
+                canonicalCdnUrlForAvatarRelative(glbBase),
+                canonicalCdnUrlForAvatarRelative(AVATAR_ACTIVE_META_REL_POSIX),
+            ],
+        });
+        res.json({ success: true, registryVersion: reg.registryVersion });
+    } catch (e) {
+        console.error('DELETE /admin/avatars/:id:', e);
+        res.status(500).json({ error: 'avatar_delete_failed' });
     }
 });
 

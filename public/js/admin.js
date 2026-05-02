@@ -1554,6 +1554,50 @@ function setupAdminAvatarManagementPanel() {
             }
         });
     }
+    const btnDel = document.getElementById('btn-admin-avatar-delete');
+    if (btnDel && !btnDel.dataset.bound) {
+        btnDel.dataset.bound = '1';
+        // 選択中エントリの GLB をレジストリ・ストレージから削除する
+        btnDel.addEventListener('click', async () => {
+            const stEd = document.getElementById('admin-avatar-editor-status');
+            const metaEl = document.getElementById('admin-avatar-editor-meta');
+            if (!adminAvatarEditId) {
+                if (stEd) stEd.textContent = '先にアバターを選択してください。';
+                return;
+            }
+            const selected =
+                adminAvatarRegistryCache &&
+                Array.isArray(adminAvatarRegistryCache.avatars)
+                    ? adminAvatarRegistryCache.avatars.find((x) => x.id === adminAvatarEditId)
+                    : null;
+            const glbName = selected && selected.glbFilename ? String(selected.glbFilename) : '';
+            const msg = glbName
+                ? `このアバターの GLB（${glbName}）を削除します。よろしいですか？`
+                : 'このアバターの GLB を削除します。よろしいですか？';
+            if (!confirm(msg)) return;
+            if (stEd) stEd.textContent = '削除中…';
+            try {
+                const r = await fetch(`/admin/avatars/${encodeURIComponent(adminAvatarEditId)}`, {
+                    method: 'DELETE',
+                    credentials: 'include',
+                });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    if (stEd) stEd.textContent = j.error || '削除に失敗しました。';
+                    return;
+                }
+                adminAvatarEditId = null;
+                const editor = document.getElementById('admin-avatar-editor');
+                if (editor) editor.hidden = true;
+                if (metaEl) metaEl.textContent = '';
+                if (stEd) stEd.textContent = '削除しました。';
+                await refreshAdminAvatarManagementPanel();
+            } catch (e) {
+                console.error(e);
+                if (stEd) stEd.textContent = '通信エラー';
+            }
+        });
+    }
 }
 
 /**
