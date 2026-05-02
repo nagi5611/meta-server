@@ -25,6 +25,8 @@ export default class AircraftController {
         this.slot = null;
         this.velocity = new THREE.Vector3();
         this._fwd = new THREE.Vector3();
+        /** 揚力計算用: ローカル +Y をワールドへ（翼面の法線） */
+        this._bodyUp = new THREE.Vector3();
         this._worldQuat = new THREE.Quaternion();
         this._worldPos = new THREE.Vector3();
         this._lookTarget = new THREE.Vector3();
@@ -372,7 +374,12 @@ export default class AircraftController {
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
         this.velocity.addScaledVector(this._fwd, thrust * ph.thrustAccel * dt);
         this.velocity.multiplyScalar(ph.drag);
-        const vH = Math.hypot(this.velocity.x, this.velocity.z);
+        // 揚力は機体の上下方向速度成分を除き、前後・横（翼面内）の速度のみから算出する
+        this._bodyUp.set(0, 1, 0).applyQuaternion(this._worldQuat).normalize();
+        const vAlongBodyUp = this.velocity.dot(this._bodyUp);
+        const vH = Math.sqrt(
+            Math.max(0, this.velocity.lengthSq() - vAlongBodyUp * vAlongBodyUp)
+        );
         const liftAccel = ph.liftPerHorizontalSpeed * vH;
         this.velocity.y += (liftAccel - ph.gravity) * dt;
         const sp = this.velocity.length();
