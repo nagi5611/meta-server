@@ -42,9 +42,9 @@ class PlayerManager {
     }
 
     /**
-     * 明示 avatarId または localStorage の選択に基づき GLB URL とアニメインデックスマップを解決する
+     * 明示 avatarId または localStorage の選択に基づき GLB URL・マップ・表示倍率を解決する
      * @param {string|null} [explicitAvatarId]
-     * @returns {Promise<{ url: string, animationMap: Record<string, number>|null }>}
+     * @returns {Promise<{ url: string, animationMap: Record<string, number>|null, displayScale: number }>}
      */
     async resolveAvatarSessionUrlAndMap(explicitAvatarId = null) {
         /** @type {string|null} */
@@ -77,8 +77,12 @@ class PlayerManager {
                     if (j.animationMap && typeof j.animationMap === 'object') {
                         animationMap = /** @type {Record<string, number>} */ (j.animationMap);
                     }
+                    let displayScale = 1;
+                    if (typeof j.displayScale === 'number' && Number.isFinite(j.displayScale)) {
+                        displayScale = j.displayScale;
+                    }
                     if (url) {
-                        return { url, animationMap };
+                        return { url, animationMap, displayScale };
                     }
                 }
             } catch {
@@ -86,7 +90,7 @@ class PlayerManager {
             }
         }
         const url = await this.resolveFallbackActiveAvatarUrl();
-        return { url, animationMap: null };
+        return { url, animationMap: null, displayScale: 1 };
     }
 
     /**
@@ -101,13 +105,15 @@ class PlayerManager {
     /**
      * Load avatar model from GLB file (with animations if present)
      * @param {string|null} [remoteAvatarId] 他プレイヤー用 avatarId（未指定時は自プレイヤーの localStorage 選択）
-     * @returns {Promise<{ scene: THREE.Group, animations: THREE.AnimationClip[], animationMap: Record<string, number>|null }>}
+     * @returns {Promise<{ scene: THREE.Group, animations: THREE.AnimationClip[], animationMap: Record<string, number>|null, displayScale: number }>}
      */
     async loadAvatarModel(remoteAvatarId = null) {
-        const { url, animationMap } =
+        const { url, animationMap, displayScale } =
             typeof remoteAvatarId === 'string' && remoteAvatarId.trim() !== ''
                 ? await this.resolveAvatarSessionUrlAndMap(remoteAvatarId.trim())
                 : await this.resolveAvatarSessionUrlAndMap(null);
+        const scaleMul =
+            typeof displayScale === 'number' && Number.isFinite(displayScale) ? displayScale : 1;
 
         const cached = this._avatarUrlModelCache.get(url);
         if (cached) {
@@ -115,7 +121,7 @@ class PlayerManager {
             const clonedScene = animations.length > 0
                 ? SkeletonUtils.clone(scene)
                 : scene.clone();
-            return { scene: clonedScene, animations, animationMap };
+            return { scene: clonedScene, animations, animationMap, displayScale: scaleMul };
         }
 
         return new Promise((resolve, reject) => {
@@ -129,7 +135,7 @@ class PlayerManager {
                     const clonedScene = animations.length > 0
                         ? SkeletonUtils.clone(gltf.scene)
                         : gltf.scene.clone();
-                    resolve({ scene: clonedScene, animations, animationMap });
+                    resolve({ scene: clonedScene, animations, animationMap, displayScale: scaleMul });
                 },
                 (progress) => {
                     if (progress.total) {
@@ -235,13 +241,19 @@ class PlayerManager {
         console.log('Creating local player avatar...');
         
         try {
-            const { scene: avatarModel, animations, animationMap } = await this.loadAvatarModel(null);
-            
+            const { scene: avatarModel, animations, animationMap, displayScale } =
+                await this.loadAvatarModel(null);
+            const ds = typeof displayScale === 'number' && Number.isFinite(displayScale) ? displayScale : 1;
+
             this.localPlayer = new THREE.Group();
             this.localPlayer.position.set(position.x, position.y, position.z);
-            
+
             avatarModel.position.y = 0;
-            avatarModel.scale.set(this.avatarScale.x, this.avatarScale.y, this.avatarScale.z);
+            avatarModel.scale.set(
+                this.avatarScale.x * ds,
+                this.avatarScale.y * ds,
+                this.avatarScale.z * ds,
+            );
             this.localPlayer.add(avatarModel);
             this.localPlayer.userData.headBone = this.findHeadBone(avatarModel);
             const anim = this.setupAvatarAnimation(avatarModel, animations, animationMap);
@@ -372,14 +384,20 @@ class PlayerManager {
         this.remotePlayers.set(playerId, placeholder);
         
         try {
-            const { scene: avatarModel, animations, animationMap } = await this.loadAvatarModel(avatarId);
-            
+            const { scene: avatarModel, animations, animationMap, displayScale } =
+                await this.loadAvatarModel(avatarId);
+            const ds = typeof displayScale === 'number' && Number.isFinite(displayScale) ? displayScale : 1;
+
             const remotePlayer = new THREE.Group();
             remotePlayer.position.copy(placeholder.position);
             remotePlayer.quaternion.copy(placeholder.quaternion);
-            
+
             avatarModel.position.y = 0;
-            avatarModel.scale.set(this.avatarScale.x, this.avatarScale.y, this.avatarScale.z);
+            avatarModel.scale.set(
+                this.avatarScale.x * ds,
+                this.avatarScale.y * ds,
+                this.avatarScale.z * ds,
+            );
             remotePlayer.add(avatarModel);
             const anim = this.setupAvatarAnimation(avatarModel, animations, animationMap);
             if (anim) {

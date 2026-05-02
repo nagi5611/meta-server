@@ -1365,6 +1365,11 @@ function openAdminAvatarEditor(entry, registryVersion) {
     fillAdminAvatarMapSelect(document.getElementById('admin-avatar-map-jump'), clips, m.jump);
     fillAdminAvatarMapSelect(document.getElementById('admin-avatar-map-run'), clips, m.run);
     renderAdminScalableAvatarMapRows(entry);
+    const scaleInp = document.getElementById('admin-avatar-display-scale');
+    if (scaleInp) {
+        const d = entry.displayScale;
+        scaleInp.value = String(typeof d === 'number' && Number.isFinite(d) ? d : 1);
+    }
     const st = document.getElementById('admin-avatar-editor-status');
     if (st) st.textContent = '';
     editor.hidden = false;
@@ -1497,12 +1502,15 @@ function setupAdminAvatarManagementPanel() {
                 return;
             }
             if (stEd) stEd.textContent = '保存中…';
+            const scaleInp = document.getElementById('admin-avatar-display-scale');
+            const scaleNum = scaleInp ? parseFloat(String(scaleInp.value)) : NaN;
+            const displayScale = Number.isFinite(scaleNum) ? scaleNum : 1;
             try {
                 const r = await fetch(`/admin/avatars/${encodeURIComponent(adminAvatarEditId)}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
-                    body: JSON.stringify({ registryVersion: regV, animationMap }),
+                    body: JSON.stringify({ registryVersion: regV, animationMap, displayScale }),
                 });
                 const j = await r.json().catch(() => ({}));
                 if (r.status === 409) {
@@ -1516,6 +1524,49 @@ function setupAdminAvatarManagementPanel() {
                 }
                 adminAvatarRegistryCache = { ...adminAvatarRegistryCache, registryVersion: j.registryVersion };
                 if (stEd) stEd.textContent = '保存しました。';
+                await refreshAdminAvatarManagementPanel();
+            } catch (e) {
+                console.error(e);
+                if (stEd) stEd.textContent = '通信エラー';
+            }
+        });
+    }
+    const btnSaveScale = document.getElementById('btn-admin-avatar-save-scale');
+    if (btnSaveScale && !btnSaveScale.dataset.bound) {
+        btnSaveScale.dataset.bound = '1';
+        btnSaveScale.addEventListener('click', async () => {
+            const stEd = document.getElementById('admin-avatar-editor-status');
+            if (!adminAvatarEditId || !adminAvatarRegistryCache) {
+                if (stEd) stEd.textContent = '先にアバターを選択してください。';
+                return;
+            }
+            const regV = adminAvatarRegistryCache.registryVersion;
+            const scaleInp = document.getElementById('admin-avatar-display-scale');
+            const scaleNum = scaleInp ? parseFloat(String(scaleInp.value)) : NaN;
+            if (!Number.isFinite(scaleNum)) {
+                if (stEd) stEd.textContent = '表示倍率に数値を入力してください。';
+                return;
+            }
+            if (stEd) stEd.textContent = '保存中…';
+            try {
+                const r = await fetch(`/admin/avatars/${encodeURIComponent(adminAvatarEditId)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ registryVersion: regV, displayScale: scaleNum }),
+                });
+                const j = await r.json().catch(() => ({}));
+                if (r.status === 409) {
+                    if (stEd) stEd.textContent = '他で更新されています。一覧を再読み込みしました。';
+                    await refreshAdminAvatarManagementPanel();
+                    return;
+                }
+                if (!r.ok) {
+                    if (stEd) stEd.textContent = j.error || '保存に失敗しました。';
+                    return;
+                }
+                adminAvatarRegistryCache = { ...adminAvatarRegistryCache, registryVersion: j.registryVersion };
+                if (stEd) stEd.textContent = '表示倍率を保存しました。';
                 await refreshAdminAvatarManagementPanel();
             } catch (e) {
                 console.error(e);

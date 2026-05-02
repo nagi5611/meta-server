@@ -142,8 +142,8 @@ async function resolveAvatarUrlForPreview(pathRel) {
     }
 }
 
-/** @typedef {{ id: string, glbPath?: string, signedUrl?: string|null, canonicalUrl?: string|null, isDefault?: boolean }} LoginAvatarDto */
-/** @typedef {{ animationMap?: Record<string, string> }} LoginAvatarDetailDto */
+/** @typedef {{ id: string, glbPath?: string, signedUrl?: string|null, canonicalUrl?: string|null, isDefault?: boolean, displayScale?: number }} LoginAvatarDto */
+/** @typedef {{ animationMap?: Record<string, string>, displayScale?: number }} LoginAvatarDetailDto */
 
 /** @typedef {{ dispose: () => void }} LoginAvatarPickerHandle */
 
@@ -509,8 +509,11 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
                 const box = new THREE.Box3().setFromObject(model);
                 const size = box.getSize(new THREE.Vector3());
                 const sz = Math.max(size.x, size.y, size.z) || 1;
-                // ユーザー指定: 既存比 0.2 倍
-                model.scale.multiplyScalar(0.35 / sz);us
+                const ds =
+                    typeof entry.displayScale === 'number' && Number.isFinite(entry.displayScale)
+                        ? entry.displayScale
+                        : 1;
+                model.scale.multiplyScalar((0.35 / sz) * ds);
                 root.add(model);
                 root.position.set(0, 0.02, 0);
                 scene.add(root);

@@ -1047,6 +1047,11 @@
                     <div id="admin-avatar-editor" class="admin-avatar-editor" hidden>
                         <h3 class="section-subtitle">選択中のアバター</h3>
                         <p class="status-text" id="admin-avatar-editor-meta"></p>
+                        <div class="field-row" style="max-width:360px">
+                            <label class="prop-label" for="admin-avatar-display-scale">表示倍率</label>
+                            <input type="number" id="admin-avatar-display-scale" class="prop-input full" min="0.05" max="10" step="0.05" value="1" />
+                        </div>
+                        <p class="hint" style="margin-top:4px">ゲーム内の基準表示（1.0）に対する大きさ。4 モーション未設定のときは下の「表示倍率を保存」で先に保存できます。</p>
                         <div class="admin-avatar-map-grid">
                             <div class="field-row">
                                 <label class="prop-label" for="admin-avatar-map-idle">idle</label>
@@ -1067,6 +1072,7 @@
                             <div id="admin-avatar-map-scalable-mount" class="admin-avatar-map-scalable-mount"></div>
                         </div>
                         <div class="btn-row" style="margin-top:10px;">
+                            <button type="button" id="btn-admin-avatar-save-scale" class="btn btn-secondary">表示倍率を保存</button>
                             <button type="button" id="btn-admin-avatar-save-map" class="btn btn-primary">マッピング保存</button>
                             <button type="button" id="btn-admin-avatar-set-default" class="btn btn-secondary">デフォルトに設定</button>
                             <button type="button" id="btn-admin-avatar-delete" class="btn btn-secondary">GLB を削除</button>

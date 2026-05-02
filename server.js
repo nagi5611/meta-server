@@ -69,6 +69,7 @@ import {
     resolveAvatarId,
     bumpRegistryVersion,
     syncActiveAvatarFromDefault,
+    normalizeDisplayScale,
 } from './lib/avatar-registry.js';
 import { syncLocalEnvToS3OnStartup, uploadLocalEnvFile, canonicalCdnUrlForEnvRelative } from './lib/s3-env-assets.js';
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
@@ -5679,6 +5680,7 @@ async function addAvatarToRegistry(req, res, makeDefault) {
             isDefault: false,
             animationClips: clips,
             animationMap: {},
+            displayScale: 1,
         };
         const hasAnyDefault = reg.avatars.some((a) => !!a.isDefault);
         if (makeDefault || !hasAnyDefault) {
@@ -5768,7 +5770,22 @@ app.patch('/admin/avatars/:id', express.json(), async (req, res) => {
         const entry = findAvatarById(reg, avatarId);
         if (!entry) return res.status(404).json({ error: 'avatar_not_found' });
         const rawMap = req.body?.animationMap;
+        const rawScaleIn = req.body?.displayScale;
         if (!rawMap || typeof rawMap !== 'object') {
+            if (typeof rawScaleIn === 'number' && Number.isFinite(rawScaleIn)) {
+                entry.displayScale = normalizeDisplayScale(rawScaleIn);
+                bumpRegistryVersion(reg);
+                writeAvatarRegistry(AVATARS_DIR, reg);
+                await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
+                io.emit('asset-invalidate', {
+                    urls: [
+                        avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
+                        canonicalCdnUrlForAvatarRelative(path.basename(entry.glbFilename)),
+                    ],
+                });
+                res.json({ success: true, registryVersion: reg.registryVersion, entry });
+                return;
+            }
             return res.status(400).json({ error: 'animationMap_required' });
         }
         const abs = path.join(AVATARS_DIR, path.basename(entry.glbFilename));
@@ -5811,6 +5828,9 @@ app.patch('/admin/avatars/:id', express.json(), async (req, res) => {
         entry.animationMap = animationMap;
         if (!hasCompleteAnimationMap(entry)) {
             return res.status(400).json({ error: 'animationMap_incomplete' });
+        }
+        if (typeof rawScaleIn === 'number' && Number.isFinite(rawScaleIn)) {
+            entry.displayScale = normalizeDisplayScale(rawScaleIn);
         }
         bumpRegistryVersion(reg);
         writeAvatarRegistry(AVATARS_DIR, reg);
@@ -6108,6 +6128,7 @@ app.get('/api/avatars', async (req, res) => {
                 id: a.id,
                 glbPath: pref ? `${pref}/${fn}` : `avatars/${fn}`,
                 isDefault: !!a.isDefault,
+                displayScale: normalizeDisplayScale(a.displayScale),
             };
             if (USE_S3_MODELS) {
                 item.canonicalUrl = canonicalCdnUrlForAvatarRelative(fn);
@@ -6166,6 +6187,7 @@ app.get('/api/avatar/:id', async (req, res) => {
             signedUrl,
             animationMap: entry.animationMap || {},
             animationClips: entry.animationClips || [],
+            displayScale: normalizeDisplayScale(entry.displayScale),
             fallbackPath: 'models/avatar.glb',
         });
     } catch (e) {
