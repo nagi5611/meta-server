@@ -3,14 +3,15 @@
 /**
  * 再起動 API を呼び出して結果を返す。
  * @param {string} endpoint
+ * @param {Record<string, string>} [body]
  * @returns {Promise<{ ok: boolean, message?: string, error?: string }>}
  */
-async function callRebootApi(endpoint) {
+async function callRebootApi(endpoint, body = {}) {
     const res = await fetch(endpoint, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(body),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -34,6 +35,10 @@ function mountAdminRebootPanel() {
     section.innerHTML = `
         <h2>Admin Reboot</h2>
         <p class="status-text">systemctl restart による Node サーバー再起動を実行します（管理者専用）。</p>
+        <div class="addon-admin-reboot-pin-row" id="addon-admin-reboot-pin-row" hidden>
+            <label class="addon-admin-reboot-pin-label" for="addon-admin-reboot-pin">再起動 PIN</label>
+            <input type="password" class="addon-admin-reboot-pin-input" id="addon-admin-reboot-pin" name="addon-admin-reboot-pin" autocomplete="off" />
+        </div>
         <div class="addon-admin-reboot-actions">
             <button type="button" class="btn btn-primary" id="addon-admin-reboot-node-btn">サーバー再起動 (systemctl)</button>
         </div>
@@ -43,7 +48,11 @@ function mountAdminRebootPanel() {
 
     const nodeBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById('addon-admin-reboot-node-btn'));
     const statusEl = document.getElementById('addon-admin-reboot-status');
+    const pinRow = document.getElementById('addon-admin-reboot-pin-row');
+    const pinInput = /** @type {HTMLInputElement | null} */ (document.getElementById('addon-admin-reboot-pin'));
     if (!nodeBtn || !statusEl) return;
+    /** @type {boolean} */
+    let pinRequired = false;
 
     const setStatus = (text, isError = false) => {
         statusEl.textContent = text;
@@ -62,9 +71,16 @@ function mountAdminRebootPanel() {
             });
             const cap = await res.json().catch(() => ({}));
             if (!res.ok || !cap.ok) throw new Error(cap.error || res.statusText);
+            pinRequired = cap.pinRequired === true;
+            if (pinRow) {
+                pinRow.hidden = !pinRequired;
+            }
+            if (pinInput && !pinRequired) {
+                pinInput.value = '';
+            }
             nodeBtn.disabled = !cap.allowNodeRestart;
             setStatus(
-                `方式=${cap.strategy || 'systemctl-restart'} / service=${cap.serviceName || '-'} / Node再起動=${cap.allowNodeRestart ? '可' : '不可'}`,
+                `方式=${cap.strategy || 'systemctl-restart'} / service=${cap.serviceName || '-'} / Node再起動=${cap.allowNodeRestart ? '可' : '不可'} / PIN=${pinRequired ? '必須' : '未設定'}`,
                 false
             );
         } catch (error) {
@@ -75,11 +91,19 @@ function mountAdminRebootPanel() {
     };
 
     nodeBtn.addEventListener('click', async () => {
+        if (pinRequired) {
+            const p = pinInput?.value ?? '';
+            if (!p) {
+                setStatus('再起動 PIN を入力してください。', true);
+                return;
+            }
+        }
         const ok = window.confirm('Node.js プロセスを再起動します。実行しますか？');
         if (!ok) return;
         setBusy(true);
         setStatus('Node再起動を要求中...');
-        const result = await callRebootApi('/admin/addons/admin-reboot/restart-node');
+        const payload = pinRequired && pinInput ? { pin: pinInput.value } : {};
+        const result = await callRebootApi('/admin/addons/admin-reboot/restart-node', payload);
         setBusy(false);
         if (!result.ok) return setStatus(`Node再起動に失敗: ${result.error || 'unknown_error'}`, true);
         setStatus(result.message || 'Node再起動を要求しました。', false);

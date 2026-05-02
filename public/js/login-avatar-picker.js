@@ -510,7 +510,7 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
                 const size = box.getSize(new THREE.Vector3());
                 const sz = Math.max(size.x, size.y, size.z) || 1;
                 // ユーザー指定: 既存比 0.2 倍
-                model.scale.multiplyScalar(0.35 / sz);
+                model.scale.multiplyScalar(0.35 / sz);us
                 root.add(model);
                 root.position.set(0, 0.02, 0);
                 scene.add(root);
