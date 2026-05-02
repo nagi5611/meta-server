@@ -13,11 +13,11 @@ async function callRebootApi(endpoint, body = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
-    const body = await res.json().catch(() => ({}));
+    const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-        return { ok: false, error: body.error || res.statusText };
+        return { ok: false, error: json.error || res.statusText };
     }
-    return { ok: true, message: body.message };
+    return { ok: true, message: json.message };
 }
 
 /**
