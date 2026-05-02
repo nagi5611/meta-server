@@ -1637,7 +1637,50 @@ function switchPanel(panelId) {
 }
 
 /**
- * アドオン一覧を取得して表示する（GET /admin/addons）
+ * アドオン設定エントリを .env 風テキスト（KEY=VALUE）に整形する
+ * @param {Array<{ key: string, value: string }>} entries
+ * @returns {string}
+ */
+function addonConfigEntriesToEnvText(entries) {
+    const list = [...entries].sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    return list.map((e) => `${String(e.key)}=${String(e.value ?? '')}`).join('\n');
+}
+
+/**
+ * .env 風テキストをパースしてキー→値の Map とエラー一覧を返す（空行・# コメントは無視、先頭の export を許容）
+ * @param {string} text
+ * @returns {{ map: Map<string, string>, errors: Array<{ line: number, message: string }> }}
+ */
+function parseAddonEnvText(text) {
+    const lines = text.split(/\r?\n/);
+    /** @type {Map<string, string>} */
+    const map = new Map();
+    /** @type {Array<{ line: number, message: string }>} */
+    const errors = [];
+    for (let i = 0; i < lines.length; i++) {
+        const lineNum = i + 1;
+        const raw = lines[i];
+        const trimmed = raw.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        let work = trimmed.replace(/^export\s+/i, '').trimStart();
+        const eq = work.indexOf('=');
+        if (eq < 0) {
+            errors.push({ line: lineNum, message: '「KEY=VALUE」形式である必要があります（= がありません）。' });
+            continue;
+        }
+        const key = work.slice(0, eq).trim();
+        const value = work.slice(eq + 1);
+        if (!key) {
+            errors.push({ line: lineNum, message: 'キーが空です。' });
+            continue;
+        }
+        map.set(key, value);
+    }
+    return { map, errors };
+}
+
+/**
+ * アドオン設定モーダル（.env 風エディタ）の DOM を一度だけ生成する
  */
 function ensureAddonConfigModal() {
     const existing = document.getElementById('addon-config-modal');
@@ -1652,20 +1695,14 @@ function ensureAddonConfigModal() {
                 <h3 id="addon-config-modal-title">アドオン設定</h3>
                 <button type="button" class="btn btn-icon" id="addon-config-modal-close" aria-label="閉じる">×</button>
             </div>
-            <p class="hint" id="addon-config-hint-primary">保存・削除後は Node プロセス再起動で反映されます。</p>
+            <p class="hint" id="addon-config-hint-primary">1行に1つ <code>KEY=VALUE</code>（.env と同様）。空行と <code>#</code> 始まりの行はコメントです。保存後は Node 再起動で反映されます。</p>
             <p class="hint" id="addon-config-hint-plugin" hidden></p>
-            <div class="addon-config-table-wrap">
-                <table class="players-table addon-config-table">
-                    <thead>
-                        <tr id="addon-config-table-head-row"><th id="addon-config-th-key">キー</th><th id="addon-config-th-value">値</th><th>操作</th></tr>
-                    </thead>
-                    <tbody id="addon-config-modal-tbody"></tbody>
-                </table>
+            <div class="addon-config-editor-toolbar">
+                <button type="button" class="btn btn-primary" id="addon-config-save-btn">保存</button>
+                <button type="button" class="btn btn-secondary" id="addon-config-reload-btn">再読込</button>
             </div>
-            <div class="addon-config-new-row">
-                <input id="addon-config-new-key" class="prop-input" type="text" placeholder="新規キー (例: systemdServiceName)">
-                <input id="addon-config-new-value" class="prop-input" type="text" placeholder="値">
-                <button type="button" class="btn btn-primary" id="addon-config-new-add">追加</button>
+            <div class="addon-config-editor-wrap">
+                <textarea id="addon-config-editor-text" class="addon-config-editor-text" aria-label="アドオン環境変数（KEY=VALUE）" spellcheck="false" wrap="off" rows="16" placeholder="# 例&#10;systemdServiceName=my-service&#10;MY_KEY=value"></textarea>
             </div>
             <p id="addon-config-modal-status" class="status-text" role="status"></p>
         </div>
@@ -1718,128 +1755,90 @@ async function deleteAddonConfigEntry(pluginId, key) {
     return body;
 }
 
-function renderAddonConfigRows(tbody, pluginId, entries, statusEl, refreshFn) {
-    tbody.innerHTML = '';
-    for (const item of entries) {
-        const tr = document.createElement('tr');
-        const tdKey = document.createElement('td');
-        const tdVal = document.createElement('td');
-        const tdAct = document.createElement('td');
-        const keyInput = document.createElement('input');
-        keyInput.type = 'text';
-        keyInput.className = 'prop-input addon-config-key-input';
-        keyInput.value = String(item.key || '');
-        const valInput = document.createElement('input');
-        valInput.type = 'text';
-        valInput.className = 'prop-input addon-config-value-input';
-        valInput.value = String(item.value || '');
-        const saveBtn = document.createElement('button');
-        saveBtn.type = 'button';
-        saveBtn.className = 'btn btn-primary';
-        saveBtn.textContent = '保存';
-        const delBtn = document.createElement('button');
-        delBtn.type = 'button';
-        delBtn.className = 'btn btn-secondary';
-        delBtn.textContent = '削除';
-
-        saveBtn.addEventListener('click', async () => {
-            const oldKey = String(item.key || '').trim();
-            const nextKey = keyInput.value.trim();
-            const nextVal = valInput.value;
-            if (!nextKey) {
-                statusEl.textContent = 'キーは必須です。';
-                return;
-            }
-            try {
-                if (oldKey !== nextKey && oldKey) {
-                    await deleteAddonConfigEntry(pluginId, oldKey);
-                }
-                await saveAddonConfigEntry(pluginId, nextKey, nextVal);
-                statusEl.textContent = '保存しました。Node を再起動してください。';
-                setAddonCatalogStatusText('アドオン設定を保存しました。Node を再起動してください。');
-                await refreshFn();
-            } catch (e) {
-                statusEl.textContent = String(e.message || e);
-            }
-        });
-
-        delBtn.addEventListener('click', async () => {
-            const key = keyInput.value.trim() || String(item.key || '').trim();
-            if (!key) return;
-            try {
-                await deleteAddonConfigEntry(pluginId, key);
-                statusEl.textContent = '削除しました。Node を再起動してください。';
-                setAddonCatalogStatusText('アドオン設定を削除しました。Node を再起動してください。');
-                await refreshFn();
-            } catch (e) {
-                statusEl.textContent = String(e.message || e);
-            }
-        });
-
-        tdKey.appendChild(keyInput);
-        tdVal.appendChild(valInput);
-        tdAct.append(saveBtn, delBtn);
-        tr.append(tdKey, tdVal, tdAct);
-        tbody.appendChild(tr);
+/**
+ * エディタ内容を検証し、DB 上のキーと差分同期する
+ * @param {string} pluginId
+ * @param {string} text
+ * @param {HTMLElement} statusEl
+ */
+async function saveAddonConfigFromEnvEditor(pluginId, text, statusEl) {
+    const { map, errors } = parseAddonEnvText(text);
+    if (errors.length) {
+        const slice = errors.slice(0, 6);
+        statusEl.textContent =
+            slice.map((e) => `行${e.line}: ${e.message}`).join(' ') + (errors.length > slice.length ? ' …' : '');
+        return;
+    }
+    let previous;
+    try {
+        previous = await fetchAddonConfigEntries(pluginId);
+    } catch (e) {
+        statusEl.textContent = String(e.message || e);
+        return;
+    }
+    const oldMap = new Map(previous.map((p) => [p.key, p.value]));
+    try {
+        for (const k of oldMap.keys()) {
+            if (!map.has(k)) await deleteAddonConfigEntry(pluginId, k);
+        }
+        for (const [k, v] of map) {
+            if (oldMap.get(k) !== v) await saveAddonConfigEntry(pluginId, k, v);
+        }
+        statusEl.textContent = '保存しました。Node を再起動してください。';
+        setAddonCatalogStatusText('アドオン設定を保存しました。Node を再起動してください。');
+        const fresh = await fetchAddonConfigEntries(pluginId);
+        const ta = /** @type {HTMLTextAreaElement | null} */ (document.getElementById('addon-config-editor-text'));
+        if (ta) ta.value = addonConfigEntriesToEnvText(fresh);
+    } catch (e) {
+        statusEl.textContent = String(e.message || e);
     }
 }
 
 async function openAddonConfigModal(pluginId) {
     const modal = ensureAddonConfigModal();
     const titleEl = document.getElementById('addon-config-modal-title');
-    const tbody = document.getElementById('addon-config-modal-tbody');
     const statusEl = document.getElementById('addon-config-modal-status');
-    const newKeyEl = /** @type {HTMLInputElement | null} */ (document.getElementById('addon-config-new-key'));
-    const newValEl = /** @type {HTMLInputElement | null} */ (document.getElementById('addon-config-new-value'));
-    const addBtn = document.getElementById('addon-config-new-add');
-    if (!titleEl || !tbody || !statusEl || !newKeyEl || !newValEl || !addBtn) return;
+    const textEl = /** @type {HTMLTextAreaElement | null} */ (document.getElementById('addon-config-editor-text'));
+    const saveBtn = document.getElementById('addon-config-save-btn');
+    const reloadBtn = document.getElementById('addon-config-reload-btn');
+    if (!titleEl || !statusEl || !textEl || !saveBtn || !reloadBtn) return;
 
     modal.dataset.pluginId = pluginId;
     titleEl.textContent = `アドオン設定: ${pluginId}`;
     const hintPlugin = document.getElementById('addon-config-hint-plugin');
-    const thKey = document.getElementById('addon-config-th-key');
-    const thVal = document.getElementById('addon-config-th-value');
     if (pluginId === 'avator-scalable-animations') {
         if (hintPlugin) {
             hintPlugin.hidden = false;
             hintPlugin.textContent =
-                'このアドオンでは「キー」にモーションの定義名（例: スクワット）、「値」にゲーム内で使う割り当てキー（例: 9, B）を入れます。従来どおり JSON の bindings を config.json や環境変数で渡すこともできます。';
+                'このアドオンは行ごとに「定義名=割り当てキー」（例: スクワット=9）と書きます。従来どおり JSON の bindings を config.json や環境変数で渡すこともできます。';
         }
-        if (thKey) thKey.textContent = '定義名';
-        if (thVal) thVal.textContent = '割り当てキー';
-        newKeyEl.placeholder = '定義名（例: スクワット）';
-        newValEl.placeholder = '割り当てキー（例: 9 または B）';
+        textEl.placeholder = '# 例: 定義名=割り当てキー\nスクワット=9\nジャンプ=B';
     } else {
         if (hintPlugin) {
             hintPlugin.hidden = true;
             hintPlugin.textContent = '';
         }
-        if (thKey) thKey.textContent = 'キー';
-        if (thVal) thVal.textContent = '値';
-        newKeyEl.placeholder = '新規キー (例: systemdServiceName)';
-        newValEl.placeholder = '値';
+        textEl.placeholder = '# 例\nsystemdServiceName=my-service\nMY_KEY=value';
     }
     statusEl.textContent = '読み込み中…';
     modal.hidden = false;
 
+    /** サーバーからエディタへ最新を反映する */
     const refreshFn = async () => {
         const entries = await fetchAddonConfigEntries(pluginId);
-        renderAddonConfigRows(tbody, pluginId, entries, statusEl, refreshFn);
-        statusEl.textContent = entries.length ? statusEl.textContent : '設定はまだありません。';
+        textEl.value = addonConfigEntriesToEnvText(entries);
+        statusEl.textContent = entries.length
+            ? '編集後は「保存」を押してください。'
+            : '設定はまだありません。KEY=VALUE 形式で入力して保存してください。';
     };
 
-    addBtn.onclick = async () => {
-        const key = newKeyEl.value.trim();
-        if (!key) {
-            statusEl.textContent = 'キーは必須です。';
-            return;
-        }
+    saveBtn.onclick = async () => {
+        await saveAddonConfigFromEnvEditor(pluginId, textEl.value, statusEl);
+    };
+
+    reloadBtn.onclick = async () => {
+        statusEl.textContent = '読み込み中…';
         try {
-            await saveAddonConfigEntry(pluginId, key, newValEl.value);
-            newKeyEl.value = '';
-            newValEl.value = '';
-            statusEl.textContent = '保存しました。Node を再起動してください。';
-            setAddonCatalogStatusText('アドオン設定を保存しました。Node を再起動してください。');
             await refreshFn();
         } catch (e) {
             statusEl.textContent = String(e.message || e);

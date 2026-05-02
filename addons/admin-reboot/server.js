@@ -1,6 +1,8 @@
 // addons/admin-reboot/server.js - Admin ステータスに再起動APIを提供
 import { timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { HOOKS } from '../../lib/hook-registry.js';
 
 /**
@@ -57,13 +59,18 @@ export default {
             : 'metaverse-simple';
         const rebootPin = typeof ctx.config.pin === 'string' ? ctx.config.pin.trim() : '';
         const pinRequired = rebootPin.length > 0;
+        const allowServerUpdate = parseBoolean(ctx.config.allowServerUpdate, true);
 
         ctx.hooks.on(HOOKS.EXPRESS_SETUP, ({ app }) => {
             app.get('/admin/addons/admin-reboot/capabilities', (_req, res) => {
+                const restartScriptPath = path.join(process.cwd(), 'restart.sh');
+                const restartScriptPresent = existsSync(restartScriptPath);
                 res.json({
                     ok: true,
                     plugin: ctx.pluginId,
                     allowNodeRestart,
+                    allowServerUpdate,
+                    restartScriptPresent,
                     pinRequired,
                     strategy: 'systemctl-restart',
                     serviceName,
@@ -85,6 +92,32 @@ export default {
                     return res.json({
                         ok: true,
                         message: `systemctl restart ${serviceName} を実行しました。`,
+                    });
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    return res.status(500).json({ ok: false, error: message });
+                }
+            });
+
+            app.post('/admin/addons/admin-reboot/server-update', (req, res) => {
+                if (!allowServerUpdate) {
+                    return res.status(403).json({ ok: false, error: 'server_update_disabled' });
+                }
+                if (pinRequired) {
+                    const given = req.body && typeof req.body.pin === 'string' ? req.body.pin : '';
+                    if (!safeStringEqual(given, rebootPin)) {
+                        return res.status(403).json({ ok: false, error: 'invalid_pin' });
+                    }
+                }
+                const restartScriptPath = path.resolve(process.cwd(), 'restart.sh');
+                if (!existsSync(restartScriptPath)) {
+                    return res.status(404).json({ ok: false, error: 'restart_script_missing' });
+                }
+                try {
+                    runDetachedCommand({ command: 'bash', args: [restartScriptPath] });
+                    return res.json({
+                        ok: true,
+                        message: `${restartScriptPath} を実行しました。`,
                     });
                 } catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
