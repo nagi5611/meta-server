@@ -1652,11 +1652,12 @@ function ensureAddonConfigModal() {
                 <h3 id="addon-config-modal-title">アドオン設定</h3>
                 <button type="button" class="btn btn-icon" id="addon-config-modal-close" aria-label="閉じる">×</button>
             </div>
-            <p class="hint">保存・削除後は Node プロセス再起動で反映されます。</p>
+            <p class="hint" id="addon-config-hint-primary">保存・削除後は Node プロセス再起動で反映されます。</p>
+            <p class="hint" id="addon-config-hint-plugin" hidden></p>
             <div class="addon-config-table-wrap">
                 <table class="players-table addon-config-table">
                     <thead>
-                        <tr><th>キー</th><th>値</th><th>操作</th></tr>
+                        <tr id="addon-config-table-head-row"><th id="addon-config-th-key">キー</th><th id="addon-config-th-value">値</th><th>操作</th></tr>
                     </thead>
                     <tbody id="addon-config-modal-tbody"></tbody>
                 </table>
@@ -1795,6 +1796,29 @@ async function openAddonConfigModal(pluginId) {
 
     modal.dataset.pluginId = pluginId;
     titleEl.textContent = `アドオン設定: ${pluginId}`;
+    const hintPlugin = document.getElementById('addon-config-hint-plugin');
+    const thKey = document.getElementById('addon-config-th-key');
+    const thVal = document.getElementById('addon-config-th-value');
+    if (pluginId === 'avator-scalable-animations') {
+        if (hintPlugin) {
+            hintPlugin.hidden = false;
+            hintPlugin.textContent =
+                'このアドオンでは「キー」にモーションの定義名（例: スクワット）、「値」にゲーム内で使う割り当てキー（例: 9, B）を入れます。従来どおり JSON の bindings を config.json や環境変数で渡すこともできます。';
+        }
+        if (thKey) thKey.textContent = '定義名';
+        if (thVal) thVal.textContent = '割り当てキー';
+        newKeyEl.placeholder = '定義名（例: スクワット）';
+        newValEl.placeholder = '割り当てキー（例: 9 または B）';
+    } else {
+        if (hintPlugin) {
+            hintPlugin.hidden = true;
+            hintPlugin.textContent = '';
+        }
+        if (thKey) thKey.textContent = 'キー';
+        if (thVal) thVal.textContent = '値';
+        newKeyEl.placeholder = '新規キー (例: systemdServiceName)';
+        newValEl.placeholder = '値';
+    }
     statusEl.textContent = '読み込み中…';
     modal.hidden = false;
 
