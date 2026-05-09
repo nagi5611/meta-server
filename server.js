@@ -805,6 +805,18 @@ function assertProductionSecurityBeforeListen() {
     if (sk.length < 16) {
         throw new Error('[security] NODE_ENV=production requires SOCKET_AUTH_SECRET (min 16 characters).');
     }
+    const adminPwEnv = String(process.env.ADMIN_PASSWORD ?? '').trim();
+    if (adminPwEnv.length < 16) {
+        throw new Error(
+            '[security] NODE_ENV=production requires ADMIN_PASSWORD in .env (min 16 characters). Do not rely on auto-generated passwords in production.'
+        );
+    }
+    const modCors = String(process.env.MODULE_SCRIPT_CORS_ORIGIN || '').trim();
+    if (modCors === '*' || modCors === '1') {
+        throw new Error(
+            '[security] NODE_ENV=production forbids MODULE_SCRIPT_CORS_ORIGIN=* or 1 (wildcard). Set a single explicit Origin (e.g. https://admin.example.com).'
+        );
+    }
     if (parseSocketAllowedOrigins().length === 0) {
         throw new Error(
             '[security] NODE_ENV=production requires SOCKET_CORS_ORIGINS (comma-separated browser origins, e.g. https://meta.example.com).'
@@ -3331,7 +3343,7 @@ io.on('connection', (socket) => {
         if (data.quaternion) {
             player.quaternion = data.quaternion;
         }
-        if (data.adminInvisible !== undefined) {
+        if (data.adminInvisible !== undefined && socket.data.isAdmin) {
             player.adminInvisible = !!data.adminInvisible;
         }
         if (data.animState !== undefined && data.animState !== null) {

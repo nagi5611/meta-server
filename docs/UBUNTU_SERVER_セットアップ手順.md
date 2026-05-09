@@ -215,7 +215,8 @@ BANDWIDTH_LIMIT_MBPS=100
 # PORT_HTTP_REDIRECT=80
 ```
 
-- `ADMIN_PASSWORD` は必ず強めのパスワードに変更する。
+- `ADMIN_PASSWORD` は必ず強めのパスワードに変更する。**`NODE_ENV=production` のときは `.env` に明示したパスワードが 16 文字未満だと起動に失敗する**（自動生成への依存不可）。あわせて `SOCKET_AUTH_SECRET`（16 文字以上）・`SOCKET_CORS_ORIGINS` が必須。`MODULE_SCRIPT_CORS_ORIGIN` に `*` や `1` は本番では起動拒否。
+- **`/pdfs`・`/images`・`/env` 等は認証なしで公開される**。機密ファイルをそのディレクトリに置かないこと（詳細は [nginx/README.md](../nginx/README.md) の「公開静的パス」）。
 - 外部から WebRTC を使う場合は `MEDIASOUP_ANNOUNCED_IP` に **このサーバーの公衆 IP またはドメイン** を設定する。
 - **HTTPS の取り方は2通りある**: (A) **nginx で TLS 終端**（推奨のことが多い）→ [nginx/README.md](../nginx/README.md)。`.env` は `USE_REVERSE_PROXY=1` とし、Node に `SSL_*` / `PORT=443` は原則不要。(B) **Node が 443 で直接 HTTPS** → 次節「5.」の Let's Encrypt と `.env` の `SSL_*` / `PORT=443` / `PORT_HTTP_REDIRECT=80`。
 
@@ -489,7 +490,7 @@ sudo ufw enable
 - [ ] build-essential, python3-minimal, git インストール
 - [ ] Node.js 22（NodeSource）インストール
 - [ ] リポジトリのクローン、`npm ci`、`npm run build`
-- [ ] `.env` 作成（`ADMIN_PASSWORD` と必要に応じて `MEDIASOUP_ANNOUNCED_IP` を設定）
+- [ ] `.env` 作成（本番なら `ADMIN_PASSWORD` 16 文字以上・`SOCKET_AUTH_SECRET`・`SOCKET_CORS_ORIGINS` 等。`MEDIASOUP_ANNOUNCED_IP` は WebRTC 用に設定）
 - [ ] HTTPS 用: 証明書の用意と `.env` の SSL_* / PORT 設定
 - [ ] 手動で `npm run start:prod` の動作確認
 - [ ] systemd サービス `meta-server.service` の作成・有効化
