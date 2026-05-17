@@ -27,7 +27,12 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { mergeAircraftPhysicsForObject } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
-import { loadPrefabGroupFromManifest, normalizePrefabManifest, resolvePrefabPartAssetPath } from './prefab-load-shared.js';
+import {
+    buildEncodedModelUrlFromPath,
+    loadPrefabGroupFromManifest,
+    normalizePrefabManifest,
+    resolvePrefabPartAssetPath
+} from './prefab-load-shared.js';
 
 /**
  * 足元 p・半径 R の球と AABB（ワールド空間 min/max）が交差するか
@@ -367,7 +372,11 @@ class SceneManager {
      * @returns {Promise<string>}
      */
     async _resolveModelHref(assetPath) {
-        return resolveModelAssetHref(String(assetPath || ''));
+        const s = String(assetPath || '').trim();
+        if (s.startsWith('plane/') && typeof window !== 'undefined') {
+            return buildEncodedModelUrlFromPath(s);
+        }
+        return resolveModelAssetHref(s);
     }
 
     /**

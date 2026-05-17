@@ -96,6 +96,9 @@ export async function fetchPrefabManifestJson(manifestPath, opts = {}) {
         if (!u) {
             u = await resolveModelAssetHref(rawPath);
         }
+    } else if (rawPath.startsWith('plane/') && typeof window !== 'undefined') {
+        // メタバース本番: /plane は Cookie 付きでオリジン配信。CDN に plane キーが無いと署名 URL でも 403 になり得る
+        u = buildEncodedModelUrlFromPath(rawPath);
     } else {
         u = await resolveModelAssetHref(rawPath);
     }
@@ -172,6 +175,8 @@ export async function loadPrefabGroupFromManifest({
         if (adminPlaneProxyBase && filePath.startsWith('plane/')) {
             const proxied = adminPlaneProxyUrl(filePath, adminPlaneProxyBase);
             resolved = proxied || (await resolveModelAssetHref(filePath));
+        } else if (filePath.startsWith('plane/') && typeof window !== 'undefined') {
+            resolved = buildEncodedModelUrlFromPath(filePath);
         } else {
             resolved = await resolveModelAssetHref(filePath);
         }
