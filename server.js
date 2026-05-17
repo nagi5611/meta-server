@@ -1738,6 +1738,8 @@ app.get('/admin/', basicAuth, sendAdminMetaverseIndex);
 
 // Apply basic auth to admin API routes
 app.use('/admin', basicAuth);
+/** 管理画面（Basic 済み）から plane プレハブを取得する。/plane は S3 本番で Socket Cookie 必須のため別経路 */
+app.use('/admin/plane-asset', express.static(PLANE_DIR));
 
 app.get('/admin/addons', (req, res) => {
     try {

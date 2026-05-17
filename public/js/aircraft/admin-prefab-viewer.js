@@ -234,6 +234,7 @@ export class AdminAircraftPrefabViewer {
             manifestPath,
             createGLTFLoader: () => createGLTFLoader(),
             onXhrProgress: () => {},
+            adminPlaneProxyBase: '/admin/plane-asset',
         });
         void totalTris;
         this._prefabRoot = group;

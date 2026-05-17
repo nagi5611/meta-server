@@ -69,13 +69,49 @@ export function normalizePrefabManifest(manifest) {
 }
 
 /**
+ * plane/ で始まるパスを /admin/plane-asset 配下の URL に写す（管理 Basic 配下で取得）
+ * @param {string} planeRelativePath 例 plane/foo-prefab-manifest.json
+ * @param {string} adminBase 例 /admin/plane-asset
+ * @returns {string}
+ */
+export function adminPlaneProxyUrl(planeRelativePath, adminBase) {
+    const p = String(planeRelativePath || '').trim().replace(/^\//, '');
+    const base = String(adminBase || '').replace(/\/+$/, '');
+    if (!base || !p.startsWith('plane/')) return '';
+    return `${base}/${p.slice('plane/'.length)}`;
+}
+
+/**
  * マニフェスト URL から JSON を取得
  * @param {string} manifestPath
+ * @param {{ adminPlaneProxyBase?: string }} [opts] adminPlaneProxyBase 指定時、plane/ パスは /admin/plane-asset 経由（Basic 配下）
  * @returns {Promise<object>}
  */
-export async function fetchPrefabManifestJson(manifestPath) {
-    const u = await resolveModelAssetHref(String(manifestPath || ''));
-    const credentials = typeof window !== 'undefined' && u.startsWith(window.location.origin) ? 'same-origin' : 'omit';
+export async function fetchPrefabManifestJson(manifestPath, opts = {}) {
+    const rawPath = String(manifestPath || '').trim();
+    const proxyBase = String(opts.adminPlaneProxyBase || '').trim();
+    let u;
+    if (proxyBase && rawPath.startsWith('plane/')) {
+        u = adminPlaneProxyUrl(rawPath, proxyBase);
+        if (!u) {
+            u = await resolveModelAssetHref(rawPath);
+        }
+    } else {
+        u = await resolveModelAssetHref(rawPath);
+    }
+    let credentials = 'omit';
+    if (typeof window !== 'undefined') {
+        try {
+            const abs = u.startsWith('http://') || u.startsWith('https://')
+                ? new URL(u)
+                : new URL(u, window.location.origin);
+            if (abs.origin === window.location.origin) {
+                credentials = 'include';
+            }
+        } catch {
+            credentials = 'omit';
+        }
+    }
     const mRes = await fetch(u, { credentials });
     if (!mRes.ok) {
         throw new Error(`マニフェストの取得に失敗: ${manifestPath}（HTTP ${mRes.status}）`);
@@ -106,10 +142,18 @@ export function gltfLoaderPathAndFile(fullUrl) {
  * @param {string} options.manifestPath models/ から始まるマニフェスト相対パス
  * @param {() => import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader} options.createGLTFLoader
  * @param {(name: string, xhr: ProgressEvent, partIndex: number, partCount: number) => void} [options.onXhrProgress]
+ * @param {string} [options.adminPlaneProxyBase] 指定時、plane/ で始まるマニフェスト・パーツは /admin/plane-asset 経由で取得（管理画面 Basic）
  * @returns {Promise<{ group: import('three').Group, manifest: ReturnType<typeof normalizePrefabManifest>, totalTris: number }>}
  */
-export async function loadPrefabGroupFromManifest({ THREE, existingGroup, manifestPath, createGLTFLoader, onXhrProgress }) {
-    const raw = await fetchPrefabManifestJson(manifestPath);
+export async function loadPrefabGroupFromManifest({
+    THREE,
+    existingGroup,
+    manifestPath,
+    createGLTFLoader,
+    onXhrProgress,
+    adminPlaneProxyBase,
+}) {
+    const raw = await fetchPrefabManifestJson(manifestPath, { adminPlaneProxyBase });
     const man = normalizePrefabManifest(raw);
     if (!man.parts.length) {
         throw new Error('prefab マニフェストに .glb パーツがありません');
@@ -124,7 +168,13 @@ export async function loadPrefabGroupFromManifest({ THREE, existingGroup, manife
     const partCount = man.parts.length;
     const factories = man.parts.map((p, i) => async () => {
         const filePath = resolvePrefabPartAssetPath(p.file);
-        const resolved = await resolveModelAssetHref(filePath);
+        let resolved;
+        if (adminPlaneProxyBase && filePath.startsWith('plane/')) {
+            const proxied = adminPlaneProxyUrl(filePath, adminPlaneProxyBase);
+            resolved = proxied || (await resolveModelAssetHref(filePath));
+        } else {
+            resolved = await resolveModelAssetHref(filePath);
+        }
         return new Promise((resolve, reject) => {
             const loader = createGLTFLoader();
             const isHttpsAbs = /^https:\/\//i.test(resolved);
