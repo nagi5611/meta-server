@@ -223,18 +223,19 @@ export class AdminAircraftPrefabViewer {
     }
 
     /**
-     * @param {string} manifestPath models/ からの相対
+     * @param {string} manifestPath models/ または plane/ からの相対（例 plane/Foo-prefab-manifest.json）
      * @returns {Promise<void>}
      */
     async loadFromManifest(manifestPath) {
         this.disposePrefabOnly();
-        const group = await loadPrefabGroupFromManifest({
+        const { group, totalTris } = await loadPrefabGroupFromManifest({
             THREE,
             existingGroup: null,
             manifestPath,
             createGLTFLoader: () => createGLTFLoader(),
             onXhrProgress: () => {},
         });
+        void totalTris;
         this._prefabRoot = group;
         this._scene.add(group);
         this._frameObject(group);

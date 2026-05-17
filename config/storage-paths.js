@@ -40,6 +40,8 @@ function getStoragePathsFromSrcDirectory(srcDirectory) {
         SRC_DIRECTORY: base,
         DATA_DIR: dataDir,
         MODELS_DIR: path.join(base, 'models'),
+        /** 飛行機 prefab 専用（/plane で配信・S3 は models と同バケットで plane/ キー接頭辞） */
+        PLANE_DIR: path.join(base, 'plane'),
         AVATARS_DIR: path.join(base, 'avatars'),
         PDFS_DIR: path.join(base, 'pdfs'),
         IMAGES_DIR: path.join(base, 'images'),
@@ -63,6 +65,7 @@ function getStoragePathsFromExplicitEnv() {
         SRC_DIRECTORY: null,
         DATA_DIR: null,
         MODELS_DIR: modelsDir,
+        PLANE_DIR: path.join(path.dirname(modelsDir), 'plane'),
         AVATARS_DIR: path.join(path.dirname(modelsDir), 'avatars'),
         PDFS_DIR: requireEnv('META_PDFS_DIR'),
         IMAGES_DIR: requireEnv('META_IMAGES_DIR'),
@@ -98,6 +101,7 @@ export function validateAndPrepareStoragePaths() {
         ensureDirExists(STORAGE_PATHS.DATA_DIR, 'META_SRC_DIRECTORY');
     }
     ensureDirExists(STORAGE_PATHS.MODELS_DIR, 'META_MODELS_DIR');
+    ensureDirExists(STORAGE_PATHS.PLANE_DIR, 'PLANE_DIR');
     ensureDirExists(STORAGE_PATHS.AVATARS_DIR, 'META_AVATARS_DIR');
     ensureDirExists(STORAGE_PATHS.PDFS_DIR, 'META_PDFS_DIR');
     ensureDirExists(STORAGE_PATHS.IMAGES_DIR, 'META_IMAGES_DIR');

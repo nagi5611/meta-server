@@ -568,6 +568,7 @@ function writeCharts(charts) {
 }
 
 const MODELS_DIR = STORAGE_PATHS.MODELS_DIR;
+const PLANE_DIR = STORAGE_PATHS.PLANE_DIR;
 const AVATARS_DIR = STORAGE_PATHS.AVATARS_DIR;
 const PDFS_DIR = STORAGE_PATHS.PDFS_DIR;
 const IMAGES_DIR = STORAGE_PATHS.IMAGES_DIR;
@@ -697,7 +698,7 @@ function decodeLikelyMojibakeFilename(filename) {
 
 /**
  * クライアントのキャッシュ無効化用に、静的配信と同じ URL パスを組み立てる
- * @param {'models' | 'avatars' | 'pdfs' | 'env' | 'images' | 'chart-bgm'} base
+ * @param {'models' | 'avatars' | 'pdfs' | 'env' | 'images' | 'chart-bgm' | 'plane'} base
  * @param {string} filename
  * @returns {string}
  */
@@ -719,6 +720,13 @@ function publicAssetUrlForCache(base, filename) {
                 return publicAssetUrlCacheForAvatars(posix);
             }
             return '/avatars/' + tail;
+        }
+        case 'plane': {
+            if (USE_S3_MODELS) {
+                const posix = parts.join('/');
+                return publicAssetUrlCacheForModels(`plane/${posix}`.replace(/^\/+/, ''));
+            }
+            return '/plane/' + tail;
         }
         case 'models':
         default: {
@@ -1812,6 +1820,13 @@ app.use('/models', (req, res, next) => {
         return res.status(403).type('txt').send('モデルは認証されたメタバースセッションからのみ取得できます');
     }
     modelsStaticMiddleware(req, res, next);
+});
+const planeStaticMiddleware = express.static(PLANE_DIR);
+app.use('/plane', (req, res, next) => {
+    if (USE_S3_MODELS && !metaverseModelsAccessAllowed(req)) {
+        return res.status(403).type('txt').send('モデルは認証されたメタバースセッションからのみ取得できます');
+    }
+    planeStaticMiddleware(req, res, next);
 });
 const avatarsStaticMiddleware = express.static(AVATARS_DIR);
 app.use('/avatars', (req, res, next) => {
@@ -5469,6 +5484,113 @@ app.post('/admin/upload-prefab-zip', uploadPrefabZip.single('zip'), async (req, 
         console.error('POST /admin/upload-prefab-zip error:', err);
         return res.status(500).json({
             error: 'Failed to process prefab zip',
+            detail: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+
+app.get('/admin/plane-prefab-manifests', (req, res) => {
+    try {
+        if (!fs.existsSync(PLANE_DIR)) {
+            return res.json([]);
+        }
+        const names = fs
+            .readdirSync(PLANE_DIR)
+            .filter((n) => n.toLowerCase().endsWith('-prefab-manifest.json'))
+            .map((n) => decodeLikelyMojibakeFilename(n))
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        res.json(names);
+    } catch (err) {
+        console.error('GET /admin/plane-prefab-manifests error:', err);
+        res.status(500).json({ error: 'Failed to list plane prefab manifests' });
+    }
+});
+
+app.post('/admin/upload-plane-prefab-zip', uploadPrefabZip.single('zip'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file or invalid file' });
+    }
+    const origName = getSafeUploadedFilename(req, req.file.originalname);
+    const ext = path.extname(origName).toLowerCase();
+    const mimeOk =
+        req.file.mimetype === 'application/zip' ||
+        req.file.mimetype === 'application/x-zip-compressed' ||
+        req.file.mimetype === 'application/zip-compressed';
+    if (ext !== '.zip' && !mimeOk) {
+        return res.status(400).json({ error: 'Only .zip is allowed' });
+    }
+    const glbOpts = parseGlbOptionsFromPrefabBody(req.body);
+    if (glbOpts.parseError) {
+        return res.status(400).json({ error: glbOpts.parseError });
+    }
+    const confirm = req.query.confirm === '1';
+    const prefabPlaneZipOpts =
+        USE_S3_MODELS
+            ? {
+                  maxEdgePx: glbOpts.maxEdgePx,
+                  skipTextureResize: glbOpts.skipTextureResize,
+                  prefabBaseOverride: `${baseNameFromZipFilename(origName)}_v_${createModelVersionToken()}`,
+                  publicUrlPrefix: 'plane',
+              }
+            : {
+                  maxEdgePx: glbOpts.maxEdgePx,
+                  skipTextureResize: glbOpts.skipTextureResize,
+                  publicUrlPrefix: 'plane',
+              };
+
+    try {
+        const result = await applyPrefabBundleZipToModels(
+            req.file.buffer,
+            PLANE_DIR,
+            origName,
+            confirm,
+            prefabPlaneZipOpts
+        );
+        if (!result.success) {
+            if (result.status === 409) {
+                return res.status(409).json({
+                    error: result.error,
+                    code: result.code,
+                    conflictingFiles: result.conflictingFiles,
+                });
+            }
+            return res.status(result.status).json({ error: result.error, code: result.code });
+        }
+        if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
+            try {
+                const absPaths = result.writtenFiles.map((f) => path.join(PLANE_DIR, f));
+                await uploadLocalModelsPathsOrRollbackS3(absPaths, PLANE_DIR, { s3RelativePrefix: 'plane' });
+            } catch (eUp) {
+                const manBare = String(result.manifestRelativePath || '').replace(/^plane\/?/, '').trim();
+                if (manBare) {
+                    removePrefabBundleFromDisk(PLANE_DIR, manBare);
+                }
+                console.error('[upload-plane-prefab-zip] S3 upload failed, rolled back:', eUp);
+                return res.status(500).json({
+                    error:
+                        'S3 に反映できなかったためアップロードを破棄しました。環境変数 META_MODELS_S3_BUCKET 等を確認してください。',
+                    detail: eUp instanceof Error ? eUp.message : String(eUp),
+                    code: 's3_upload_failed',
+                });
+            }
+        }
+        const invUrls = result.writtenFiles.map((f) => publicAssetUrlForCache('plane', f));
+        if (invUrls.length) {
+            io.emit('asset-invalidate', { urls: invUrls });
+        }
+        return res.json({
+            success: true,
+            prefabManifest: result.manifestRelativePath,
+            prefabGroupId: result.prefabGroupId,
+            displayName: result.displayName,
+            writtenFiles: result.writtenFiles,
+            glbCount: result.glbCount,
+            textureResizeNotes: result.textureResizeNotes,
+        });
+    } catch (err) {
+        console.error('POST /admin/upload-plane-prefab-zip error:', err);
+        return res.status(500).json({
+            error: 'Failed to process plane prefab zip',
             detail: err instanceof Error ? err.message : String(err),
         });
     }

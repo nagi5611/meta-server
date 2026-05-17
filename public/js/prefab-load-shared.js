@@ -3,6 +3,18 @@
 import { countTrianglesInObject } from './model-load-limits.js';
 import { resolveModelAssetHref } from './asset-resolve.js';
 
+/**
+ * マニフェスト parts[].file を models/ または plane/ 付きの参照パスへ正規化
+ * @param {string} file
+ * @returns {string}
+ */
+export function resolvePrefabPartAssetPath(file) {
+    const f = String(file || '').trim().replace(/^\//, '');
+    if (!f) return f;
+    if (f.startsWith('models/') || f.startsWith('plane/')) return f;
+    return `models/${f}`;
+}
+
 /** マニフェスト内 .glb パーツの同時取得数（1 本の GLTFLoader は setPath 競合のためパーツごとに作る） */
 const PREFAB_PART_LOAD_CONCURRENCY = 24;
 
@@ -111,7 +123,7 @@ export async function loadPrefabGroupFromManifest({ THREE, existingGroup, manife
     group.userData.prefabGroupId = man.prefabGroupId;
     const partCount = man.parts.length;
     const factories = man.parts.map((p, i) => async () => {
-        const filePath = p.file.startsWith('models/') ? p.file : `models/${p.file}`;
+        const filePath = resolvePrefabPartAssetPath(p.file);
         const resolved = await resolveModelAssetHref(filePath);
         return new Promise((resolve, reject) => {
             const loader = createGLTFLoader();

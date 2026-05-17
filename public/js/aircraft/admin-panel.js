@@ -29,13 +29,14 @@ async function fetchJson(url, opt = {}) {
 
 /**
  * @param {File} file
+ * @param {string} endpoint 例 `/admin/upload-plane-prefab-zip`
  * @returns {Promise<{ prefabManifest: string }>}
  */
-async function uploadPrefabZip(file) {
+async function uploadPrefabZip(file, endpoint) {
     const postZip = (confirmFlag) =>
         new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            xhr.open('POST', `/admin/upload-prefab-zip${confirmFlag ? '?confirm=1' : ''}`);
+            xhr.open('POST', `${endpoint}${confirmFlag ? '?confirm=1' : ''}`);
             xhr.withCredentials = true;
             xhr.addEventListener('load', () => {
                 let json = null;
@@ -66,6 +67,44 @@ async function uploadPrefabZip(file) {
         throw new Error(r.json?.error || `HTTP ${r.status}`);
     }
     return r.json;
+}
+
+/**
+ * `plane/` 配下のマニフェスト一覧でセレクトを再構築する
+ * @returns {Promise<void>}
+ */
+async function reloadPlaneManifestSelect() {
+    const sel = /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-manifest-select'));
+    if (!sel) return;
+    /** @type {string[]} */
+    let names = [];
+    try {
+        const res = await fetch('/admin/plane-prefab-manifests', { credentials: 'include' });
+        const j = await res.json().catch(() => []);
+        names = Array.isArray(j) ? j : [];
+    } catch {
+        names = [];
+    }
+    const cur = String(draftAirframe?.prefabManifest || document.getElementById('ac-field-manifest')?.value || '').trim();
+    sel.innerHTML = '<option value="">（プレハブを選択）</option>';
+    if (cur && !names.some((n) => `plane/${n}` === cur)) {
+        const opt = document.createElement('option');
+        opt.value = cur;
+        opt.textContent = cur.startsWith('models/') ? `(互換 models) ${cur}` : cur;
+        sel.appendChild(opt);
+    }
+    for (const n of names) {
+        const val = `plane/${n}`;
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = n;
+        sel.appendChild(opt);
+    }
+    if (cur && [...sel.options].some((o) => o.value === cur)) {
+        sel.value = cur;
+    } else {
+        sel.value = '';
+    }
 }
 
 /**
@@ -185,6 +224,7 @@ async function selectAirframe(id) {
     const data = await fetchJson(`/admin/addons/aircraft/airframes/${encodeURIComponent(id)}`);
     draftAirframe = data.airframe;
     syncFormFromDraft();
+    await reloadPlaneManifestSelect();
     await reloadList();
     const manifest = String(draftAirframe?.prefabManifest || '').trim();
     if (manifest && viewer) {
@@ -199,7 +239,7 @@ async function selectAirframe(id) {
         }
     } else if (viewer) {
         viewer.disposePrefabOnly();
-        setStatus('マニフェスト未設定。ZIP をアップロードしてください。');
+        setStatus('マニフェスト未設定。左上でモデルをアップロードするか、右の一覧からプレハブを選んでください。');
     }
 }
 
@@ -249,6 +289,7 @@ async function saveDraft() {
     draftAirframe = data.airframe;
     syncFormFromDraft();
     setStatus('保存しました');
+    await reloadPlaneManifestSelect();
     await reloadList();
 }
 
@@ -263,8 +304,12 @@ export function initAircraftAdminPanel() {
     root.innerHTML = `
         <div class="ac-admin-layout">
             <aside class="ac-admin-left">
+                <div class="ac-plane-upload-toolbar">
+                    <button type="button" class="btn btn-secondary" id="ac-btn-upload-model">モデルをアップロードする</button>
+                    <input type="file" id="ac-plane-zip-input" accept=".zip,application/zip" hidden />
+                </div>
                 <h2 class="section-title">飛行機ライブラリ</h2>
-                <p class="hint">機体ごとに prefab ZIP を登録し、パーツロールとアニメーションを定義します。ワールドでは <code>prefabManifest</code> + <code>aircraft</code> + <code>aircraftLibraryId</code> を併用します。</p>
+                <p class="hint">機体ごとに <code>plane/</code> 上のプレハブを選び、パーツロールとアニメーションを定義します。ワールドでは <code>prefabManifest</code> + <code>aircraft</code> + <code>aircraftLibraryId</code> を併用します。</p>
                 <div class="ac-admin-actions">
                     <button type="button" class="btn btn-primary" id="ac-btn-add">機体を追加</button>
                     <button type="button" class="btn btn-secondary" id="ac-btn-delete" disabled>削除</button>
@@ -282,10 +327,12 @@ export function initAircraftAdminPanel() {
                 <div class="field-row"><label class="prop-label" for="ac-field-display">表示名</label>
                     <input type="text" id="ac-field-display" class="prop-input full" /></div>
                 <div class="field-row"><label class="prop-label" for="ac-field-manifest">prefab マニフェスト</label>
-                    <input type="text" id="ac-field-manifest" class="prop-input full" readonly placeholder="models/...-prefab-manifest.json" /></div>
+                    <input type="text" id="ac-field-manifest" class="prop-input full" readonly placeholder="plane/...-prefab-manifest.json" /></div>
                 <div class="field-row">
-                    <label class="prop-label" for="ac-zip-input">Prefab ZIP</label>
-                    <input type="file" id="ac-zip-input" accept=".zip,application/zip" />
+                    <label class="prop-label" for="ac-manifest-select">プレハブモデル（plane/）</label>
+                    <select id="ac-manifest-select" class="prop-input full">
+                        <option value="">（読み込み中）</option>
+                    </select>
                 </div>
                 <h3 class="section-subtitle">ロール割当</h3>
                 <div class="field-row">
@@ -362,6 +409,7 @@ export function initAircraftAdminPanel() {
             selectedAirframeId = null;
             viewer?.disposePrefabOnly();
             syncFormFromDraft();
+            await reloadPlaneManifestSelect();
             await reloadList();
             setStatus('削除しました');
         } catch (e) {
@@ -395,30 +443,26 @@ export function initAircraftAdminPanel() {
         if (v && viewer) viewer.selectByPath(v);
     });
 
-    document.getElementById('ac-zip-input')?.addEventListener('change', async (ev) => {
+    document.getElementById('ac-btn-upload-model')?.addEventListener('click', () => {
+        document.getElementById('ac-plane-zip-input')?.click();
+    });
+
+    document.getElementById('ac-plane-zip-input')?.addEventListener('change', async (ev) => {
         const input = /** @type {HTMLInputElement} */ (ev.target);
         const file = input.files && input.files[0];
         input.value = '';
-        if (!file || !draftAirframe?.id) {
-            setStatus('先に機体を選択してください', true);
-            return;
-        }
+        if (!file) return;
         if (!String(file.name || '').toLowerCase().endsWith('.zip')) {
             setStatus('.zip のみ', true);
             return;
         }
         try {
-            setStatus('ZIP をアップロード中…');
-            const json = await uploadPrefabZip(file);
+            setStatus('モデル ZIP をアップロード中…');
+            const json = await uploadPrefabZip(file, '/admin/upload-plane-prefab-zip');
             const pm = String(json.prefabManifest || '').trim();
             if (!pm) throw new Error('no_prefab_manifest_in_response');
-            draftAirframe.prefabManifest = pm;
-            const el = document.getElementById('ac-field-manifest');
-            if (el) el.value = pm;
-            await viewer?.loadFromManifest(pm);
-            refreshPathDropdown();
-            setStatus(`ZIP 完了: ${pm}`);
-            await saveDraft();
+            await reloadPlaneManifestSelect();
+            setStatus(`アップロード完了: ${pm}`);
         } catch (e) {
             if (e instanceof Error && e.message === 'cancelled') {
                 setStatus('キャンセルしました');
@@ -428,11 +472,40 @@ export function initAircraftAdminPanel() {
         }
     });
 
-    void reloadList().then(() => {
-        if (selectedAirframeId) {
-            void selectAirframe(selectedAirframeId).catch((e) => setStatus(String(e), true));
+    document.getElementById('ac-manifest-select')?.addEventListener('change', async (ev) => {
+        if (!draftAirframe?.id) {
+            setStatus('先に機体を選択してください', true);
+            return;
+        }
+        const v = /** @type {HTMLSelectElement} */ (ev.target).value.trim();
+        const el = document.getElementById('ac-field-manifest');
+        if (!v) {
+            draftAirframe.prefabManifest = '';
+            if (el && 'value' in el) /** @type {HTMLInputElement} */ (el).value = '';
+            viewer?.disposePrefabOnly();
+            syncFormFromDraft();
+            await saveDraft();
+            return;
+        }
+        draftAirframe.prefabManifest = v;
+        if (el && 'value' in el) /** @type {HTMLInputElement} */ (el).value = v;
+        try {
+            setStatus('プレハブを読み込み中…');
+            await viewer?.loadFromManifest(v);
+            refreshPathDropdown();
+            await saveDraft();
+        } catch (e) {
+            setStatus(e instanceof Error ? e.message : String(e), true);
         }
     });
+
+    void (async () => {
+        await reloadPlaneManifestSelect();
+        await reloadList();
+        if (selectedAirframeId) {
+            await selectAirframe(selectedAirframeId).catch((e) => setStatus(String(e), true));
+        }
+    })();
 
     const delBtn = document.getElementById('ac-btn-delete');
     if (delBtn) delBtn.disabled = !draftAirframe?.id;

@@ -1,4 +1,4 @@
-// public/sw.js — /models/* と /pdfs/* の Stale-While-Revalidate + Cache API
+// public/sw.js — /models/* /plane/* と /pdfs/* の Stale-While-Revalidate + Cache API
 // 注: CloudFront 等の別オリジンのモデル URL はここを通らずネットワークフェッチされる
 const CACHE_VERSION = 'v1';
 const CACHE_NAME = `metaverse-assets-${CACHE_VERSION}`;
@@ -13,7 +13,10 @@ let cacheWritesDisabled = false;
  */
 function isAssetUrl(url) {
     return url.origin === self.location.origin &&
-        (url.pathname.startsWith('/models/') || url.pathname.startsWith('/pdfs/') || url.pathname.startsWith('/env/'));
+        (url.pathname.startsWith('/models/') ||
+            url.pathname.startsWith('/plane/') ||
+            url.pathname.startsWith('/pdfs/') ||
+            url.pathname.startsWith('/env/'));
 }
 
 /**
@@ -127,7 +130,10 @@ self.addEventListener('message', (event) => {
                 } catch (_) {
                     continue;
                 }
-                if (!pathname.startsWith('/models/') && !pathname.startsWith('/pdfs/') && !pathname.startsWith('/env/')) continue;
+                if (!pathname.startsWith('/models/') &&
+                    !pathname.startsWith('/plane/') &&
+                    !pathname.startsWith('/pdfs/') &&
+                    !pathname.startsWith('/env/')) continue;
                 const keys = await cache.keys();
                 for (const req of keys) {
                     try {

@@ -26,7 +26,8 @@ import {
 import {
     loadPrefabGroupFromManifest,
     normalizePrefabManifest,
-    fetchPrefabManifestJson
+    fetchPrefabManifestJson,
+    resolvePrefabPartAssetPath
 } from './prefab-load-shared.js';
 import { normalizeWorldsLod } from './world-lod-normalize.js';
 import {
@@ -3248,11 +3249,7 @@ function addPrefabFromManifest(manifestPath) {
         try {
             const raw = await fetchPrefabManifestJson(manifestPath);
             const man = normalizePrefabManifest(raw);
-            const firstPart = man.parts[0]
-                ? (man.parts[0].file.startsWith('models/')
-                    ? man.parts[0].file
-                    : `models/${man.parts[0].file}`)
-                : manifestPath;
+            const firstPart = man.parts[0] ? resolvePrefabPartAssetPath(man.parts[0].file) : manifestPath;
             const cfg = {
                 position: { x: 0, y: 2, z: -5 },
                 rotation: { x: 0, y: 0, z: 0 },
