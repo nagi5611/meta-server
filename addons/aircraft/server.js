@@ -14,21 +14,50 @@ function isPlainObject(v) {
     return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+const BINDINGS_MAX_PATH_LEN = 2048;
+const BINDINGS_MAX_PATHS_PER_ROLE = 64;
+
 /**
  * @param {unknown} raw
- * @returns {{ ok: true, obj: Record<string, string> } | { ok: false, error: string }}
+ * @returns {{ ok: true, obj: Record<string, string[]> } | { ok: false, error: string }}
  */
 function parseBindings(raw) {
     if (raw == null) return { ok: true, obj: {} };
     if (!isPlainObject(raw)) return { ok: false, error: 'bindings must be an object' };
-    /** @type {Record<string, string>} */
+    /** @type {Record<string, string[]>} */
     const out = {};
     for (const [k, v] of Object.entries(raw)) {
         if (typeof k !== 'string' || !k.trim()) continue;
-        if (typeof v !== 'string') return { ok: false, error: `bindings.${k} must be a string path` };
-        const p = v.trim();
-        if (p.length > 2048) return { ok: false, error: `bindings.${k} path too long` };
-        out[k.trim()] = p;
+        const key = k.trim();
+        /** @type {string[]} */
+        const paths = [];
+        if (Array.isArray(v)) {
+            for (const item of v) {
+                if (typeof item !== 'string') {
+                    return { ok: false, error: `bindings.${key} must be an array of strings` };
+                }
+                const p = item.trim();
+                if (!p) continue;
+                if (p.length > BINDINGS_MAX_PATH_LEN) {
+                    return { ok: false, error: `bindings.${key} path too long` };
+                }
+                if (!paths.includes(p)) paths.push(p);
+                if (paths.length > BINDINGS_MAX_PATHS_PER_ROLE) {
+                    return { ok: false, error: `bindings.${key} too many paths` };
+                }
+            }
+        } else if (typeof v === 'string') {
+            const p = v.trim();
+            if (p) {
+                if (p.length > BINDINGS_MAX_PATH_LEN) {
+                    return { ok: false, error: `bindings.${key} path too long` };
+                }
+                paths.push(p);
+            }
+        } else {
+            return { ok: false, error: `bindings.${key} must be a string or string[]` };
+        }
+        if (paths.length) out[key] = paths;
     }
     return { ok: true, obj: out };
 }

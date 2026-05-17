@@ -666,6 +666,13 @@
                                                 <input type="text" id="obj-ac-id" class="prop-input" placeholder="例: hangar-plane-1">
                                             </div>
                                             <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-library-id">ライブラリ機体 ID</label>
+                                                <select id="obj-ac-library-id" class="prop-input full">
+                                                    <option value="">（未リンク）</option>
+                                                </select>
+                                            </div>
+                                            <p class="hint" style="margin:0 0 8px 4px;font-size:11px;">管理の「飛行機」で登録した機体を選ぶと、搭乗時にエンジンブレード等のアニメーションが再生されます。</p>
+                                            <div class="prop-row">
                                                 <label class="prop-label" for="obj-ac-radius">接近・操縦距離</label>
                                                 <input type="number" id="obj-ac-radius" class="prop-input num" step="0.1" min="0.1" value="4">
                                                 <span class="prop-unit">m</span>

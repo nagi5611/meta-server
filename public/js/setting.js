@@ -57,6 +57,10 @@ let modelList = [];
 let mtlList = []; // MTL ファイル名（models/ 配下、ファイル名のみ）
 /** @type {string[]} */
 let prefabManifestList = []; // models 直下 *-prefab-manifest.json ファイル名のみ（GET /admin/prefab-manifests）
+/** @type {string[]} */
+let planePrefabManifestList = []; // plane/ 用（GET /admin/plane-prefab-manifests）
+/** @type {{ id: string, displayName: string, prefabManifest: string }[]} */
+let aircraftLibraryList = [];
 let selectedModelPath = null; // 左パネル「モデル一覧」で選択中のモデル（models/xxx.glb または .obj）
 let pdfList = [];
 let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（pdfs/xxx.pdf）
@@ -154,6 +158,14 @@ function isObjPath(path) {
 const MODEL_ICON_3D_ASSET =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 20.5 12 12 21.5 3.5 12 12 2.5z"/><path d="M12 2.5v19M3.5 12h17"/></svg>';
 
+/** plane/ プレハブ一覧用（翼風シルエット） */
+const MODEL_ICON_PLANE_PREFAB =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18"/><path d="M12 3 9 12h6l-3-9"/><path d="M7 15l-3 5M17 15l3 5"/></svg>';
+
+/** 機体ライブラリ（搭乗可能） */
+const MODEL_ICON_AIRCRAFT_LIB =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12 14 9V7l-4-2-4 2v2l-7 3v2l7-2v5l-2 1v2h6v-2l-2-1v-5l7 2v-2z"/></svg>';
+
 /**
  * admin/models の生ファイル名と prefab マニフェスト一覧から、左パネル用エントリを作る。
  * 空間チャンク用の *.chunk_*.glb / *.chunk.json / *.chunks.json は一覧に出さない（レガシー資産用）。
@@ -191,10 +203,49 @@ function buildModelPrefabEntries(fileNames, manifestFileNames) {
 }
 
 /**
+ * ワールド編集左パネル用（GLB/OBJ + models/plane prefab + 機体ライブラリ）
+ * @returns {{ displayLabel: string, path: string, isPrefab?: boolean, kind?: string, prefabManifest?: string, aircraftLibraryId?: string }[]}
+ */
+function buildEditorModelPaletteEntries() {
+    const base = buildModelPrefabEntries(modelList, prefabManifestList);
+    /** @type {{ displayLabel: string, path: string, isPrefab?: boolean, kind?: string, prefabManifest?: string, aircraftLibraryId?: string }[]} */
+    const out = base.map((e) => ({
+        ...e,
+        kind: e.isPrefab ? 'prefab-models' : 'glb',
+    }));
+    const planes = Array.isArray(planePrefabManifestList) ? planePrefabManifestList : [];
+    for (const name of planes) {
+        const low = String(name || '').toLowerCase();
+        if (!low.endsWith('-prefab-manifest.json')) continue;
+        const baseName = String(name).replace(/-prefab-manifest\.json$/i, '');
+        out.push({
+            displayLabel: `${baseName}（飛行機 Prefab）`,
+            path: 'plane/' + String(name).replace(/^\//, ''),
+            isPrefab: true,
+            kind: 'prefab-plane',
+        });
+    }
+    for (const af of aircraftLibraryList) {
+        const id = String(af?.id || '').trim();
+        const pm = String(af?.prefabManifest || '').trim();
+        if (!id || !pm) continue;
+        out.push({
+            displayLabel: `${af.displayName || id}（機体ライブラリ）`,
+            path: `__aircraft__:${id}`,
+            kind: 'aircraft-lib',
+            prefabManifest: pm,
+            aircraftLibraryId: id,
+        });
+    }
+    out.sort((a, b) => a.displayLabel.localeCompare(b.displayLabel, 'ja'));
+    return out;
+}
+
+/**
  * 現在の選択がパレットに存在するか確認し、無ければ先頭へ寄せる
  */
 function syncModelPaletteSelectionAfterListChange() {
-    const pal = buildModelPrefabEntries(modelList, prefabManifestList);
+    const pal = buildEditorModelPaletteEntries();
     const ok = pal.some((e) => e.path === selectedModelPath);
     if (!ok && pal.length) {
         selectedModelPath = pal[0].path;
@@ -262,10 +313,12 @@ function playEditorGltfClipPreview(model, clipName) {
 async function loadModelFromConfig(config) {
     const pfm = String(config.prefabManifest || '').trim();
     if (pfm) {
+        const planeProxy = pfm.startsWith('plane/') ? '/admin/plane-asset' : undefined;
         const { group, totalTris } = await loadPrefabGroupFromManifest({
             THREE,
             manifestPath: pfm,
-            createGLTFLoader: createEditorGLTFLoader
+            createGLTFLoader: createEditorGLTFLoader,
+            adminPlaneProxyBase: planeProxy,
         });
         if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
             disposeObjectTree(group);
@@ -1299,6 +1352,26 @@ function syncLightFromPanel(opts) {
     }
 }
 
+/**
+ * オブジェクトパネル「ライブラリ機体 ID」セレクトを aircraftLibraryList で再構築する
+ * @returns {void}
+ */
+function refreshAircraftLibrarySelectOptions() {
+    const sel = document.getElementById('obj-ac-library-id');
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">（未リンク）</option>';
+    for (const af of aircraftLibraryList) {
+        const opt = document.createElement('option');
+        opt.value = af.id;
+        opt.textContent = `${af.displayName} (${af.id})`;
+        sel.appendChild(opt);
+    }
+    if (cur && [...sel.options].some((o) => o.value === cur)) {
+        sel.value = cur;
+    }
+}
+
 function updateVehicleAircraftFieldsVisibility() {
     const sel = document.getElementById('obj-vehicle-type');
     const wrap = document.getElementById('obj-aircraft-fields');
@@ -1443,6 +1516,16 @@ function updateObjectPanel(obj) {
             document.getElementById('obj-ac-chase-x').value = ch.x ?? 0;
             document.getElementById('obj-ac-chase-y').value = ch.y ?? 3;
             document.getElementById('obj-ac-chase-z').value = ch.z ?? 12;
+            refreshAircraftLibrarySelectOptions();
+            const libSel = document.getElementById('obj-ac-library-id');
+            const libCur = String(ac.aircraftLibraryId || '').trim();
+            if (libSel && 'value' in libSel) {
+                if (libCur && [...libSel.options].some((o) => o.value === libCur)) {
+                    /** @type {HTMLSelectElement} */ (libSel).value = libCur;
+                } else {
+                    /** @type {HTMLSelectElement} */ (libSel).value = '';
+                }
+            }
         } else {
             document.getElementById('obj-ac-id').value = '';
             document.getElementById('obj-ac-radius').value = 4;
@@ -1453,6 +1536,9 @@ function updateObjectPanel(obj) {
             document.getElementById('obj-ac-chase-x').value = 0;
             document.getElementById('obj-ac-chase-y').value = 3;
             document.getElementById('obj-ac-chase-z').value = 12;
+            refreshAircraftLibrarySelectOptions();
+            const libSel0 = document.getElementById('obj-ac-library-id');
+            if (libSel0 && 'value' in libSel0) /** @type {HTMLSelectElement} */ (libSel0).value = '';
         }
         const ovPh = document.getElementById('obj-ac-phys-override');
         const taPh = document.getElementById('obj-ac-phys-json');
@@ -1616,6 +1702,9 @@ function syncObjectFromPanel(opts) {
                     z: parseFloat(document.getElementById('obj-ac-chase-z').value) || 0
                 }
             };
+            const libSel = document.getElementById('obj-ac-library-id');
+            const libV = libSel && 'value' in libSel ? String(/** @type {HTMLSelectElement} */ (libSel).value || '').trim() : '';
+            if (libV) acPayload.aircraftLibraryId = libV;
             const ovPh = document.getElementById('obj-ac-phys-override');
             const taPh = document.getElementById('obj-ac-phys-json');
             if (ovPh?.checked && taPh && !taPh.disabled) {
@@ -2604,6 +2693,8 @@ async function loadWorldModelEntryForEditor(config, idx) {
                 z: ch.z ?? 12
             }
         };
+        const libId = String(a.aircraftLibraryId || '').trim();
+        if (libId) cfgBase.aircraft.aircraftLibraryId = libId;
         const ap = a.aircraftPhysics;
         if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
             const clipped = clipAircraftPhysicsPartialFromUser(ap);
@@ -2892,6 +2983,36 @@ async function fetchModels() {
     } catch {
         prefabManifestList = [];
     }
+    try {
+        const rPlane = await fetch('/admin/plane-prefab-manifests', { credentials: 'include' });
+        if (rPlane.ok) {
+            planePrefabManifestList = await rPlane.json();
+            if (!Array.isArray(planePrefabManifestList)) planePrefabManifestList = [];
+        } else {
+            planePrefabManifestList = [];
+        }
+    } catch {
+        planePrefabManifestList = [];
+    }
+    try {
+        const ra = await fetch('/admin/addons/aircraft/airframes', { credentials: 'include' });
+        if (ra.ok) {
+            const ja = await ra.json();
+            const rows = Array.isArray(ja.airframes) ? ja.airframes : [];
+            aircraftLibraryList = rows
+                .map((r) => ({
+                    id: String(r.id || '').trim(),
+                    displayName: String(r.displayName || r.id || ''),
+                    prefabManifest: String(r.prefabManifest || '').trim(),
+                }))
+                .filter((x) => x.id && x.prefabManifest);
+        } else {
+            aircraftLibraryList = [];
+        }
+    } catch {
+        aircraftLibraryList = [];
+    }
+    refreshAircraftLibrarySelectOptions();
 }
 
 async function fetchMtls() {
@@ -3185,7 +3306,7 @@ function renderModelList() {
     syncModelPaletteSelectionAfterListChange();
     const el = document.getElementById('model-list');
     el.innerHTML = '';
-    const pal = buildModelPrefabEntries(modelList, prefabManifestList);
+    const pal = buildEditorModelPaletteEntries();
     pal.forEach((ent) => {
         const path = ent.path;
         const isSel = path === selectedModelPath;
@@ -3196,9 +3317,21 @@ function renderModelList() {
         div.setAttribute('aria-label', ent.displayLabel);
         div.dataset.path = path;
         const icon = document.createElement('span');
-        icon.className = 'model-prefab-icon model-prefab-icon--model3d';
+        let iconClass = 'model-prefab-icon model-prefab-icon--model3d';
+        let svg = MODEL_ICON_3D_ASSET;
+        if (ent.kind === 'aircraft-lib') {
+            iconClass = 'model-prefab-icon model-prefab-icon--aircraft-lib';
+            svg = MODEL_ICON_AIRCRAFT_LIB;
+        } else if (ent.kind === 'prefab-plane') {
+            iconClass = 'model-prefab-icon model-prefab-icon--plane-prefab';
+            svg = MODEL_ICON_PLANE_PREFAB;
+        } else if (ent.kind === 'prefab-models') {
+            iconClass = 'model-prefab-icon model-prefab-icon--prefab';
+            svg = MODEL_ICON_3D_ASSET;
+        }
+        icon.className = iconClass;
         icon.setAttribute('aria-hidden', 'true');
-        icon.innerHTML = MODEL_ICON_3D_ASSET;
+        icon.innerHTML = svg;
         const label = document.createElement('span');
         label.className = 'model-prefab-label';
         label.textContent = ent.displayLabel;
@@ -3240,6 +3373,57 @@ async function selectWorld(id) {
 }
 
 /**
+ * 機体ライブラリ定義をワールドに配置（prefab + aircraft + aircraftLibraryId）
+ * @param {string} aircraftLibraryId
+ * @param {string} prefabManifest
+ */
+function addAircraftFromLibrary(aircraftLibraryId, prefabManifest) {
+    if (!selectedWorldId) return;
+    const libId = String(aircraftLibraryId || '').trim();
+    const pfm = String(prefabManifest || '').trim();
+    if (!libId || !pfm) return;
+    void (async () => {
+        try {
+            const raw = await fetchPrefabManifestJson(pfm, {
+                adminPlaneProxyBase: pfm.startsWith('plane/') ? '/admin/plane-asset' : undefined,
+            });
+            const man = normalizePrefabManifest(raw);
+            const firstPart = man.parts[0] ? resolvePrefabPartAssetPath(man.parts[0].file) : pfm;
+            const safe = libId.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const cfg = {
+                position: { x: 0, y: 2, z: -5 },
+                rotation: { x: 0, y: 0, z: 0 },
+                scale: { x: 1, y: 1, z: 1 },
+                path: firstPart,
+                prefabManifest: pfm,
+                prefabGroupId: man.prefabGroupId,
+                aircraft: {
+                    id: `ac-${safe}-${Date.now()}`,
+                    aircraftLibraryId: libId,
+                    radius: 6,
+                    label: '操縦する',
+                    cockpitOffset: { x: 0, y: 1.2, z: 0 },
+                    chaseOffset: { x: 0, y: 3, z: 12 },
+                },
+            };
+            const { model, triangleCount } = await loadModelFromConfig(cfg);
+            pushUndo();
+            model.position.set(0, 2, -5);
+            model.rotation.set(0, 0, 0);
+            model.scale.set(1, 1, 1);
+            applyModelShadowByTriangleCount(model, triangleCount);
+            model.userData.editId = 'm' + Date.now();
+            model.userData.config = cfg;
+            editGroup.add(model);
+            renderWorldObjectList();
+        } catch (err) {
+            console.error('Load aircraft library failed:', libId, err);
+            alert(err.message || String(err));
+        }
+    })();
+}
+
+/**
  * prefab マニフェスト（models/...-prefab-manifest.json）からグループを追加する
  * @param {string} manifestPath
  */
@@ -3247,7 +3431,11 @@ function addPrefabFromManifest(manifestPath) {
     if (!selectedWorldId) return;
     void (async () => {
         try {
-            const raw = await fetchPrefabManifestJson(manifestPath);
+            const raw = await fetchPrefabManifestJson(manifestPath, {
+                adminPlaneProxyBase: String(manifestPath || '').startsWith('plane/')
+                    ? '/admin/plane-asset'
+                    : undefined,
+            });
             const man = normalizePrefabManifest(raw);
             const firstPart = man.parts[0] ? resolvePrefabPartAssetPath(man.parts[0].file) : manifestPath;
             const cfg = {
@@ -3894,6 +4082,7 @@ function bindEvents() {
     });
     for (const acId of [
         'obj-ac-id',
+        'obj-ac-library-id',
         'obj-ac-radius',
         'obj-ac-label',
         'obj-ac-cockpit-x',
@@ -4438,7 +4627,7 @@ function bindEvents() {
     });
 
     document.getElementById('btn-add-model').addEventListener('click', () => {
-        const pal = buildModelPrefabEntries(modelList, prefabManifestList);
+        const pal = buildEditorModelPaletteEntries();
         if (!pal.length) {
             alert('モデルをアップロードするか、一覧から選択してください');
             return;
@@ -4447,6 +4636,10 @@ function bindEvents() {
         const path = match.path || '';
         if (!path) {
             alert('モデルをアップロードするか、一覧から選択してください');
+            return;
+        }
+        if (match.kind === 'aircraft-lib' && match.aircraftLibraryId && match.prefabManifest) {
+            addAircraftFromLibrary(match.aircraftLibraryId, match.prefabManifest);
             return;
         }
         if (match.isPrefab) {

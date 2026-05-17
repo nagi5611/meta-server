@@ -4,6 +4,7 @@ import {
     AIRFRAME_ROLE_KEYS,
     defaultAnimationJson,
     normalizeBindings,
+    bindingPathsForRole,
 } from './airframe-definition-schema.js';
 import { AdminAircraftPrefabViewer, collectNamePaths } from './admin-prefab-viewer.js';
 
@@ -165,7 +166,6 @@ function syncFormFromDraft() {
     const spin = typeof eb.spinAxis === 'string' && eb.spinAxis ? eb.spinAxis : 'z';
     const spinEl = document.getElementById('ac-anim-spinaxis');
     if (spinEl && 'value' in spinEl) /** @type {HTMLSelectElement} */ (spinEl).value = spin;
-    const bind = d?.bindings && typeof d.bindings === 'object' ? d.bindings : {};
     const roleSel = /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-role-select'));
     if (roleSel) {
         roleSel.innerHTML = '';
@@ -183,15 +183,47 @@ function syncFormFromDraft() {
     const bindList = document.getElementById('ac-bindings-list');
     if (bindList) {
         bindList.innerHTML = '';
+        const bind = d?.bindings && typeof d.bindings === 'object' ? d.bindings : {};
+        let any = false;
         for (const role of AIRFRAME_ROLE_KEYS) {
-            if (!bind[role]) continue;
-            const row = document.createElement('div');
-            row.className = 'ac-binding-row';
-            row.innerHTML = `<span class="ac-binding-role">${role}</span><code>${bind[role]}</code>`;
-            bindList.appendChild(row);
+            const paths = bindingPathsForRole(bind, role);
+            if (!paths.length) continue;
+            any = true;
+            const sec = document.createElement('div');
+            sec.className = 'ac-binding-role-block';
+            const h = document.createElement('div');
+            h.className = 'ac-binding-role-title';
+            h.textContent = role;
+            sec.appendChild(h);
+            for (const p of paths) {
+                const row = document.createElement('div');
+                row.className = 'ac-binding-row';
+                const code = document.createElement('code');
+                code.textContent = p;
+                row.appendChild(code);
+                const del = document.createElement('button');
+                del.type = 'button';
+                del.className = 'btn btn-sm btn-outline-secondary';
+                del.textContent = '削除';
+                del.dataset.role = role;
+                del.dataset.path = p;
+                del.addEventListener('click', () => {
+                    if (!draftAirframe) return;
+                    const cur = bindingPathsForRole(draftAirframe.bindings, role).filter((x) => x !== p);
+                    const b = { ...(draftAirframe.bindings || {}) };
+                    if (cur.length) b[role] = cur;
+                    else delete b[role];
+                    draftAirframe.bindings = normalizeBindings(b);
+                    syncFormFromDraft();
+                    setStatus(`削除: ${role} の「${p}」`);
+                });
+                row.appendChild(del);
+                sec.appendChild(row);
+            }
+            bindList.appendChild(sec);
         }
-        if (!bindList.children.length) {
-            bindList.innerHTML = '<p class="hint">未割当です。ビューアでオブジェクトを選びロールに割り当ててください。</p>';
+        if (!any) {
+            bindList.innerHTML = '<p class="hint">未割当です。ロールを選びパスを指定して「追加」してください。</p>';
         }
     }
     const delBtn = document.getElementById('ac-btn-delete');
@@ -343,7 +375,7 @@ export function initAircraftAdminPanel() {
                     <label class="prop-label" for="ac-path-select">オブジェクトパス</label>
                     <select id="ac-path-select" class="prop-input full"></select>
                 </div>
-                <button type="button" class="btn btn-primary" id="ac-btn-assign">選択パスをロールに割当</button>
+                <button type="button" class="btn btn-primary" id="ac-btn-add-binding">選択パスをロールに追加</button>
                 <div id="ac-bindings-list" class="ac-bindings-list"></div>
                 <h3 class="section-subtitle">アニメーション（エンジンブレード）</h3>
                 <div class="field-row"><label class="prop-label" for="ac-anim-maxaccel">角加速度上限 (rad/s²)</label>
@@ -421,7 +453,7 @@ export function initAircraftAdminPanel() {
         void saveDraft().catch((e) => setStatus(e instanceof Error ? e.message : String(e), true));
     });
 
-    document.getElementById('ac-btn-assign')?.addEventListener('click', () => {
+    document.getElementById('ac-btn-add-binding')?.addEventListener('click', () => {
         if (!draftAirframe) return;
         const role = /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-role-select'))?.value;
         const pathSel = /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-path-select'));
@@ -431,11 +463,16 @@ export function initAircraftAdminPanel() {
             setStatus('ロールとパスを選んでください', true);
             return;
         }
+        const arr = bindingPathsForRole(draftAirframe.bindings, role);
+        if (arr.includes(path)) {
+            setStatus('そのパスは既にこのロールにあります', true);
+            return;
+        }
         const b = { ...(draftAirframe.bindings || {}) };
-        b[role] = path;
+        b[role] = [...arr, path];
         draftAirframe.bindings = normalizeBindings(b);
         syncFormFromDraft();
-        setStatus(`割当: ${role} ← ${path}`);
+        setStatus(`追加: ${role} ← ${path}`);
     });
 
     document.getElementById('ac-path-select')?.addEventListener('change', (ev) => {

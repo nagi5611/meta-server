@@ -68,7 +68,7 @@ export default class AircraftController {
         this._passengerMouseBound = false;
         this._passengerAimScratch = new THREE.Vector3();
         this._passengerBaseObj = new THREE.Object3D();
-        /** @type {{ blade: THREE.Object3D, axis: 'x'|'y'|'z', params: { maxAccelRadPerS2: number, maxOmegaRadPerS: number }, state: { omega: number } }|null} */
+        /** @type {{ blades: { blade: THREE.Object3D, axis: 'x'|'y'|'z', params: { maxAccelRadPerS2: number, maxOmegaRadPerS: number }, state: { omega: number } }[] }|null} */
         this._libAnim = null;
         /** @type {string|null} */
         this._libAnimLoadingFor = null;
@@ -125,25 +125,37 @@ export default class AircraftController {
             .then(({ ok, j }) => {
                 if (this._libAnimLoadingFor !== loadingFor || this.slot?.aircraftLibraryId !== loadingFor) return;
                 if (!ok || !j?.ok || !j.airframe) return;
-                const path = typeof j.airframe.bindings?.engineBlade === 'string' ? j.airframe.bindings.engineBlade.trim() : '';
-                if (!path) return;
-                const blade = findObjectByNamePath(root, path);
-                if (!blade) {
-                    console.warn('[AircraftController] engineBlade path not found:', path);
-                    return;
+                const ebRaw = j.airframe.bindings?.engineBlade;
+                /** @type {string[]} */
+                const paths = [];
+                if (Array.isArray(ebRaw)) {
+                    for (const x of ebRaw) {
+                        const s = typeof x === 'string' ? x.trim() : '';
+                        if (s) paths.push(s);
+                    }
+                } else if (typeof ebRaw === 'string' && ebRaw.trim()) {
+                    paths.push(ebRaw.trim());
                 }
+                if (!paths.length) return;
                 const eb = j.airframe.animation?.engineBlade;
                 const ax = String(eb?.spinAxis || 'z').toLowerCase();
                 const axis = ax === 'x' || ax === 'y' || ax === 'z' ? ax : 'z';
-                this._libAnim = {
-                    blade,
-                    axis,
-                    params: {
-                        maxAccelRadPerS2: typeof eb?.maxAccelRadPerS2 === 'number' ? eb.maxAccelRadPerS2 : 24,
-                        maxOmegaRadPerS: typeof eb?.maxOmegaRadPerS === 'number' ? eb.maxOmegaRadPerS : 140,
-                    },
-                    state: { omega: 0 },
+                const params = {
+                    maxAccelRadPerS2: typeof eb?.maxAccelRadPerS2 === 'number' ? eb.maxAccelRadPerS2 : 24,
+                    maxOmegaRadPerS: typeof eb?.maxOmegaRadPerS === 'number' ? eb.maxOmegaRadPerS : 140,
                 };
+                /** @type {{ blade: THREE.Object3D, axis: 'x'|'y'|'z', params: typeof params, state: { omega: number } }[]} */
+                const blades = [];
+                for (const path of paths) {
+                    const blade = findObjectByNamePath(root, path);
+                    if (!blade) {
+                        console.warn('[AircraftController] engineBlade path not found:', path);
+                        continue;
+                    }
+                    blades.push({ blade, axis, params, state: { omega: 0 } });
+                }
+                if (!blades.length) return;
+                this._libAnim = { blades };
             })
             .catch((e) => {
                 console.warn('[AircraftController] aircraft library fetch failed:', e);
@@ -547,7 +559,7 @@ export default class AircraftController {
      * @param {number} dt
      */
     _updateLibraryVisuals(dt) {
-        if (!this._libAnim?.blade || !this.slot?.root) return;
+        if (!this._libAnim?.blades?.length || !this.slot?.root) return;
         const ph = this.physics;
         const root = this.slot.root;
         root.getWorldQuaternion(this._worldQuat);
@@ -555,14 +567,9 @@ export default class AircraftController {
         if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
         let t01 = ph.maxSpeed > 0 ? THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / ph.maxSpeed, 0, 1) : 0;
         if (this.keys.forward) t01 = Math.min(1, t01 + 0.22);
-        stepEngineBladeRotation(
-            this._libAnim.blade,
-            this._libAnim.axis,
-            this._libAnim.params,
-            t01,
-            dt,
-            this._libAnim.state
-        );
+        for (const b of this._libAnim.blades) {
+            stepEngineBladeRotation(b.blade, b.axis, b.params, t01, dt, b.state);
+        }
     }
 
     /**

@@ -11,11 +11,29 @@ export const AIRFRAME_ROLE_KEYS = [
 ];
 
 /**
- * 空のバインドマップ（ロール → 名前パス）
- * @returns {Record<string, string>}
+ * 空のバインドマップ（ロール → 名前パス配列）
+ * @returns {Record<string, string[]>}
  */
 export function emptyBindings() {
     return {};
+}
+
+/**
+ * ロールに紐づく名前パス一覧（レガシー単一文字列も配列として解釈）
+ * @param {unknown} rawBindings
+ * @param {string} role
+ * @returns {string[]}
+ */
+export function bindingPathsForRole(rawBindings, role) {
+    const r = String(role || '').trim();
+    if (!r || !isKnownRole(r)) return [];
+    if (!isObj(rawBindings)) return [];
+    const v = rawBindings[r];
+    if (Array.isArray(v)) {
+        return v.map((x) => String(x || '').trim()).filter(Boolean);
+    }
+    if (typeof v === 'string' && v.trim()) return [v.trim()];
+    return [];
 }
 
 /**
@@ -50,17 +68,30 @@ export function isKnownRole(role) {
 }
 
 /**
- * 保存前にバインドを正規化（未知キーは落とす）
+ * 保存前にバインドを正規化（未知キーは落とす。各ロールは複数パス可）
  * @param {unknown} raw
- * @returns {Record<string, string>}
+ * @returns {Record<string, string[]>}
  */
 export function normalizeBindings(raw) {
     if (!isObj(raw)) return {};
-    /** @type {Record<string, string>} */
+    /** @type {Record<string, string[]>} */
     const out = {};
+    const MAX_PER_ROLE = 64;
     for (const k of AIRFRAME_ROLE_KEYS) {
         const v = raw[k];
-        if (typeof v === 'string' && v.trim()) out[k] = v.trim();
+        /** @type {string[]} */
+        const paths = [];
+        if (Array.isArray(v)) {
+            for (const item of v) {
+                const p = typeof item === 'string' ? item.trim() : '';
+                if (!p) continue;
+                if (!paths.includes(p)) paths.push(p);
+                if (paths.length >= MAX_PER_ROLE) break;
+            }
+        } else if (typeof v === 'string' && v.trim()) {
+            paths.push(v.trim());
+        }
+        if (paths.length) out[k] = paths;
     }
     return out;
 }

@@ -1239,9 +1239,21 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     color: #3d6b4a;
 }
 
+.admin-panel-world-edit .model-prefab-icon--plane-prefab {
+    background: linear-gradient(135deg, rgba(70, 110, 160, 0.22), rgba(50, 80, 130, 0.08));
+    color: #2a5080;
+}
+
+.admin-panel-world-edit .model-prefab-icon--aircraft-lib {
+    background: linear-gradient(135deg, rgba(140, 90, 40, 0.22), rgba(100, 70, 30, 0.08));
+    color: #8a5520;
+}
+
 .admin-panel-world-edit .model-list .item.selected .model-prefab-icon,
 .admin-panel-world-edit .model-list .item.selected .model-prefab-icon--prefab,
-.admin-panel-world-edit .model-list .item.selected .model-prefab-icon--model3d {
+.admin-panel-world-edit .model-list .item.selected .model-prefab-icon--model3d,
+.admin-panel-world-edit .model-list .item.selected .model-prefab-icon--plane-prefab,
+.admin-panel-world-edit .model-list .item.selected .model-prefab-icon--aircraft-lib {
     background: rgba(255, 255, 255, 0.22);
     color: inherit;
 }
@@ -3801,6 +3813,16 @@ body.admin-dark .admin-panel-world-edit .model-prefab-icon--model3d {
     color: #a8d4b0;
 }
 
+body.admin-dark .admin-panel-world-edit .model-prefab-icon--plane-prefab {
+    background: linear-gradient(135deg, rgba(100, 150, 210, 0.22), rgba(255, 255, 255, 0.06));
+    color: #9ec8f0;
+}
+
+body.admin-dark .admin-panel-world-edit .model-prefab-icon--aircraft-lib {
+    background: linear-gradient(135deg, rgba(200, 150, 90, 0.2), rgba(255, 255, 255, 0.06));
+    color: #e0c49a;
+}
+
 body.admin-dark .admin-panel-world-edit .we-left-area button,
 body.admin-dark .admin-panel-world-edit .we-right-content button {
     background: #25231d;
@@ -4756,6 +4778,24 @@ body.admin-dark .admin-avatar-editor {
 .ac-binding-role {
     font-weight: 600;
     min-width: 100px;
+}
+.ac-binding-role-block {
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.ac-binding-role-title {
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: none;
+    color: #444;
+    margin-bottom: 4px;
+}
+body.admin-dark .ac-binding-role-block {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+body.admin-dark .ac-binding-role-title {
+    color: #ccc;
 }
 body.admin-dark .ac-admin-left,
 body.admin-dark .ac-admin-right {
