@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { mergeAircraftPhysicsFromWorld } from './aircraft-physics-defaults.js';
+import { findObjectByNamePath, stepEngineBladeRotation } from './runtime-prefab-aircraft-anim.js';
 
 const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
@@ -67,6 +68,10 @@ export default class AircraftController {
         this._passengerMouseBound = false;
         this._passengerAimScratch = new THREE.Vector3();
         this._passengerBaseObj = new THREE.Object3D();
+        /** @type {{ blade: THREE.Object3D, axis: 'x'|'y'|'z', params: { maxAccelRadPerS2: number, maxOmegaRadPerS: number }, state: { omega: number } }|null} */
+        this._libAnim = null;
+        /** @type {string|null} */
+        this._libAnimLoadingFor = null;
     }
 
     /**
@@ -100,6 +105,49 @@ export default class AircraftController {
             ? { ...slot.physics }
             : mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
         this._attachKeys();
+        this._scheduleLibraryAnim();
+    }
+
+    /**
+     * aircraftLibraryId があれば定義を取得しエンジンブレード参照を解決する
+     */
+    _scheduleLibraryAnim() {
+        this._libAnim = null;
+        this._libAnimLoadingFor = null;
+        const slot = this.slot;
+        const libId = slot?.aircraftLibraryId ? String(slot.aircraftLibraryId).trim() : '';
+        if (!libId || !slot?.root) return;
+        this._libAnimLoadingFor = libId;
+        const root = slot.root;
+        const loadingFor = libId;
+        fetch(`/api/addons/aircraft/airframes/${encodeURIComponent(libId)}`, { credentials: 'same-origin' })
+            .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
+            .then(({ ok, j }) => {
+                if (this._libAnimLoadingFor !== loadingFor || this.slot?.aircraftLibraryId !== loadingFor) return;
+                if (!ok || !j?.ok || !j.airframe) return;
+                const path = typeof j.airframe.bindings?.engineBlade === 'string' ? j.airframe.bindings.engineBlade.trim() : '';
+                if (!path) return;
+                const blade = findObjectByNamePath(root, path);
+                if (!blade) {
+                    console.warn('[AircraftController] engineBlade path not found:', path);
+                    return;
+                }
+                const eb = j.airframe.animation?.engineBlade;
+                const ax = String(eb?.spinAxis || 'z').toLowerCase();
+                const axis = ax === 'x' || ax === 'y' || ax === 'z' ? ax : 'z';
+                this._libAnim = {
+                    blade,
+                    axis,
+                    params: {
+                        maxAccelRadPerS2: typeof eb?.maxAccelRadPerS2 === 'number' ? eb.maxAccelRadPerS2 : 24,
+                        maxOmegaRadPerS: typeof eb?.maxOmegaRadPerS === 'number' ? eb.maxOmegaRadPerS : 140,
+                    },
+                    state: { omega: 0 },
+                };
+            })
+            .catch((e) => {
+                console.warn('[AircraftController] aircraft library fetch failed:', e);
+            });
     }
 
     unbind() {
@@ -111,6 +159,8 @@ export default class AircraftController {
         this._omegaRoll = 0;
         this._aircraftGrounded = false;
         this.physics = mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
+        this._libAnim = null;
+        this._libAnimLoadingFor = null;
     }
 
     /**
@@ -488,7 +538,31 @@ export default class AircraftController {
             this._aircraftGrounded = false;
         }
 
+        this._updateLibraryVisuals(dt);
         this._updateCamera();
+    }
+
+    /**
+     * ライブラリ定義に基づきプロペラ等をローカル回転（操縦中のみ）
+     * @param {number} dt
+     */
+    _updateLibraryVisuals(dt) {
+        if (!this._libAnim?.blade || !this.slot?.root) return;
+        const ph = this.physics;
+        const root = this.slot.root;
+        root.getWorldQuaternion(this._worldQuat);
+        this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
+        if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
+        let t01 = ph.maxSpeed > 0 ? THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / ph.maxSpeed, 0, 1) : 0;
+        if (this.keys.forward) t01 = Math.min(1, t01 + 0.22);
+        stepEngineBladeRotation(
+            this._libAnim.blade,
+            this._libAnim.axis,
+            this._libAnim.params,
+            t01,
+            dt,
+            this._libAnim.state
+        );
     }
 
     /**

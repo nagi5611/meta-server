@@ -18,6 +18,7 @@ const STORAGE_CAMERA = 'metaverse-aircraft-camera';
  * @property {import('three').Quaternion} parkedQuaternion
  * @property {import('three').Vector3} parkedScale
  * @property {Record<string, number>} [physics] — ワールド aircraftPhysics と models[].aircraft.aircraftPhysics をマージした操縦パラメータ
+ * @property {string|null} [aircraftLibraryId] — SQLite 機体ライブラリ ID（prefab + 視覚アニメ用）
  */
 
 export default class AircraftManager {

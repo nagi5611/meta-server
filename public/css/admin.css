@@ -4674,3 +4674,113 @@ body.admin-dark .admin-avatar-editor {
         grid-template-columns: 1fr;
     }
 }
+
+/* 飛行機ライブラリ（Aircraft アドオン管理） */
+.admin-panel-aircraft {
+    padding: 0;
+    overflow: hidden;
+}
+.ac-admin-layout {
+    display: flex;
+    height: calc(100vh - 72px);
+    min-height: 420px;
+    gap: 0;
+}
+.ac-admin-left {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 1px solid rgba(0, 0, 0, 0.1);
+    padding: 12px;
+    overflow: auto;
+}
+.ac-admin-center {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    gap: 6px;
+}
+.ac-viewer-mount {
+    flex: 1;
+    min-height: 200px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #1a1a22;
+}
+.ac-admin-right {
+    width: 320px;
+    flex-shrink: 0;
+    border-left: 1px solid rgba(0, 0, 0, 0.1);
+    padding: 12px;
+    overflow: auto;
+}
+.ac-admin-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0;
+}
+.ac-airframe-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.ac-airframe-item {
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 6px;
+    background: #fafafa;
+    cursor: pointer;
+    font-size: 13px;
+}
+.ac-airframe-item:hover {
+    background: #f0f7ff;
+}
+.ac-airframe-item.selected {
+    border-color: #1565c0;
+    background: #e3f2fd;
+}
+.ac-bindings-list {
+    margin: 8px 0 12px;
+    font-size: 12px;
+}
+.ac-binding-row {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    margin-bottom: 4px;
+}
+.ac-binding-role {
+    font-weight: 600;
+    min-width: 100px;
+}
+body.admin-dark .ac-admin-left,
+body.admin-dark .ac-admin-right {
+    border-color: rgba(255, 255, 255, 0.1);
+}
+body.admin-dark .ac-airframe-item {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+body.admin-dark .ac-airframe-item.selected {
+    background: rgba(21, 101, 192, 0.25);
+}
+@media (max-width: 900px) {
+    .ac-admin-layout {
+        flex-direction: column;
+        height: auto;
+        min-height: 0;
+    }
+    .ac-admin-left,
+    .ac-admin-right {
+        width: 100%;
+        border: none;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    }
+    .ac-viewer-mount {
+        min-height: 280px;
+    }
+}

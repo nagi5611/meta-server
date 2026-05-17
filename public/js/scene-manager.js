@@ -964,26 +964,22 @@ class SceneManager {
             this.environmentGroup.add(model);
 
             model.updateMatrixWorld(true);
-            // 飛行機ルートは操縦で移動するが、drawCull の球心は登録時固定のため、そのままだと離陸後に視距離外扱いで非表示になる
-            // prefab は親 Group は cull せず、各パーツ子のみ AABB + 視距離
-            if (!config.aircraft) {
-                const isPrefab = !!String(config.prefabManifest || '').trim();
-                if (isPrefab) {
-                    const lodId = String(config.lodId || '').trim();
-                    if (lodId) {
-                        model.userData.prefabLodRootMeta = { lodId };
-                        this._applyPrefabPartLodRanks(model, config);
-                        this._prefabLodRoots.push(model);
-                    }
-                    model.traverse((ch) => {
-                        if (ch.userData && ch.userData.isPrefabPart) {
-                            ch.userData.drawCullStyle = 'aabb';
-                            this._registerDrawCullTarget(ch);
-                        }
-                    });
-                } else {
-                    this._registerDrawCullTarget(model);
+            const isPrefab = !!String(config.prefabManifest || '').trim();
+            if (isPrefab) {
+                const lodId = String(config.lodId || '').trim();
+                if (lodId) {
+                    model.userData.prefabLodRootMeta = { lodId };
+                    this._applyPrefabPartLodRanks(model, config);
+                    this._prefabLodRoots.push(model);
                 }
+                model.traverse((ch) => {
+                    if (ch.userData && ch.userData.isPrefabPart) {
+                        ch.userData.drawCullStyle = 'aabb';
+                        this._registerDrawCullTarget(ch);
+                    }
+                });
+            } else if (!config.aircraft) {
+                this._registerDrawCullTarget(model);
             }
 
             if (config.animate) {
@@ -1084,11 +1080,6 @@ class SceneManager {
             }
 
             if (pfm) {
-                if (fullConfig.aircraft) {
-                    console.warn('[SceneManager] prefab と aircraft は同時に指定できません。スキップ:', pfm);
-                    snapBudgetDone();
-                    return;
-                }
                 try {
                     const nPlanParts = plan?.prefabManifestPlan?.parts?.length;
                     const nPart = nPlanParts && nPlanParts > 0 ? nPlanParts : 1;
@@ -1832,6 +1823,7 @@ class SceneManager {
         const physics = mergeAircraftPhysicsForObject(worldAircraftPhysics, aircraftCfg.aircraftPhysics);
         this.aircraftSlots.push({
             id,
+            aircraftLibraryId: String(aircraftCfg.aircraftLibraryId || '').trim() || null,
             position: { x: position.x, y: position.y, z: position.z },
             radius: typeof aircraftCfg.radius === 'number' && Number.isFinite(aircraftCfg.radius) ? aircraftCfg.radius : 4,
             label: aircraftCfg.label || '操縦する',
