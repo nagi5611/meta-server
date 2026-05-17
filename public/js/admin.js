@@ -1729,7 +1729,7 @@ function switchPanel(panelId) {
     }
     if (panelId === 'panel-aircraft' && !aircraftAdminInitialized) {
         aircraftAdminInitialized = true;
-        import('../../addons/aircraft/client/admin-panel.js')
+        import('/js/aircraft/admin-panel.js')
             .then((m) => {
                 m.initAircraftAdminPanel();
             })

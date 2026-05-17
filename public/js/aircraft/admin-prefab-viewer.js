@@ -1,10 +1,10 @@
-// addons/aircraft/client/admin-prefab-viewer.js — 管理パネル用 prefab プレビュー（Three.js）
+// public/js/aircraft/admin-prefab-viewer.js — 管理パネル用 prefab プレビュー（Three.js・/js 配下で配信）
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { loadPrefabGroupFromManifest } from '../../../public/js/prefab-load-shared.js';
+import { loadPrefabGroupFromManifest } from '/js/prefab-load-shared.js';
 
 const DRACO_DECODER_PATH = 'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
 

@@ -30,7 +30,7 @@
 
 - `client/init.js` が `MetaverseApp` に `AircraftController` / `AircraftManager` を結線
 - `public/js/addons/registry-game.js` から `game.js` を読み込み
-- 管理画面は `public/js/admin.js` が「飛行機」タブ初回表示時に `client/admin-panel.js` を動的 import
+- 管理画面の飛行機タブ UI は **`public/js/aircraft/`**（`/js/aircraft/*.js`）に置き、`public/js/admin.js` が初回表示時に `import('/js/aircraft/admin-panel.js')` で読み込む。本番で `/addons` を静的配信しない構成でも動作する。
 
 ## データ契約（コア）
 

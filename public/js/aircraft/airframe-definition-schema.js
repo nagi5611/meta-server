@@ -1,4 +1,4 @@
-// addons/aircraft/client/airframe-definition-schema.js — 機体ライブラリのロール列挙と既定アニメ JSON
+// public/js/aircraft/airframe-definition-schema.js — 機体ライブラリのロール列挙と既定アニメ JSON（管理画面用・/js 配下で配信）
 
 /** ワールド編集で割り当て可能なパーツロール（v1.1） */
 export const AIRFRAME_ROLE_KEYS = [

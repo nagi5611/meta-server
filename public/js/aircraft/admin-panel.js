@@ -1,4 +1,4 @@
-// addons/aircraft/client/admin-panel.js — 飛行機ライブラリ管理 UI（管理パネル「飛行機」タブ）
+// public/js/aircraft/admin-panel.js — 飛行機ライブラリ管理 UI（/js 配信・Nginx では /addons を経由しない）
 
 import {
     AIRFRAME_ROLE_KEYS,
