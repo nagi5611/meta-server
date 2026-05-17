@@ -47,6 +47,13 @@ export function defaultAnimationJson() {
             maxOmegaRadPerS: 140,
             spinAxis: 'z',
         },
+        flap: {
+            hingeAxis: 'x',
+            maxAngleRad: 0.52,
+            maxOmegaRadPerS: 1.1,
+            signL: 1,
+            signR: -1,
+        },
     };
 }
 

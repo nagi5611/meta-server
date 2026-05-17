@@ -594,7 +594,7 @@ ${t('ui.aircraftHudLinesHtml')}
 
     /**
      * 飛行機操縦中の計器表示（showAircraftHud 後・毎フレーム）
-     * @param {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean }|null} snap
+     * @param {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean, throttle?: number, flapLabel?: string, vfeMs?: number, vfeWarn?: boolean }|null} snap
      */
     updateAircraftHudTelemetry(snap) {
         if (!this.aircraftHud || !snap) return;
@@ -620,6 +620,20 @@ ${t('ui.aircraftHudLinesHtml')}
         if (wp) wp.textContent = q(snap.omegaPitch, 2);
         if (wr) wr.textContent = q(snap.omegaRoll, 2);
         if (g) g.textContent = snap.grounded ? t('ui.aircraftGrounded') : t('ui.aircraftAirborne');
+        const th = el('aircraft-hud-throttle');
+        if (th) th.textContent = typeof snap.throttle === 'number' && Number.isFinite(snap.throttle)
+            ? (snap.throttle * 100).toFixed(0)
+            : '—';
+        const fl = el('aircraft-hud-flap');
+        if (fl) fl.textContent = snap.flapLabel != null ? String(snap.flapLabel) : '—';
+        const vf = el('aircraft-hud-vfe');
+        if (vf) {
+            const lab = snap.flapLabel != null ? String(snap.flapLabel) : '';
+            if (lab === 'UP' || typeof snap.vfeMs !== 'number' || !Number.isFinite(snap.vfeMs)) vf.textContent = '—';
+            else vf.textContent = q(snap.vfeMs, 0);
+        }
+        const vw = el('aircraft-hud-vfewarn');
+        if (vw) vw.textContent = snap.vfeWarn ? t('ui.aircraftVfeWarn') : '';
     }
 
     hideAircraftHud() {

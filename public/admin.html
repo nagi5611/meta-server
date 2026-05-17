@@ -959,7 +959,7 @@
                                                 <label class="prop-label" for="world-aircraft-drag">速度維持率（毎フレーム乗算）</label>
                                                 <input type="number" id="world-aircraft-drag" class="prop-input num" step="0.001" min="0.5" max="0.99999">
                                             </div>
-                                            <p class="hint" style="margin-top:6px;">ヨー・ピッチは接地/空中で角加速度・最高角速度を別々に設定可能。ロールは最高角速度あり・姿勢上 ±30° で制限。入力を離すと角速度は angularDecel で減衰します。</p>
+                                            <p class="hint" style="margin-top:6px;">ヨー・ピッチは接地/空中で角加速度・最高角速度を別々に設定可能。ロールは最高角速度あり・バンクは <code>maxBankDeg</code>（既定 30°、787 向けは 67 など）で制限。入力を離すと角速度は angularDecel で減衰。ゲーム操作: 矢印=スロットル／フラップ、W/S=ピッチ、A/D=ロール、Q/E=ラダー。</p>
                                             <div class="prop-row">
                                                 <label class="prop-label" for="world-aircraft-yaw-accel-ground">ヨー角加速度（接地・ラダー）</label>
                                                 <input type="number" id="world-aircraft-yaw-accel-ground" class="prop-input num" step="0.1" min="0.05"><span class="prop-unit">rad/s²</span>
@@ -1004,13 +1004,13 @@
                                                 <label class="prop-label" for="world-aircraft-angular-decel">角速度減衰（入力オフ時）</label>
                                                 <input type="number" id="world-aircraft-angular-decel" class="prop-input num" step="0.1" min="0"><span class="prop-unit">rad/s²</span>
                                             </div>
-                                            <p class="hint" style="margin-top:6px;">接地中、ヨー入力がオフのとき <code>angularDecel</code> に加算される減速（左右別）。角速度の符号は内部値（D 側が正、A 側が負）。</p>
+                                            <p class="hint" style="margin-top:6px;">接地中、ヨー入力がオフのとき <code>angularDecel</code> に加算される減速（左右別）。角速度の符号は内部値（右/E 側が正、左/Q 側が負）。</p>
                                             <div class="prop-row">
-                                                <label class="prop-label" for="world-aircraft-yaw-ground-friction-left">接地ヨー摩擦（左/A・角速度負側）</label>
+                                                <label class="prop-label" for="world-aircraft-yaw-ground-friction-left">接地ヨー摩擦（左/Q・角速度負側）</label>
                                                 <input type="number" id="world-aircraft-yaw-ground-friction-left" class="prop-input num" step="0.1" min="0"><span class="prop-unit">rad/s²</span>
                                             </div>
                                             <div class="prop-row">
-                                                <label class="prop-label" for="world-aircraft-yaw-ground-friction-right">接地ヨー摩擦（右/D・角速度正側）</label>
+                                                <label class="prop-label" for="world-aircraft-yaw-ground-friction-right">接地ヨー摩擦（右/E・角速度正側）</label>
                                                 <input type="number" id="world-aircraft-yaw-ground-friction-right" class="prop-input num" step="0.1" min="0"><span class="prop-unit">rad/s²</span>
                                             </div>
                                             <p class="hint" style="margin-top:6px;">タイヤ（接地・速度）: 横滑り 0＝従来どおり即時除去。転がり抵抗は前後スピードを常時減衰（ブレーキとは別）。</p>
@@ -1025,6 +1025,35 @@
                                             <div class="prop-row">
                                                 <label class="prop-label" for="world-aircraft-wheel-brake-decel">タイヤブレーキ（接地中 Space）減速度</label>
                                                 <input type="number" id="world-aircraft-wheel-brake-decel" class="prop-input num" step="1" min="0.5"><span class="prop-unit">m/s²</span>
+                                            </div>
+                                            <p class="hint" style="margin-top:8px;">FBW 近似・スロットル: <code>throttleSpoolPerS</code> は矢印押下中のスロットル変化率（1/s）。<code>maxBankDeg</code> はバンク上限（度）。0 の <code>rudderAuthorityRefSpeedMs</code> は最高速度を参照速度に使う。</p>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-throttle-spool">スロットル変化率 throttleSpoolPerS</label>
+                                                <input type="number" id="world-aircraft-throttle-spool" class="prop-input num" step="0.05" min="0.05"><span class="prop-unit">1/s</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-max-bank-deg">バンク角上限 maxBankDeg</label>
+                                                <input type="number" id="world-aircraft-max-bank-deg" class="prop-input num" step="1" min="1" max="85"><span class="prop-unit">°</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-rudder-ref-speed">ラダー権限参照速度 rudderAuthorityRefSpeedMs（0=最高速度）</label>
+                                                <input type="number" id="world-aircraft-rudder-ref-speed" class="prop-input num" step="1" min="0"><span class="prop-unit">m/s</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-rudder-min-scale">高速時ラダー下限スケール rudderAuthorityMinScale</label>
+                                                <input type="number" id="world-aircraft-rudder-min-scale" class="prop-input num" step="0.01" min="0.05" max="1">
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-thrust-pitch-delta">推力ピッチ thrustPitchFromThrottleDelta</label>
+                                                <input type="number" id="world-aircraft-thrust-pitch-delta" class="prop-input num" step="0.01" min="0"><span class="prop-unit">rad·s/Δthrottle</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-thrust-pitch-relax">ピッチ無入力時の推力ピッチ緩和 thrustPitchRelaxNoInput</label>
+                                                <input type="number" id="world-aircraft-thrust-pitch-relax" class="prop-input num" step="0.1" min="0"><span class="prop-unit">1/s</span>
+                                            </div>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="world-aircraft-flap-pitch-down">フラップ時機首下げ権限 flapPitchDownAuthority</label>
+                                                <input type="number" id="world-aircraft-flap-pitch-down" class="prop-input num" step="0.05" min="0" max="1">
                                             </div>
                                         </div>
                                     </details>

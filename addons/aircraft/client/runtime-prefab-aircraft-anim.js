@@ -49,3 +49,30 @@ export function stepEngineBladeRotation(blade, axis, params, throttle01, dt, sta
     else if (axis === 'y') blade.rotation.y += w * dt;
     else blade.rotation.z += w * dt;
 }
+
+/**
+ * フラップメッシュのローカル軸角度を目標へ角速度上限付きで追従する（操縦中ローカル表示用）
+ * @param {THREE.Object3D} mesh
+ * @param {'x'|'y'|'z'} axis
+ * @param {number} targetRad
+ * @param {number} maxOmegaRadPerS
+ * @param {number} dt
+ * @param {{ angle: number }} state — mesh の当該軸上の累積角と同期（初回は mesh から読む想定）
+ */
+export function stepFlapDeflection(mesh, axis, targetRad, maxOmegaRadPerS, dt, state) {
+    const maxW = Math.max(0.01, Number(maxOmegaRadPerS) || 0.8);
+    let cur = state.angle;
+    if (!Number.isFinite(cur)) {
+        if (axis === 'x') cur = mesh.rotation.x;
+        else if (axis === 'y') cur = mesh.rotation.y;
+        else cur = mesh.rotation.z;
+        state.angle = cur;
+    }
+    const diff = targetRad - cur;
+    const step = Math.sign(diff) * Math.min(Math.abs(diff), maxW * dt);
+    cur += step;
+    state.angle = cur;
+    if (axis === 'x') mesh.rotation.x = cur;
+    else if (axis === 'y') mesh.rotation.y = cur;
+    else mesh.rotation.z = cur;
+}

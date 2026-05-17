@@ -2500,7 +2500,14 @@ function fillWorldAircraftPhysicsForm(world) {
         ['world-aircraft-yaw-ground-friction-right', m.yawGroundFrictionRight],
         ['world-aircraft-ground-tire-lateral-decel', m.groundTireLateralDecel],
         ['world-aircraft-ground-tire-rolling-decel', m.groundTireRollingDecel],
-        ['world-aircraft-wheel-brake-decel', m.wheelBrakeDecel]
+        ['world-aircraft-wheel-brake-decel', m.wheelBrakeDecel],
+        ['world-aircraft-throttle-spool', m.throttleSpoolPerS],
+        ['world-aircraft-max-bank-deg', m.maxBankDeg],
+        ['world-aircraft-rudder-ref-speed', m.rudderAuthorityRefSpeedMs],
+        ['world-aircraft-rudder-min-scale', m.rudderAuthorityMinScale],
+        ['world-aircraft-thrust-pitch-delta', m.thrustPitchFromThrottleDelta],
+        ['world-aircraft-thrust-pitch-relax', m.thrustPitchRelaxNoInput],
+        ['world-aircraft-flap-pitch-down', m.flapPitchDownAuthority]
     ];
     for (const [id, v] of ids) {
         const el = document.getElementById(id);
@@ -2540,7 +2547,14 @@ function readWorldAircraftPhysicsFromForm() {
         yawGroundFrictionRight: parse('world-aircraft-yaw-ground-friction-right', DEFAULT_AIRCRAFT_PHYSICS.yawGroundFrictionRight),
         groundTireLateralDecel: parse('world-aircraft-ground-tire-lateral-decel', DEFAULT_AIRCRAFT_PHYSICS.groundTireLateralDecel),
         groundTireRollingDecel: parse('world-aircraft-ground-tire-rolling-decel', DEFAULT_AIRCRAFT_PHYSICS.groundTireRollingDecel),
-        wheelBrakeDecel: parse('world-aircraft-wheel-brake-decel', DEFAULT_AIRCRAFT_PHYSICS.wheelBrakeDecel)
+        wheelBrakeDecel: parse('world-aircraft-wheel-brake-decel', DEFAULT_AIRCRAFT_PHYSICS.wheelBrakeDecel),
+        throttleSpoolPerS: parse('world-aircraft-throttle-spool', DEFAULT_AIRCRAFT_PHYSICS.throttleSpoolPerS),
+        maxBankDeg: parse('world-aircraft-max-bank-deg', DEFAULT_AIRCRAFT_PHYSICS.maxBankDeg),
+        rudderAuthorityRefSpeedMs: parse('world-aircraft-rudder-ref-speed', DEFAULT_AIRCRAFT_PHYSICS.rudderAuthorityRefSpeedMs),
+        rudderAuthorityMinScale: parse('world-aircraft-rudder-min-scale', DEFAULT_AIRCRAFT_PHYSICS.rudderAuthorityMinScale),
+        thrustPitchFromThrottleDelta: parse('world-aircraft-thrust-pitch-delta', DEFAULT_AIRCRAFT_PHYSICS.thrustPitchFromThrottleDelta),
+        thrustPitchRelaxNoInput: parse('world-aircraft-thrust-pitch-relax', DEFAULT_AIRCRAFT_PHYSICS.thrustPitchRelaxNoInput),
+        flapPitchDownAuthority: parse('world-aircraft-flap-pitch-down', DEFAULT_AIRCRAFT_PHYSICS.flapPitchDownAuthority)
     };
     return mergeAircraftPhysicsFromWorld(raw);
 }
@@ -5690,7 +5704,14 @@ function bindEvents() {
         'world-aircraft-yaw-ground-friction-right',
         'world-aircraft-ground-tire-lateral-decel',
         'world-aircraft-ground-tire-rolling-decel',
-        'world-aircraft-wheel-brake-decel'
+        'world-aircraft-wheel-brake-decel',
+        'world-aircraft-throttle-spool',
+        'world-aircraft-max-bank-deg',
+        'world-aircraft-rudder-ref-speed',
+        'world-aircraft-rudder-min-scale',
+        'world-aircraft-thrust-pitch-delta',
+        'world-aircraft-thrust-pitch-relax',
+        'world-aircraft-flap-pitch-down'
     ]) {
         document.getElementById(aircraftInputId)?.addEventListener('change', syncWorldAircraftPhysicsFromForm);
     }

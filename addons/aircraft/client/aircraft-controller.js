@@ -1,15 +1,36 @@
 // addons/aircraft/client/aircraft-controller.js — キネマティック飛行（四元数・-Z 前進・BVH 下向きレイ接地）
+// 入力: 矢印=スロットル/フラップ、W/S=ピッチ、A/D=ロール、Q/E=ラダー、Space=ブレーキ
+// FBW 風は簡易モデル（一般向け航空解説ベースのゲイン・Vfe 近似。実機 FCOM 非根拠）
 
 import * as THREE from 'three';
-import { mergeAircraftPhysicsFromWorld } from './aircraft-physics-defaults.js';
-import { findObjectByNamePath, stepEngineBladeRotation } from './runtime-prefab-aircraft-anim.js';
+import {
+    mergeAircraftPhysicsFromWorld,
+    flapAuthorityMultipliers,
+    flapVfeMs
+} from './aircraft-physics-defaults.js';
+import { findObjectByNamePath, stepEngineBladeRotation, stepFlapDeflection } from './runtime-prefab-aircraft-anim.js';
 
 const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
 /** 地上判定の Y 余裕（この範囲なら接地扱いで横スリップのみ除去） */
 const GROUNDED_Y_TOLERANCE = 0.15;
-/** ワールド YXZ オイラー Z（ロール）の上限 ±30° */
-const MAX_BANK_RAD = Math.PI / 6;
+
+/** レバー表記（右矢印でインデックス増＝展開大） */
+export const AIRCRAFT_FLAP_LABELS = Object.freeze(['UP', '1', '5', '15', '20', '25', '30']);
+
+const THROTTLE_MIN = -0.3;
+const THROTTLE_MAX = 1;
+/** 荷重解放: 連続収納の間隔 (s) */
+const FLAP_RELIEF_COOLDOWN_S = 0.22;
+
+/**
+ * @param {{ maxBankDeg?: number }} ph
+ * @returns {number}
+ */
+function maxBankRadFromPhysics(ph) {
+    const deg = typeof ph.maxBankDeg === 'number' ? ph.maxBankDeg : 30;
+    return THREE.MathUtils.degToRad(THREE.MathUtils.clamp(deg, 1, 85));
+}
 
 /**
  * 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -32,8 +53,8 @@ export default class AircraftController {
         this._worldPos = new THREE.Vector3();
         this._lookTarget = new THREE.Vector3();
         this.keys = {
-            forward: false,
-            back: false,
+            throttleUp: false,
+            throttleDown: false,
             yawL: false,
             yawR: false,
             pitchUp: false,
@@ -42,6 +63,12 @@ export default class AircraftController {
             rollR: false,
             brake: false
         };
+        /** 無次元スロットル THROTTLE_MIN..THROTTLE_MAX */
+        this._throttle = 0;
+        this._prevThrottle = 0;
+        /** 0..6 = UP..30 */
+        this._flapIndex = 0;
+        this._flapReliefCooldown = 0;
         /** @type {'cockpit'|'chase'} */
         this.cameraMode = 'cockpit';
         this._onKeyDown = (e) => this._handleKey(e, true);
@@ -68,7 +95,12 @@ export default class AircraftController {
         this._passengerMouseBound = false;
         this._passengerAimScratch = new THREE.Vector3();
         this._passengerBaseObj = new THREE.Object3D();
-        /** @type {{ blades: { blade: THREE.Object3D, axis: 'x'|'y'|'z', params: { maxAccelRadPerS2: number, maxOmegaRadPerS: number }, state: { omega: number } }[] }|null} */
+        /**
+         * @type {{
+         *   blades: { blade: THREE.Object3D, axis: 'x'|'y'|'z', params: { maxAccelRadPerS2: number, maxOmegaRadPerS: number }, state: { omega: number } }[],
+         *   flaps: { mesh: THREE.Object3D, axis: 'x'|'y'|'z', sign: number, maxAngleRad: number, maxOmegaRadPerS: number, state: { angle: number } }[]
+         * }|null}
+         */
         this._libAnim = null;
         /** @type {string|null} */
         this._libAnimLoadingFor = null;
@@ -101,15 +133,41 @@ export default class AircraftController {
         this._omegaPitch = 0;
         this._omegaRoll = 0;
         this._aircraftGrounded = false;
-        this.physics = slot?.physics && typeof slot.physics === 'object'
-            ? { ...slot.physics }
-            : mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
+        this._throttle = 0;
+        this._prevThrottle = 0;
+        this._flapIndex = 0;
+        this._flapReliefCooldown = 0;
+        this.physics = mergeAircraftPhysicsFromWorld(
+            slot?.physics && typeof slot.physics === 'object' ? slot.physics : this._worldAircraftPhysicsRaw
+        );
         this._attachKeys();
         this._scheduleLibraryAnim();
     }
 
     /**
-     * aircraftLibraryId があれば定義を取得しエンジンブレード参照を解決する
+     * @param {unknown} rawBindings
+     * @param {string} role
+     * @returns {string[]}
+     */
+    _bindingPathsForRole(rawBindings, role) {
+        const r = String(role || '').trim();
+        if (!r || !rawBindings || typeof rawBindings !== 'object') return [];
+        const v = /** @type {Record<string, unknown>} */ (rawBindings)[r];
+        /** @type {string[]} */
+        const paths = [];
+        if (Array.isArray(v)) {
+            for (const x of v) {
+                const s = typeof x === 'string' ? x.trim() : '';
+                if (s) paths.push(s);
+            }
+        } else if (typeof v === 'string' && v.trim()) {
+            paths.push(v.trim());
+        }
+        return paths;
+    }
+
+    /**
+     * aircraftLibraryId があれば定義を取得しエンジンブレード・フラップ参照を解決する
      */
     _scheduleLibraryAnim() {
         this._libAnim = null;
@@ -125,18 +183,18 @@ export default class AircraftController {
             .then(({ ok, j }) => {
                 if (this._libAnimLoadingFor !== loadingFor || this.slot?.aircraftLibraryId !== loadingFor) return;
                 if (!ok || !j?.ok || !j.airframe) return;
-                const ebRaw = j.airframe.bindings?.engineBlade;
+                const bindings = j.airframe.bindings;
+                const ebRaw = bindings?.engineBlade;
                 /** @type {string[]} */
-                const paths = [];
+                const ebPaths = [];
                 if (Array.isArray(ebRaw)) {
                     for (const x of ebRaw) {
                         const s = typeof x === 'string' ? x.trim() : '';
-                        if (s) paths.push(s);
+                        if (s) ebPaths.push(s);
                     }
                 } else if (typeof ebRaw === 'string' && ebRaw.trim()) {
-                    paths.push(ebRaw.trim());
+                    ebPaths.push(ebRaw.trim());
                 }
-                if (!paths.length) return;
                 const eb = j.airframe.animation?.engineBlade;
                 const ax = String(eb?.spinAxis || 'z').toLowerCase();
                 const axis = ax === 'x' || ax === 'y' || ax === 'z' ? ax : 'z';
@@ -146,7 +204,7 @@ export default class AircraftController {
                 };
                 /** @type {{ blade: THREE.Object3D, axis: 'x'|'y'|'z', params: typeof params, state: { omega: number } }[]} */
                 const blades = [];
-                for (const path of paths) {
+                for (const path of ebPaths) {
                     const blade = findObjectByNamePath(root, path);
                     if (!blade) {
                         console.warn('[AircraftController] engineBlade path not found:', path);
@@ -154,8 +212,30 @@ export default class AircraftController {
                     }
                     blades.push({ blade, axis, params, state: { omega: 0 } });
                 }
-                if (!blades.length) return;
-                this._libAnim = { blades };
+
+                const fa = j.airframe.animation?.flap;
+                const fAxisRaw = String(fa?.hingeAxis || fa?.axis || 'x').toLowerCase();
+                const fAxis = fAxisRaw === 'x' || fAxisRaw === 'y' || fAxisRaw === 'z' ? fAxisRaw : 'x';
+                const maxAngleRad = typeof fa?.maxAngleRad === 'number' && Number.isFinite(fa.maxAngleRad) ? fa.maxAngleRad : 0.52;
+                const maxOmegaRadPerS = typeof fa?.maxOmegaRadPerS === 'number' && Number.isFinite(fa.maxOmegaRadPerS) ? fa.maxOmegaRadPerS : 1.1;
+                const signL = typeof fa?.signL === 'number' && Number.isFinite(fa.signL) ? fa.signL : 1;
+                const signR = typeof fa?.signR === 'number' && Number.isFinite(fa.signR) ? fa.signR : -1;
+
+                /** @type {{ mesh: THREE.Object3D, axis: 'x'|'y'|'z', sign: number, maxAngleRad: number, maxOmegaRadPerS: number, state: { angle: number } }[]} */
+                const flaps = [];
+                for (const path of this._bindingPathsForRole(bindings, 'flap_L')) {
+                    const mesh = findObjectByNamePath(root, path);
+                    if (!mesh) console.warn('[AircraftController] flap_L path not found:', path);
+                    else flaps.push({ mesh, axis: fAxis, sign: signL, maxAngleRad, maxOmegaRadPerS, state: { angle: NaN } });
+                }
+                for (const path of this._bindingPathsForRole(bindings, 'flap_R')) {
+                    const mesh = findObjectByNamePath(root, path);
+                    if (!mesh) console.warn('[AircraftController] flap_R path not found:', path);
+                    else flaps.push({ mesh, axis: fAxis, sign: signR, maxAngleRad, maxOmegaRadPerS, state: { angle: NaN } });
+                }
+
+                if (!blades.length && !flaps.length) return;
+                this._libAnim = { blades, flaps };
             })
             .catch((e) => {
                 console.warn('[AircraftController] aircraft library fetch failed:', e);
@@ -170,6 +250,10 @@ export default class AircraftController {
         this._omegaPitch = 0;
         this._omegaRoll = 0;
         this._aircraftGrounded = false;
+        this._throttle = 0;
+        this._prevThrottle = 0;
+        this._flapIndex = 0;
+        this._flapReliefCooldown = 0;
         this.physics = mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
@@ -224,8 +308,15 @@ export default class AircraftController {
         document.removeEventListener('keyup', this._onKeyUp);
         this._bound = false;
         Object.keys(this.keys).forEach((k) => {
-            this.keys[k] = false;
+            this.keys[/** @type {keyof AircraftController['keys']} */ (k)] = false;
         });
+    }
+
+    /**
+     * @param {number} delta
+     */
+    _bumpFlap(delta) {
+        this._flapIndex = THREE.MathUtils.clamp(this._flapIndex + delta, 0, AIRCRAFT_FLAP_LABELS.length - 1);
     }
 
     /**
@@ -236,16 +327,32 @@ export default class AircraftController {
         if (!this.slot) return;
         if (this._isInputActive()) return;
         const c = e.code;
+
+        if (c === 'ArrowRight') {
+            if (down && !e.repeat) {
+                this._bumpFlap(1);
+                e.preventDefault();
+            }
+            return;
+        }
+        if (c === 'ArrowLeft') {
+            if (down && !e.repeat) {
+                this._bumpFlap(-1);
+                e.preventDefault();
+            }
+            return;
+        }
+
         /** @type {[string, keyof AircraftController['keys']][]} */
         const map = [
-            ['KeyW', 'forward'],
-            ['KeyS', 'back'],
-            ['KeyA', 'yawL'],
-            ['KeyD', 'yawR'],
-            ['ArrowUp', 'pitchDn'],
-            ['ArrowDown', 'pitchUp'],
-            ['ArrowLeft', 'rollR'],
-            ['ArrowRight', 'rollL'],
+            ['ArrowUp', 'throttleUp'],
+            ['ArrowDown', 'throttleDown'],
+            ['KeyQ', 'yawL'],
+            ['KeyE', 'yawR'],
+            ['KeyW', 'pitchUp'],
+            ['KeyS', 'pitchDn'],
+            ['KeyA', 'rollL'],
+            ['KeyD', 'rollR'],
             ['Space', 'brake']
         ];
         for (const [code, key] of map) {
@@ -366,16 +473,17 @@ export default class AircraftController {
     }
 
     /**
-     * ワールド YXZ のロール角を ±MAX_BANK_RAD に収め、必要ならローカル姿勢を書き換える
+     * ワールド YXZ のロール角を上限に収め、必要ならローカル姿勢を書き換える
      * @param {import('three').Object3D} root
+     * @param {number} maxBankRad
      */
-    _clampWorldBank(root) {
+    _clampWorldBank(root, maxBankRad) {
         root.updateMatrixWorld(true);
         root.getWorldQuaternion(this._worldQuat);
         this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
         const z = this._eulerScratch.z;
-        if (z <= MAX_BANK_RAD && z >= -MAX_BANK_RAD) return;
-        this._eulerScratch.z = THREE.MathUtils.clamp(z, -MAX_BANK_RAD, MAX_BANK_RAD);
+        if (z <= maxBankRad && z >= -maxBankRad) return;
+        this._eulerScratch.z = THREE.MathUtils.clamp(z, -maxBankRad, maxBankRad);
         this._qClampWorld.setFromEuler(this._eulerScratch);
         if (root.parent) {
             root.parent.updateMatrixWorld(true);
@@ -397,54 +505,97 @@ export default class AircraftController {
         const root = this.slot.root;
         const dt = Math.min(0.1, deltaTime);
 
-        const yawIn = (this.keys.yawR ? 1 : 0) - (this.keys.yawL ? 1 : 0);
-        let pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
-        const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
-
         const ph = this.physics;
+        const maxBankRad = maxBankRadFromPhysics(ph);
         const dec = ph.angularDecel;
 
+        if (this._flapReliefCooldown > 0) this._flapReliefCooldown = Math.max(0, this._flapReliefCooldown - dt);
+
+        const spool = ph.throttleSpoolPerS;
+        if (this.keys.throttleUp) {
+            this._throttle = Math.min(THROTTLE_MAX, this._throttle + spool * dt);
+        }
+        if (this.keys.throttleDown) {
+            this._throttle = Math.max(THROTTLE_MIN, this._throttle - spool * dt);
+        }
+        this._throttle = THREE.MathUtils.clamp(this._throttle, THROTTLE_MIN, THROTTLE_MAX);
+
         root.updateMatrixWorld(true);
+        root.getWorldQuaternion(this._worldQuat);
+        this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
+        if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
+        const airForward = Math.max(0, this.velocity.dot(this._fwd));
+        const vfe = flapVfeMs(this._flapIndex);
+        const vfeCap = Number.isFinite(vfe) ? Math.min(ph.maxSpeed, vfe) : ph.maxSpeed;
+
+        if (this._flapIndex > 0 && airForward > vfe * 0.995 && this._flapReliefCooldown <= 0) {
+            this._flapIndex -= 1;
+            this._flapReliefCooldown = FLAP_RELIEF_COOLDOWN_S;
+        }
+
+        const fa = flapAuthorityMultipliers(this._flapIndex);
+        const rudRef = ph.rudderAuthorityRefSpeedMs > 0.5 ? ph.rudderAuthorityRefSpeedMs : ph.maxSpeed;
+        const rudT = rudRef > 1e-6 ? THREE.MathUtils.clamp(airForward / rudRef, 0, 1) : 0;
+        const rudScale = ph.rudderAuthorityMinScale + (1 - ph.rudderAuthorityMinScale) * (1 - rudT);
+
+        const yawIn = (this.keys.yawR ? 1 : 0) - (this.keys.yawL ? 1 : 0);
+        let pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
+        if (this._flapIndex > 0 && pitchIn < 0) {
+            pitchIn *= ph.flapPitchDownAuthority;
+        }
+        const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
+
         root.getWorldQuaternion(this._worldQuat);
         this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
         const bank = this._eulerScratch.z;
         let rollInEff = rollIn;
-        if (bank >= MAX_BANK_RAD - 0.02 && rollIn > 0) rollInEff = 0;
-        if (bank <= -MAX_BANK_RAD + 0.02 && rollIn < 0) rollInEff = 0;
+        if (bank >= maxBankRad - 0.02 && rollIn > 0) rollInEff = 0;
+        if (bank <= -maxBankRad + 0.02 && rollIn < 0) rollInEff = 0;
 
         let yawDecel = dec;
         if (this._aircraftGrounded) {
             if (this._omegaYaw > 0) yawDecel += ph.yawGroundFrictionRight;
             else if (this._omegaYaw < 0) yawDecel += ph.yawGroundFrictionLeft;
         }
-        const yawAccel = this._aircraftGrounded ? ph.yawAccelGround : ph.yawAccelAir;
-        const yawMaxRate = this._aircraftGrounded ? ph.yawMaxRateGround : ph.yawMaxRateAir;
-        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, yawAccel, yawMaxRate, yawDecel, dt);
-        const pitchAccel = this._aircraftGrounded ? ph.pitchAccelGround : ph.pitchAccelAir;
-        const pitchMaxRate = this._aircraftGrounded ? ph.pitchMaxRateGround : ph.pitchMaxRateAir;
-        this._omegaPitch = this._integrateOmega(pitchIn, this._omegaPitch, pitchAccel, pitchMaxRate, dec, dt);
-        this._omegaRoll = this._integrateOmega(rollInEff, this._omegaRoll, ph.rollAccel, ph.rollMaxRate, dec, dt);
+        const yawAccel0 = this._aircraftGrounded ? ph.yawAccelGround : ph.yawAccelAir * rudScale;
+        const yawMax0 = this._aircraftGrounded ? ph.yawMaxRateGround : ph.yawMaxRateAir * rudScale;
+        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, yawAccel0, yawMax0, yawDecel, dt);
+
+        const pitchAccel0 = this._aircraftGrounded ? ph.pitchAccelGround : ph.pitchAccelAir * fa.pitchMul;
+        const pitchMax0 = this._aircraftGrounded ? ph.pitchMaxRateGround : ph.pitchMaxRateAir * fa.pitchMul;
+        this._omegaPitch = this._integrateOmega(pitchIn, this._omegaPitch, pitchAccel0, pitchMax0, dec, dt);
+
+        const dTh = (this._throttle - this._prevThrottle) / Math.max(dt, 1e-4);
+        this._omegaPitch += ph.thrustPitchFromThrottleDelta * dTh * dt;
+        this._prevThrottle = this._throttle;
+        if (pitchIn === 0 && ph.thrustPitchRelaxNoInput > 0) {
+            this._omegaPitch *= Math.exp(-ph.thrustPitchRelaxNoInput * dt);
+        }
+
+        const rollAccelEff = ph.rollAccel * fa.rollMul;
+        const rollMaxEff = ph.rollMaxRate * fa.rollMul;
+        this._omegaRoll = this._integrateOmega(rollInEff, this._omegaRoll, rollAccelEff, rollMaxEff, dec, dt);
 
         root.rotateOnAxis(new THREE.Vector3(0, 1, 0), -this._omegaYaw * dt);
         root.rotateOnAxis(new THREE.Vector3(1, 0, 0), this._omegaPitch * dt);
         root.rotateOnAxis(new THREE.Vector3(0, 0, 1), -this._omegaRoll * dt);
         root.updateMatrixWorld(true);
-        this._clampWorldBank(root);
+        this._clampWorldBank(root, maxBankRad);
 
-        const thrust = (this.keys.forward ? 1 : 0) - (this.keys.back ? 1 : 0);
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
-        this.velocity.addScaledVector(this._fwd, thrust * ph.thrustAccel * dt);
+        this.velocity.addScaledVector(this._fwd, this._throttle * ph.thrustAccel * dt);
         this.velocity.multiplyScalar(ph.drag);
-        // 揚力は機体の上下方向速度成分を除き、前後・横（翼面内）の速度のみから算出する
         this._bodyUp.set(0, 1, 0).applyQuaternion(this._worldQuat).normalize();
         const vAlongBodyUp = this.velocity.dot(this._bodyUp);
         const vH = Math.sqrt(
             Math.max(0, this.velocity.lengthSq() - vAlongBodyUp * vAlongBodyUp)
         );
-        const liftAccel = ph.liftPerHorizontalSpeed * vH;
+        const liftAccel = ph.liftPerHorizontalSpeed * vH * fa.liftMul;
         this.velocity.y += (liftAccel - ph.gravity) * dt;
-        const sp = this.velocity.length();
+        let sp = this.velocity.length();
+        if (sp > vfeCap) this.velocity.multiplyScalar(vfeCap / sp);
+        sp = this.velocity.length();
         if (sp > ph.maxSpeed) this.velocity.multiplyScalar(ph.maxSpeed / sp);
 
         const climbK = ph.excessClimbDamping;
@@ -555,20 +706,32 @@ export default class AircraftController {
     }
 
     /**
-     * ライブラリ定義に基づきプロペラ等をローカル回転（操縦中のみ）
+     * ライブラリ定義に基づきプロペラ・フラップをローカル更新（操縦中のみ）
      * @param {number} dt
      */
     _updateLibraryVisuals(dt) {
-        if (!this._libAnim?.blades?.length || !this.slot?.root) return;
+        if (!this.slot?.root) return;
         const ph = this.physics;
         const root = this.slot.root;
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
         if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
+        const throttleVis = THREE.MathUtils.clamp(this._throttle, 0, 1);
         let t01 = ph.maxSpeed > 0 ? THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / ph.maxSpeed, 0, 1) : 0;
-        if (this.keys.forward) t01 = Math.min(1, t01 + 0.22);
-        for (const b of this._libAnim.blades) {
-            stepEngineBladeRotation(b.blade, b.axis, b.params, t01, dt, b.state);
+        t01 = Math.max(t01, throttleVis);
+
+        if (this._libAnim?.blades?.length) {
+            for (const b of this._libAnim.blades) {
+                stepEngineBladeRotation(b.blade, b.axis, b.params, t01, dt, b.state);
+            }
+        }
+        if (this._libAnim?.flaps?.length) {
+            const n = AIRCRAFT_FLAP_LABELS.length - 1;
+            const norm = n > 0 ? this._flapIndex / n : 0;
+            for (const f of this._libAnim.flaps) {
+                const target = norm * f.maxAngleRad * f.sign;
+                stepFlapDeflection(f.mesh, f.axis, target, f.maxOmegaRadPerS, dt, f.state);
+            }
         }
     }
 
@@ -609,7 +772,20 @@ export default class AircraftController {
 
     /**
      * 操縦 HUD 用。毎フレーム update の直後に呼ぶ。
-     * @returns {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean }|null}
+     * @returns {{
+     *   speedMs: number,
+     *   pitchDeg: number,
+     *   yawDeg: number,
+     *   rollDeg: number,
+     *   omegaYaw: number,
+     *   omegaPitch: number,
+     *   omegaRoll: number,
+     *   grounded: boolean,
+     *   throttle: number,
+     *   flapLabel: string,
+     *   vfeMs: number,
+     *   vfeWarn: boolean
+     * }|null}
      */
     getHudSnapshot() {
         const root = this.slot?.root;
@@ -618,6 +794,11 @@ export default class AircraftController {
         root.getWorldQuaternion(this._worldQuat);
         this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
         const r2d = 180 / Math.PI;
+        const vfe = flapVfeMs(this._flapIndex);
+        this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
+        if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
+        const airF = Math.max(0, this.velocity.dot(this._fwd));
+        const vfeWarn = this._flapIndex > 0 && Number.isFinite(vfe) && airF > vfe * 0.92;
         return {
             speedMs: this.velocity.length(),
             pitchDeg: this._eulerScratch.x * r2d,
@@ -626,7 +807,11 @@ export default class AircraftController {
             omegaYaw: this._omegaYaw,
             omegaPitch: this._omegaPitch,
             omegaRoll: this._omegaRoll,
-            grounded: this._aircraftGrounded
+            grounded: this._aircraftGrounded,
+            throttle: this._throttle,
+            flapLabel: AIRCRAFT_FLAP_LABELS[this._flapIndex] || 'UP',
+            vfeMs: Number.isFinite(vfe) ? vfe : this.physics.maxSpeed,
+            vfeWarn
         };
     }
 
