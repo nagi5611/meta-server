@@ -859,3 +859,4 @@ export default class AircraftController {
             this._applySlotCameraBodyEuler(this.slot, 'chase');
         }
     }
+}
