@@ -28,6 +28,7 @@ import {
 } from './model-load-limits.js';
 import { mergeAircraftPhysicsForObject, mergeAircraftPhysicsFromWorld } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
 import { resolveLegacyCameraFromLibrary } from './aircraft/camera-viewpoints.js';
+import { applyAircraftBodyOrientationToObject3D } from './aircraft/aircraft-body-orient.js';
 import {
     buildEncodedModelUrlFromPath,
     loadPrefabGroupFromManifest,
@@ -1836,6 +1837,8 @@ class SceneManager {
             return;
         }
         model.userData.aircraftId = id;
+        applyAircraftBodyOrientationToObject3D(model, aircraftCfg);
+        model.updateMatrixWorld(true);
         const libId = String(aircraftCfg.aircraftLibraryId || '').trim();
         const prefabManifest = String(modelPrefabManifest || '').trim();
         const cockpit = aircraftCfg.cockpitOffset || { x: 0, y: 1.2, z: 0 };

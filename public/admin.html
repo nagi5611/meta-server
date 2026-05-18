@@ -681,7 +681,16 @@
                                                 <label class="prop-label" for="obj-ac-label">プロンプト文言</label>
                                                 <input type="text" id="obj-ac-label" class="prop-input" placeholder="操縦する">
                                             </div>
-                                            <p class="hint" style="margin-top:6px;">ライブラリ未リンクの古いデータに含まれるカメラ／操縦の上書きは、保存時も JSON に残ります。編集は飛行機タブの機体ライブラリで行ってください。前進方向はモデルの <strong>-Z</strong> 軸です。</p>
+                                            <div class="prop-row">
+                                                <label class="prop-label" for="obj-ac-body-x">機体メッシュ追加回転（度）</label>
+                                                <span class="prop-unit" style="margin:0 6px 0 0;">X</span>
+                                                <input type="number" id="obj-ac-body-x" class="prop-input num" step="1" value="0" title="モデルローカル X 軸周り（前後が逆ならまず Y=180 を試す）">
+                                                <span class="prop-unit" style="margin:0 6px 0 0;">Y</span>
+                                                <input type="number" id="obj-ac-body-y" class="prop-input num" step="1" value="0" title="モデルローカル Y 軸周り（前後反転に 180 が多い）">
+                                                <span class="prop-unit" style="margin:0 6px 0 0;">Z</span>
+                                                <input type="number" id="obj-ac-body-z" class="prop-input num" step="1" value="0" title="モデルローカル Z 軸周り">
+                                            </div>
+                                            <p class="hint" style="margin-top:6px;">ライブラリ未リンクの古いデータに含まれるカメラ／操縦の上書きは、保存時も JSON に残ります。編集は飛行機タブの機体ライブラリで行ってください。前進方向はモデルの <strong>-Z</strong> 軸です。GLB の前後が逆などのときは上の「機体メッシュ追加回転」で向きだけ補正できます（オブジェクトの回転・ライブラリのカメラ角とは別）。</p>
                                         </div>
                                     </div>
                                 </details>

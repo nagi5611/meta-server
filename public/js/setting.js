@@ -45,9 +45,62 @@ import {
     mergeAircraftPhysicsFromWorld,
     clipAircraftPhysicsPartialFromUser
 } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
+import {
+    applyAircraftBodyOrientationToObject3D,
+    extractConfigRotationDegFromModelWithAircraftBody
+} from './aircraft/aircraft-body-orient.js';
 
 /**
- * ワールド JSON 用 aircraft。ライブラリ連携時は id / radius / label / aircraftLibraryId のみ。
+ * bodyEulerDeg をワールド JSON 用に aircraft オブジェクトへ付与（全ゼロは省略）
+ * @param {Record<string, unknown>} a
+ * @param {Record<string, unknown>} base
+ */
+function appendSerializedBodyEulerDeg(a, base) {
+    const be = a.bodyEulerDeg;
+    if (!be || typeof be !== 'object' || Array.isArray(be)) return;
+    const o = /** @type {Record<string, unknown>} */ (be);
+    const nx = (k, d) => {
+        const v = o[k];
+        return typeof v === 'number' && Number.isFinite(v) ? v : d;
+    };
+    const bx = nx('x', 0);
+    const by = nx('y', 0);
+    const bz = nx('z', 0);
+    if (bx !== 0 || by !== 0 || bz !== 0) {
+        base.bodyEulerDeg = { x: bx, y: by, z: bz };
+    }
+}
+
+/**
+ * オブジェクトパネル「機体メッシュ追加回転（度）」を読む
+ * @returns {{ x: number, y: number, z: number }}
+ */
+function readObjAcBodyEulerDegFromPanel() {
+    const elx = document.getElementById('obj-ac-body-x');
+    const ely = document.getElementById('obj-ac-body-y');
+    const elz = document.getElementById('obj-ac-body-z');
+    const px = elx && elx.value !== '' ? parseFloat(elx.value) : 0;
+    const py = ely && ely.value !== '' ? parseFloat(ely.value) : 0;
+    const pz = elz && elz.value !== '' ? parseFloat(elz.value) : 0;
+    return {
+        x: Number.isFinite(px) ? px : 0,
+        y: Number.isFinite(py) ? py : 0,
+        z: Number.isFinite(pz) ? pz : 0
+    };
+}
+
+/**
+ * aircraft レコードに bodyEulerDeg を反映（全ゼロならキー削除）
+ * @param {Record<string, unknown>} rec
+ */
+function mergeBodyEulerIntoAircraftRecord(rec) {
+    const { x, y, z } = readObjAcBodyEulerDegFromPanel();
+    if (x === 0 && y === 0 && z === 0) delete rec.bodyEulerDeg;
+    else rec.bodyEulerDeg = { x, y, z };
+}
+
+/**
+ * ワールド JSON 用 aircraft。ライブラリ連携時は id / radius / label / aircraftLibraryId（＋任意 bodyEulerDeg）。
  * 未リンクのレガシー機体はカメラ・physics を JSON から引き継ぎ保存する。
  * @param {unknown} raw
  * @returns {Record<string, unknown>|null}
@@ -65,6 +118,7 @@ function serializeAircraftForWorldJson(raw) {
     const base = { id, radius, label };
     if (libId) {
         base.aircraftLibraryId = libId;
+        appendSerializedBodyEulerDeg(a, base);
         return base;
     }
     const ck = a.cockpitOffset && typeof a.cockpitOffset === 'object' && !Array.isArray(a.cockpitOffset)
@@ -94,6 +148,7 @@ function serializeAircraftForWorldJson(raw) {
         const clipped = clipAircraftPhysicsPartialFromUser(ap);
         if (clipped && Object.keys(clipped).length) base.aircraftPhysics = clipped;
     }
+    appendSerializedBodyEulerDeg(a, base);
     return base;
 }
 
@@ -1042,11 +1097,15 @@ function getWorldEditorClipboardPayloadFromSelection() {
     if (obj.userData.config && !obj.isLight) {
         const c = JSON.parse(JSON.stringify(obj.userData.config));
         c.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
-        c.rotation = {
-            x: obj.rotation.x * 180 / Math.PI,
-            y: obj.rotation.y * 180 / Math.PI,
-            z: obj.rotation.z * 180 / Math.PI
-        };
+        if (c.aircraft && c.aircraft.id) {
+            c.rotation = extractConfigRotationDegFromModelWithAircraftBody(obj, c.aircraft);
+        } else {
+            c.rotation = {
+                x: obj.rotation.x * 180 / Math.PI,
+                y: obj.rotation.y * 180 / Math.PI,
+                z: obj.rotation.z * 180 / Math.PI
+            };
+        }
         c.scale = { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z };
         if (c.animate) c.animate = { ...c.animate, rotation: c.animate.rotation ? { ...c.animate.rotation } : {} };
         if (c.teleporter) c.teleporter = { ...c.teleporter };
@@ -1249,7 +1308,16 @@ function onTransformChange() {
     if (!obj) return;
     if (obj.userData.config) {
         obj.userData.config.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
-        obj.userData.config.rotation = { x: obj.rotation.x * 180 / Math.PI, y: obj.rotation.y * 180 / Math.PI, z: obj.rotation.z * 180 / Math.PI };
+        const c = obj.userData.config;
+        if (c.aircraft && c.aircraft.id) {
+            obj.userData.config.rotation = extractConfigRotationDegFromModelWithAircraftBody(obj, c.aircraft);
+        } else {
+            obj.userData.config.rotation = {
+                x: obj.rotation.x * 180 / Math.PI,
+                y: obj.rotation.y * 180 / Math.PI,
+                z: obj.rotation.z * 180 / Math.PI
+            };
+        }
         obj.userData.config.scale = { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z };
         if (selectedObject === obj) updateObjectPanel(obj);
     }
@@ -1502,9 +1570,18 @@ function updateObjectPanel(obj) {
     document.getElementById('obj-pos-x').value = obj.position.x;
     document.getElementById('obj-pos-y').value = obj.position.y;
     document.getElementById('obj-pos-z').value = obj.position.z;
-    document.getElementById('obj-rot-x').value = (obj.rotation.x * 180 / Math.PI).toFixed(2);
-    document.getElementById('obj-rot-y').value = (obj.rotation.y * 180 / Math.PI).toFixed(2);
-    document.getElementById('obj-rot-z').value = (obj.rotation.z * 180 / Math.PI).toFixed(2);
+    const cfgForRot = obj.userData.config;
+    const acForRot = cfgForRot && cfgForRot.aircraft && cfgForRot.aircraft.id ? cfgForRot.aircraft : null;
+    if (acForRot && cfgForRot) {
+        const rr = cfgForRot.rotation || { x: 0, y: 0, z: 0 };
+        document.getElementById('obj-rot-x').value = (Number(rr.x) || 0).toFixed(2);
+        document.getElementById('obj-rot-y').value = (Number(rr.y) || 0).toFixed(2);
+        document.getElementById('obj-rot-z').value = (Number(rr.z) || 0).toFixed(2);
+    } else {
+        document.getElementById('obj-rot-x').value = (obj.rotation.x * 180 / Math.PI).toFixed(2);
+        document.getElementById('obj-rot-y').value = (obj.rotation.y * 180 / Math.PI).toFixed(2);
+        document.getElementById('obj-rot-z').value = (obj.rotation.z * 180 / Math.PI).toFixed(2);
+    }
     document.getElementById('obj-scale-x').value = obj.scale.x;
     document.getElementById('obj-scale-y').value = obj.scale.y;
     document.getElementById('obj-scale-z').value = obj.scale.z;
@@ -1560,6 +1637,27 @@ function updateObjectPanel(obj) {
             refreshAircraftLibrarySelectOptions();
             const libSel0 = document.getElementById('obj-ac-library-id');
             if (libSel0 && 'value' in libSel0) /** @type {HTMLSelectElement} */ (libSel0).value = '';
+        }
+        const bxEl = document.getElementById('obj-ac-body-x');
+        const byEl = document.getElementById('obj-ac-body-y');
+        const bzEl = document.getElementById('obj-ac-body-z');
+        if (bxEl && byEl && bzEl) {
+            if (ac && ac.id) {
+                const be = ac.bodyEulerDeg && typeof ac.bodyEulerDeg === 'object' && !Array.isArray(ac.bodyEulerDeg)
+                    ? /** @type {Record<string, unknown>} */ (ac.bodyEulerDeg)
+                    : {};
+                const nbe = (k, d) => {
+                    const v = be[k];
+                    return typeof v === 'number' && Number.isFinite(v) ? v : d;
+                };
+                bxEl.value = String(nbe('x', 0));
+                byEl.value = String(nbe('y', 0));
+                bzEl.value = String(nbe('z', 0));
+            } else {
+                bxEl.value = '0';
+                byEl.value = '0';
+                bzEl.value = '0';
+            }
         }
         updateVehicleAircraftFieldsVisibility();
         updateGlbAnimInteractPanel(obj);
@@ -1706,6 +1804,7 @@ function syncObjectFromPanel(opts) {
             };
             if (libV) {
                 c.aircraft = { ...base, aircraftLibraryId: libV };
+                mergeBodyEulerIntoAircraftRecord(c.aircraft);
             } else {
                 const prev = c.aircraft && typeof c.aircraft === 'object' && !Array.isArray(c.aircraft) ? c.aircraft : {};
                 const ckPrev = prev.cockpitOffset && typeof prev.cockpitOffset === 'object' && !Array.isArray(prev.cockpitOffset)
@@ -1747,6 +1846,7 @@ function syncObjectFromPanel(opts) {
                     const clipped = clipAircraftPhysicsPartialFromUser(ap);
                     if (clipped && Object.keys(clipped).length) acPayload.aircraftPhysics = clipped;
                 }
+                mergeBodyEulerIntoAircraftRecord(acPayload);
                 c.aircraft = acPayload;
             }
         } else {
@@ -1825,6 +1925,19 @@ function syncObjectFromPanel(opts) {
             };
         } else {
             delete c.teleporter;
+        }
+    }
+    if (selectedObject.userData.config) {
+        const cfg = selectedObject.userData.config;
+        if (cfg.aircraft && cfg.aircraft.id) {
+            const r = cfg.rotation || { x: 0, y: 0, z: 0 };
+            selectedObject.rotation.set(
+                (Number(r.x) || 0) * Math.PI / 180,
+                (Number(r.y) || 0) * Math.PI / 180,
+                (Number(r.z) || 0) * Math.PI / 180
+            );
+            applyAircraftBodyOrientationToObject3D(selectedObject, cfg.aircraft);
+            selectedObject.updateMatrixWorld(true);
         }
     }
 }
@@ -2739,6 +2852,9 @@ async function loadWorldIntoScene(world) {
         model.position.set(pos.x, pos.y, pos.z);
         model.rotation.set(rot.x * Math.PI / 180, rot.y * Math.PI / 180, rot.z * Math.PI / 180);
         model.scale.set(scale.x, scale.y, scale.z);
+        if (cfgBase.aircraft && cfgBase.aircraft.id) {
+            applyAircraftBodyOrientationToObject3D(model, cfgBase.aircraft);
+        }
         applyModelShadowByTriangleCount(model, triangleCount);
         model.userData.editId = 'm' + slotIdx;
         model.userData.config = cfgBase;
@@ -2769,8 +2885,20 @@ function animate() {
     });
     if (transformControls.dragging) {
         if (selectedObject && selectedObject.userData.config) {
+            const cfg = selectedObject.userData.config;
             selectedObject.userData.config.position = { x: selectedObject.position.x, y: selectedObject.position.y, z: selectedObject.position.z };
-            selectedObject.userData.config.rotation = { x: selectedObject.rotation.x * 180 / Math.PI, y: selectedObject.rotation.y * 180 / Math.PI, z: selectedObject.rotation.z * 180 / Math.PI };
+            if (cfg.aircraft && cfg.aircraft.id) {
+                selectedObject.userData.config.rotation = extractConfigRotationDegFromModelWithAircraftBody(
+                    selectedObject,
+                    cfg.aircraft
+                );
+            } else {
+                selectedObject.userData.config.rotation = {
+                    x: selectedObject.rotation.x * 180 / Math.PI,
+                    y: selectedObject.rotation.y * 180 / Math.PI,
+                    z: selectedObject.rotation.z * 180 / Math.PI
+                };
+            }
             selectedObject.userData.config.scale = { x: selectedObject.scale.x, y: selectedObject.scale.y, z: selectedObject.scale.z };
         }
         if (selectedObject && selectedObject.userData.pdfConfig) {
@@ -3990,6 +4118,9 @@ function bindEvents() {
         'obj-ac-library-id',
         'obj-ac-radius',
         'obj-ac-label',
+        'obj-ac-body-x',
+        'obj-ac-body-y',
+        'obj-ac-body-z',
     ]) {
         document.getElementById(acId)?.addEventListener('change', syncObjectFromPanel);
     }
