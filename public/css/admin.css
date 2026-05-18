@@ -4738,6 +4738,37 @@ body.admin-dark .admin-avatar-editor {
     padding: 12px;
     overflow: auto;
 }
+.ac-right-tabbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 10px 0 6px;
+}
+.ac-tab-btn {
+    flex: 1;
+    min-width: 88px;
+    padding: 6px 8px;
+    font-size: 11px;
+    line-height: 1.2;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+    background: #f0f0f0;
+    cursor: pointer;
+}
+.ac-tab-btn.is-active {
+    border-color: #1565c0;
+    background: #e3f2fd;
+    font-weight: 600;
+}
+body.admin-dark .ac-tab-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #e8e8e8;
+}
+body.admin-dark .ac-tab-btn.is-active {
+    border-color: #64b5f6;
+    background: rgba(21, 101, 192, 0.35);
+}
 .ac-admin-actions {
     display: flex;
     flex-wrap: wrap;

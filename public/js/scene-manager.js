@@ -27,6 +27,7 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { mergeAircraftPhysicsForObject, mergeAircraftPhysicsFromWorld } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
+import { resolveLegacyCameraFromLibrary } from './aircraft/camera-viewpoints.js';
 import {
     buildEncodedModelUrlFromPath,
     loadPrefabGroupFromManifest,
@@ -1879,39 +1880,38 @@ class SceneManager {
                 const af = j.airframe;
                 const cam = af.camera && typeof af.camera === 'object' ? af.camera : {};
                 const fp = af.flightPhysics && typeof af.flightPhysics === 'object' ? af.flightPhysics : {};
+                const leg = resolveLegacyCameraFromLibrary(cam);
                 for (const slot of slots) {
                     if (String(slot.aircraftLibraryId || '').trim() !== lid) continue;
                     slot.physics = mergeAircraftPhysicsFromWorld(fp);
-                    const ck = cam.cockpitOffset;
-                    if (ck && typeof ck === 'object') {
-                        slot.cockpitOffset = {
-                            x: typeof ck.x === 'number' && Number.isFinite(ck.x) ? ck.x : slot.cockpitOffset.x,
-                            y: typeof ck.y === 'number' && Number.isFinite(ck.y) ? ck.y : slot.cockpitOffset.y,
-                            z: typeof ck.z === 'number' && Number.isFinite(ck.z) ? ck.z : slot.cockpitOffset.z
-                        };
-                    }
-                    const ch = cam.chaseOffset;
-                    if (ch && typeof ch === 'object') {
-                        slot.chaseOffset = {
-                            x: typeof ch.x === 'number' && Number.isFinite(ch.x) ? ch.x : slot.chaseOffset.x,
-                            y: typeof ch.y === 'number' && Number.isFinite(ch.y) ? ch.y : slot.chaseOffset.y,
-                            z: typeof ch.z === 'number' && Number.isFinite(ch.z) ? ch.z : slot.chaseOffset.z
-                        };
-                    }
-                    if (cam.cockpitEulerDeg && typeof cam.cockpitEulerDeg === 'object') {
+                    const ck = leg.cockpitOffset;
+                    slot.cockpitOffset = {
+                        x: typeof ck.x === 'number' && Number.isFinite(ck.x) ? ck.x : slot.cockpitOffset.x,
+                        y: typeof ck.y === 'number' && Number.isFinite(ck.y) ? ck.y : slot.cockpitOffset.y,
+                        z: typeof ck.z === 'number' && Number.isFinite(ck.z) ? ck.z : slot.cockpitOffset.z,
+                    };
+                    const ch = leg.chaseOffset;
+                    slot.chaseOffset = {
+                        x: typeof ch.x === 'number' && Number.isFinite(ch.x) ? ch.x : slot.chaseOffset.x,
+                        y: typeof ch.y === 'number' && Number.isFinite(ch.y) ? ch.y : slot.chaseOffset.y,
+                        z: typeof ch.z === 'number' && Number.isFinite(ch.z) ? ch.z : slot.chaseOffset.z,
+                    };
+                    const ced = leg.cockpitEulerDeg;
+                    if (ced && typeof ced === 'object') {
                         slot.cockpitEulerDeg = {
-                            x: Number(cam.cockpitEulerDeg.x) || 0,
-                            y: Number(cam.cockpitEulerDeg.y) || 0,
-                            z: Number(cam.cockpitEulerDeg.z) || 0
+                            x: Number(ced.x) || 0,
+                            y: Number(ced.y) || 0,
+                            z: Number(ced.z) || 0,
                         };
                     } else {
                         delete slot.cockpitEulerDeg;
                     }
-                    if (cam.chaseEulerDeg && typeof cam.chaseEulerDeg === 'object') {
+                    const sed = leg.chaseEulerDeg;
+                    if (sed && typeof sed === 'object') {
                         slot.chaseEulerDeg = {
-                            x: Number(cam.chaseEulerDeg.x) || 0,
-                            y: Number(cam.chaseEulerDeg.y) || 0,
-                            z: Number(cam.chaseEulerDeg.z) || 0
+                            x: Number(sed.x) || 0,
+                            y: Number(sed.y) || 0,
+                            z: Number(sed.z) || 0,
                         };
                     } else {
                         delete slot.chaseEulerDeg;

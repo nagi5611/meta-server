@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { loadPrefabGroupFromManifest } from '/js/prefab-load-shared.js';
@@ -77,6 +78,10 @@ export function collectNamePaths(root) {
 }
 
 /**
+ * @typedef {{ id: string, name?: string, role: string, position: {x:number,y:number,z:number}, eulerDeg?: {x:number,y:number,z:number} }} AcViewpointPayload
+ */
+
+/**
  * 管理画面用 prefab ビューア
  */
 export class AdminAircraftPrefabViewer {
@@ -113,11 +118,29 @@ export class AdminAircraftPrefabViewer {
         this._disposed = false;
         this._boundResize = () => this._resize();
         this._boundClick = (e) => this._onClick(e);
+        /** @type {THREE.Group|null} */
+        this._vpParent = null;
+        /** @type {string|null} */
+        this._vpSelectedId = null;
+        /** @type {TransformControls} */
+        this._transformControls = new TransformControls(this._camera, this._renderer.domElement);
+        this._transformControls.setSpace('local');
+        this._transformControls.setSize(0.85);
+        this._scene.add(this._transformControls);
+        this._transformControls.addEventListener('dragging-changed', (ev) => {
+            this._controls.enabled = !ev.value;
+        });
+        this._transformControls.addEventListener('change', () => this._emitViewpointTransformIfActive());
+        /** @type {{ active: boolean, blockPrefabPick: boolean, onUpdate: ((v: AcViewpointPayload[]) => void) | null, onSelectRequest: ((id: string) => void) | null }} */
+        this._vpEdit = { active: false, blockPrefabPick: false, onUpdate: null, onSelectRequest: null };
+        this._vpGizmoScale = 0.15;
+        this._eulerScratch = new THREE.Euler(0, 0, 0, 'YXZ');
         container.appendChild(this._renderer.domElement);
         this._renderer.domElement.style.display = 'block';
         this._renderer.domElement.style.width = '100%';
         this._renderer.domElement.style.height = '100%';
         this._renderer.domElement.style.cursor = 'pointer';
+        this._renderer.domElement.setAttribute('tabindex', '0');
         window.addEventListener('resize', this._boundResize);
         this._renderer.domElement.addEventListener('click', this._boundClick);
         this._resize();
@@ -153,16 +176,249 @@ export class AdminAircraftPrefabViewer {
     }
 
     /**
+     * 視点編集モード（支店定義タブ）。プレハブ選択クリックを止め、マーカー＋ギズモで編集する。
+     * @param {{ active: boolean, blockPrefabPick?: boolean, viewpoints: AcViewpointPayload[], selectedId: string|null, onUpdate: ((v: AcViewpointPayload[]) => void)|null, onSelectRequest?: ((id: string) => void)|null }} opts
+     * @returns {void}
+     */
+    setViewpointEditMode(opts) {
+        const active = !!opts.active;
+        this._vpEdit.active = active;
+        this._vpEdit.blockPrefabPick = active && opts.blockPrefabPick !== false;
+        this._vpEdit.onUpdate = opts.onUpdate || null;
+        this._vpEdit.onSelectRequest = opts.onSelectRequest || null;
+        this._vpSelectedId = opts.selectedId || null;
+        if (!active) {
+            this._transformControls.detach();
+            this._clearViewpointMarkers();
+            return;
+        }
+        if (!this._prefabRoot) {
+            this._transformControls.detach();
+            return;
+        }
+        this._rebuildViewpointMarkers(opts.viewpoints || []);
+        this._attachTransformToSelected();
+    }
+
+    /**
+     * @param {'translate'|'rotate'} mode
+     */
+    setViewpointTransformMode(mode) {
+        this._transformControls.setMode(mode === 'rotate' ? 'rotate' : 'translate');
+    }
+
+    /**
+     * @param {number} dx
+     * @param {number} dy
+     * @param {number} dz
+     * @returns {void}
+     */
+    nudgeSelectedViewpoint(dx, dy, dz) {
+        if (!this._vpEdit.active || !this._vpParent) return;
+        const obj = this._transformControls.object;
+        if (!obj) return;
+        obj.position.x += dx;
+        obj.position.y += dy;
+        obj.position.z += dz;
+        this._emitViewpointTransformIfActive();
+    }
+
+    /**
+     * @returns {void}
+     */
+    _emitViewpointTransformIfActive() {
+        if (!this._vpEdit.active || !this._vpEdit.onUpdate || !this._vpParent) return;
+        const list = this._collectViewpointsFromMarkers();
+        this._vpEdit.onUpdate(list);
+    }
+
+    /**
+     * @returns {AcViewpointPayload[]}
+     */
+    _collectViewpointsFromMarkers() {
+        if (!this._vpParent) return [];
+        /** @type {AcViewpointPayload[]} */
+        const out = [];
+        const r2d = 180 / Math.PI;
+        for (const ch of this._vpParent.children) {
+            if (!(ch instanceof THREE.Group) || !ch.userData.acVpMeta) continue;
+            const meta = /** @type {AcViewpointPayload} */ (ch.userData.acVpMeta);
+            this._eulerScratch.setFromQuaternion(ch.quaternion, 'YXZ');
+            out.push({
+                id: meta.id,
+                name: meta.name,
+                role: meta.role,
+                position: { x: ch.position.x, y: ch.position.y, z: ch.position.z },
+                eulerDeg: {
+                    x: this._eulerScratch.x * r2d,
+                    y: this._eulerScratch.y * r2d,
+                    z: this._eulerScratch.z * r2d,
+                },
+            });
+        }
+        return out;
+    }
+
+    /**
+     * @param {AcViewpointPayload[]} viewpoints
+     * @returns {void}
+     */
+    _rebuildViewpointMarkers(viewpoints) {
+        this._transformControls.detach();
+        this._clearViewpointMarkers();
+        if (!this._prefabRoot || !viewpoints.length) return;
+        this._vpParent = new THREE.Group();
+        this._vpParent.name = '_ac_camera_viewpoints';
+        this._prefabRoot.add(this._vpParent);
+        const box = new THREE.Box3().setFromObject(this._prefabRoot);
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z, 0.5);
+        this._vpGizmoScale = maxDim * 0.04;
+        const d2r = Math.PI / 180;
+        for (const vp of viewpoints) {
+            const g = new THREE.Group();
+            g.name = `vp_${vp.id}`;
+            g.userData.acVpMeta = {
+                id: vp.id,
+                name: vp.name || vp.id,
+                role: vp.role || 'free',
+                position: { ...vp.position },
+                eulerDeg: { ...(vp.eulerDeg || { x: 0, y: 0, z: 0 }) },
+            };
+            g.position.set(vp.position.x, vp.position.y, vp.position.z);
+            const ed = vp.eulerDeg || { x: 0, y: 0, z: 0 };
+            g.quaternion.setFromEuler(
+                new THREE.Euler(ed.x * d2r, ed.y * d2r, ed.z * d2r, 'YXZ')
+            );
+            const geom = new THREE.OctahedronGeometry(this._vpGizmoScale, 0);
+            const mat = new THREE.MeshStandardMaterial({
+                color: vp.role === 'cockpit' ? 0x48cae4 : vp.role === 'chase' ? 0xffaa00 : 0xadb5bd,
+                emissive: 0x111111,
+                metalness: 0.2,
+                roughness: 0.45,
+            });
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.userData.acVpGizmo = true;
+            mesh.raycast = THREE.Mesh.prototype.raycast;
+            g.add(mesh);
+            const ax = new THREE.AxesHelper(this._vpGizmoScale * 2.2);
+            g.add(ax);
+            this._vpParent.add(g);
+        }
+        this._attachTransformToSelected();
+    }
+
+    /**
+     * @returns {void}
+     */
+    _attachTransformToSelected() {
+        if (!this._vpParent || !this._vpSelectedId) {
+            this._transformControls.detach();
+            return;
+        }
+        const g = this._vpParent.children.find(
+            (c) => c instanceof THREE.Group && c.userData.acVpMeta && c.userData.acVpMeta.id === this._vpSelectedId
+        );
+        if (g) this._transformControls.attach(/** @type {THREE.Object3D} */ (g));
+        else this._transformControls.detach();
+    }
+
+    /**
+     * @param {string|null} id
+     * @param {AcViewpointPayload[]} viewpoints
+     * @returns {void}
+     */
+    setSelectedViewpointId(id, viewpoints) {
+        this._vpSelectedId = id;
+        if (this._vpEdit.active && viewpoints && this._vpParent && this._vpParent.children.length === viewpoints.length) {
+            this._attachTransformToSelected();
+            return;
+        }
+        if (this._vpEdit.active && viewpoints && viewpoints.length) {
+            this._rebuildViewpointMarkers(viewpoints);
+        } else {
+            this._attachTransformToSelected();
+        }
+    }
+
+    /**
+     * 数値フォームから位置姿勢だけ更新（ギズモを付け替えずに同期）
+     * @param {{ id: string, name?: string, role: string, position: {x:number,y:number,z:number}, eulerDeg?: {x:number,y:number,z:number} }[]} viewpoints
+     * @returns {void}
+     */
+    refreshViewpointMarkersFrom(viewpoints) {
+        if (!this._vpParent || !this._vpEdit.active) return;
+        const d2r = Math.PI / 180;
+        for (const ch of this._vpParent.children) {
+            if (!(ch instanceof THREE.Group) || !ch.userData.acVpMeta) continue;
+            const id = ch.userData.acVpMeta.id;
+            const vp = viewpoints.find((v) => v.id === id);
+            if (!vp) continue;
+            ch.userData.acVpMeta = {
+                id: vp.id,
+                name: vp.name || vp.id,
+                role: vp.role || 'free',
+                position: { ...vp.position },
+                eulerDeg: { ...(vp.eulerDeg || { x: 0, y: 0, z: 0 }) },
+            };
+            ch.position.set(vp.position.x, vp.position.y, vp.position.z);
+            const ed = vp.eulerDeg || { x: 0, y: 0, z: 0 };
+            ch.quaternion.setFromEuler(new THREE.Euler(ed.x * d2r, ed.y * d2r, ed.z * d2r, 'YXZ'));
+        }
+        this._attachTransformToSelected();
+    }
+
+    /**
+     * @returns {void}
+     */
+    _clearViewpointMarkers() {
+        this._transformControls.detach();
+        if (this._vpParent && this._prefabRoot) {
+            this._prefabRoot.remove(this._vpParent);
+            this._vpParent.traverse((ch) => {
+                if (ch.isMesh) {
+                    ch.geometry?.dispose?.();
+                    const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+                    mats.forEach((m) => m?.dispose?.());
+                }
+            });
+        }
+        this._vpParent = null;
+    }
+
+    /**
      * @param {MouseEvent} e
      */
     _onClick(e) {
+        if (this._vpEdit.active && this._vpEdit.blockPrefabPick && this._vpParent) {
+            const rect = this._renderer.domElement.getBoundingClientRect();
+            this._pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            this._pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            this._raycaster.setFromCamera(this._pointer, this._camera);
+            const hits = this._raycaster.intersectObjects(this._vpParent.children, true);
+            const gizmoHit = hits.find((h) => h.object && h.object.userData.acVpGizmo);
+            if (gizmoHit) {
+                let o = gizmoHit.object;
+                while (o && o.parent !== this._vpParent) o = o.parent;
+                if (o && o.userData.acVpMeta && this._vpEdit.onSelectRequest) {
+                    this._vpEdit.onSelectRequest(String(o.userData.acVpMeta.id));
+                }
+                return;
+            }
+            return;
+        }
         if (!this._prefabRoot) return;
         const rect = this._renderer.domElement.getBoundingClientRect();
         this._pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         this._pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         this._raycaster.setFromCamera(this._pointer, this._camera);
         const hits = this._raycaster.intersectObject(this._prefabRoot, true);
-        const meshHit = hits.find((h) => h.object && (h.object.isMesh || h.object.isSkinnedMesh));
+        const meshHit = hits.find(
+            (h) =>
+                h.object &&
+                (h.object.isMesh || h.object.isSkinnedMesh) &&
+                !h.object.userData.acVpGizmo
+        );
         const obj = meshHit ? meshHit.object : null;
         this.setSelected(obj);
     }
@@ -264,6 +520,8 @@ export class AdminAircraftPrefabViewer {
      * プレハブのみ破棄
      */
     disposePrefabOnly() {
+        this._transformControls.detach();
+        this._clearViewpointMarkers();
         if (this._prefabRoot) {
             this._scene.remove(this._prefabRoot);
             this._prefabRoot.traverse((ch) => {
@@ -287,6 +545,8 @@ export class AdminAircraftPrefabViewer {
         window.removeEventListener('resize', this._boundResize);
         this._renderer.domElement.removeEventListener('click', this._boundClick);
         this.disposePrefabOnly();
+        this._transformControls.dispose();
+        this._scene.remove(this._transformControls);
         this._controls.dispose();
         this._renderer.dispose();
         if (this._renderer.domElement.parentNode) {

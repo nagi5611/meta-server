@@ -12,6 +12,7 @@ import {
     fillFlightPhysicsForm,
     readFlightPhysicsFromForm,
 } from './flight-physics-admin-form.js';
+import { migrateLegacyCameraToViewpoints, buildCameraJsonForPut } from './camera-viewpoints.js';
 
 let mounted = false;
 /** @type {AdminAircraftPrefabViewer|null} */
@@ -20,6 +21,12 @@ let viewer = null;
 let selectedAirframeId = null;
 /** @type {object|null} */
 let draftAirframe = null;
+/** @type {string|null} */
+let selectedViewpointId = null;
+/** @type {'object'|'params'|'branch'} */
+let activeRightTab = 'object';
+/** @type {((e: KeyboardEvent) => void) | null} */
+let acVpKeydownHandler = null;
 
 /**
  * @param {string} url
@@ -234,7 +241,194 @@ function syncFormFromDraft() {
     const delBtn = document.getElementById('ac-btn-delete');
     if (delBtn) delBtn.disabled = !d?.id;
     fillFlightPhysicsForm(d?.flightPhysics);
-    fillCameraFromDraft(d?.camera);
+    syncViewpointPanelFromDraft();
+    refreshRightTabVisibility();
+}
+
+/**
+ * @returns {ReturnType<typeof migrateLegacyCameraToViewpoints>}
+ */
+function getViewpointsList() {
+    return migrateLegacyCameraToViewpoints(draftAirframe?.camera);
+}
+
+/**
+ * @param {ReturnType<typeof migrateLegacyCameraToViewpoints>} vps
+ * @returns {void}
+ */
+function applyViewpointsToDraftCamera(vps) {
+    if (!draftAirframe) return;
+    draftAirframe.camera = buildCameraJsonForPut(draftAirframe.camera || {}, vps);
+}
+
+/**
+ * @returns {void}
+ */
+function syncViewpointPanelFromDraft() {
+    const sel = /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-vp-select'));
+    if (!sel) return;
+    const vps = getViewpointsList();
+    const keep = selectedViewpointId;
+    sel.innerHTML = '';
+    for (const vp of vps) {
+        const opt = document.createElement('option');
+        opt.value = vp.id;
+        opt.textContent = `${vp.name || vp.id} (${vp.role})`;
+        sel.appendChild(opt);
+    }
+    if (keep && vps.some((v) => v.id === keep)) selectedViewpointId = keep;
+    else selectedViewpointId = vps[0]?.id || null;
+    if (selectedViewpointId && [...sel.options].some((o) => o.value === selectedViewpointId)) {
+        sel.value = selectedViewpointId;
+    } else if (sel.options.length) {
+        sel.selectedIndex = 0;
+        selectedViewpointId = sel.value;
+    } else {
+        selectedViewpointId = null;
+    }
+    fillViewpointDetailInputs();
+    syncViewpointEditorOnViewer();
+}
+
+/**
+ * @returns {void}
+ */
+function fillViewpointDetailInputs() {
+    const vp = getViewpointsList().find((v) => v.id === selectedViewpointId);
+    const set = (id, v) => {
+        const el = document.getElementById(id);
+        if (el && 'value' in el) /** @type {HTMLInputElement} */ (el).value = String(v);
+    };
+    const setSel = (id, v) => {
+        const el = document.getElementById(id);
+        if (el && 'value' in el) /** @type {HTMLSelectElement} */ (el).value = v;
+    };
+    if (!vp) {
+        set('ac-vp-name', '');
+        setSel('ac-vp-role', 'free');
+        for (const k of ['ac-vp-px', 'ac-vp-py', 'ac-vp-pz', 'ac-vp-rx', 'ac-vp-ry', 'ac-vp-rz']) set(k, '0');
+        return;
+    }
+    set('ac-vp-name', vp.name || vp.id);
+    setSel('ac-vp-role', vp.role === 'cockpit' || vp.role === 'chase' ? vp.role : 'free');
+    set('ac-vp-px', vp.position.x);
+    set('ac-vp-py', vp.position.y);
+    set('ac-vp-pz', vp.position.z);
+    const e = vp.eulerDeg || { x: 0, y: 0, z: 0 };
+    set('ac-vp-rx', e.x ?? 0);
+    set('ac-vp-ry', e.y ?? 0);
+    set('ac-vp-rz', e.z ?? 0);
+}
+
+/**
+ * @returns {void}
+ */
+function readViewpointDetailIntoDraft() {
+    const vps = getViewpointsList();
+    const idx = vps.findIndex((v) => v.id === selectedViewpointId);
+    if (idx < 0) return;
+    const p = (id) => {
+        const el = document.getElementById(id);
+        const n = el && 'value' in el ? parseFloat(/** @type {HTMLInputElement} */ (el).value) : NaN;
+        return Number.isFinite(n) ? n : 0;
+    };
+    const name = String(document.getElementById('ac-vp-name')?.value || '').trim();
+    const roleEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-vp-role'));
+    const roleRaw = roleEl?.value || 'free';
+    const role = roleRaw === 'cockpit' || roleRaw === 'chase' ? roleRaw : 'free';
+    vps[idx] = {
+        ...vps[idx],
+        name: name || vps[idx].id,
+        role,
+        position: { x: p('ac-vp-px'), y: p('ac-vp-py'), z: p('ac-vp-pz') },
+        eulerDeg: { x: p('ac-vp-rx'), y: p('ac-vp-ry'), z: p('ac-vp-rz') },
+    };
+    applyViewpointsToDraftCamera(vps);
+    viewer?.refreshViewpointMarkersFrom(getViewpointsList());
+}
+
+/**
+ * @returns {void}
+ */
+function syncViewpointEditorOnViewer() {
+    if (!viewer) return;
+    if (activeRightTab !== 'branch') {
+        viewer.setViewpointEditMode({
+            active: false,
+            viewpoints: [],
+            selectedId: null,
+            onUpdate: null,
+            onSelectRequest: null,
+        });
+        return;
+    }
+    const vps = getViewpointsList();
+    viewer.setViewpointEditMode({
+        active: true,
+        blockPrefabPick: true,
+        viewpoints: vps,
+        selectedId: selectedViewpointId,
+        onUpdate: (markersPayload) => {
+            const base = getViewpointsList();
+            for (let i = 0; i < base.length; i++) {
+                const u = markersPayload.find((m) => m.id === base[i].id);
+                if (u) {
+                    base[i] = {
+                        ...base[i],
+                        position: { ...u.position },
+                        eulerDeg: { ...u.eulerDeg },
+                    };
+                }
+            }
+            applyViewpointsToDraftCamera(base);
+            fillViewpointDetailInputs();
+        },
+        onSelectRequest: (id) => {
+            selectedViewpointId = id;
+            const sel = document.getElementById('ac-vp-select');
+            if (sel && 'value' in sel) /** @type {HTMLSelectElement} */ (sel).value = id;
+            viewer?.setSelectedViewpointId(id, getViewpointsList());
+            fillViewpointDetailInputs();
+        },
+    });
+}
+
+/**
+ * @returns {void}
+ */
+function refreshRightTabVisibility() {
+    const panes = {
+        object: document.getElementById('ac-pane-object'),
+        params: document.getElementById('ac-pane-params'),
+        branch: document.getElementById('ac-pane-branch'),
+    };
+    for (const [k, el] of Object.entries(panes)) {
+        if (!el) continue;
+        el.style.display = k === activeRightTab ? '' : 'none';
+    }
+    document.querySelectorAll('.ac-tab-btn').forEach((btn) => {
+        const t = /** @type {HTMLElement} */ (btn).dataset.acTab;
+        btn.classList.toggle('is-active', t === activeRightTab);
+    });
+    const hint = document.getElementById('ac-viewer-hint');
+    if (hint) {
+        if (activeRightTab === 'branch') {
+            hint.textContent =
+                '視点マーカーをドラッグ（矢印／回転）または右の数値・矢印キーで編集。マーカーをクリックで視点を選択。';
+        } else {
+            hint.textContent = 'クリックでオブジェクト選択（ハイライト）';
+        }
+    }
+    syncViewpointEditorOnViewer();
+}
+
+/**
+ * @param {'object'|'params'|'branch'} tab
+ * @returns {void}
+ */
+function setActiveRightTab(tab) {
+    activeRightTab = tab;
+    refreshRightTabVisibility();
 }
 
 /**
@@ -255,50 +449,6 @@ function readAnimationFromForm() {
 }
 
 /**
- * @returns {Record<string, unknown>}
- */
-function readCameraFromForm() {
-    const p = (id) => {
-        const el = document.getElementById(id);
-        const n = el && 'value' in el ? parseFloat(/** @type {HTMLInputElement} */ (el).value) : NaN;
-        return Number.isFinite(n) ? n : 0;
-    };
-    return {
-        cockpitOffset: { x: p('ac-cam-cockpit-x'), y: p('ac-cam-cockpit-y'), z: p('ac-cam-cockpit-z') },
-        chaseOffset: { x: p('ac-cam-chase-x'), y: p('ac-cam-chase-y'), z: p('ac-cam-chase-z') },
-        cockpitEulerDeg: { x: p('ac-cam-cockpit-rx'), y: p('ac-cam-cockpit-ry'), z: p('ac-cam-cockpit-rz') },
-        chaseEulerDeg: { x: p('ac-cam-chase-rx'), y: p('ac-cam-chase-ry'), z: p('ac-cam-chase-rz') },
-    };
-}
-
-/**
- * @param {unknown} camRaw
- */
-function fillCameraFromDraft(camRaw) {
-    const c = camRaw && typeof camRaw === 'object' && !Array.isArray(camRaw) ? camRaw : {};
-    const ck = /** @type {{x?:number,y?:number,z?:number}} */ (c.cockpitOffset) || {};
-    const ch = /** @type {{x?:number,y?:number,z?:number}} */ (c.chaseOffset) || {};
-    const set = (id, v) => {
-        const el = document.getElementById(id);
-        if (el && 'value' in el) /** @type {HTMLInputElement} */ (el).value = String(v);
-    };
-    set('ac-cam-cockpit-x', ck.x ?? 0);
-    set('ac-cam-cockpit-y', ck.y ?? 1.2);
-    set('ac-cam-cockpit-z', ck.z ?? 0);
-    set('ac-cam-chase-x', ch.x ?? 0);
-    set('ac-cam-chase-y', ch.y ?? 3);
-    set('ac-cam-chase-z', ch.z ?? 12);
-    const ce = /** @type {{x?:number,y?:number,z?:number}} */ (c.cockpitEulerDeg) || {};
-    const se = /** @type {{x?:number,y?:number,z?:number}} */ (c.chaseEulerDeg) || {};
-    set('ac-cam-cockpit-rx', ce.x ?? 0);
-    set('ac-cam-cockpit-ry', ce.y ?? 0);
-    set('ac-cam-cockpit-rz', ce.z ?? 0);
-    set('ac-cam-chase-rx', se.x ?? 0);
-    set('ac-cam-chase-ry', se.y ?? 0);
-    set('ac-cam-chase-rz', se.z ?? 0);
-}
-
-/**
  * @param {string} id
  * @returns {Promise<void>}
  */
@@ -315,6 +465,7 @@ async function selectAirframe(id) {
             setStatus('プレハブを読み込み中…');
             await viewer.loadFromManifest(manifest);
             refreshPathDropdown();
+            syncViewpointEditorOnViewer();
             setStatus('読み込み完了');
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -363,7 +514,7 @@ async function saveDraft() {
         bindings,
         animation,
         flightPhysics: readFlightPhysicsFromForm(),
-        camera: readCameraFromForm(),
+        camera: buildCameraJsonForPut(draftAirframe.camera || {}, getViewpointsList()),
     };
     setStatus('保存中…');
     const data = await fetchJson(`/admin/addons/aircraft/airframes/${encodeURIComponent(draftAirframe.id)}`, {
@@ -403,7 +554,7 @@ export function initAircraftAdminPanel() {
             </aside>
             <div class="ac-admin-center">
                 <div id="ac-viewer-mount" class="ac-viewer-mount"></div>
-                <p class="hint">クリックでオブジェクト選択（ハイライト）</p>
+                <p class="hint" id="ac-viewer-hint">クリックでオブジェクト選択（ハイライト）</p>
             </div>
             <aside class="ac-admin-right">
                 <h3 class="section-subtitle">選択中の機体</h3>
@@ -419,56 +570,76 @@ export function initAircraftAdminPanel() {
                         <option value="">（読み込み中）</option>
                     </select>
                 </div>
-                <h3 class="section-subtitle">ロール割当</h3>
-                <div class="field-row">
-                    <label class="prop-label" for="ac-role-select">ロール</label>
-                    <select id="ac-role-select" class="prop-input full"></select>
+                <div class="ac-right-tabbar" role="tablist">
+                    <button type="button" class="ac-tab-btn is-active" data-ac-tab="object" role="tab">オブジェクト定義</button>
+                    <button type="button" class="ac-tab-btn" data-ac-tab="params" role="tab">パラメータ定義</button>
+                    <button type="button" class="ac-tab-btn" data-ac-tab="branch" role="tab">支店定義</button>
                 </div>
-                <div class="field-row">
-                    <label class="prop-label" for="ac-path-select">オブジェクトパス</label>
-                    <select id="ac-path-select" class="prop-input full"></select>
+                <p class="hint" style="margin:6px 0 8px;font-size:11px;">「支店」タブでは機体ローカル座標の<strong>視点（カメラ）</strong>を編集します。ゲームでは <code>cockpit</code> / <code>chase</code> 役割の先頭1件ずつがコックピット視点・追従視点に使われます。</p>
+                <div id="ac-pane-object" class="ac-tab-pane">
+                    <h3 class="section-subtitle">ロール割当</h3>
+                    <div class="field-row">
+                        <label class="prop-label" for="ac-role-select">ロール</label>
+                        <select id="ac-role-select" class="prop-input full"></select>
+                    </div>
+                    <div class="field-row">
+                        <label class="prop-label" for="ac-path-select">オブジェクトパス</label>
+                        <select id="ac-path-select" class="prop-input full"></select>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="ac-btn-add-binding">選択パスをロールに追加</button>
+                    <div id="ac-bindings-list" class="ac-bindings-list"></div>
                 </div>
-                <button type="button" class="btn btn-primary" id="ac-btn-add-binding">選択パスをロールに追加</button>
-                <div id="ac-bindings-list" class="ac-bindings-list"></div>
-                <h3 class="section-subtitle">操縦パラメータ</h3>
-                <div id="ac-flight-physics-mount"></div>
-                <h3 class="section-subtitle">コックピット／追従カメラ（機体ローカル）</h3>
-                <p class="hint" style="margin:0 0 8px;">位置は m、回転は度（機体ローカル）。ライブラリ連携ワールドはゲーム起動時に API で再読込されます。</p>
-                <div class="prop-group-label">コックピット視点・位置</div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-x">X</label>
-                    <input type="number" id="ac-cam-cockpit-x" class="prop-input num" step="0.05" value="0" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-y">Y</label>
-                    <input type="number" id="ac-cam-cockpit-y" class="prop-input num" step="0.05" value="1.2" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-z">Z</label>
-                    <input type="number" id="ac-cam-cockpit-z" class="prop-input num" step="0.05" value="0" /></div>
-                <div class="prop-group-label">コックピット視点・回転（°）</div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-rx">Pitch X</label>
-                    <input type="number" id="ac-cam-cockpit-rx" class="prop-input num" step="0.5" value="0" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-ry">Yaw Y</label>
-                    <input type="number" id="ac-cam-cockpit-ry" class="prop-input num" step="0.5" value="0" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-rz">Roll Z</label>
-                    <input type="number" id="ac-cam-cockpit-rz" class="prop-input num" step="0.5" value="0" /></div>
-                <div class="prop-group-label">追従カメラ・位置（+Z は後方寄り）</div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-chase-x">X</label>
-                    <input type="number" id="ac-cam-chase-x" class="prop-input num" step="0.05" value="0" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-chase-y">Y</label>
-                    <input type="number" id="ac-cam-chase-y" class="prop-input num" step="0.05" value="3" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-chase-z">Z</label>
-                    <input type="number" id="ac-cam-chase-z" class="prop-input num" step="0.05" value="12" /></div>
-                <div class="prop-group-label">追従カメラ・回転（°）</div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-chase-rx">Pitch X</label>
-                    <input type="number" id="ac-cam-chase-rx" class="prop-input num" step="0.5" value="0" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-chase-ry">Yaw Y</label>
-                    <input type="number" id="ac-cam-chase-ry" class="prop-input num" step="0.5" value="0" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-cam-chase-rz">Roll Z</label>
-                    <input type="number" id="ac-cam-chase-rz" class="prop-input num" step="0.5" value="0" /></div>
-                <h3 class="section-subtitle">アニメーション（エンジンブレード）</h3>
-                <div class="field-row"><label class="prop-label" for="ac-anim-maxaccel">角加速度上限 (rad/s²)</label>
-                    <input type="number" id="ac-anim-maxaccel" class="prop-input num" step="0.5" min="0" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-anim-maxomega">目標角速度上限 (rad/s)</label>
-                    <input type="number" id="ac-anim-maxomega" class="prop-input num" step="1" min="0" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-anim-spinaxis">回転軸（ローカル）</label>
-                    <select id="ac-anim-spinaxis" class="prop-input full"><option value="x">x</option><option value="y">y</option><option value="z">z</option></select></div>
+                <div id="ac-pane-params" class="ac-tab-pane" style="display:none">
+                    <h3 class="section-subtitle">操縦パラメータ</h3>
+                    <div id="ac-flight-physics-mount"></div>
+                    <h3 class="section-subtitle">アニメーション（エンジンブレード）</h3>
+                    <div class="field-row"><label class="prop-label" for="ac-anim-maxaccel">角加速度上限 (rad/s²)</label>
+                        <input type="number" id="ac-anim-maxaccel" class="prop-input num" step="0.5" min="0" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-anim-maxomega">目標角速度上限 (rad/s)</label>
+                        <input type="number" id="ac-anim-maxomega" class="prop-input num" step="1" min="0" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-anim-spinaxis">回転軸（ローカル）</label>
+                        <select id="ac-anim-spinaxis" class="prop-input full"><option value="x">x</option><option value="y">y</option><option value="z">z</option></select></div>
+                </div>
+                <div id="ac-pane-branch" class="ac-tab-pane" style="display:none">
+                    <h3 class="section-subtitle">視点（カメラ）</h3>
+                    <p class="hint" style="margin:0 0 8px;">3D 上のマーカーをドラッグするか、数値・矢印キーで移動。ビューアを一度クリックしてからキー操作してください。</p>
+                    <div class="ac-admin-actions" style="margin-top:0;">
+                        <button type="button" class="btn btn-sm btn-primary" id="ac-vp-add">視点を追加</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="ac-vp-del">削除</button>
+                    </div>
+                    <div class="field-row">
+                        <label class="prop-label" for="ac-vp-select">視点一覧</label>
+                        <select id="ac-vp-select" class="prop-input full" size="5" style="min-height:100px;"></select>
+                    </div>
+                    <div class="field-row"><label class="prop-label" for="ac-vp-name">表示名</label>
+                        <input type="text" id="ac-vp-name" class="prop-input full" placeholder="例: メインコックピット" /></div>
+                    <div class="field-row">
+                        <label class="prop-label" for="ac-vp-role">役割</label>
+                        <select id="ac-vp-role" class="prop-input full">
+                            <option value="cockpit">cockpit（コックピット視点に使用）</option>
+                            <option value="chase">chase（追従視点に使用）</option>
+                            <option value="free">free（参照用・ゲームでは未使用）</option>
+                        </select>
+                    </div>
+                    <div class="prop-group-label">位置（機体ローカル m）</div>
+                    <div class="field-row"><label class="prop-label" for="ac-vp-px">X</label>
+                        <input type="number" id="ac-vp-px" class="prop-input num" step="0.05" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-vp-py">Y</label>
+                        <input type="number" id="ac-vp-py" class="prop-input num" step="0.05" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-vp-pz">Z</label>
+                        <input type="number" id="ac-vp-pz" class="prop-input num" step="0.05" /></div>
+                    <div class="prop-group-label">回転（°・YXZ）</div>
+                    <div class="field-row"><label class="prop-label" for="ac-vp-rx">Pitch X</label>
+                        <input type="number" id="ac-vp-rx" class="prop-input num" step="0.5" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-vp-ry">Yaw Y</label>
+                        <input type="number" id="ac-vp-ry" class="prop-input num" step="0.5" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-vp-rz">Roll Z</label>
+                        <input type="number" id="ac-vp-rz" class="prop-input num" step="0.5" /></div>
+                    <div class="ac-admin-actions" style="margin-top:4px;">
+                        <button type="button" class="btn btn-sm btn-secondary" id="ac-vp-mode-trans">移動ギズモ</button>
+                        <button type="button" class="btn btn-sm btn-secondary" id="ac-vp-mode-rot">回転ギズモ</button>
+                    </div>
+                </div>
                 <div class="ac-admin-actions">
                     <button type="button" class="btn btn-primary" id="ac-btn-save">保存</button>
                 </div>
@@ -617,11 +788,87 @@ export function initAircraftAdminPanel() {
             setStatus('プレハブを読み込み中…');
             await viewer?.loadFromManifest(v);
             refreshPathDropdown();
+            syncViewpointEditorOnViewer();
             await saveDraft();
         } catch (e) {
             setStatus(e instanceof Error ? e.message : String(e), true);
         }
     });
+
+    document.querySelectorAll('.ac-tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const t = /** @type {HTMLElement} */ (btn).dataset.acTab;
+            if (t === 'object' || t === 'params' || t === 'branch') setActiveRightTab(t);
+        });
+    });
+
+    document.getElementById('ac-vp-add')?.addEventListener('click', () => {
+        if (!draftAirframe) return;
+        const vps = [...getViewpointsList()];
+        const id = `vp_${Date.now()}`;
+        vps.push({
+            id,
+            name: `視点_${vps.length + 1}`,
+            role: 'free',
+            position: { x: 0, y: 2, z: 10 },
+            eulerDeg: { x: 0, y: 0, z: 0 },
+        });
+        applyViewpointsToDraftCamera(vps);
+        selectedViewpointId = id;
+        syncViewpointPanelFromDraft();
+        setStatus(`視点を追加: ${id}`);
+    });
+
+    document.getElementById('ac-vp-del')?.addEventListener('click', () => {
+        if (!draftAirframe || !selectedViewpointId) return;
+        const vps = getViewpointsList().filter((v) => v.id !== selectedViewpointId);
+        if (!vps.length) {
+            setStatus('最低 1 件の視点が必要です', true);
+            return;
+        }
+        applyViewpointsToDraftCamera(vps);
+        selectedViewpointId = vps[0]?.id || null;
+        syncViewpointPanelFromDraft();
+        setStatus('視点を削除しました');
+    });
+
+    document.getElementById('ac-vp-select')?.addEventListener('change', (ev) => {
+        selectedViewpointId = /** @type {HTMLSelectElement} */ (ev.target).value || null;
+        fillViewpointDetailInputs();
+        viewer?.setSelectedViewpointId(selectedViewpointId, getViewpointsList());
+    });
+
+    for (const id of ['ac-vp-name', 'ac-vp-role', 'ac-vp-px', 'ac-vp-py', 'ac-vp-pz', 'ac-vp-rx', 'ac-vp-ry', 'ac-vp-rz']) {
+        document.getElementById(id)?.addEventListener('change', () => {
+            readViewpointDetailIntoDraft();
+        });
+    }
+
+    document.getElementById('ac-vp-mode-trans')?.addEventListener('click', () => {
+        viewer?.setViewpointTransformMode('translate');
+    });
+    document.getElementById('ac-vp-mode-rot')?.addEventListener('click', () => {
+        viewer?.setViewpointTransformMode('rotate');
+    });
+
+    acVpKeydownHandler = (e) => {
+        if (activeRightTab !== 'branch' || !viewer) return;
+        const canvas = document.querySelector('#ac-viewer-mount canvas');
+        if (!canvas || document.activeElement !== canvas) return;
+        const step = e.shiftKey ? 0.02 : 0.1;
+        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(e.code)) {
+            e.preventDefault();
+        }
+        if (e.code === 'ArrowLeft') viewer.nudgeSelectedViewpoint(-step, 0, 0);
+        else if (e.code === 'ArrowRight') viewer.nudgeSelectedViewpoint(step, 0, 0);
+        else if (e.code === 'ArrowUp') viewer.nudgeSelectedViewpoint(0, step, 0);
+        else if (e.code === 'ArrowDown') viewer.nudgeSelectedViewpoint(0, -step, 0);
+        else if (e.code === 'PageUp') viewer.nudgeSelectedViewpoint(0, 0, step);
+        else if (e.code === 'PageDown') viewer.nudgeSelectedViewpoint(0, 0, -step);
+    };
+    document.addEventListener('keydown', acVpKeydownHandler);
+
+    refreshRightTabVisibility();
 
     void (async () => {
         await reloadPlaneManifestSelect();
@@ -640,6 +887,10 @@ export function initAircraftAdminPanel() {
  * @returns {void}
  */
 export function disposeAircraftAdminPanel() {
+    if (acVpKeydownHandler) {
+        document.removeEventListener('keydown', acVpKeydownHandler);
+        acVpKeydownHandler = null;
+    }
     if (viewer) {
         viewer.dispose();
         viewer = null;

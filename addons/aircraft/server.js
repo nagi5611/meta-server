@@ -120,6 +120,28 @@ function parseCameraJson(raw) {
     if (ce) out.cockpitEulerDeg = ce;
     const se = euler(raw.chaseEulerDeg);
     if (se) out.chaseEulerDeg = se;
+    const VP_ID_RE = /^[a-zA-Z0-9_-]{1,48}$/;
+    if (Array.isArray(raw.viewpoints)) {
+        /** @type {unknown[]} */
+        const vps = [];
+        for (const item of raw.viewpoints) {
+            if (!isPlainObject(item) || vps.length >= 24) break;
+            const id = typeof item.id === 'string' ? item.id.trim() : '';
+            if (!VP_ID_RE.test(id)) continue;
+            const roleRaw = typeof item.role === 'string' ? item.role.trim().toLowerCase() : 'free';
+            const role = roleRaw === 'cockpit' || roleRaw === 'chase' ? roleRaw : 'free';
+            const name =
+                typeof item.name === 'string' && item.name.trim() ? item.name.trim().slice(0, 64) : id;
+            vps.push({
+                id,
+                name,
+                role,
+                position: vec3(item.position, { x: 0, y: 1.2, z: 0 }),
+                eulerDeg: euler(item.eulerDeg) || { x: 0, y: 0, z: 0 },
+            });
+        }
+        if (vps.length) out.viewpoints = vps;
+    }
     const s = JSON.stringify(out);
     if (s.length > 16000) return { ok: false, error: 'camera JSON too large' };
     return { ok: true, obj: out };
