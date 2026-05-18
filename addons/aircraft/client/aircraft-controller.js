@@ -754,7 +754,9 @@ export default class AircraftController {
             root.localToWorld(this._lookTarget);
             this.camera.position.copy(this._lookTarget);
             root.getWorldQuaternion(this._worldQuat);
-            this.camera.quaternion.copy(this._worldQuat).multiply(qOff);
+            this.camera.quaternion.copy(this._worldQuat);
+            this._applySlotCameraBodyEuler(slot, 'cockpit');
+            this.camera.quaternion.multiply(qOff);
             return;
         }
 
@@ -767,7 +769,9 @@ export default class AircraftController {
         o.position.copy(this.camera.position);
         o.quaternion.identity();
         o.lookAt(this._passengerAimScratch);
-        this.camera.quaternion.copy(o.quaternion).multiply(qOff);
+        this.camera.quaternion.copy(o.quaternion);
+        this._applySlotCameraBodyEuler(slot, 'chase');
+        this.camera.quaternion.multiply(qOff);
     }
 
     /**
@@ -815,6 +819,22 @@ export default class AircraftController {
         };
     }
 
+    /**
+     * 機体ローカル（ライブラリ camera.cockpitEulerDeg / chaseEulerDeg）の追加回転をカメラ姿勢に乗算する
+     * @param {object|null|undefined} slot
+     * @param {'cockpit'|'chase'} which
+     */
+    _applySlotCameraBodyEuler(slot, which) {
+        const deg = which === 'cockpit' ? slot?.cockpitEulerDeg : slot?.chaseEulerDeg;
+        if (!deg || typeof deg !== 'object') return;
+        const rx = THREE.MathUtils.degToRad(Number(deg.x) || 0);
+        const ry = THREE.MathUtils.degToRad(Number(deg.y) || 0);
+        const rz = THREE.MathUtils.degToRad(Number(deg.z) || 0);
+        this._eulerScratch.set(rx, ry, rz, 'YXZ');
+        this._qParentWorld.setFromEuler(this._eulerScratch);
+        this.camera.quaternion.multiply(this._qParentWorld);
+    }
+
     _updateCamera() {
         const root = this.slot?.root;
         if (!root) return;
@@ -828,6 +848,7 @@ export default class AircraftController {
             this._lookTarget.set(0, 0, -30);
             root.localToWorld(this._lookTarget);
             this.camera.lookAt(this._lookTarget);
+            this._applySlotCameraBodyEuler(this.slot, 'cockpit');
         } else {
             this._lookTarget.set(chase.x, chase.y, chase.z);
             root.localToWorld(this._lookTarget);
@@ -835,6 +856,6 @@ export default class AircraftController {
             root.getWorldPosition(this._fwd);
             this._fwd.y += 1;
             this.camera.lookAt(this._fwd);
+            this._applySlotCameraBodyEuler(this.slot, 'chase');
         }
     }
-}

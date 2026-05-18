@@ -2,6 +2,8 @@
 import express from 'express';
 import { HOOKS } from '../../lib/hook-registry.js';
 import { registerAircraftSocketHandlers } from '../../lib/aircraft-server/register-socket.js';
+import { mergeAircraftPhysicsFromWorld } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
+import { appendAircraftPhysicsValidationErrors } from '../../lib/aircraft-server/validate-worlds.js';
 
 const AIRFRAME_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 const JSON_BODY_LIMIT = 512 * 1024;
@@ -75,6 +77,55 @@ function parseAnimation(raw) {
 }
 
 /**
+ * @param {unknown} raw
+ * @returns {{ ok: true, obj: Record<string, number> } | { ok: false, error: string }}
+ */
+function parseFlightPhysics(raw) {
+    if (raw == null) return { ok: true, obj: mergeAircraftPhysicsFromWorld(null) };
+    if (!isPlainObject(raw)) return { ok: false, error: 'flightPhysics must be an object' };
+    const merged = mergeAircraftPhysicsFromWorld(raw);
+    const errs = [];
+    appendAircraftPhysicsValidationErrors(merged, 'flightPhysics', errs);
+    if (errs.length) return { ok: false, error: errs[0] };
+    const s = JSON.stringify(merged);
+    if (s.length > 32000) return { ok: false, error: 'flightPhysics JSON too large' };
+    return { ok: true, obj: merged };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {{ ok: true, obj: Record<string, unknown> } | { ok: false, error: string }}
+ */
+function parseCameraJson(raw) {
+    if (raw == null) return { ok: true, obj: {} };
+    if (!isPlainObject(raw)) return { ok: false, error: 'camera must be an object' };
+    const out = {};
+    const vec3 = (v, def) => {
+        if (!isPlainObject(v)) return { ...def };
+        const x = typeof v.x === 'number' && Number.isFinite(v.x) ? v.x : def.x;
+        const y = typeof v.y === 'number' && Number.isFinite(v.y) ? v.y : def.y;
+        const z = typeof v.z === 'number' && Number.isFinite(v.z) ? v.z : def.z;
+        return { x, y, z };
+    };
+    const euler = (v) => {
+        if (!isPlainObject(v)) return undefined;
+        const x = typeof v.x === 'number' && Number.isFinite(v.x) ? v.x : 0;
+        const y = typeof v.y === 'number' && Number.isFinite(v.y) ? v.y : 0;
+        const z = typeof v.z === 'number' && Number.isFinite(v.z) ? v.z : 0;
+        return { x, y, z };
+    };
+    if (raw.cockpitOffset) out.cockpitOffset = vec3(raw.cockpitOffset, { x: 0, y: 1.2, z: 0 });
+    if (raw.chaseOffset) out.chaseOffset = vec3(raw.chaseOffset, { x: 0, y: 3, z: 12 });
+    const ce = euler(raw.cockpitEulerDeg);
+    if (ce) out.cockpitEulerDeg = ce;
+    const se = euler(raw.chaseEulerDeg);
+    if (se) out.chaseEulerDeg = se;
+    const s = JSON.stringify(out);
+    if (s.length > 16000) return { ok: false, error: 'camera JSON too large' };
+    return { ok: true, obj: out };
+}
+
+/**
  * @param {import('better-sqlite3').Database} db
  * @param {string} id
  * @returns {object|null}
@@ -84,6 +135,8 @@ function rowToAirframe(db, id) {
     if (!row) return null;
     let bindings = {};
     let animation = {};
+    let flightPhysicsRaw = {};
+    let cameraRaw = {};
     try {
         bindings = row.bindings_json ? JSON.parse(String(row.bindings_json)) : {};
     } catch {
@@ -94,12 +147,26 @@ function rowToAirframe(db, id) {
     } catch {
         animation = {};
     }
+    try {
+        flightPhysicsRaw = row.physics_json ? JSON.parse(String(row.physics_json)) : {};
+    } catch {
+        flightPhysicsRaw = {};
+    }
+    try {
+        cameraRaw = row.camera_json ? JSON.parse(String(row.camera_json)) : {};
+    } catch {
+        cameraRaw = {};
+    }
+    const fp = parseFlightPhysics(flightPhysicsRaw);
+    const cam = parseCameraJson(cameraRaw);
     return {
         id: String(row.id),
         displayName: String(row.display_name || ''),
         prefabManifest: String(row.prefab_manifest || ''),
         bindings: isPlainObject(bindings) ? bindings : {},
         animation: isPlainObject(animation) ? animation : {},
+        flightPhysics: fp.ok ? fp.obj : mergeAircraftPhysicsFromWorld(null),
+        camera: cam.ok && isPlainObject(cam.obj) ? cam.obj : {},
         updatedAt: String(row.updated_at || ''),
     };
 }
@@ -182,6 +249,10 @@ export default {
                     if (!b.ok) return res.status(400).json({ error: b.error });
                     const a = parseAnimation(body.animation);
                     if (!a.ok) return res.status(400).json({ error: a.error });
+                    const fp = parseFlightPhysics(body.flightPhysics);
+                    if (!fp.ok) return res.status(400).json({ error: fp.error });
+                    const cam = parseCameraJson(body.camera);
+                    if (!cam.ok) return res.status(400).json({ error: cam.error });
 
                     const exists = db.prepare('SELECT 1 FROM aircraft_airframe WHERE id = ?').get(id);
                     if (exists) {
@@ -191,6 +262,8 @@ export default {
                                 prefab_manifest = ?,
                                 bindings_json = ?,
                                 animation_json = ?,
+                                physics_json = ?,
+                                camera_json = ?,
                                 updated_at = datetime('now')
                              WHERE id = ?`
                         ).run(
@@ -198,18 +271,22 @@ export default {
                             prefabManifest,
                             JSON.stringify(b.obj),
                             JSON.stringify(a.obj),
+                            JSON.stringify(fp.obj),
+                            JSON.stringify(cam.obj),
                             id
                         );
                     } else {
                         db.prepare(
-                            `INSERT INTO aircraft_airframe (id, display_name, prefab_manifest, bindings_json, animation_json, updated_at)
-                             VALUES (?, ?, ?, ?, ?, datetime('now'))`
+                            `INSERT INTO aircraft_airframe (id, display_name, prefab_manifest, bindings_json, animation_json, physics_json, camera_json, updated_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
                         ).run(
                             id,
                             displayName,
                             prefabManifest,
                             JSON.stringify(b.obj),
-                            JSON.stringify(a.obj)
+                            JSON.stringify(a.obj),
+                            JSON.stringify(fp.obj),
+                            JSON.stringify(cam.obj)
                         );
                     }
                     const row = rowToAirframe(db, id);

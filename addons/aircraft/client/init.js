@@ -6,8 +6,9 @@ import AircraftManager from './aircraft-manager.js';
 /**
  * エアークラフトのコントローラ・マネージャを生成し UI / ネットワークと結線する。
  * @param {object} app MetaverseApp インスタンス（init 内で this）
+ * @returns {Promise<void>}
  */
-export function initAircraftSubsystem(app) {
+export async function initAircraftSubsystem(app) {
     app.aircraftController = new AircraftController(
         app.sceneManager.getCamera(),
         app.physicsManager
@@ -24,6 +25,7 @@ export function initAircraftSubsystem(app) {
         app.uiManager
     );
     app.aircraftManager.setMobileMode(app.isMobileMode);
+    await app.sceneManager.hydrateAircraftSlotsFromLibrary();
     app.aircraftManager.refreshSlotsFromScene();
 
     app.uiManager.setAircraftBoardHandler(() => {

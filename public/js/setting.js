@@ -43,9 +43,59 @@ import { resolveEnvAssetHref } from './asset-resolve.js';
 import { resolveModelAssetHref } from './asset-resolve.js';
 import {
     mergeAircraftPhysicsFromWorld,
-    clipAircraftPhysicsPartialFromUser,
-    DEFAULT_AIRCRAFT_PHYSICS
+    clipAircraftPhysicsPartialFromUser
 } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
+
+/**
+ * ワールド JSON 用 aircraft。ライブラリ連携時は id / radius / label / aircraftLibraryId のみ。
+ * 未リンクのレガシー機体はカメラ・physics を JSON から引き継ぎ保存する。
+ * @param {unknown} raw
+ * @returns {Record<string, unknown>|null}
+ */
+function serializeAircraftForWorldJson(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const a = /** @type {Record<string, unknown>} */ (raw);
+    const id = String(a.id || '').trim();
+    if (!id) return null;
+    const radius = typeof a.radius === 'number' && Number.isFinite(a.radius) ? a.radius : 4;
+    const labelRaw = a.label != null ? String(a.label).trim() : '';
+    const label = labelRaw || '操縦する';
+    const libId = String(a.aircraftLibraryId || '').trim();
+    /** @type {Record<string, unknown>} */
+    const base = { id, radius, label };
+    if (libId) {
+        base.aircraftLibraryId = libId;
+        return base;
+    }
+    const ck = a.cockpitOffset && typeof a.cockpitOffset === 'object' && !Array.isArray(a.cockpitOffset)
+        ? /** @type {Record<string, unknown>} */ (a.cockpitOffset)
+        : {};
+    const ch = a.chaseOffset && typeof a.chaseOffset === 'object' && !Array.isArray(a.chaseOffset)
+        ? /** @type {Record<string, unknown>} */ (a.chaseOffset)
+        : {};
+    const nx = (o, k, d) => {
+        const v = o[k];
+        return typeof v === 'number' && Number.isFinite(v) ? v : d;
+    };
+    base.cockpitOffset = { x: nx(ck, 'x', 0), y: nx(ck, 'y', 1.2), z: nx(ck, 'z', 0) };
+    base.chaseOffset = { x: nx(ch, 'x', 0), y: nx(ch, 'y', 3), z: nx(ch, 'z', 12) };
+    const ce = a.cockpitEulerDeg;
+    if (ce && typeof ce === 'object' && !Array.isArray(ce)) {
+        const o = /** @type {Record<string, unknown>} */ (ce);
+        base.cockpitEulerDeg = { x: nx(o, 'x', 0), y: nx(o, 'y', 0), z: nx(o, 'z', 0) };
+    }
+    const se = a.chaseEulerDeg;
+    if (se && typeof se === 'object' && !Array.isArray(se)) {
+        const o = /** @type {Record<string, unknown>} */ (se);
+        base.chaseEulerDeg = { x: nx(o, 'x', 0), y: nx(o, 'y', 0), z: nx(o, 'z', 0) };
+    }
+    const ap = a.aircraftPhysics;
+    if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
+        const clipped = clipAircraftPhysicsPartialFromUser(ap);
+        if (clipped && Object.keys(clipped).length) base.aircraftPhysics = clipped;
+    }
+    return base;
+}
 
 // --- State ---
 let scene, camera, renderer, controls, transformControls;
@@ -1002,21 +1052,8 @@ function getWorldEditorClipboardPayloadFromSelection() {
         if (c.teleporter) c.teleporter = { ...c.teleporter };
         if (c.taiko) c.taiko = { ...c.taiko };
         if (c.aircraft) {
-            const a = c.aircraft;
-            const ck = a.cockpitOffset || {};
-            const ch = a.chaseOffset || {};
-            c.aircraft = {
-                id: a.id,
-                radius: a.radius,
-                label: a.label,
-                cockpitOffset: { x: ck.x, y: ck.y, z: ck.z },
-                chaseOffset: { x: ch.x, y: ch.y, z: ch.z }
-            };
-            const ap = a.aircraftPhysics;
-            if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
-                const clipped = clipAircraftPhysicsPartialFromUser(ap);
-                if (clipped && Object.keys(clipped).length) c.aircraft.aircraftPhysics = clipped;
-            }
+            const ser = serializeAircraftForWorldJson(c.aircraft);
+            if (ser) c.aircraft = ser;
         }
         if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
         if (!isObjPath(c.path || '')) delete c.mtlPath;
@@ -1061,11 +1098,9 @@ function uniquifyPastedModelConfig(cfg) {
         };
     }
     if (c.aircraft && c.aircraft.id) {
-        c.aircraft = { ...c.aircraft, id: `${String(c.aircraft.id)}-paste-${Date.now()}` };
-        const ck = c.aircraft.cockpitOffset || {};
-        const ch = c.aircraft.chaseOffset || {};
-        c.aircraft.cockpitOffset = { x: ck.x ?? 0, y: ck.y ?? 1.2, z: ck.z ?? 0 };
-        c.aircraft.chaseOffset = { x: ch.x ?? 0, y: ch.y ?? 3, z: ch.z ?? 12 };
+        const a = { ...c.aircraft, id: `${String(c.aircraft.id)}-paste-${Date.now()}` };
+        const ser = serializeAircraftForWorldJson(a);
+        if (ser) c.aircraft = ser;
     }
     if (c.teleporter && c.teleporter.id != null && String(c.teleporter.id).length) {
         c.teleporter = { ...c.teleporter, id: `${String(c.teleporter.id)}-paste-${Date.now()}` };
@@ -1508,14 +1543,6 @@ function updateObjectPanel(obj) {
             document.getElementById('obj-ac-id').value = ac.id || '';
             document.getElementById('obj-ac-radius').value = ac.radius != null ? ac.radius : 4;
             document.getElementById('obj-ac-label').value = ac.label || '操縦する';
-            const ck = ac.cockpitOffset || {};
-            const ch = ac.chaseOffset || {};
-            document.getElementById('obj-ac-cockpit-x').value = ck.x ?? 0;
-            document.getElementById('obj-ac-cockpit-y').value = ck.y ?? 1.2;
-            document.getElementById('obj-ac-cockpit-z').value = ck.z ?? 0;
-            document.getElementById('obj-ac-chase-x').value = ch.x ?? 0;
-            document.getElementById('obj-ac-chase-y').value = ch.y ?? 3;
-            document.getElementById('obj-ac-chase-z').value = ch.z ?? 12;
             refreshAircraftLibrarySelectOptions();
             const libSel = document.getElementById('obj-ac-library-id');
             const libCur = String(ac.aircraftLibraryId || '').trim();
@@ -1530,26 +1557,9 @@ function updateObjectPanel(obj) {
             document.getElementById('obj-ac-id').value = '';
             document.getElementById('obj-ac-radius').value = 4;
             document.getElementById('obj-ac-label').value = '操縦する';
-            document.getElementById('obj-ac-cockpit-x').value = 0;
-            document.getElementById('obj-ac-cockpit-y').value = 1.2;
-            document.getElementById('obj-ac-cockpit-z').value = 0;
-            document.getElementById('obj-ac-chase-x').value = 0;
-            document.getElementById('obj-ac-chase-y').value = 3;
-            document.getElementById('obj-ac-chase-z').value = 12;
             refreshAircraftLibrarySelectOptions();
             const libSel0 = document.getElementById('obj-ac-library-id');
             if (libSel0 && 'value' in libSel0) /** @type {HTMLSelectElement} */ (libSel0).value = '';
-        }
-        const ovPh = document.getElementById('obj-ac-phys-override');
-        const taPh = document.getElementById('obj-ac-phys-json');
-        if (ovPh && taPh) {
-            const part = ac && ac.aircraftPhysics && typeof ac.aircraftPhysics === 'object' && !Array.isArray(ac.aircraftPhysics)
-                ? ac.aircraftPhysics
-                : null;
-            const partKeys = part ? Object.keys(part).filter((k) => typeof part[k] === 'number' && Number.isFinite(part[k])) : [];
-            ovPh.checked = partKeys.length > 0;
-            taPh.disabled = !ovPh.checked;
-            taPh.value = partKeys.length ? JSON.stringify(part, null, 2) : '';
         }
         updateVehicleAircraftFieldsVisibility();
         updateGlbAnimInteractPanel(obj);
@@ -1686,44 +1696,59 @@ function syncObjectFromPanel(opts) {
         if (vType === 'airplane') {
             const idRaw = document.getElementById('obj-ac-id').value.trim();
             const rad = parseFloat(document.getElementById('obj-ac-radius').value);
+            const libSel = document.getElementById('obj-ac-library-id');
+            const libV = libSel && 'value' in libSel ? String(/** @type {HTMLSelectElement} */ (libSel).value || '').trim() : '';
             /** @type {Record<string, unknown>} */
-            const acPayload = {
+            const base = {
                 id: idRaw || 'plane-1',
                 radius: Number.isFinite(rad) && rad > 0 ? rad : 4,
                 label: (document.getElementById('obj-ac-label').value || '').trim() || '操縦する',
-                cockpitOffset: {
-                    x: parseFloat(document.getElementById('obj-ac-cockpit-x').value) || 0,
-                    y: parseFloat(document.getElementById('obj-ac-cockpit-y').value) || 0,
-                    z: parseFloat(document.getElementById('obj-ac-cockpit-z').value) || 0
-                },
-                chaseOffset: {
-                    x: parseFloat(document.getElementById('obj-ac-chase-x').value) || 0,
-                    y: parseFloat(document.getElementById('obj-ac-chase-y').value) || 0,
-                    z: parseFloat(document.getElementById('obj-ac-chase-z').value) || 0
-                }
             };
-            const libSel = document.getElementById('obj-ac-library-id');
-            const libV = libSel && 'value' in libSel ? String(/** @type {HTMLSelectElement} */ (libSel).value || '').trim() : '';
-            if (libV) acPayload.aircraftLibraryId = libV;
-            const ovPh = document.getElementById('obj-ac-phys-override');
-            const taPh = document.getElementById('obj-ac-phys-json');
-            if (ovPh?.checked && taPh && !taPh.disabled) {
-                const rawStr = (taPh.value || '').trim();
-                if (rawStr) {
-                    try {
-                        const parsed = JSON.parse(rawStr);
-                        const phys = clipAircraftPhysicsPartialFromUser(parsed);
-                        if (phys && Object.keys(phys).length) acPayload.aircraftPhysics = phys;
-                    } catch (_) {
-                        window.alert('機体の操縦パラメータJSONが不正のため、aircraftPhysics は更新されませんでした。');
-                    }
+            if (libV) {
+                c.aircraft = { ...base, aircraftLibraryId: libV };
+            } else {
+                const prev = c.aircraft && typeof c.aircraft === 'object' && !Array.isArray(c.aircraft) ? c.aircraft : {};
+                const ckPrev = prev.cockpitOffset && typeof prev.cockpitOffset === 'object' && !Array.isArray(prev.cockpitOffset)
+                    ? /** @type {Record<string, unknown>} */ (prev.cockpitOffset)
+                    : {};
+                const chPrev = prev.chaseOffset && typeof prev.chaseOffset === 'object' && !Array.isArray(prev.chaseOffset)
+                    ? /** @type {Record<string, unknown>} */ (prev.chaseOffset)
+                    : {};
+                const nx = (o, k, d) => {
+                    const v = o[k];
+                    return typeof v === 'number' && Number.isFinite(v) ? v : d;
+                };
+                /** @type {Record<string, unknown>} */
+                const acPayload = {
+                    ...base,
+                    cockpitOffset: {
+                        x: nx(ckPrev, 'x', 0),
+                        y: nx(ckPrev, 'y', 1.2),
+                        z: nx(ckPrev, 'z', 0),
+                    },
+                    chaseOffset: {
+                        x: nx(chPrev, 'x', 0),
+                        y: nx(chPrev, 'y', 3),
+                        z: nx(chPrev, 'z', 12),
+                    },
+                };
+                const ce = prev.cockpitEulerDeg;
+                if (ce && typeof ce === 'object' && !Array.isArray(ce)) {
+                    const o = /** @type {Record<string, unknown>} */ (ce);
+                    acPayload.cockpitEulerDeg = { x: nx(o, 'x', 0), y: nx(o, 'y', 0), z: nx(o, 'z', 0) };
                 }
-                taPh.disabled = false;
-            } else if (taPh) {
-                taPh.value = '';
-                taPh.disabled = true;
+                const se = prev.chaseEulerDeg;
+                if (se && typeof se === 'object' && !Array.isArray(se)) {
+                    const o = /** @type {Record<string, unknown>} */ (se);
+                    acPayload.chaseEulerDeg = { x: nx(o, 'x', 0), y: nx(o, 'y', 0), z: nx(o, 'z', 0) };
+                }
+                const ap = prev.aircraftPhysics;
+                if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
+                    const clipped = clipAircraftPhysicsPartialFromUser(ap);
+                    if (clipped && Object.keys(clipped).length) acPayload.aircraftPhysics = clipped;
+                }
+                c.aircraft = acPayload;
             }
-            c.aircraft = acPayload;
         } else {
             delete c.aircraft;
         }
@@ -2302,21 +2327,9 @@ function buildWorldsFromScene() {
                     if (c.teleporter) c.teleporter = { ...c.teleporter };
                     if (c.taiko) c.taiko = { ...c.taiko };
                     if (c.aircraft) {
-                        const a = c.aircraft;
-                        const ck = a.cockpitOffset || {};
-                        const ch = a.chaseOffset || {};
-                        c.aircraft = {
-                            id: a.id,
-                            radius: a.radius,
-                            label: a.label,
-                            cockpitOffset: { x: ck.x, y: ck.y, z: ck.z },
-                            chaseOffset: { x: ch.x, y: ch.y, z: ch.z }
-                        };
-                        const ap = a.aircraftPhysics;
-                        if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
-                            const clipped = clipAircraftPhysicsPartialFromUser(ap);
-                            if (clipped && Object.keys(clipped).length) c.aircraft.aircraftPhysics = clipped;
-                        }
+                        const ser = serializeAircraftForWorldJson(c.aircraft);
+                        if (ser) c.aircraft = ser;
+                        else delete c.aircraft;
                     }
                     if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
                     delete c.chunkManifest;
@@ -2392,7 +2405,6 @@ function buildWorldsFromScene() {
             } else {
                 delete w.physicsAssist;
             }
-            w.aircraftPhysics = readWorldAircraftPhysicsFromForm();
             const srcLod = worlds[selectedWorldId] && worlds[selectedWorldId].lodSystem;
             if (srcLod && typeof srcLod === 'object') {
                 w.lodSystem = {
@@ -2469,103 +2481,6 @@ function updatePhysicsAssistSpawnHint() {
         return;
     }
     hint.hidden = Math.abs(spawnY - minY) <= 20;
-}
-
-/**
- * 飛行機ワールド共通パラメータのフォームを埋める
- * @param {object} [world]
- */
-function fillWorldAircraftPhysicsForm(world) {
-    const m = mergeAircraftPhysicsFromWorld(world && world.aircraftPhysics);
-    const ids = [
-        ['world-aircraft-gravity', m.gravity],
-        ['world-aircraft-lift-per-speed', m.liftPerHorizontalSpeed],
-        ['world-aircraft-sideslip-damping', m.sideslipDamping],
-        ['world-aircraft-excess-climb-damping', m.excessClimbDamping],
-        ['world-aircraft-max-speed', m.maxSpeed],
-        ['world-aircraft-thrust-accel', m.thrustAccel],
-        ['world-aircraft-drag', m.drag],
-        ['world-aircraft-yaw-accel-ground', m.yawAccelGround],
-        ['world-aircraft-yaw-accel-air', m.yawAccelAir],
-        ['world-aircraft-yaw-max-rate-ground', m.yawMaxRateGround],
-        ['world-aircraft-yaw-max-rate-air', m.yawMaxRateAir],
-        ['world-aircraft-pitch-accel-ground', m.pitchAccelGround],
-        ['world-aircraft-pitch-accel-air', m.pitchAccelAir],
-        ['world-aircraft-pitch-max-rate-ground', m.pitchMaxRateGround],
-        ['world-aircraft-pitch-max-rate-air', m.pitchMaxRateAir],
-        ['world-aircraft-roll-accel', m.rollAccel],
-        ['world-aircraft-roll-max-rate', m.rollMaxRate],
-        ['world-aircraft-angular-decel', m.angularDecel],
-        ['world-aircraft-yaw-ground-friction-left', m.yawGroundFrictionLeft],
-        ['world-aircraft-yaw-ground-friction-right', m.yawGroundFrictionRight],
-        ['world-aircraft-ground-tire-lateral-decel', m.groundTireLateralDecel],
-        ['world-aircraft-ground-tire-rolling-decel', m.groundTireRollingDecel],
-        ['world-aircraft-wheel-brake-decel', m.wheelBrakeDecel],
-        ['world-aircraft-throttle-spool', m.throttleSpoolPerS],
-        ['world-aircraft-max-bank-deg', m.maxBankDeg],
-        ['world-aircraft-rudder-ref-speed', m.rudderAuthorityRefSpeedMs],
-        ['world-aircraft-rudder-min-scale', m.rudderAuthorityMinScale],
-        ['world-aircraft-thrust-pitch-delta', m.thrustPitchFromThrottleDelta],
-        ['world-aircraft-thrust-pitch-relax', m.thrustPitchRelaxNoInput],
-        ['world-aircraft-flap-pitch-down', m.flapPitchDownAuthority]
-    ];
-    for (const [id, v] of ids) {
-        const el = document.getElementById(id);
-        if (el) el.value = String(v);
-    }
-}
-
-/**
- * @returns {ReturnType<typeof mergeAircraftPhysicsFromWorld>}
- */
-function readWorldAircraftPhysicsFromForm() {
-    const parse = (id, fallback) => {
-        const el = document.getElementById(id);
-        const n = el ? parseFloat(el.value) : NaN;
-        return Number.isFinite(n) ? n : fallback;
-    };
-    const raw = {
-        gravity: parse('world-aircraft-gravity', DEFAULT_AIRCRAFT_PHYSICS.gravity),
-        liftPerHorizontalSpeed: parse('world-aircraft-lift-per-speed', DEFAULT_AIRCRAFT_PHYSICS.liftPerHorizontalSpeed),
-        sideslipDamping: parse('world-aircraft-sideslip-damping', DEFAULT_AIRCRAFT_PHYSICS.sideslipDamping),
-        excessClimbDamping: parse('world-aircraft-excess-climb-damping', DEFAULT_AIRCRAFT_PHYSICS.excessClimbDamping),
-        maxSpeed: parse('world-aircraft-max-speed', DEFAULT_AIRCRAFT_PHYSICS.maxSpeed),
-        thrustAccel: parse('world-aircraft-thrust-accel', DEFAULT_AIRCRAFT_PHYSICS.thrustAccel),
-        drag: parse('world-aircraft-drag', DEFAULT_AIRCRAFT_PHYSICS.drag),
-        yawAccelGround: parse('world-aircraft-yaw-accel-ground', DEFAULT_AIRCRAFT_PHYSICS.yawAccelGround),
-        yawAccelAir: parse('world-aircraft-yaw-accel-air', DEFAULT_AIRCRAFT_PHYSICS.yawAccelAir),
-        yawMaxRateGround: parse('world-aircraft-yaw-max-rate-ground', DEFAULT_AIRCRAFT_PHYSICS.yawMaxRateGround),
-        yawMaxRateAir: parse('world-aircraft-yaw-max-rate-air', DEFAULT_AIRCRAFT_PHYSICS.yawMaxRateAir),
-        pitchAccelGround: parse('world-aircraft-pitch-accel-ground', DEFAULT_AIRCRAFT_PHYSICS.pitchAccelGround),
-        pitchAccelAir: parse('world-aircraft-pitch-accel-air', DEFAULT_AIRCRAFT_PHYSICS.pitchAccelAir),
-        pitchMaxRateGround: parse('world-aircraft-pitch-max-rate-ground', DEFAULT_AIRCRAFT_PHYSICS.pitchMaxRateGround),
-        pitchMaxRateAir: parse('world-aircraft-pitch-max-rate-air', DEFAULT_AIRCRAFT_PHYSICS.pitchMaxRateAir),
-        rollAccel: parse('world-aircraft-roll-accel', DEFAULT_AIRCRAFT_PHYSICS.rollAccel),
-        rollMaxRate: parse('world-aircraft-roll-max-rate', DEFAULT_AIRCRAFT_PHYSICS.rollMaxRate),
-        angularDecel: parse('world-aircraft-angular-decel', DEFAULT_AIRCRAFT_PHYSICS.angularDecel),
-        yawGroundFrictionLeft: parse('world-aircraft-yaw-ground-friction-left', DEFAULT_AIRCRAFT_PHYSICS.yawGroundFrictionLeft),
-        yawGroundFrictionRight: parse('world-aircraft-yaw-ground-friction-right', DEFAULT_AIRCRAFT_PHYSICS.yawGroundFrictionRight),
-        groundTireLateralDecel: parse('world-aircraft-ground-tire-lateral-decel', DEFAULT_AIRCRAFT_PHYSICS.groundTireLateralDecel),
-        groundTireRollingDecel: parse('world-aircraft-ground-tire-rolling-decel', DEFAULT_AIRCRAFT_PHYSICS.groundTireRollingDecel),
-        wheelBrakeDecel: parse('world-aircraft-wheel-brake-decel', DEFAULT_AIRCRAFT_PHYSICS.wheelBrakeDecel),
-        throttleSpoolPerS: parse('world-aircraft-throttle-spool', DEFAULT_AIRCRAFT_PHYSICS.throttleSpoolPerS),
-        maxBankDeg: parse('world-aircraft-max-bank-deg', DEFAULT_AIRCRAFT_PHYSICS.maxBankDeg),
-        rudderAuthorityRefSpeedMs: parse('world-aircraft-rudder-ref-speed', DEFAULT_AIRCRAFT_PHYSICS.rudderAuthorityRefSpeedMs),
-        rudderAuthorityMinScale: parse('world-aircraft-rudder-min-scale', DEFAULT_AIRCRAFT_PHYSICS.rudderAuthorityMinScale),
-        thrustPitchFromThrottleDelta: parse('world-aircraft-thrust-pitch-delta', DEFAULT_AIRCRAFT_PHYSICS.thrustPitchFromThrottleDelta),
-        thrustPitchRelaxNoInput: parse('world-aircraft-thrust-pitch-relax', DEFAULT_AIRCRAFT_PHYSICS.thrustPitchRelaxNoInput),
-        flapPitchDownAuthority: parse('world-aircraft-flap-pitch-down', DEFAULT_AIRCRAFT_PHYSICS.flapPitchDownAuthority)
-    };
-    return mergeAircraftPhysicsFromWorld(raw);
-}
-
-/**
- * 選択中ワールドの aircraftPhysics をフォームから worlds に反映
- */
-function syncWorldAircraftPhysicsFromForm() {
-    if (!selectedWorldId || !worlds[selectedWorldId]) return;
-    pushUndo();
-    worlds[selectedWorldId].aircraftPhysics = readWorldAircraftPhysicsFromForm();
 }
 
 /**
@@ -2689,31 +2604,8 @@ async function loadWorldModelEntryForEditor(config, idx) {
         }
     }
     if (config.aircraft && config.aircraft.id) {
-        const a = config.aircraft;
-        const ck = a.cockpitOffset || {};
-        const ch = a.chaseOffset || {};
-        cfgBase.aircraft = {
-            id: String(a.id || '').trim(),
-            radius: typeof a.radius === 'number' && Number.isFinite(a.radius) ? a.radius : 4,
-            label: a.label || '操縦する',
-            cockpitOffset: {
-                x: ck.x ?? 0,
-                y: ck.y ?? 1.2,
-                z: ck.z ?? 0
-            },
-            chaseOffset: {
-                x: ch.x ?? 0,
-                y: ch.y ?? 3,
-                z: ch.z ?? 12
-            }
-        };
-        const libId = String(a.aircraftLibraryId || '').trim();
-        if (libId) cfgBase.aircraft.aircraftLibraryId = libId;
-        const ap = a.aircraftPhysics;
-        if (ap && typeof ap === 'object' && !Array.isArray(ap)) {
-            const clipped = clipAircraftPhysicsPartialFromUser(ap);
-            if (clipped && Object.keys(clipped).length) cfgBase.aircraft.aircraftPhysics = clipped;
-        }
+        const ser = serializeAircraftForWorldJson(config.aircraft);
+        if (ser) cfgBase.aircraft = ser;
     }
     if (isObjPath(path) && config.mtlPath) {
         cfgBase.mtlPath = config.mtlPath;
@@ -2829,7 +2721,6 @@ async function loadWorldIntoScene(world) {
         }
     }
     updatePhysicsAssistSpawnHint();
-    fillWorldAircraftPhysicsForm(world);
 
     const models = world.models || [];
     const factories = models.map((config, idx) => () => loadWorldModelEntryForEditor(config, idx));
@@ -4099,52 +3990,9 @@ function bindEvents() {
         'obj-ac-library-id',
         'obj-ac-radius',
         'obj-ac-label',
-        'obj-ac-cockpit-x',
-        'obj-ac-cockpit-y',
-        'obj-ac-cockpit-z',
-        'obj-ac-chase-x',
-        'obj-ac-chase-y',
-        'obj-ac-chase-z'
     ]) {
         document.getElementById(acId)?.addEventListener('change', syncObjectFromPanel);
     }
-    document.getElementById('obj-ac-phys-json')?.addEventListener('change', syncObjectFromPanel);
-    document.getElementById('obj-ac-phys-override')?.addEventListener('change', () => {
-        const ov = document.getElementById('obj-ac-phys-override');
-        const ta = document.getElementById('obj-ac-phys-json');
-        if (ta) ta.disabled = !ov?.checked;
-        syncObjectFromPanel();
-    });
-    document.getElementById('obj-ac-phys-export')?.addEventListener('click', async () => {
-        const ta = document.getElementById('obj-ac-phys-json');
-        const text = (ta?.value || '').trim() || '{}';
-        try {
-            await navigator.clipboard.writeText(text);
-        } catch (_) {
-            window.alert('クリップボードへのコピーに失敗しました。');
-        }
-    });
-    document.getElementById('obj-ac-phys-import')?.addEventListener('click', async () => {
-        try {
-            const clipText = (await navigator.clipboard.readText()).trim();
-            const parsed = JSON.parse(clipText);
-            const phys = clipAircraftPhysicsPartialFromUser(parsed);
-            if (!phys || !Object.keys(phys).length) {
-                window.alert('有効なパラメータキーが見つかりませんでした。');
-                return;
-            }
-            const ov = document.getElementById('obj-ac-phys-override');
-            const ta = document.getElementById('obj-ac-phys-json');
-            if (ov) ov.checked = true;
-            if (ta) {
-                ta.disabled = false;
-                ta.value = JSON.stringify(phys, null, 2);
-            }
-            syncObjectFromPanel();
-        } catch (_) {
-            window.alert('クリップボードの読み取りまたはJSONの解析に失敗しました。');
-        }
-    });
 
     document.getElementById('object-props')?.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-glb-preview-clip]');
@@ -5680,41 +5528,6 @@ function bindEvents() {
         pushUndo();
         applyPhysicsAssistPanelToSelectedWorld();
     });
-
-    for (const aircraftInputId of [
-        'world-aircraft-gravity',
-        'world-aircraft-lift-per-speed',
-        'world-aircraft-sideslip-damping',
-        'world-aircraft-excess-climb-damping',
-        'world-aircraft-max-speed',
-        'world-aircraft-thrust-accel',
-        'world-aircraft-drag',
-        'world-aircraft-yaw-accel-ground',
-        'world-aircraft-yaw-accel-air',
-        'world-aircraft-yaw-max-rate-ground',
-        'world-aircraft-yaw-max-rate-air',
-        'world-aircraft-pitch-accel-ground',
-        'world-aircraft-pitch-accel-air',
-        'world-aircraft-pitch-max-rate-ground',
-        'world-aircraft-pitch-max-rate-air',
-        'world-aircraft-roll-accel',
-        'world-aircraft-roll-max-rate',
-        'world-aircraft-angular-decel',
-        'world-aircraft-yaw-ground-friction-left',
-        'world-aircraft-yaw-ground-friction-right',
-        'world-aircraft-ground-tire-lateral-decel',
-        'world-aircraft-ground-tire-rolling-decel',
-        'world-aircraft-wheel-brake-decel',
-        'world-aircraft-throttle-spool',
-        'world-aircraft-max-bank-deg',
-        'world-aircraft-rudder-ref-speed',
-        'world-aircraft-rudder-min-scale',
-        'world-aircraft-thrust-pitch-delta',
-        'world-aircraft-thrust-pitch-relax',
-        'world-aircraft-flap-pitch-down'
-    ]) {
-        document.getElementById(aircraftInputId)?.addEventListener('change', syncWorldAircraftPhysicsFromForm);
-    }
 
     document.getElementById('light-pos-x').addEventListener('change', syncLightFromPanel);
     document.getElementById('light-pos-y').addEventListener('change', syncLightFromPanel);

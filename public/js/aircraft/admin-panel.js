@@ -7,6 +7,11 @@ import {
     bindingPathsForRole,
 } from './airframe-definition-schema.js';
 import { AdminAircraftPrefabViewer, collectNamePaths } from './admin-prefab-viewer.js';
+import {
+    mountFlightPhysicsForm,
+    fillFlightPhysicsForm,
+    readFlightPhysicsFromForm,
+} from './flight-physics-admin-form.js';
 
 let mounted = false;
 /** @type {AdminAircraftPrefabViewer|null} */
@@ -228,6 +233,8 @@ function syncFormFromDraft() {
     }
     const delBtn = document.getElementById('ac-btn-delete');
     if (delBtn) delBtn.disabled = !d?.id;
+    fillFlightPhysicsForm(d?.flightPhysics);
+    fillCameraFromDraft(d?.camera);
 }
 
 /**
@@ -245,6 +252,50 @@ function readAnimationFromForm() {
             spinAxis: axis,
         },
     };
+}
+
+/**
+ * @returns {Record<string, unknown>}
+ */
+function readCameraFromForm() {
+    const p = (id) => {
+        const el = document.getElementById(id);
+        const n = el && 'value' in el ? parseFloat(/** @type {HTMLInputElement} */ (el).value) : NaN;
+        return Number.isFinite(n) ? n : 0;
+    };
+    return {
+        cockpitOffset: { x: p('ac-cam-cockpit-x'), y: p('ac-cam-cockpit-y'), z: p('ac-cam-cockpit-z') },
+        chaseOffset: { x: p('ac-cam-chase-x'), y: p('ac-cam-chase-y'), z: p('ac-cam-chase-z') },
+        cockpitEulerDeg: { x: p('ac-cam-cockpit-rx'), y: p('ac-cam-cockpit-ry'), z: p('ac-cam-cockpit-rz') },
+        chaseEulerDeg: { x: p('ac-cam-chase-rx'), y: p('ac-cam-chase-ry'), z: p('ac-cam-chase-rz') },
+    };
+}
+
+/**
+ * @param {unknown} camRaw
+ */
+function fillCameraFromDraft(camRaw) {
+    const c = camRaw && typeof camRaw === 'object' && !Array.isArray(camRaw) ? camRaw : {};
+    const ck = /** @type {{x?:number,y?:number,z?:number}} */ (c.cockpitOffset) || {};
+    const ch = /** @type {{x?:number,y?:number,z?:number}} */ (c.chaseOffset) || {};
+    const set = (id, v) => {
+        const el = document.getElementById(id);
+        if (el && 'value' in el) /** @type {HTMLInputElement} */ (el).value = String(v);
+    };
+    set('ac-cam-cockpit-x', ck.x ?? 0);
+    set('ac-cam-cockpit-y', ck.y ?? 1.2);
+    set('ac-cam-cockpit-z', ck.z ?? 0);
+    set('ac-cam-chase-x', ch.x ?? 0);
+    set('ac-cam-chase-y', ch.y ?? 3);
+    set('ac-cam-chase-z', ch.z ?? 12);
+    const ce = /** @type {{x?:number,y?:number,z?:number}} */ (c.cockpitEulerDeg) || {};
+    const se = /** @type {{x?:number,y?:number,z?:number}} */ (c.chaseEulerDeg) || {};
+    set('ac-cam-cockpit-rx', ce.x ?? 0);
+    set('ac-cam-cockpit-ry', ce.y ?? 0);
+    set('ac-cam-cockpit-rz', ce.z ?? 0);
+    set('ac-cam-chase-rx', se.x ?? 0);
+    set('ac-cam-chase-ry', se.y ?? 0);
+    set('ac-cam-chase-rz', se.z ?? 0);
 }
 
 /**
@@ -311,6 +362,8 @@ async function saveDraft() {
         prefabManifest: String(document.getElementById('ac-field-manifest')?.value || '').trim(),
         bindings,
         animation,
+        flightPhysics: readFlightPhysicsFromForm(),
+        camera: readCameraFromForm(),
     };
     setStatus('保存中…');
     const data = await fetchJson(`/admin/addons/aircraft/airframes/${encodeURIComponent(draftAirframe.id)}`, {
@@ -341,7 +394,7 @@ export function initAircraftAdminPanel() {
                     <input type="file" id="ac-plane-zip-input" accept=".zip,application/zip" hidden />
                 </div>
                 <h2 class="section-title">飛行機ライブラリ</h2>
-                <p class="hint">機体ごとに <code>plane/</code> 上のプレハブを選び、パーツロールとアニメーションを定義します。ワールドでは <code>prefabManifest</code> + <code>aircraft</code> + <code>aircraftLibraryId</code> を併用します。</p>
+                <p class="hint">機体ごとに <code>plane/</code> 上のプレハブを選び、操縦パラメータ・カメラ・パーツロール・アニメーションを定義します。ワールドのオブジェクトでは <code>prefabManifest</code> とライブラリ機体 ID のリンクのみ行います。</p>
                 <div class="ac-admin-actions">
                     <button type="button" class="btn btn-primary" id="ac-btn-add">機体を追加</button>
                     <button type="button" class="btn btn-secondary" id="ac-btn-delete" disabled>削除</button>
@@ -377,6 +430,38 @@ export function initAircraftAdminPanel() {
                 </div>
                 <button type="button" class="btn btn-primary" id="ac-btn-add-binding">選択パスをロールに追加</button>
                 <div id="ac-bindings-list" class="ac-bindings-list"></div>
+                <h3 class="section-subtitle">操縦パラメータ</h3>
+                <div id="ac-flight-physics-mount"></div>
+                <h3 class="section-subtitle">コックピット／追従カメラ（機体ローカル）</h3>
+                <p class="hint" style="margin:0 0 8px;">位置は m、回転は度（機体ローカル）。ライブラリ連携ワールドはゲーム起動時に API で再読込されます。</p>
+                <div class="prop-group-label">コックピット視点・位置</div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-x">X</label>
+                    <input type="number" id="ac-cam-cockpit-x" class="prop-input num" step="0.05" value="0" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-y">Y</label>
+                    <input type="number" id="ac-cam-cockpit-y" class="prop-input num" step="0.05" value="1.2" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-z">Z</label>
+                    <input type="number" id="ac-cam-cockpit-z" class="prop-input num" step="0.05" value="0" /></div>
+                <div class="prop-group-label">コックピット視点・回転（°）</div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-rx">Pitch X</label>
+                    <input type="number" id="ac-cam-cockpit-rx" class="prop-input num" step="0.5" value="0" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-ry">Yaw Y</label>
+                    <input type="number" id="ac-cam-cockpit-ry" class="prop-input num" step="0.5" value="0" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-cockpit-rz">Roll Z</label>
+                    <input type="number" id="ac-cam-cockpit-rz" class="prop-input num" step="0.5" value="0" /></div>
+                <div class="prop-group-label">追従カメラ・位置（+Z は後方寄り）</div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-chase-x">X</label>
+                    <input type="number" id="ac-cam-chase-x" class="prop-input num" step="0.05" value="0" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-chase-y">Y</label>
+                    <input type="number" id="ac-cam-chase-y" class="prop-input num" step="0.05" value="3" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-chase-z">Z</label>
+                    <input type="number" id="ac-cam-chase-z" class="prop-input num" step="0.05" value="12" /></div>
+                <div class="prop-group-label">追従カメラ・回転（°）</div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-chase-rx">Pitch X</label>
+                    <input type="number" id="ac-cam-chase-rx" class="prop-input num" step="0.5" value="0" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-chase-ry">Yaw Y</label>
+                    <input type="number" id="ac-cam-chase-ry" class="prop-input num" step="0.5" value="0" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-cam-chase-rz">Roll Z</label>
+                    <input type="number" id="ac-cam-chase-rz" class="prop-input num" step="0.5" value="0" /></div>
                 <h3 class="section-subtitle">アニメーション（エンジンブレード）</h3>
                 <div class="field-row"><label class="prop-label" for="ac-anim-maxaccel">角加速度上限 (rad/s²)</label>
                     <input type="number" id="ac-anim-maxaccel" class="prop-input num" step="0.5" min="0" /></div>
@@ -391,6 +476,8 @@ export function initAircraftAdminPanel() {
             </aside>
         </div>
     `;
+
+    mountFlightPhysicsForm(document.getElementById('ac-flight-physics-mount'));
 
     const mount = document.getElementById('ac-viewer-mount');
     if (mount) {

@@ -339,7 +339,7 @@ class MetaverseApp {
         };
         this.setupClientPerfObservers();
 
-        initAircraftSubsystem(this);
+        initAircraftSubsystem(this).catch((e) => console.warn('[Aircraft] init failed', e));
         initAvatorScalableAnimations(this);
 
         this.networkManager.connect();
@@ -784,6 +784,14 @@ class MetaverseApp {
 
         if (this.aircraftController && world) {
             this.aircraftController.applyWorldPhysics(world.aircraftPhysics);
+        }
+
+        if (this.sceneManager?.hydrateAircraftSlotsFromLibrary) {
+            try {
+                await this.sceneManager.hydrateAircraftSlotsFromLibrary();
+            } catch (e) {
+                console.warn('[Aircraft] hydrate failed', e);
+            }
         }
 
         if (this.aircraftManager) {

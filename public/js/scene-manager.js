@@ -26,7 +26,7 @@ import {
     fetchModelContentLength,
     countTrianglesInObject
 } from './model-load-limits.js';
-import { mergeAircraftPhysicsForObject } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
+import { mergeAircraftPhysicsForObject, mergeAircraftPhysicsFromWorld } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
 import {
     buildEncodedModelUrlFromPath,
     loadPrefabGroupFromManifest,
@@ -1827,12 +1827,15 @@ class SceneManager {
             return;
         }
         model.userData.aircraftId = id;
+        const libId = String(aircraftCfg.aircraftLibraryId || '').trim();
         const cockpit = aircraftCfg.cockpitOffset || { x: 0, y: 1.2, z: 0 };
         const chase = aircraftCfg.chaseOffset || { x: 0, y: 3, z: 12 };
-        const physics = mergeAircraftPhysicsForObject(worldAircraftPhysics, aircraftCfg.aircraftPhysics);
+        const physics = libId
+            ? mergeAircraftPhysicsFromWorld(null)
+            : mergeAircraftPhysicsForObject(worldAircraftPhysics, aircraftCfg.aircraftPhysics);
         this.aircraftSlots.push({
             id,
-            aircraftLibraryId: String(aircraftCfg.aircraftLibraryId || '').trim() || null,
+            aircraftLibraryId: libId || null,
             position: { x: position.x, y: position.y, z: position.z },
             radius: typeof aircraftCfg.radius === 'number' && Number.isFinite(aircraftCfg.radius) ? aircraftCfg.radius : 4,
             label: aircraftCfg.label || '操縦する',
@@ -1859,6 +1862,65 @@ class SceneManager {
      */
     getAircraftSlots() {
         return this.aircraftSlots;
+    }
+
+    /**
+     * aircraftLibraryId 付きスロットに、ライブラリ API の flightPhysics / camera を反映する（ゲーム用）
+     * @returns {Promise<void>}
+     */
+    async hydrateAircraftSlotsFromLibrary() {
+        const slots = this.aircraftSlots;
+        const ids = [...new Set(slots.map((s) => String(s.aircraftLibraryId || '').trim()).filter(Boolean))];
+        for (const lid of ids) {
+            try {
+                const r = await fetch(`/api/addons/aircraft/airframes/${encodeURIComponent(lid)}`, { credentials: 'same-origin' });
+                const j = await r.json();
+                if (!r.ok || !j?.ok || !j?.airframe) continue;
+                const af = j.airframe;
+                const cam = af.camera && typeof af.camera === 'object' ? af.camera : {};
+                const fp = af.flightPhysics && typeof af.flightPhysics === 'object' ? af.flightPhysics : {};
+                for (const slot of slots) {
+                    if (String(slot.aircraftLibraryId || '').trim() !== lid) continue;
+                    slot.physics = mergeAircraftPhysicsFromWorld(fp);
+                    const ck = cam.cockpitOffset;
+                    if (ck && typeof ck === 'object') {
+                        slot.cockpitOffset = {
+                            x: typeof ck.x === 'number' && Number.isFinite(ck.x) ? ck.x : slot.cockpitOffset.x,
+                            y: typeof ck.y === 'number' && Number.isFinite(ck.y) ? ck.y : slot.cockpitOffset.y,
+                            z: typeof ck.z === 'number' && Number.isFinite(ck.z) ? ck.z : slot.cockpitOffset.z
+                        };
+                    }
+                    const ch = cam.chaseOffset;
+                    if (ch && typeof ch === 'object') {
+                        slot.chaseOffset = {
+                            x: typeof ch.x === 'number' && Number.isFinite(ch.x) ? ch.x : slot.chaseOffset.x,
+                            y: typeof ch.y === 'number' && Number.isFinite(ch.y) ? ch.y : slot.chaseOffset.y,
+                            z: typeof ch.z === 'number' && Number.isFinite(ch.z) ? ch.z : slot.chaseOffset.z
+                        };
+                    }
+                    if (cam.cockpitEulerDeg && typeof cam.cockpitEulerDeg === 'object') {
+                        slot.cockpitEulerDeg = {
+                            x: Number(cam.cockpitEulerDeg.x) || 0,
+                            y: Number(cam.cockpitEulerDeg.y) || 0,
+                            z: Number(cam.cockpitEulerDeg.z) || 0
+                        };
+                    } else {
+                        delete slot.cockpitEulerDeg;
+                    }
+                    if (cam.chaseEulerDeg && typeof cam.chaseEulerDeg === 'object') {
+                        slot.chaseEulerDeg = {
+                            x: Number(cam.chaseEulerDeg.x) || 0,
+                            y: Number(cam.chaseEulerDeg.y) || 0,
+                            z: Number(cam.chaseEulerDeg.z) || 0
+                        };
+                    } else {
+                        delete slot.chaseEulerDeg;
+                    }
+                }
+            } catch (e) {
+                console.warn('[SceneManager] hydrateAircraftSlotsFromLibrary failed:', lid, e);
+            }
+        }
     }
 
     /**
