@@ -95,6 +95,14 @@ export default class AircraftController {
         this._passengerMouseBound = false;
         this._passengerAimScratch = new THREE.Vector3();
         this._passengerBaseObj = new THREE.Object3D();
+        /** 操縦中: ポインターロック時のヘッドムーブ（機体基準カメラに上乗せ） */
+        this.pilotLookYaw = 0;
+        this.pilotLookPitch = 0;
+        this._pilotMouseSensitivity = 0.002;
+        /** @type {((e: MouseEvent) => void)|null} */
+        this._onPilotMouseMove = null;
+        this._pilotMouseBound = false;
+        this._qPilotLook = new THREE.Quaternion();
         /**
          * @type {{
          *   blades: { blade: THREE.Object3D, axis: 'x'|'y'|'z', params: { maxAccelRadPerS2: number, maxOmegaRadPerS: number }, state: { omega: number } }[],
@@ -119,7 +127,12 @@ export default class AircraftController {
      * @param {'cockpit'|'chase'} mode
      */
     setCameraMode(mode) {
-        this.cameraMode = mode === 'chase' ? 'chase' : 'cockpit';
+        const next = mode === 'chase' ? 'chase' : 'cockpit';
+        if (next !== this.cameraMode) {
+            this.pilotLookYaw = 0;
+            this.pilotLookPitch = 0;
+        }
+        this.cameraMode = next;
     }
 
     /**
@@ -141,6 +154,7 @@ export default class AircraftController {
             slot?.physics && typeof slot.physics === 'object' ? slot.physics : this._worldAircraftPhysicsRaw
         );
         this._attachKeys();
+        this._bindPilotMouseLook();
         this._scheduleLibraryAnim();
     }
 
@@ -244,6 +258,7 @@ export default class AircraftController {
 
     unbind() {
         this._detachKeys();
+        this._detachPilotMouseLook();
         this.slot = null;
         this.velocity.set(0, 0, 0);
         this._omegaYaw = 0;
@@ -293,6 +308,48 @@ export default class AircraftController {
         this.passengerViewSlot = null;
         this.passengerLookYaw = 0;
         this.passengerLookPitch = 0;
+    }
+
+    /**
+     * 操縦中にポインターロック＋マウスで周囲を見回す
+     */
+    _bindPilotMouseLook() {
+        this._detachPilotMouseLook();
+        this.pilotLookYaw = 0;
+        this.pilotLookPitch = 0;
+        this._onPilotMouseMove = (e) => {
+            if (!this.slot) return;
+            if (!document.pointerLockElement) return;
+            if (this._isInputActive()) return;
+            this.pilotLookYaw -= e.movementX * this._pilotMouseSensitivity;
+            this.pilotLookPitch -= e.movementY * this._pilotMouseSensitivity;
+            const lim = Math.PI / 2 - 0.08;
+            this.pilotLookPitch = THREE.MathUtils.clamp(this.pilotLookPitch, -lim, lim);
+        };
+        document.addEventListener('mousemove', this._onPilotMouseMove);
+        this._pilotMouseBound = true;
+    }
+
+    /**
+     * 操縦終了時にマウスリスナー解除
+     */
+    _detachPilotMouseLook() {
+        if (this._onPilotMouseMove && this._pilotMouseBound) {
+            document.removeEventListener('mousemove', this._onPilotMouseMove);
+        }
+        this._onPilotMouseMove = null;
+        this._pilotMouseBound = false;
+        this.pilotLookYaw = 0;
+        this.pilotLookPitch = 0;
+    }
+
+    /**
+     * lookAt + ライブラリ euler の後に、操縦者のヘッドムーブ回転を乗算する
+     */
+    _applyPilotLookOffset() {
+        this._eulerScratch.set(this.pilotLookPitch, this.pilotLookYaw, 0, 'YXZ');
+        this._qPilotLook.setFromEuler(this._eulerScratch);
+        this.camera.quaternion.multiply(this._qPilotLook);
     }
 
     _attachKeys() {
@@ -864,6 +921,7 @@ export default class AircraftController {
             root.localToWorld(this._lookTarget);
             this.camera.lookAt(this._lookTarget);
             this._applySlotCameraBodyEuler(this.slot, 'cockpit');
+            this._applyPilotLookOffset();
         } else {
             this._lookTarget.set(chase.x, chase.y, chase.z);
             root.localToWorld(this._lookTarget);
@@ -872,6 +930,7 @@ export default class AircraftController {
             this._fwd.y += 1;
             this.camera.lookAt(this._fwd);
             this._applySlotCameraBodyEuler(this.slot, 'chase');
+            this._applyPilotLookOffset();
         }
     }
 }
