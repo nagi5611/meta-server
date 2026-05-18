@@ -115,6 +115,10 @@ export function buildCameraJsonForPut(cam, viewpoints) {
         out.chaseOffset = { ...chase.position };
         out.chaseEulerDeg = { ...chase.eulerDeg };
     }
+    const c = cam && typeof cam === 'object' && !Array.isArray(cam) ? cam : {};
+    if (c.meshVisualEulerDeg != null && typeof c.meshVisualEulerDeg === 'object' && !Array.isArray(c.meshVisualEulerDeg)) {
+        out.meshVisualEulerDeg = eulerDeg(c.meshVisualEulerDeg);
+    }
     return out;
 }
 

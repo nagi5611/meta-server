@@ -13,6 +13,7 @@ import {
     readFlightPhysicsFromForm,
 } from './flight-physics-admin-form.js';
 import { migrateLegacyCameraToViewpoints, buildCameraJsonForPut } from './camera-viewpoints.js';
+import { applyMeshVisualEulerDegToModel, normalizeMeshVisualEulerDeg } from './mesh-visual-pivot.js';
 
 let mounted = false;
 /** @type {AdminAircraftPrefabViewer|null} */
@@ -160,6 +161,29 @@ async function reloadList() {
 }
 
 /**
+ * 右パネル「メッシュ見た目」の数値を読む（度）
+ * @returns {{ x: number, y: number, z: number }}
+ */
+function readMeshVisualEulerFromForm() {
+    const p = (id) => {
+        const el = document.getElementById(id);
+        const n = el && 'value' in el ? parseFloat(/** @type {HTMLInputElement} */ (el).value) : NaN;
+        return Number.isFinite(n) ? n : 0;
+    };
+    return { x: p('ac-mesh-rx'), y: p('ac-mesh-ry'), z: p('ac-mesh-rz') };
+}
+
+/**
+ * プレハブルートにメッシュ見た目ピボットを適用（ビューアプレビュー）
+ * @returns {void}
+ */
+function applyMeshVisualPivotToViewer() {
+    const root = viewer?.getPrefabRoot?.();
+    if (!root) return;
+    applyMeshVisualEulerDegToModel(root, readMeshVisualEulerFromForm());
+}
+
+/**
  * @returns {void}
  */
 function syncFormFromDraft() {
@@ -241,8 +265,14 @@ function syncFormFromDraft() {
     const delBtn = document.getElementById('ac-btn-delete');
     if (delBtn) delBtn.disabled = !d?.id;
     fillFlightPhysicsForm(d?.flightPhysics);
+    const camMesh = d?.camera && typeof d.camera === 'object' ? d.camera : {};
+    const me = normalizeMeshVisualEulerDeg(camMesh.meshVisualEulerDeg);
+    setVal('ac-mesh-rx', String(me.x));
+    setVal('ac-mesh-ry', String(me.y));
+    setVal('ac-mesh-rz', String(me.z));
     syncViewpointPanelFromDraft();
     refreshRightTabVisibility();
+    applyMeshVisualPivotToViewer();
 }
 
 /**
@@ -466,6 +496,7 @@ async function selectAirframe(id) {
             await viewer.loadFromManifest(manifest);
             refreshPathDropdown();
             syncViewpointEditorOnViewer();
+            applyMeshVisualPivotToViewer();
             setStatus('読み込み完了');
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -514,7 +545,10 @@ async function saveDraft() {
         bindings,
         animation,
         flightPhysics: readFlightPhysicsFromForm(),
-        camera: buildCameraJsonForPut(draftAirframe.camera || {}, getViewpointsList()),
+        camera: buildCameraJsonForPut(
+            { ...(draftAirframe.camera || {}), meshVisualEulerDeg: readMeshVisualEulerFromForm() },
+            getViewpointsList()
+        ),
     };
     setStatus('保存中…');
     const data = await fetchJson(`/admin/addons/aircraft/airframes/${encodeURIComponent(draftAirframe.id)}`, {
@@ -592,6 +626,15 @@ export function initAircraftAdminPanel() {
                 <div id="ac-pane-params" class="ac-tab-pane" style="display:none">
                     <h3 class="section-subtitle">操縦パラメータ</h3>
                     <div id="ac-flight-physics-mount"></div>
+                    <h3 class="section-subtitle">メッシュ見た目（°・YXZ）</h3>
+                    <p class="hint" style="margin:0 0 8px;font-size:11px;">GLB 全体を機体ローカルで回すだけです。<strong>推力・ネット同期の前後はルートのまま</strong>なので、モデルの前向きと推進の見え方を合わせる用途に使います。</p>
+                    <div class="prop-group-label">回転（Pitch X / Yaw Y / Roll Z）</div>
+                    <div class="field-row"><label class="prop-label" for="ac-mesh-rx">Pitch X</label>
+                        <input type="number" id="ac-mesh-rx" class="prop-input num" step="0.5" value="0" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-mesh-ry">Yaw Y</label>
+                        <input type="number" id="ac-mesh-ry" class="prop-input num" step="0.5" value="0" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-mesh-rz">Roll Z</label>
+                        <input type="number" id="ac-mesh-rz" class="prop-input num" step="0.5" value="0" /></div>
                     <h3 class="section-subtitle">アニメーション（エンジンブレード）</h3>
                     <div class="field-row"><label class="prop-label" for="ac-anim-maxaccel">角加速度上限 (rad/s²)</label>
                         <input type="number" id="ac-anim-maxaccel" class="prop-input num" step="0.5" min="0" /></div>
@@ -789,6 +832,7 @@ export function initAircraftAdminPanel() {
             await viewer?.loadFromManifest(v);
             refreshPathDropdown();
             syncViewpointEditorOnViewer();
+            applyMeshVisualPivotToViewer();
             await saveDraft();
         } catch (e) {
             setStatus(e instanceof Error ? e.message : String(e), true);
@@ -801,6 +845,10 @@ export function initAircraftAdminPanel() {
             if (t === 'object' || t === 'params' || t === 'branch') setActiveRightTab(t);
         });
     });
+
+    for (const id of ['ac-mesh-rx', 'ac-mesh-ry', 'ac-mesh-rz']) {
+        document.getElementById(id)?.addEventListener('input', () => applyMeshVisualPivotToViewer());
+    }
 
     document.getElementById('ac-vp-add')?.addEventListener('click', () => {
         if (!draftAirframe) return;

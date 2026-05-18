@@ -120,6 +120,10 @@ function parseCameraJson(raw) {
     if (ce) out.cockpitEulerDeg = ce;
     const se = euler(raw.chaseEulerDeg);
     if (se) out.chaseEulerDeg = se;
+    if (raw.meshVisualEulerDeg != null && isPlainObject(raw.meshVisualEulerDeg)) {
+        const me = euler(raw.meshVisualEulerDeg);
+        if (me) out.meshVisualEulerDeg = me;
+    }
     const VP_ID_RE = /^[a-zA-Z0-9_-]{1,48}$/;
     if (Array.isArray(raw.viewpoints)) {
         /** @type {unknown[]} */
