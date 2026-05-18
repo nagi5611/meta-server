@@ -331,6 +331,33 @@ export default {
                 }
             });
 
+            /**
+             * prefab マニフェストパスが一致する機体ライブラリ ID を返す（ワールド編集で aircraftLibraryId なし配置向け）
+             */
+            app.get('/api/addons/aircraft/lookup-airframe-id-by-prefab-manifest', (req, res) => {
+                try {
+                    const man =
+                        typeof req.query.prefabManifest === 'string'
+                            ? req.query.prefabManifest.trim().slice(0, 1024)
+                            : '';
+                    if (!man) {
+                        return res.status(400).json({ error: 'missing_prefab_manifest' });
+                    }
+                    const db = ctx.openDatabase();
+                    const row = db
+                        .prepare(
+                            'SELECT id FROM aircraft_airframe WHERE prefab_manifest = ? ORDER BY id ASC LIMIT 1'
+                        )
+                        .get(man);
+                    if (!row) return res.status(404).json({ error: 'not_found' });
+                    res.setHeader('Cache-Control', 'public, max-age=60');
+                    res.json({ ok: true, airframeId: String(row.id) });
+                } catch (e) {
+                    ctx.logger.error('GET lookup airframe by prefab manifest', e);
+                    res.status(500).json({ error: 'lookup_failed' });
+                }
+            });
+
             /** ゲームクライアント用（認証なし・定義のみ） */
             app.get('/api/addons/aircraft/airframes/:id', airframeIdParam, (req, res) => {
                 try {

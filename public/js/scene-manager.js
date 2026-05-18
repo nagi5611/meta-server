@@ -1027,7 +1027,14 @@ class SceneManager {
             }
 
             if (config.aircraft) {
-                this._registerAircraftSlot(model, config.aircraft, position, worldAircraftPhysics);
+                const modelPrefabManifest = String(config.prefabManifest || '').trim();
+                this._registerAircraftSlot(
+                    model,
+                    config.aircraft,
+                    position,
+                    worldAircraftPhysics,
+                    modelPrefabManifest
+                );
             }
 
             this._registerGlbWorldInteract(model, config);
@@ -1820,8 +1827,9 @@ class SceneManager {
      * @param {object} aircraftCfg - models[].aircraft
      * @param {{x:number,y:number,z:number}} position - 設定上の位置（近接ゾーン用）
      * @param {Record<string, unknown>|null|undefined} worldAircraftPhysics - ワールド共通 aircraftPhysics（生）
+     * @param {string} [modelPrefabManifest] - models[].prefabManifest（ライブラリ紐づけ用・aircraftLibraryId 省略時）
      */
-    _registerAircraftSlot(model, aircraftCfg, position, worldAircraftPhysics) {
+    _registerAircraftSlot(model, aircraftCfg, position, worldAircraftPhysics, modelPrefabManifest = '') {
         const id = String(aircraftCfg.id || '').trim();
         if (!id) {
             console.warn('  Aircraft: skipped — missing id');
@@ -1829,6 +1837,7 @@ class SceneManager {
         }
         model.userData.aircraftId = id;
         const libId = String(aircraftCfg.aircraftLibraryId || '').trim();
+        const prefabManifest = String(modelPrefabManifest || '').trim();
         const cockpit = aircraftCfg.cockpitOffset || { x: 0, y: 1.2, z: 0 };
         const chase = aircraftCfg.chaseOffset || { x: 0, y: 3, z: 12 };
         const physics = libId
@@ -1837,6 +1846,8 @@ class SceneManager {
         this.aircraftSlots.push({
             id,
             aircraftLibraryId: libId || null,
+            /** hydrate 前にマニフェストからライブラリ ID を解決するために保持 */
+            prefabManifest: prefabManifest || null,
             position: { x: position.x, y: position.y, z: position.z },
             radius: typeof aircraftCfg.radius === 'number' && Number.isFinite(aircraftCfg.radius) ? aircraftCfg.radius : 4,
             label: aircraftCfg.label || '操縦する',
@@ -1871,6 +1882,34 @@ class SceneManager {
      */
     async hydrateAircraftSlotsFromLibrary() {
         const slots = this.aircraftSlots;
+        /** aircraftLibraryId が無く prefab のみのスロット → DB の prefab_manifest と一致する機体 ID を付与 */
+        const manifestSlots = slots.filter(
+            (s) => !String(s.aircraftLibraryId || '').trim() && String(s.prefabManifest || '').trim()
+        );
+        const uniqueManifests = [
+            ...new Set(manifestSlots.map((s) => String(s.prefabManifest || '').trim()).filter(Boolean)),
+        ];
+        for (const pm of uniqueManifests) {
+            try {
+                const q = new URLSearchParams({ prefabManifest: pm });
+                const r = await fetch(
+                    `/api/addons/aircraft/lookup-airframe-id-by-prefab-manifest?${q.toString()}`,
+                    { credentials: 'same-origin' }
+                );
+                const j = await r.json();
+                if (!r.ok || !j?.ok || !j.airframeId) continue;
+                const resolvedId = String(j.airframeId).trim();
+                if (!resolvedId) continue;
+                for (const slot of manifestSlots) {
+                    if (String(slot.prefabManifest || '').trim() === pm) {
+                        slot.aircraftLibraryId = resolvedId;
+                    }
+                }
+            } catch (e) {
+                console.warn('[SceneManager] resolve aircraft library id by prefab manifest failed:', pm, e);
+            }
+        }
+
         const ids = [...new Set(slots.map((s) => String(s.aircraftLibraryId || '').trim()).filter(Boolean))];
         for (const lid of ids) {
             try {

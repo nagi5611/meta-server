@@ -135,6 +135,8 @@ export class AdminAircraftPrefabViewer {
         this._vpEdit = { active: false, blockPrefabPick: false, onUpdate: null, onSelectRequest: null };
         this._vpGizmoScale = 0.15;
         this._eulerScratch = new THREE.Euler(0, 0, 0, 'YXZ');
+        /** 視点プレビュー用（ゲームの PerspectiveCamera に近い見た目） */
+        this._viewPreviewFovDeg = 50;
         container.appendChild(this._renderer.domElement);
         this._renderer.domElement.style.display = 'block';
         this._renderer.domElement.style.width = '100%';
@@ -303,9 +305,60 @@ export class AdminAircraftPrefabViewer {
             g.add(mesh);
             const ax = new THREE.AxesHelper(this._vpGizmoScale * 2.2);
             g.add(ax);
+            const sightDepth = Math.max(this._vpGizmoScale * 14, maxDim * 0.1);
+            const sightColor =
+                vp.role === 'cockpit' ? 0x7ee8ff : vp.role === 'chase' ? 0xffcc66 : 0xc5ccd6;
+            this._addViewpointSightHelpers(g, sightDepth, this._viewPreviewFovDeg, sightColor);
             this._vpParent.add(g);
         }
         this._attachTransformToSelected();
+    }
+
+    /**
+     * 視点マーカー用: ローカル −Z 方向の視線とワイヤーフラスタム（操縦カメラと同じ向き基準）
+     * @param {THREE.Group} parentVpGroup
+     * @param {number} depth
+     * @param {number} fovDeg
+     * @param {number} colorHex
+     */
+    _addViewpointSightHelpers(parentVpGroup, depth, fovDeg, colorHex) {
+        const dir = new THREE.Vector3(0, 0, -1);
+        const headLen = Math.max(this._vpGizmoScale * 1.8, depth * 0.12);
+        const headW = headLen * 0.55;
+        const arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(0, 0, 0), depth * 0.42, colorHex, headLen, headW);
+        arrow.userData.acVpSight = true;
+        parentVpGroup.add(arrow);
+
+        const fov = THREE.MathUtils.degToRad(fovDeg);
+        const aspect = Math.max(0.5, Math.min(2.5, this._camera.aspect || 1));
+        const halfH = Math.tan(fov / 2) * depth;
+        const halfW = halfH * aspect;
+        const z = -depth;
+        const apex = new THREE.Vector3(0, 0, 0);
+        const c0 = new THREE.Vector3(-halfW, halfH, z);
+        const c1 = new THREE.Vector3(halfW, halfH, z);
+        const c2 = new THREE.Vector3(halfW, -halfH, z);
+        const c3 = new THREE.Vector3(-halfW, -halfH, z);
+        const pts = [
+            apex, c0,
+            apex, c1,
+            apex, c2,
+            apex, c3,
+            c0, c1,
+            c1, c2,
+            c2, c3,
+            c3, c0,
+        ];
+        const frGeom = new THREE.BufferGeometry().setFromPoints(pts);
+        const frMat = new THREE.LineBasicMaterial({
+            color: colorHex,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: true,
+        });
+        const frustum = new THREE.LineSegments(frGeom, frMat);
+        frustum.userData.acVpSight = true;
+        parentVpGroup.add(frustum);
     }
 
     /**
@@ -377,6 +430,11 @@ export class AdminAircraftPrefabViewer {
             this._prefabRoot.remove(this._vpParent);
             this._vpParent.traverse((ch) => {
                 if (ch.isMesh) {
+                    ch.geometry?.dispose?.();
+                    const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+                    mats.forEach((m) => m?.dispose?.());
+                }
+                if (ch.isLine || ch.isLineSegments) {
                     ch.geometry?.dispose?.();
                     const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
                     mats.forEach((m) => m?.dispose?.());
