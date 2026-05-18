@@ -44,6 +44,10 @@ export async function initAircraftSubsystem(app) {
 
     app.networkManager.setAircraftNetworkBridge({
         getPose: () => app.aircraftManager.getAircraftPoseForNetwork(),
+        getPilotCameraWorldPose: () =>
+            app.aircraftManager?.isPiloting && app.aircraftController
+                ? app.aircraftController.getNetworkCameraPose()
+                : null,
         onSnapshot: (list) => app.aircraftManager.applyNetworkAircraftSnapshot(
             list,
             app.networkManager.myPlayerId

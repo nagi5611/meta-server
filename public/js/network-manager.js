@@ -28,12 +28,16 @@ class NetworkManager {
 
         /** @type {(() => object|null)|null} 操縦中の機体姿勢を player-update に同梱 */
         this._getAircraftPoseForNetwork = null;
+        /** @type {(() => { position: object, quaternion: object }|null)|null} 操縦中のメインカメラ姿勢（player-update の位置・姿勢） */
+        this._getPilotCameraWorldPose = null;
         /** @type {((list: object[]) => void)|null} */
         this._onAircraftSnapshot = null;
         /** @type {((slotId: string) => void)|null} */
         this._onAircraftReleased = null;
         /** @type {((playerId: string) => boolean)|null} ローカルブロック（クライアントのみ） */
         this._isLocalPlayerBlocked = null;
+        /** player-update 操縦時カメラ姿勢用 */
+        this._pilotSendQuatScratch = new THREE.Quaternion();
     }
 
     /**
@@ -46,6 +50,7 @@ class NetworkManager {
 
     /**
      * サーバー条件とローカルブロックをマージしたリモート可視フラグ
+     * （pilotingAircraftId 時は他クライアントでアバター非表示。位置は操縦者のカメラ付近に同期される）
      * @param {{ id: string, adminInvisible?: boolean, pilotingAircraftId?: string|null }} player
      * @returns {boolean}
      */
@@ -75,6 +80,8 @@ class NetworkManager {
     setAircraftNetworkBridge(bridge) {
         const b = bridge && typeof bridge === 'object' ? bridge : {};
         this._getAircraftPoseForNetwork = typeof b.getPose === 'function' ? b.getPose : null;
+        this._getPilotCameraWorldPose =
+            typeof b.getPilotCameraWorldPose === 'function' ? b.getPilotCameraWorldPose : null;
         this._onAircraftSnapshot = typeof b.onSnapshot === 'function' ? b.onSnapshot : null;
         this._onAircraftReleased = typeof b.onReleased === 'function' ? b.onReleased : null;
     }
@@ -346,8 +353,18 @@ class NetworkManager {
         this.updateInterval = setInterval(() => {
             if (!this.socket || !characterController) return;
 
-            const position = characterController.getPosition();
-            const rotation = characterController.getRotation();
+            const camPose = this._getPilotCameraWorldPose?.();
+            const position = camPose?.position
+                ? { x: camPose.position.x, y: camPose.position.y, z: camPose.position.z }
+                : characterController.getPosition();
+            const rotation = camPose?.quaternion
+                ? this._pilotSendQuatScratch.set(
+                      camPose.quaternion.x,
+                      camPose.quaternion.y,
+                      camPose.quaternion.z,
+                      camPose.quaternion.w
+                  )
+                : characterController.getRotation();
 
             // Get Euler angles from quaternion for rotation
             const euler = new THREE.Euler().setFromQuaternion(rotation);

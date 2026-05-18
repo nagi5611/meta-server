@@ -17,6 +17,10 @@ class PlayerManager {
         /** Avatar GLB scale (change to resize model) */
         this.avatarScale = { x: 1.5, y: 1.5, z: 1.5 };
         this._headWorldOffset = new THREE.Vector3(0, 0.08, 0);
+        /** 飛行機操縦中: 自アバターを透明化（カメラ位置に追従） */
+        this._localPilotGhostMode = false;
+        /** @type {Map<THREE.Material, { transparent: boolean, opacity: number, depthWrite: boolean }>|null} */
+        this._localPilotGhostMatRestore = null;
     }
 
     /**
@@ -279,6 +283,7 @@ class PlayerManager {
             this.scene.add(this.localPlayer);
             console.log('Local player created with placeholder');
         }
+        if (this._localPilotGhostMode) this._applyLocalPilotGhostMaterials();
     }
 
     /**
@@ -322,6 +327,68 @@ class PlayerManager {
     setLocalPlayerVisible(visible) {
         if (!this.localPlayer) return;
         this.localPlayer.visible = !!visible;
+    }
+
+    /**
+     * 飛行機操縦中: 自アバター＋ネームタグを透明化（カメラ位置に追従させる前提）
+     * @param {boolean} on
+     */
+    setLocalPlayerAircraftPilotGhostMode(on) {
+        const v = !!on;
+        if (this._localPilotGhostMode === v) return;
+        this._localPilotGhostMode = v;
+        if (!v) {
+            this._clearLocalPilotGhostMaterials();
+            return;
+        }
+        this._applyLocalPilotGhostMaterials();
+    }
+
+    /**
+     * @returns {void}
+     */
+    _clearLocalPilotGhostMaterials() {
+        if (!this._localPilotGhostMatRestore) return;
+        for (const [m, s] of this._localPilotGhostMatRestore) {
+            try {
+                m.transparent = s.transparent;
+                m.opacity = s.opacity;
+                m.depthWrite = s.depthWrite;
+                m.needsUpdate = true;
+            } catch (_) {
+                /* ignore */
+            }
+        }
+        this._localPilotGhostMatRestore.clear();
+        this._localPilotGhostMatRestore = null;
+    }
+
+    /**
+     * @returns {void}
+     */
+    _applyLocalPilotGhostMaterials() {
+        if (!this.localPlayer || !this._localPilotGhostMode) return;
+        this._clearLocalPilotGhostMaterials();
+        const map = new Map();
+        this._localPilotGhostMatRestore = map;
+        this.localPlayer.traverse((ch) => {
+            if (!ch.isMesh && !ch.isSkinnedMesh && ch.type !== 'Sprite') return;
+            const mats = ch.material ? (Array.isArray(ch.material) ? ch.material : [ch.material]) : [];
+            for (const m of mats) {
+                if (!m || typeof m !== 'object' || !('opacity' in m)) continue;
+                if (!map.has(m)) {
+                    map.set(m, {
+                        transparent: !!m.transparent,
+                        opacity: typeof m.opacity === 'number' ? m.opacity : 1,
+                        depthWrite: m.depthWrite !== false,
+                    });
+                }
+                m.transparent = true;
+                m.opacity = 0;
+                m.depthWrite = false;
+                m.needsUpdate = true;
+            }
+        });
     }
 
     /**

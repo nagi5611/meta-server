@@ -451,6 +451,21 @@ export default class AircraftController {
     }
 
     /**
+     * 操縦中: player-update 用にワールド空間のメインカメラ姿勢を返す（アバター位置＝視点に同期）
+     * @returns {{ position: {x:number,y:number,z:number}, quaternion: {x:number,y:number,z:number,w:number} }|null}
+     */
+    getNetworkCameraPose() {
+        const cam = this.camera;
+        if (!cam) return null;
+        const p = cam.position;
+        const q = cam.quaternion;
+        return {
+            position: { x: p.x, y: p.y, z: p.z },
+            quaternion: { x: q.x, y: q.y, z: q.z, w: q.w },
+        };
+    }
+
+    /**
      * 角速度 1 軸: 入力ありは角加速度、なしは angularDecel で減速し ±maxRate でクリップ
      * @param {number} input -1 | 0 | 1
      * @param {number} omega

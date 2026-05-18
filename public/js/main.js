@@ -110,6 +110,10 @@ class MetaverseApp {
         /** @type {number} */
         this._perfNextFpsWindowAt = 0;
 
+        /** 操縦中 updateLocalPlayer 用（カメラ姿勢の再利用バッファ） */
+        this._pilotCamPosScratch = new THREE.Vector3();
+        this._pilotCamQuatScratch = new THREE.Quaternion();
+
         // Setup page visibility handling
         this.setupPageVisibility();
     }
@@ -492,8 +496,10 @@ class MetaverseApp {
             const mode = this.menuManager?.settings?.viewMode || 'third';
             const hideForFirst = mode === 'first';
             const hideForAdmin = !!(this.networkManager && this.networkManager.adminInvisible);
-            const hideForAircraft = !!(this.aircraftManager && (this.aircraftManager.isPiloting || this.aircraftManager.isPassenger));
-            this.playerManager.setLocalPlayerVisible(!hideForFirst && !hideForAdmin && !hideForAircraft);
+            const isPassenger = !!(this.aircraftManager && this.aircraftManager.isPassenger);
+            const isPilot = !!(this.aircraftManager && this.aircraftManager.isPiloting);
+            this.playerManager.setLocalPlayerVisible(!hideForFirst && !hideForAdmin && !isPassenger);
+            this.playerManager.setLocalPlayerAircraftPilotGhostMode(!!isPilot);
         };
         this.aircraftManager?.setOnPilotingChange?.(() => this.refreshLocalAvatarVisibility());
 
@@ -994,10 +1000,24 @@ class MetaverseApp {
             }
             this.characterController.update(deltaTime);
 
-            // Update local player visual and animation state
-            const position = this.characterController.getPosition();
-            const rotation = this.characterController.getRotation();
+            // Update local player visual and animation state（操縦中はカメラ位置・向きにアバターを合わせ透明化）
+            let position = this.characterController.getPosition();
+            let rotation = this.characterController.getRotation();
             const movementState = this.characterController.getMovementState();
+            if (this.aircraftManager?.isPiloting && this.aircraftController) {
+                const cam = this.aircraftController.getNetworkCameraPose();
+                if (cam?.position && cam?.quaternion) {
+                    this._pilotCamPosScratch.set(cam.position.x, cam.position.y, cam.position.z);
+                    this._pilotCamQuatScratch.set(
+                        cam.quaternion.x,
+                        cam.quaternion.y,
+                        cam.quaternion.z,
+                        cam.quaternion.w
+                    );
+                    position = this._pilotCamPosScratch;
+                    rotation = this._pilotCamQuatScratch;
+                }
+            }
             this.playerManager.updateLocalPlayer(position, rotation, movementState);
 
             this.sceneManager.updatePrefabLodVisibility(position);
