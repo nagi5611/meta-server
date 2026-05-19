@@ -409,6 +409,7 @@
                             <button type="button" class="we-category-btn" data-we-category="model">モデル</button>
                             <button type="button" class="we-category-btn" data-we-category="avatar">アバター</button>
                             <button type="button" class="we-category-btn" data-we-category="pdf">PDF</button>
+                            <button type="button" class="we-category-btn" data-we-category="flights">発着情報</button>
                             <button type="button" class="we-category-btn" data-we-category="file">ファイル</button>
                         </nav>
                         <div class="we-left-content">
@@ -481,6 +482,13 @@
                                         </div>
                                         <div id="we-pdf-preview-status" class="status-text"></div>
                                     </div>
+                                </section>
+                            </div>
+                            <div id="we-cat-flights" class="we-category-pane">
+                                <section class="section">
+                                    <h2 class="section-title">発着情報</h2>
+                                    <p class="hint">松山空港（MYJ）の発着を ODPT API で表示します。API キーは <code>ADDON_MATSUYAMA_FLIGHTS_ODPT_CONSUMER_KEY</code> で設定し、アドオン有効化後にサーバーを再起動してください。</p>
+                                    <button type="button" id="btn-add-flight-board">発着情報メニューパネルを追加</button>
                                 </section>
                             </div>
                             <div id="we-cat-file" class="we-category-pane">

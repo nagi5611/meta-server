@@ -143,4 +143,9 @@ export function seedFirstRunDefaultAddons(addonsRoot) {
         db.prepare('INSERT INTO addon_enabled (plugin_id, enabled) VALUES (?, 1)').run('aircraft');
         console.log('[addons-registry] first run: enabled addon aircraft');
     }
+    const matsuyamaFlightsManifest = path.join(addonsRoot, 'matsuyama-flights', 'plugin.json');
+    if (fs.existsSync(matsuyamaFlightsManifest)) {
+        db.prepare('INSERT INTO addon_enabled (plugin_id, enabled) VALUES (?, 1)').run('matsuyama-flights');
+        console.log('[addons-registry] first run: enabled addon matsuyama-flights');
+    }
 }

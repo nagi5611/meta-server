@@ -24,6 +24,10 @@ import {
     DEFAULT_WORLD_DIRECTIONAL_INTENSITY
 } from './ibl-setup.js';
 import {
+    addFlightBoardToEditor,
+    loadFlightBoardIntoEditor,
+} from '../../addons/matsuyama-flights/client/world-editor.js';
+import {
     loadPrefabGroupFromManifest,
     normalizePrefabManifest,
     fetchPrefabManifestJson,
@@ -117,7 +121,7 @@ let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（p
 let lightHelpers = []; // { light, mesh? } for point/spot position drag
 let worldObjectList = []; // 右パネル「オブジェクト一覧」の並び（クリックで選択用）
 /** オブジェクト一覧の階層展開状態＋ prefab 子行用の動的キー（例 pf_m123） */
-let objectListExpanded = { lights: false, models: false, pdfs: false };
+let objectListExpanded = { lights: false, models: false, pdfs: false, flightBoards: false };
 /** @type {{ kind: 'model'|'pdf'|'light', data: object }|null} Ctrl+C で取り込んだオブジェクトスナップショット */
 let worldEditorObjectClipboard = null;
 /** 貼り付け時に X 方向へずらす距離（m） */
@@ -2277,6 +2281,7 @@ function buildWorldsFromScene() {
             spawnPoint: w.spawnPoint ? { ...w.spawnPoint } : { x: 0, y: 10, z: 0 },
             lights: w.lights ? w.lights.map((l) => ({ ...l })) : [],
             pdfs: w.pdfs ? w.pdfs.map((p) => ({ ...p })) : [],
+            flightBoards: w.flightBoards ? w.flightBoards.map((b) => ({ ...b })) : [],
             vdbs: [],
             floorEnabled: wid === selectedWorldId ? document.getElementById('floor-enabled').checked : (w.floorEnabled !== false),
             floorWidth: wid === selectedWorldId
@@ -2313,6 +2318,7 @@ function buildWorldsFromScene() {
             w.models = [];
             w.lights = [];
             w.pdfs = [];
+            w.flightBoards = [];
             editGroup.children.forEach((child) => {
                 if (child.userData.config && !child.isLight) {
                     const c = { ...child.userData.config };
@@ -2379,6 +2385,13 @@ function buildWorldsFromScene() {
                     p.rotation = { x: child.rotation.x * 180 / Math.PI, y: child.rotation.y * 180 / Math.PI, z: child.rotation.z * 180 / Math.PI };
                     p.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
                     w.pdfs.push(p);
+                }
+                if (child.isMesh && child.userData.flightBoardConfig) {
+                    const b = { ...child.userData.flightBoardConfig };
+                    b.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+                    b.rotation = { x: child.rotation.x * 180 / Math.PI, y: child.rotation.y * 180 / Math.PI, z: child.rotation.z * 180 / Math.PI };
+                    b.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
+                    w.flightBoards.push(b);
                 }
             });
             w.spawnPoint = {
@@ -2693,6 +2706,11 @@ async function loadWorldIntoScene(world) {
         loadPdfTextureForMesh(mesh, path).catch(() => {});
     });
 
+    const flightBoards = world.flightBoards || [];
+    flightBoards.forEach((config) => {
+        loadFlightBoardIntoEditor(editGroup, config);
+    });
+
     document.getElementById('spawn-x').value = (world.spawnPoint && world.spawnPoint.x) ?? 0;
     document.getElementById('spawn-y').value = (world.spawnPoint && world.spawnPoint.y) ?? 10;
     document.getElementById('spawn-z').value = (world.spawnPoint && world.spawnPoint.z) ?? 0;
@@ -2793,6 +2811,7 @@ const EMPTY_EDITOR_WORLD = {
     models: [],
     lights: [],
     pdfs: [],
+    flightBoards: [],
     spawnPoint: { x: 0, y: 10, z: 0 },
     floorEnabled: true,
     floorWidth: DEFAULT_FLOOR_WIDTH_M,
@@ -3115,8 +3134,11 @@ function renderWorldObjectList() {
     const lightsArr = [];
     const modelsArr = [];
     const pdfsArr = [];
+    const flightBoardsArr = [];
     editGroup.children.forEach((child) => {
-        if (child.userData.pdfConfig) {
+        if (child.userData.flightBoardConfig) {
+            flightBoardsArr.push(child);
+        } else if (child.userData.pdfConfig) {
             pdfsArr.push(child);
         } else if (child.userData.config) {
             modelsArr.push(child);
@@ -3126,11 +3148,12 @@ function renderWorldObjectList() {
             lightsArr.push(child);
         }
     });
-    worldObjectList = [...lightsArr, ...modelsArr, ...pdfsArr];
+    worldObjectList = [...lightsArr, ...modelsArr, ...pdfsArr, ...flightBoardsArr];
     if (selectedObject) {
         if (lightsArr.includes(selectedObject)) objectListExpanded.lights = true;
         if (modelsArr.includes(selectedObject)) objectListExpanded.models = true;
         if (pdfsArr.includes(selectedObject)) objectListExpanded.pdfs = true;
+        if (flightBoardsArr.includes(selectedObject)) objectListExpanded.flightBoards = true;
         if (
             selectedObject.userData.config
             && String(selectedObject.userData.config.prefabManifest || '').trim()
@@ -3141,6 +3164,9 @@ function renderWorldObjectList() {
     }
 
     function makeItemLabel(child) {
+        if (child.userData.flightBoardConfig) {
+            return '発着情報パネル';
+        }
         if (child.userData.pdfConfig) {
             const path = child.userData.pdfConfig.path || '';
             return path.split('/').pop() || 'PDF';
@@ -3191,6 +3217,12 @@ function renderWorldObjectList() {
     el.appendChild(createCategory('ライト', 'lights', lightsArr, 0));
     el.appendChild(createModelObjectListCategory('models', modelsArr, lightsArr.length));
     el.appendChild(createCategory('PDF', 'pdfs', pdfsArr, lightsArr.length + modelsArr.length));
+    el.appendChild(createCategory(
+        '発着情報',
+        'flightBoards',
+        flightBoardsArr,
+        lightsArr.length + modelsArr.length + pdfsArr.length
+    ));
 }
 
 function renderWorldList() {
@@ -4432,6 +4464,7 @@ function bindEvents() {
             spawnPoint: { x: 0, y: 10, z: 0 },
             lights: [],
             pdfs: [],
+            flightBoards: [],
             vdbs: [],
             floorEnabled: true,
             floorWidth: DEFAULT_FLOOR_WIDTH_M,
@@ -4521,6 +4554,16 @@ function bindEvents() {
         if (path) addPdf(path);
         else alert('PDFをアップロードするか、一覧から選択してください');
     });
+
+    const btnAddFlightBoard = document.getElementById('btn-add-flight-board');
+    if (btnAddFlightBoard) {
+        btnAddFlightBoard.addEventListener('click', () => {
+            if (!selectedWorldId || !editGroup) return;
+            pushUndo();
+            addFlightBoardToEditor(editGroup);
+            renderWorldObjectList();
+        });
+    }
 
     let modelUploadModalBusy = false;
     let modelUploadQueuePollId = null;

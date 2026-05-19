@@ -25,6 +25,7 @@ import { XrPlayerRig } from './xr-player-rig.js';
 import { registerMetaverseServiceWorker } from './service-worker-register.js';
 import { initAircraftSubsystem } from '../../addons/aircraft/client/init.js';
 import { initAvatorScalableAnimations } from '../../addons/avator-scalable-animations/client/init.js';
+import { initMatsuyamaFlightsSubsystem } from '../../addons/matsuyama-flights/client/init.js';
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 
 const DEFAULT_ROOM = 'lobby';
@@ -345,6 +346,7 @@ class MetaverseApp {
 
         initAircraftSubsystem(this).catch((e) => console.warn('[Aircraft] init failed', e));
         initAvatorScalableAnimations(this);
+        initMatsuyamaFlightsSubsystem(this).catch((e) => console.warn('[matsuyama-flights] init failed', e));
 
         this.networkManager.connect();
         this.networkManager.startSendingUpdates(this.characterController);

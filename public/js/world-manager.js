@@ -139,6 +139,9 @@ class WorldManager {
                         loadState,
                         onByteProgress
                     });
+                    if (typeof this._loadWorldFlightBoards === 'function') {
+                        await this._loadWorldFlightBoards(world);
+                    }
                     console.log(`World loaded: ${worldId}`);
 
                     if (onComplete) {
