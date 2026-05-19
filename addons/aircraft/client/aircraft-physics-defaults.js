@@ -3,120 +3,114 @@
 /** ノット→m/s（ICAO 標準換算） */
 export const KNOTS_TO_MS = 0.514444;
 
+/** シミュレーション内部のみ（管理 UI には出さない） */
+export const AIRCRAFT_PHYSICS_INTERNAL = Object.freeze({
+    gravity: 9.81,
+    /** 毎フレーム速度乗算（ゲーム用減衰） */
+    drag: 0.985,
+    /** 操縦入力オフ時の角速度減速 (rad/s²) */
+    angularDecel: 2.5,
+    /** フラップ展開時のロール・ピッチ権限乗数（固定。揚力は flapLiftCoeff* で調整） */
+    flapRollPitchAuthority: Object.freeze([
+        { rollMul: 1, pitchMul: 1 },
+        { rollMul: 0.94, pitchMul: 0.9 },
+        { rollMul: 0.88, pitchMul: 0.85 },
+        { rollMul: 0.8, pitchMul: 0.78 },
+        { rollMul: 0.74, pitchMul: 0.72 },
+        { rollMul: 0.68, pitchMul: 0.66 },
+        { rollMul: 0.62, pitchMul: 0.6 }
+    ])
+});
+
 /**
- * B787 系の目安 Vfe（kt）。インデックス 0=Flaps1 … 5=Flaps30。一般向け資料ベースのゲーム近似。
+ * B787 系の目安 Vfe（kt）。インデックス 0=Flaps1 … 5=Flaps30。
+ * 出典: 一般向け運用資料・ACAPS 系の公開値域（ゲーム近似）
  * @type {readonly number[]}
  */
 export const FLAP_VFE_KNOTS = Object.freeze([250, 230, 215, 210, 190, 180]);
 
 /**
- * @type {Readonly<{
- *   maxSpeed: number,
- *   thrustAccel: number,
- *   drag: number,
- *   yawAccelGround: number,
- *   yawAccelAir: number,
- *   pitchAccelGround: number,
- *   pitchAccelAir: number,
- *   rollAccel: number,
- *   yawMaxRateGround: number,
- *   yawMaxRateAir: number,
- *   pitchMaxRateGround: number,
- *   pitchMaxRateAir: number,
- *   rollMaxRate: number,
- *   angularDecel: number,
- *   yawGroundFrictionLeft: number,
- *   yawGroundFrictionRight: number,
- *   groundTireLateralDecel: number,
- *   groundTireRollingDecel: number,
- *   wheelBrakeDecel: number,
- *   sideslipDamping: number,
- *   excessClimbDamping: number,
- *   gravity: number,
- *   liftPerHorizontalSpeed: number,
- *   throttleSpoolPerS: number,
- *   maxBankDeg: number,
- *   rudderAuthorityRefSpeedMs: number,
- *   rudderAuthorityMinScale: number,
- *   thrustPitchFromThrottleDelta: number,
- *   thrustPitchRelaxNoInput: number,
- *   flapPitchDownAuthority: number
- * }>}
+ * B787-9 目安をベースにした操縦パラメータ（公開仕様＋ゲーム換算の推論値）。
+ * 出典例: 最大速度 Mach 0.90（≈296 m/s 付近）、バンク保護約67°、ロール率15–20°/s、
+ * 離陸ローテーション約1°/s、乾燥滑走路タイヤμ≈0.7–0.85（推論）、着陸減速度目安≈4–6 m/s²（推論）
+ * @type {Readonly<Record<string, number>>}
  */
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
-    maxSpeed: 45,
-    thrustAccel: 18,
-    drag: 0.985,
-    yawAccelGround: 5,
-    yawAccelAir: 5,
-    pitchAccelGround: 4,
-    pitchAccelAir: 4,
-    rollAccel: 3.5,
-    yawMaxRateGround: 1.1,
-    yawMaxRateAir: 1.1,
-    pitchMaxRateGround: 0.9,
-    /** 空中ピッチ率の目安は一般向け B787 解説（数°/s）に寄せたゲーム値（rad/s） */
-    pitchMaxRateAir: 0.055,
-    /** ロール率 ≈17°/s（15〜20°/s の中間）相当のゲーム値 */
-    rollMaxRate: 0.31,
-    /** 入力オフ時の角速度減速 (rad/s²) */
-    angularDecel: 3,
-    /** 接地中・ヨー角速度が負（A/左寄り）のときに加算する減速 (rad/s²)。angularDecel に加算 */
-    yawGroundFrictionLeft: 0,
-    /** 接地中・ヨー角速度が正（D/右寄り）のときに加算する減速 (rad/s²) */
-    yawGroundFrictionRight: 0,
-    /**
-     * 接地タイヤの横滑り減速度 (m/s²)。前進軸に垂直な水平速度を減衰。
-     * 0 のときは従来どおり、横成分を即時に除去（前進方向への射影のみ）。
-     */
-    groundTireLateralDecel: 0,
-    /** 接地タイヤの転がり抵抗 (m/s²)。前後速度を減速。Space ブレーキとは別。0 で無効 */
-    groundTireRollingDecel: 0,
-    /** 接地中・Space タイヤブレーキ時の前後速度減速度 (m/s²) */
-    wheelBrakeDecel: 32,
-    /** 空中のみ: 速度の機体前後軸に垂直な成分を exp(-k*dt) で減衰 (1/s)。0 で無効 */
-    sideslipDamping: 0,
-    /** 空中かつ上向き速度時のみ vy を exp(-k*dt) で減衰 (1/s)。揚力の積み上がりを抑える。0 で無効 */
-    excessClimbDamping: 0,
-    gravity: 9.81,
-    liftPerHorizontalSpeed: 0.35,
-    /** スロットルレバー押しっぱなし時の変化率（1 秒あたりの無次元スロットル量） */
-    throttleSpoolPerS: 1.2,
-    /** ワールド YXZ ロール（バンク）上限（度）。787 向けは 67 などをワールドで指定可能 */
-    maxBankDeg: 30,
-    /** ラダー権限が最小になる参考速度 (m/s)。0 のとき maxSpeed を使用 */
-    rudderAuthorityRefSpeedMs: 0,
-    /** 参考速度以上でラダー最高角速度・角加速度に掛ける下限スケール（FBW の高速ラダー・リミット近似） */
-    rudderAuthorityMinScale: 0.15,
-    /** d(throttle)/dt に比例して加えるピッチ角速度 (rad / (無次元/秒)) — 推力変化の機首上げ近似 */
-    thrustPitchFromThrottleDelta: 0.14,
-    /** ピッチ入力ゼロ時、推力由来ピッチ角速度を指数で戻す係数 (1/s) */
-    thrustPitchRelaxNoInput: 5,
-    /**
-     * フラップ展開中、機首下げ入力（S）に掛ける権限係数 0〜1（マイナス G 制限の粗い近似）
-     */
-    flapPitchDownAuthority: 0.22
+    /** 最大推進速度 (m/s)。ユーザー指定 default 254 */
+    maxThrustSpeed: 254,
+    /** ヨー: 最大姿勢角 (°)。ラダー・側滑の粗い上限（推論） */
+    yawMaxDeg: 12,
+    /** ヨー: 最大角速度 (rad/s)。巡航ターン約3°/s ≈ 0.052 */
+    yawMaxRate: 0.052,
+    /** ヨー: 最大角加速度 (rad/s²)。推論 */
+    yawMaxAccel: 0.08,
+    /** ピッチ: 最大姿勢角 (°)。機首上下の粗い上限（推論） */
+    pitchMaxDeg: 25,
+    /** ピッチ: 最大角速度 (rad/s)。運用目安 2–3°/s */
+    pitchMaxRate: 0.052,
+    /** ピッチ: 最大角加速度 (rad/s²)。推論 */
+    pitchMaxAccel: 0.06,
+    /** ロール: 最大バンク角 (°)。FBW 保護上限の公開値 67° 付近 */
+    rollMaxDeg: 67,
+    /** ロール: 最大角速度 (rad/s)。17°/s */
+    rollMaxRate: 0.297,
+    /** ロール: 最大角加速度 (rad/s²)。推論 */
+    rollMaxAccel: 0.35,
+    /** タイヤ静止摩擦係数 μs（乾燥舗装・航空タイヤの一般値域、推論） */
+    tireStaticFriction: 0.78,
+    /** タイヤ動摩擦係数 μk（推論） */
+    tireKineticFriction: 0.55,
+    /** フラップ UP 時の揚力係数 (1/s)×水平速度。巡航で重量支持のゲーム換算（推論） */
+    flapLiftCoeff0: 0.078,
+    flapLiftCoeff1: 0.082,
+    flapLiftCoeff2: 0.086,
+    flapLiftCoeff3: 0.091,
+    flapLiftCoeff4: 0.094,
+    flapLiftCoeff5: 0.097,
+    flapLiftCoeff6: 0.1,
+    /** スロットル→エンジン回転数（正規化 0–1）の追従加速度 (1/s²)。全開まで約5–6 s（推論） */
+    engineRpmAccelPerThrottle: 0.18,
+    /** エンジン回転数 1.0 時の前進加速度 (m/s²)。787-9 推力/重量比 ≈2.5（推論） */
+    thrustAccelPerEngineRpm: 2.5,
+    /** Space ブレーキ減速度 (m/s²)。着陸 autobrake 高めの目安（推論） */
+    tireBrakeAccel: 5.5
 });
 
+const FLAP_LIFT_KEYS = Object.freeze([
+    'flapLiftCoeff0',
+    'flapLiftCoeff1',
+    'flapLiftCoeff2',
+    'flapLiftCoeff3',
+    'flapLiftCoeff4',
+    'flapLiftCoeff5',
+    'flapLiftCoeff6'
+]);
+
 /**
- * フラップ段階 i（0=UP … 6=30）の揚力・ロール・ピッチに掛ける乗数（FBW「フラップ展開でマイルド」＋揚力増の近似）
+ * フラップ段階 i（0=UP … 6=30）のロール・ピッチ権限乗数
  * @param {number} flapIndex
- * @returns {{ liftMul: number, rollMul: number, pitchMul: number }}
+ * @returns {{ rollMul: number, pitchMul: number }}
  */
 export function flapAuthorityMultipliers(flapIndex) {
     const idx = Math.round(Number(flapIndex));
     const i = Math.max(0, Math.min(6, Number.isFinite(idx) ? idx : 0));
-    /** @type {readonly { liftMul: number, rollMul: number, pitchMul: number }[]} */
-    const table = [
-        { liftMul: 1, rollMul: 1, pitchMul: 1 },
-        { liftMul: 1.05, rollMul: 0.94, pitchMul: 0.9 },
-        { liftMul: 1.1, rollMul: 0.88, pitchMul: 0.85 },
-        { liftMul: 1.16, rollMul: 0.8, pitchMul: 0.78 },
-        { liftMul: 1.2, rollMul: 0.74, pitchMul: 0.72 },
-        { liftMul: 1.24, rollMul: 0.68, pitchMul: 0.66 },
-        { liftMul: 1.28, rollMul: 0.62, pitchMul: 0.6 }
-    ];
-    return table[i];
+    const table = AIRCRAFT_PHYSICS_INTERNAL.flapRollPitchAuthority;
+    return table[i] || table[0];
+}
+
+/**
+ * フラップ段階の揚力係数 (1/s)×vH
+ * @param {number} flapIndex
+ * @param {Record<string, number>} ph merge 済み physics
+ * @returns {number}
+ */
+export function flapLiftCoeff(flapIndex, ph) {
+    const idx = Math.round(Number(flapIndex));
+    const i = Math.max(0, Math.min(6, Number.isFinite(idx) ? idx : 0));
+    const key = FLAP_LIFT_KEYS[i];
+    const v = ph[key];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    return /** @type {number} */ (DEFAULT_AIRCRAFT_PHYSICS[key]);
 }
 
 /**
@@ -133,87 +127,99 @@ export function flapVfeMs(flapIndex) {
 }
 
 /**
+ * 旧 physics JSON を新キーへ写す（保存データ互換）
+ * @param {Record<string, unknown>} r
+ */
+function applyLegacyPhysicsAliases(r) {
+    if (typeof r.maxSpeed === 'number' && typeof r.maxThrustSpeed !== 'number') {
+        r.maxThrustSpeed = r.maxSpeed;
+    }
+    if (typeof r.maxBankDeg === 'number' && typeof r.rollMaxDeg !== 'number') {
+        r.rollMaxDeg = r.maxBankDeg;
+    }
+    if (typeof r.wheelBrakeDecel === 'number' && typeof r.tireBrakeAccel !== 'number') {
+        r.tireBrakeAccel = r.wheelBrakeDecel;
+    }
+    if (typeof r.throttleSpoolPerS === 'number' && typeof r.engineRpmAccelPerThrottle !== 'number') {
+        r.engineRpmAccelPerThrottle = r.throttleSpoolPerS;
+    }
+    if (typeof r.thrustAccel === 'number' && typeof r.thrustAccelPerEngineRpm !== 'number') {
+        r.thrustAccelPerEngineRpm = r.thrustAccel;
+    }
+    const avg = (a, b) => {
+        const xs = [a, b].filter((x) => typeof x === 'number' && Number.isFinite(x));
+        return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : undefined;
+    };
+    if (typeof r.yawMaxAccel !== 'number') {
+        const v = avg(r.yawAccelGround, r.yawAccelAir) ?? r.yawAccel;
+        if (typeof v === 'number') r.yawMaxAccel = v;
+    }
+    if (typeof r.pitchMaxAccel !== 'number') {
+        const v = avg(r.pitchAccelGround, r.pitchAccelAir) ?? r.pitchAccel;
+        if (typeof v === 'number') r.pitchMaxAccel = v;
+    }
+    if (typeof r.rollMaxAccel !== 'number' && typeof r.rollAccel === 'number') {
+        r.rollMaxAccel = r.rollAccel;
+    }
+    if (typeof r.yawMaxRate !== 'number') {
+        const v = avg(r.yawMaxRateGround, r.yawMaxRateAir) ?? r.yawRate ?? r.yawMaxRate;
+        if (typeof v === 'number') r.yawMaxRate = v;
+    }
+    if (typeof r.pitchMaxRate !== 'number') {
+        const v = avg(r.pitchMaxRateGround, r.pitchMaxRateAir) ?? r.pitchRate ?? r.pitchMaxRate;
+        if (typeof v === 'number') r.pitchMaxRate = v;
+    }
+    if (typeof r.rollMaxRate !== 'number' && typeof r.rollRate === 'number') {
+        r.rollMaxRate = r.rollRate;
+    }
+    if (typeof r.groundTireLateralDecel === 'number' && typeof r.tireKineticFriction !== 'number') {
+        const g = AIRCRAFT_PHYSICS_INTERNAL.gravity;
+        if (g > 0) r.tireKineticFriction = r.groundTireLateralDecel / g;
+    }
+    if (typeof r.liftPerHorizontalSpeed === 'number') {
+        const base = r.liftPerHorizontalSpeed;
+        const legacyMul = [1, 1.05, 1.1, 1.16, 1.2, 1.24, 1.28];
+        for (let i = 0; i < FLAP_LIFT_KEYS.length; i++) {
+            const k = FLAP_LIFT_KEYS[i];
+            if (typeof r[k] !== 'number') r[k] = base * legacyMul[i];
+        }
+    }
+}
+
+/**
+ * @param {string} key
+ * @param {number} v
+ * @returns {number}
+ */
+function clipPhysicsValue(key, v) {
+    if (key === 'maxThrustSpeed') return Math.min(600, Math.max(1, v));
+    if (key.endsWith('Deg')) return Math.min(90, Math.max(1, v));
+    if (key.endsWith('MaxRate')) return Math.min(10, Math.max(0.005, v));
+    if (key.endsWith('MaxAccel')) return Math.min(40, Math.max(0.01, v));
+    if (key.startsWith('flapLiftCoeff')) return Math.min(3, Math.max(0, v));
+    if (key === 'tireStaticFriction' || key === 'tireKineticFriction') {
+        return Math.min(2, Math.max(0.05, v));
+    }
+    if (key === 'engineRpmAccelPerThrottle') return Math.min(5, Math.max(0.02, v));
+    if (key === 'thrustAccelPerEngineRpm') return Math.min(50, Math.max(0.1, v));
+    if (key === 'tireBrakeAccel') return Math.min(15, Math.max(0.5, v));
+    return Math.min(500, Math.max(0.001, v));
+}
+
+/**
  * worlds.json の aircraftPhysics を既定値でマージして検証クリップする。
- * 旧キー pitchRate / rollRate は最高角速度として読み替える。yawRate はヨー最高角速度（接地・空中の両方）に読み替える。
- * 旧 pitchAccel / pitchMaxRate は接地・空中の両方にコピーする。
- * 旧 yawAccel は yawAccelGround / yawAccelAir の両方にコピーする。
- * 旧 yawMaxRate / yawRate は yawMaxRateGround / yawMaxRateAir の両方にコピーする。
  * @param {Record<string, unknown>|null|undefined} raw
  */
 export function mergeAircraftPhysicsFromWorld(raw) {
     const base = { ...DEFAULT_AIRCRAFT_PHYSICS };
     if (!raw || typeof raw !== 'object') return base;
     const r = { ...raw };
-    if (typeof r.yawAccel === 'number') {
-        if (typeof r.yawAccelGround !== 'number') r.yawAccelGround = r.yawAccel;
-        if (typeof r.yawAccelAir !== 'number') r.yawAccelAir = r.yawAccel;
-    }
-    if (typeof r.yawMaxRate === 'number') {
-        if (typeof r.yawMaxRateGround !== 'number') r.yawMaxRateGround = r.yawMaxRate;
-        if (typeof r.yawMaxRateAir !== 'number') r.yawMaxRateAir = r.yawMaxRate;
-    }
-    if (typeof r.yawRate === 'number') {
-        if (typeof r.yawMaxRateGround !== 'number') r.yawMaxRateGround = r.yawRate;
-        if (typeof r.yawMaxRateAir !== 'number') r.yawMaxRateAir = r.yawRate;
-    }
-    if (typeof r.pitchMaxRate === 'number') {
-        if (typeof r.pitchMaxRateGround !== 'number') r.pitchMaxRateGround = r.pitchMaxRate;
-        if (typeof r.pitchMaxRateAir !== 'number') r.pitchMaxRateAir = r.pitchMaxRate;
-    }
-    if (typeof r.pitchRate === 'number') {
-        if (typeof r.pitchMaxRateGround !== 'number') r.pitchMaxRateGround = r.pitchRate;
-        if (typeof r.pitchMaxRateAir !== 'number') r.pitchMaxRateAir = r.pitchRate;
-    }
-    if (typeof r.pitchAccel === 'number') {
-        if (typeof r.pitchAccelGround !== 'number') r.pitchAccelGround = r.pitchAccel;
-        if (typeof r.pitchAccelAir !== 'number') r.pitchAccelAir = r.pitchAccel;
-    }
-    if (typeof r.rollRate === 'number' && typeof r.rollMaxRate !== 'number') r.rollMaxRate = r.rollRate;
+    applyLegacyPhysicsAliases(r);
 
     for (const k of Object.keys(DEFAULT_AIRCRAFT_PHYSICS)) {
         const v = r[k];
         if (typeof v !== 'number' || !Number.isFinite(v)) continue;
-        if (k === 'drag') {
-            base[k] = Math.min(0.99999, Math.max(0.5, v));
-        } else if (k === 'maxSpeed') {
-            base[k] = Math.min(500, Math.max(1, v));
-        } else if (k === 'gravity') {
-            base[k] = Math.min(50, Math.max(0, v));
-        } else if (k === 'liftPerHorizontalSpeed') {
-            base[k] = Math.min(5, Math.max(0, v));
-        } else if (k === 'sideslipDamping' || k === 'excessClimbDamping') {
-            base[k] = Math.min(10, Math.max(0, v));
-        } else if (k === 'angularDecel' || k === 'yawGroundFrictionLeft' || k === 'yawGroundFrictionRight') {
-            base[k] = Math.min(30, Math.max(0, v));
-        } else if (k === 'groundTireLateralDecel' || k === 'groundTireRollingDecel') {
-            base[k] = Math.min(500, Math.max(0, v));
-        } else if (k === 'wheelBrakeDecel') {
-            base[k] = Math.min(200, Math.max(0.5, v));
-        } else if (k === 'throttleSpoolPerS') {
-            base[k] = Math.min(5, Math.max(0.05, v));
-        } else if (k === 'maxBankDeg') {
-            base[k] = Math.min(85, Math.max(1, v));
-        } else if (k === 'rudderAuthorityRefSpeedMs') {
-            base[k] = Math.min(500, Math.max(0, v));
-        } else if (k === 'rudderAuthorityMinScale') {
-            base[k] = Math.min(1, Math.max(0.05, v));
-        } else if (k === 'thrustPitchFromThrottleDelta') {
-            base[k] = Math.min(2, Math.max(0, v));
-        } else if (k === 'thrustPitchRelaxNoInput') {
-            base[k] = Math.min(20, Math.max(0, v));
-        } else if (k === 'flapPitchDownAuthority') {
-            base[k] = Math.min(1, Math.max(0, v));
-        } else if (k === 'pitchAccelGround' || k === 'pitchAccelAir' || k === 'yawAccelGround' || k === 'yawAccelAir') {
-            base[k] = Math.min(40, Math.max(0.05, v));
-        } else if (k === 'pitchMaxRateGround' || k === 'pitchMaxRateAir' || k === 'yawMaxRateGround' || k === 'yawMaxRateAir') {
-            base[k] = Math.min(10, Math.max(0.02, v));
-        } else if (k.endsWith('Accel')) {
-            base[k] = Math.min(40, Math.max(0.05, v));
-        } else if (k.endsWith('MaxRate')) {
-            base[k] = Math.min(10, Math.max(0.02, v));
-        } else {
-            base[k] = Math.min(50, Math.max(0.01, v));
-        }
+        base[k] = clipPhysicsValue(k, v);
     }
     return base;
 }

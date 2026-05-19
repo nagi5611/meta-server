@@ -6,7 +6,9 @@ import * as THREE from 'three';
 import {
     mergeAircraftPhysicsFromWorld,
     flapAuthorityMultipliers,
-    flapVfeMs
+    flapLiftCoeff,
+    flapVfeMs,
+    AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
 import { findObjectByNamePath, stepEngineBladeRotation, stepFlapDeflection } from './runtime-prefab-aircraft-anim.js';
 
@@ -22,15 +24,6 @@ const THROTTLE_MIN = -0.3;
 const THROTTLE_MAX = 1;
 /** 荷重解放: 連続収納の間隔 (s) */
 const FLAP_RELIEF_COOLDOWN_S = 0.22;
-
-/**
- * @param {{ maxBankDeg?: number }} ph
- * @returns {number}
- */
-function maxBankRadFromPhysics(ph) {
-    const deg = typeof ph.maxBankDeg === 'number' ? ph.maxBankDeg : 30;
-    return THREE.MathUtils.degToRad(THREE.MathUtils.clamp(deg, 1, 85));
-}
 
 /**
  * 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -66,6 +59,8 @@ export default class AircraftController {
         /** 無次元スロットル THROTTLE_MIN..THROTTLE_MAX */
         this._throttle = 0;
         this._prevThrottle = 0;
+        /** 正規化エンジン回転数 0..1（スロットルに追従） */
+        this._engineRpm = 0;
         /** 0..6 = UP..30 */
         this._flapIndex = 0;
         this._flapReliefCooldown = 0;
@@ -148,6 +143,7 @@ export default class AircraftController {
         this._aircraftGrounded = false;
         this._throttle = 0;
         this._prevThrottle = 0;
+        this._engineRpm = 0;
         this._flapIndex = 0;
         this._flapReliefCooldown = 0;
         this.physics = mergeAircraftPhysicsFromWorld(
@@ -267,6 +263,7 @@ export default class AircraftController {
         this._aircraftGrounded = false;
         this._throttle = 0;
         this._prevThrottle = 0;
+        this._engineRpm = 0;
         this._flapIndex = 0;
         this._flapReliefCooldown = 0;
         this.physics = mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
@@ -545,17 +542,33 @@ export default class AircraftController {
     }
 
     /**
-     * ワールド YXZ のロール角を上限に収め、必要ならローカル姿勢を書き換える
+     * ワールド YXZ のヨー・ピッチ・ロールを physics の上限 (°) に収める
      * @param {import('three').Object3D} root
-     * @param {number} maxBankRad
+     * @param {{ yawMaxDeg: number, pitchMaxDeg: number, rollMaxDeg: number }} ph
      */
-    _clampWorldBank(root, maxBankRad) {
+    _clampWorldAttitude(root, ph) {
         root.updateMatrixWorld(true);
         root.getWorldQuaternion(this._worldQuat);
         this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
-        const z = this._eulerScratch.z;
-        if (z <= maxBankRad && z >= -maxBankRad) return;
-        this._eulerScratch.z = THREE.MathUtils.clamp(z, -maxBankRad, maxBankRad);
+        const yawLim = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(ph.yawMaxDeg, 1, 90));
+        const pitchLim = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(ph.pitchMaxDeg, 1, 90));
+        const rollLim = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(ph.rollMaxDeg, 1, 90));
+        const y0 = this._eulerScratch.y;
+        const x0 = this._eulerScratch.x;
+        const z0 = this._eulerScratch.z;
+        this._eulerScratch.y = THREE.MathUtils.clamp(y0, -yawLim, yawLim);
+        this._eulerScratch.x = THREE.MathUtils.clamp(x0, -pitchLim, pitchLim);
+        this._eulerScratch.z = THREE.MathUtils.clamp(z0, -rollLim, rollLim);
+        if (
+            this._eulerScratch.y === y0 &&
+            this._eulerScratch.x === x0 &&
+            this._eulerScratch.z === z0
+        ) {
+            return;
+        }
+        if (this._eulerScratch.y !== y0) this._omegaYaw = 0;
+        if (this._eulerScratch.x !== x0) this._omegaPitch = 0;
+        if (this._eulerScratch.z !== z0) this._omegaRoll = 0;
         this._qClampWorld.setFromEuler(this._eulerScratch);
         if (root.parent) {
             root.parent.updateMatrixWorld(true);
@@ -565,7 +578,6 @@ export default class AircraftController {
         } else {
             root.quaternion.copy(this._qClampWorld);
         }
-        this._omegaRoll = 0;
         root.updateMatrixWorld(true);
     }
 
@@ -578,19 +590,27 @@ export default class AircraftController {
         const dt = Math.min(0.1, deltaTime);
 
         const ph = this.physics;
-        const maxBankRad = maxBankRadFromPhysics(ph);
-        const dec = ph.angularDecel;
+        const dec = AIRCRAFT_PHYSICS_INTERNAL.angularDecel;
+        const g = AIRCRAFT_PHYSICS_INTERNAL.gravity;
+        const maxSpd = ph.maxThrustSpeed;
 
         if (this._flapReliefCooldown > 0) this._flapReliefCooldown = Math.max(0, this._flapReliefCooldown - dt);
 
-        const spool = ph.throttleSpoolPerS;
+        const rpmSpool = ph.engineRpmAccelPerThrottle;
         if (this.keys.throttleUp) {
-            this._throttle = Math.min(THROTTLE_MAX, this._throttle + spool * dt);
+            this._throttle = Math.min(THROTTLE_MAX, this._throttle + rpmSpool * dt);
         }
         if (this.keys.throttleDown) {
-            this._throttle = Math.max(THROTTLE_MIN, this._throttle - spool * dt);
+            this._throttle = Math.max(THROTTLE_MIN, this._throttle - rpmSpool * dt);
         }
         this._throttle = THREE.MathUtils.clamp(this._throttle, THROTTLE_MIN, THROTTLE_MAX);
+
+        const targetRpm = Math.max(0, this._throttle);
+        if (this._engineRpm < targetRpm) {
+            this._engineRpm = Math.min(targetRpm, this._engineRpm + rpmSpool * dt);
+        } else if (this._engineRpm > targetRpm) {
+            this._engineRpm = Math.max(targetRpm, this._engineRpm - rpmSpool * dt);
+        }
 
         root.updateMatrixWorld(true);
         root.getWorldQuaternion(this._worldQuat);
@@ -598,7 +618,7 @@ export default class AircraftController {
         if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
         const airForward = Math.max(0, this.velocity.dot(this._fwd));
         const vfe = flapVfeMs(this._flapIndex);
-        const vfeCap = Number.isFinite(vfe) ? Math.min(ph.maxSpeed, vfe) : ph.maxSpeed;
+        const vfeCap = Number.isFinite(vfe) ? Math.min(maxSpd, vfe) : maxSpd;
 
         if (this._flapIndex > 0 && airForward > vfe * 0.995 && this._flapReliefCooldown <= 0) {
             this._flapIndex -= 1;
@@ -606,85 +626,68 @@ export default class AircraftController {
         }
 
         const fa = flapAuthorityMultipliers(this._flapIndex);
-        const rudRef = ph.rudderAuthorityRefSpeedMs > 0.5 ? ph.rudderAuthorityRefSpeedMs : ph.maxSpeed;
-        const rudT = rudRef > 1e-6 ? THREE.MathUtils.clamp(airForward / rudRef, 0, 1) : 0;
-        const rudScale = ph.rudderAuthorityMinScale + (1 - ph.rudderAuthorityMinScale) * (1 - rudT);
-
         const yawIn = (this.keys.yawR ? 1 : 0) - (this.keys.yawL ? 1 : 0);
-        let pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
-        if (this._flapIndex > 0 && pitchIn < 0) {
-            pitchIn *= ph.flapPitchDownAuthority;
-        }
+        const pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
         const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
 
         root.getWorldQuaternion(this._worldQuat);
         this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
+        const rollLimRad = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(ph.rollMaxDeg, 1, 90));
         const bank = this._eulerScratch.z;
         let rollInEff = rollIn;
-        if (bank >= maxBankRad - 0.02 && rollIn > 0) rollInEff = 0;
-        if (bank <= -maxBankRad + 0.02 && rollIn < 0) rollInEff = 0;
+        if (bank >= rollLimRad - 0.02 && rollIn > 0) rollInEff = 0;
+        if (bank <= -rollLimRad + 0.02 && rollIn < 0) rollInEff = 0;
 
-        let yawDecel = dec;
-        if (this._aircraftGrounded) {
-            if (this._omegaYaw > 0) yawDecel += ph.yawGroundFrictionRight;
-            else if (this._omegaYaw < 0) yawDecel += ph.yawGroundFrictionLeft;
-        }
-        const yawAccel0 = this._aircraftGrounded ? ph.yawAccelGround : ph.yawAccelAir * rudScale;
-        const yawMax0 = this._aircraftGrounded ? ph.yawMaxRateGround : ph.yawMaxRateAir * rudScale;
-        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, yawAccel0, yawMax0, yawDecel, dt);
-
-        const pitchAccel0 = this._aircraftGrounded ? ph.pitchAccelGround : ph.pitchAccelAir * fa.pitchMul;
-        const pitchMax0 = this._aircraftGrounded ? ph.pitchMaxRateGround : ph.pitchMaxRateAir * fa.pitchMul;
-        this._omegaPitch = this._integrateOmega(pitchIn, this._omegaPitch, pitchAccel0, pitchMax0, dec, dt);
-
-        const dTh = (this._throttle - this._prevThrottle) / Math.max(dt, 1e-4);
-        this._omegaPitch += ph.thrustPitchFromThrottleDelta * dTh * dt;
-        this._prevThrottle = this._throttle;
-        if (pitchIn === 0 && ph.thrustPitchRelaxNoInput > 0) {
-            this._omegaPitch *= Math.exp(-ph.thrustPitchRelaxNoInput * dt);
-        }
-
-        const rollAccelEff = ph.rollAccel * fa.rollMul;
-        const rollMaxEff = ph.rollMaxRate * fa.rollMul;
-        this._omegaRoll = this._integrateOmega(rollInEff, this._omegaRoll, rollAccelEff, rollMaxEff, dec, dt);
+        this._omegaYaw = this._integrateOmega(
+            yawIn,
+            this._omegaYaw,
+            ph.yawMaxAccel,
+            ph.yawMaxRate,
+            dec,
+            dt
+        );
+        this._omegaPitch = this._integrateOmega(
+            pitchIn,
+            this._omegaPitch,
+            ph.pitchMaxAccel * fa.pitchMul,
+            ph.pitchMaxRate * fa.pitchMul,
+            dec,
+            dt
+        );
+        this._omegaRoll = this._integrateOmega(
+            rollInEff,
+            this._omegaRoll,
+            ph.rollMaxAccel * fa.rollMul,
+            ph.rollMaxRate * fa.rollMul,
+            dec,
+            dt
+        );
 
         root.rotateOnAxis(new THREE.Vector3(0, 1, 0), -this._omegaYaw * dt);
         root.rotateOnAxis(new THREE.Vector3(1, 0, 0), this._omegaPitch * dt);
         root.rotateOnAxis(new THREE.Vector3(0, 0, 1), -this._omegaRoll * dt);
         root.updateMatrixWorld(true);
-        this._clampWorldBank(root, maxBankRad);
+        this._clampWorldAttitude(root, ph);
 
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
-        this.velocity.addScaledVector(this._fwd, this._throttle * ph.thrustAccel * dt);
-        this.velocity.multiplyScalar(ph.drag);
+        let thrust = this._engineRpm * ph.thrustAccelPerEngineRpm;
+        if (this._throttle < 0) {
+            thrust = this._throttle * ph.thrustAccelPerEngineRpm;
+        }
+        this.velocity.addScaledVector(this._fwd, thrust * dt);
+        this.velocity.multiplyScalar(AIRCRAFT_PHYSICS_INTERNAL.drag);
         this._bodyUp.set(0, 1, 0).applyQuaternion(this._worldQuat).normalize();
         const vAlongBodyUp = this.velocity.dot(this._bodyUp);
         const vH = Math.sqrt(
             Math.max(0, this.velocity.lengthSq() - vAlongBodyUp * vAlongBodyUp)
         );
-        const liftAccel = ph.liftPerHorizontalSpeed * vH * fa.liftMul;
-        this.velocity.y += (liftAccel - ph.gravity) * dt;
+        const liftAccel = flapLiftCoeff(this._flapIndex, ph) * vH;
+        this.velocity.y += (liftAccel - g) * dt;
         let sp = this.velocity.length();
         if (sp > vfeCap) this.velocity.multiplyScalar(vfeCap / sp);
         sp = this.velocity.length();
-        if (sp > ph.maxSpeed) this.velocity.multiplyScalar(ph.maxSpeed / sp);
-
-        const climbK = ph.excessClimbDamping;
-        if (climbK > 0 && !this._aircraftGrounded && this.velocity.y > 0) {
-            this.velocity.y *= Math.exp(-climbK * dt);
-        }
-
-        const slipK = ph.sideslipDamping;
-        if (slipK > 0 && !this._aircraftGrounded && this._fwd.lengthSq() > 1e-12) {
-            this._lookTarget.copy(this._fwd).normalize();
-            const vParallel = this.velocity.dot(this._lookTarget);
-            this._worldPos.copy(this._lookTarget).multiplyScalar(vParallel);
-            const slipFactor = Math.exp(-slipK * dt);
-            this.velocity.sub(this._worldPos);
-            this.velocity.multiplyScalar(slipFactor);
-            this.velocity.add(this._worldPos);
-        }
+        if (sp > maxSpd) this.velocity.multiplyScalar(maxSpd / sp);
 
         root.getWorldPosition(this._worldPos);
         this._worldPos.addScaledVector(this.velocity, dt);
@@ -732,7 +735,8 @@ export default class AircraftController {
                         hx /= lenH;
                         hz /= lenH;
                         let fwdSpeed = this.velocity.x * hx + this.velocity.z * hz;
-                        const rollK = ph.groundTireRollingDecel;
+                        const rollMu = ph.tireKineticFriction;
+                        const rollK = rollMu * g * 0.12;
                         if (rollK > 0) {
                             const mag = Math.abs(fwdSpeed);
                             if (mag > 0) {
@@ -741,7 +745,7 @@ export default class AircraftController {
                             }
                         }
                         if (this.keys.brake) {
-                            const step = ph.wheelBrakeDecel * dt;
+                            const step = ph.tireBrakeAccel * dt;
                             const mag = Math.abs(fwdSpeed);
                             if (mag > 0) {
                                 const ds = Math.min(mag, step);
@@ -751,7 +755,9 @@ export default class AircraftController {
                         const latX = this.velocity.x - hx * fwdSpeed;
                         const latZ = this.velocity.z - hz * fwdSpeed;
                         const latMag = Math.hypot(latX, latZ);
-                        const latK = ph.groundTireLateralDecel;
+                        const muLat =
+                            latMag < 0.35 ? ph.tireStaticFriction : ph.tireKineticFriction;
+                        const latK = muLat * g;
                         if (latK > 0 && latMag > 1e-9) {
                             const reduce = Math.min(latMag, latK * dt);
                             const scale = (latMag - reduce) / latMag;
@@ -789,8 +795,11 @@ export default class AircraftController {
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
         if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
         const throttleVis = THREE.MathUtils.clamp(this._throttle, 0, 1);
-        let t01 = ph.maxSpeed > 0 ? THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / ph.maxSpeed, 0, 1) : 0;
-        t01 = Math.max(t01, throttleVis);
+        let t01 = Math.max(this._engineRpm, throttleVis);
+        const maxSpd = ph.maxThrustSpeed;
+        if (maxSpd > 0) {
+            t01 = Math.max(t01, THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / maxSpd, 0, 1));
+        }
 
         if (this._libAnim?.blades?.length) {
             for (const b of this._libAnim.blades) {
@@ -886,7 +895,7 @@ export default class AircraftController {
             grounded: this._aircraftGrounded,
             throttle: this._throttle,
             flapLabel: AIRCRAFT_FLAP_LABELS[this._flapIndex] || 'UP',
-            vfeMs: Number.isFinite(vfe) ? vfe : this.physics.maxSpeed,
+            vfeMs: Number.isFinite(vfe) ? vfe : this.physics.maxThrustSpeed,
             vfeWarn
         };
     }

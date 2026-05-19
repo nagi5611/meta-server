@@ -4,36 +4,28 @@ import { DEFAULT_AIRCRAFT_PHYSICS, mergeAircraftPhysicsFromWorld } from '../../.
 
 /** @type {Record<string, string>} */
 const LABEL_JA = {
-    maxSpeed: '最高速度 (m/s)',
-    thrustAccel: '推力加速度 (m/s²)',
-    drag: '速度維持率（毎フレーム乗算）',
-    yawAccelGround: 'ヨー角加速度 接地 (rad/s²)',
-    yawAccelAir: 'ヨー角加速度 空中 (rad/s²)',
-    pitchAccelGround: 'ピッチ角加速度 接地 (rad/s²)',
-    pitchAccelAir: 'ピッチ角加速度 空中 (rad/s²)',
-    rollAccel: 'ロール角加速度 (rad/s²)',
-    yawMaxRateGround: 'ヨー最高角速度 接地 (rad/s)',
-    yawMaxRateAir: 'ヨー最高角速度 空中 (rad/s)',
-    pitchMaxRateGround: 'ピッチ最高角速度 接地 (rad/s)',
-    pitchMaxRateAir: 'ピッチ最高角速度 空中 (rad/s)',
-    rollMaxRate: 'ロール最高角速度 (rad/s)',
-    angularDecel: '角速度減衰 入力オフ (rad/s²)',
-    yawGroundFrictionLeft: '接地ヨー摩擦 左/Q 側 (rad/s²)',
-    yawGroundFrictionRight: '接地ヨー摩擦 右/E 側 (rad/s²)',
-    groundTireLateralDecel: 'タイヤ横滑り減速度 (m/s²)',
-    groundTireRollingDecel: 'タイヤ転がり抵抗 (m/s²)',
-    wheelBrakeDecel: 'Space ブレーキ減速度 (m/s²)',
-    sideslipDamping: '側滑り減衰 (1/s)',
-    excessClimbDamping: '上向き速度減衰 (1/s)',
-    gravity: '重力 (m/s²)',
-    liftPerHorizontalSpeed: '揚力係数 (1/s)',
-    throttleSpoolPerS: 'スロットル変化率 (1/s)',
-    maxBankDeg: 'バンク角上限 (°)',
-    rudderAuthorityRefSpeedMs: 'ラダー権限参照速度 (m/s、0=最高速度)',
-    rudderAuthorityMinScale: '高速ラダー下限スケール',
-    thrustPitchFromThrottleDelta: '推力ピッチ係数',
-    thrustPitchRelaxNoInput: 'ピッチ無入力時緩和 (1/s)',
-    flapPitchDownAuthority: 'フラップ時機首下げ権限 (0–1)',
+    maxThrustSpeed: '最大推進速度 (m/s)',
+    yawMaxDeg: 'ヨー 最大角度 (°)',
+    yawMaxRate: 'ヨー 最大角速度 (rad/s)',
+    yawMaxAccel: 'ヨー 最大角加速度 (rad/s²)',
+    pitchMaxDeg: 'ピッチ 最大角度 (°)',
+    pitchMaxRate: 'ピッチ 最大角速度 (rad/s)',
+    pitchMaxAccel: 'ピッチ 最大角加速度 (rad/s²)',
+    rollMaxDeg: 'ロール 最大角度 (°)',
+    rollMaxRate: 'ロール 最大角速度 (rad/s)',
+    rollMaxAccel: 'ロール 最大角加速度 (rad/s²)',
+    tireStaticFriction: 'タイヤ静止摩擦係数 μs',
+    tireKineticFriction: 'タイヤ動摩擦係数 μk',
+    flapLiftCoeff0: '揚力係数 Flap UP',
+    flapLiftCoeff1: '揚力係数 Flap 1',
+    flapLiftCoeff2: '揚力係数 Flap 5',
+    flapLiftCoeff3: '揚力係数 Flap 15',
+    flapLiftCoeff4: '揚力係数 Flap 20',
+    flapLiftCoeff5: '揚力係数 Flap 25',
+    flapLiftCoeff6: '揚力係数 Flap 30',
+    engineRpmAccelPerThrottle: 'スロットル→エンジン回転数加速度 (1/s²)',
+    thrustAccelPerEngineRpm: 'エンジン回転数→推力加速度 (m/s²)',
+    tireBrakeAccel: 'タイヤブレーキ減速度 (m/s²)',
 };
 
 /**
@@ -45,7 +37,8 @@ export function mountFlightPhysicsForm(container) {
     const hint = document.createElement('p');
     hint.className = 'hint';
     hint.style.margin = '0 0 8px';
-    hint.textContent = '数値は保存時にクリップされます。未入力は既定値です。';
+    hint.textContent =
+        'B787-9 目安の既定値です。保存時にクリップされます。旧キー（maxSpeed 等）は読み込み時に自動変換されます。';
     container.appendChild(hint);
     for (const key of Object.keys(DEFAULT_AIRCRAFT_PHYSICS)) {
         const def = /** @type {number} */ (DEFAULT_AIRCRAFT_PHYSICS[/** @type {keyof typeof DEFAULT_AIRCRAFT_PHYSICS} */ (key)]);
@@ -59,7 +52,12 @@ export function mountFlightPhysicsForm(container) {
         inp.type = 'number';
         inp.id = `ac-flight-${key}`;
         inp.className = 'prop-input num';
-        inp.step = key === 'drag' ? '0.001' : key.includes('Deg') ? '1' : '0.05';
+        inp.step =
+            key.includes('Friction') || key.startsWith('flapLiftCoeff')
+                ? '0.001'
+                : key.endsWith('Deg')
+                  ? '1'
+                  : '0.01';
         inp.value = String(def);
         row.appendChild(lab);
         row.appendChild(inp);
