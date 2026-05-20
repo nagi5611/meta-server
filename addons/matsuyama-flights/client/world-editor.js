@@ -1,10 +1,28 @@
 // addons/matsuyama-flights/client/world-editor.js — ワールド編集用発着パネル
 import * as THREE from 'three';
-import { drawFlightBoardCanvas } from './flight-board-mesh.js';
+import {
+    BOARD_ASPECT_H,
+    BOARD_ASPECT_W,
+    CANVAS_H,
+    CANVAS_W,
+    drawFlightBoardCanvas,
+} from './flight-board-mesh.js';
 
 const DEFAULT_POS = { x: 0, y: 2, z: -5 };
 const DEFAULT_ROT = { x: 0, y: 0, z: 0 };
-const DEFAULT_SCALE = { x: 2, y: 3.5, z: 1 };
+/** 平面が 3:2 のため、横長の既定スケール */
+const DEFAULT_SCALE = { x: 2, y: 2, z: 1 };
+
+/**
+ * エディタ用プレビューキャンバス（本番と同じ縦横比）
+ * @returns {HTMLCanvasElement}
+ */
+function createEditorPreviewCanvas() {
+    const canvas = document.createElement('canvas');
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+    return canvas;
+}
 
 /**
  * エディタ用プレースホルダ発着板を editGroup に追加する
@@ -12,12 +30,10 @@ const DEFAULT_SCALE = { x: 2, y: 3.5, z: 1 };
  * @returns {THREE.Mesh}
  */
 export function addFlightBoardToEditor(editGroup) {
-    const geom = new THREE.PlaneGeometry(1, 1);
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
+    const geom = new THREE.PlaneGeometry(BOARD_ASPECT_W, BOARD_ASPECT_H);
+    const canvas = createEditorPreviewCanvas();
     const ctx = canvas.getContext('2d');
-    drawFlightBoardCanvas(ctx, null, '松山空港 発着情報\n（保存後メタバースで表示）');
+    drawFlightBoardCanvas(ctx, null, '松山空港 運行状況（保存後に表示）');
 
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
@@ -45,12 +61,10 @@ export function loadFlightBoardIntoEditor(editGroup, config) {
     const rot = config.rotation || DEFAULT_ROT;
     const scale = config.scale || DEFAULT_SCALE;
 
-    const geom = new THREE.PlaneGeometry(1, 1);
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
+    const geom = new THREE.PlaneGeometry(BOARD_ASPECT_W, BOARD_ASPECT_H);
+    const canvas = createEditorPreviewCanvas();
     const ctx = canvas.getContext('2d');
-    drawFlightBoardCanvas(ctx, null, '松山空港 発着情報');
+    drawFlightBoardCanvas(ctx, null, '松山空港 運行状況');
 
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
