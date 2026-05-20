@@ -14,6 +14,8 @@ const STACK_LINE_H = 14;
 const COL_RATIOS_WITH_CHANGED = [0, 0.24, 0.38, 0.56, 0.72];
 /** 当日 changed なし時は便名以降を左へ */
 const COL_RATIOS_NO_CHANGED = [0, 0.17, 0.30, 0.44, 0.56];
+/** 状況列だけ右へずらす文字数 */
+const STATUS_COL_SHIFT_CHARS = 2;
 
 /** テクスチャ・メッシュの縦横比（横 5 : 縦 4） */
 export const BOARD_ASPECT_W = 5;
@@ -242,6 +244,18 @@ function drawCellValue(ctx, raw, x, y, xEnd, color, maxSingleLen = 14) {
 }
 
 /**
+ * 等幅フォントで n 文字分の幅を測る
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {string} font
+ * @param {number} chars
+ * @returns {number}
+ */
+function measureMonoCharWidth(ctx, font, chars) {
+    ctx.font = font;
+    return ctx.measureText('0'.repeat(Math.max(0, chars))).width;
+}
+
+/**
  * 1区画（出発 or 到着）を描画
  * @param {CanvasRenderingContext2D} ctx
  * @param {string} title
@@ -268,12 +282,16 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
     const anyChanged = rows.some((r) => r.timeChanged);
     const colRatios = anyChanged ? COL_RATIOS_WITH_CHANGED : COL_RATIOS_NO_CHANGED;
     const colX = colRatios.map((r) => x0 + 12 + w * r);
+    const statusColX = colX[4] + measureMonoCharWidth(ctx, LED_FONT, STATUS_COL_SHIFT_CHARS);
     const nearestIdx = findNearestRowIndex(rows);
 
     ctx.font = LED_FONT_SM;
     ctx.fillStyle = COLOR_LED_DIM;
     const headerY = y0 + 58;
-    cols.forEach((c, i) => drawLedText(ctx, c, colX[i], headerY, COLOR_LED_DIM));
+    cols.forEach((c, i) => {
+        const x = i === 4 ? statusColX : colX[i];
+        drawLedText(ctx, c, x, headerY, COLOR_LED_DIM);
+    });
 
     ctx.strokeStyle = 'rgba(255, 180, 50, 0.35)';
     ctx.lineWidth = 1;
@@ -337,7 +355,7 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
             drawCellValue(ctx, row.airline, colX[2], y, colX[3], textColor, 18)
         );
         drawLedText(ctx, String(place).slice(0, 14), colX[3], y, textColor, false);
-        drawLedText(ctx, statusText.slice(0, 24), colX[4], y, statusColor, false);
+        drawLedText(ctx, statusText.slice(0, 24), statusColX, y, statusColor, false);
         y += rowH;
     }
 }

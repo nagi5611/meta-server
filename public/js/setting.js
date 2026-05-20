@@ -1233,7 +1233,11 @@ function onWorldEditorClipboardKeyDown(e) {
         if (selectedObject.parent !== editGroup) return;
         if (selectedObject.userData.lightConfig && (selectedObject.isLight || selectedObject.userData.lightRef)) {
             syncLightFromPanel({ recordUndo: false });
-        } else if (selectedObject.userData.config || selectedObject.userData.pdfConfig) {
+        } else if (
+            selectedObject.userData.config
+            || selectedObject.userData.pdfConfig
+            || selectedObject.userData.flightBoardConfig
+        ) {
             syncObjectFromPanel({ recordUndo: false });
         }
         const payload = getWorldEditorClipboardPayloadFromSelection();
@@ -1262,6 +1266,12 @@ function onTransformChange() {
         obj.userData.pdfConfig.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
         obj.userData.pdfConfig.rotation = { x: obj.rotation.x * 180 / Math.PI, y: obj.rotation.y * 180 / Math.PI, z: obj.rotation.z * 180 / Math.PI };
         obj.userData.pdfConfig.scale = { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z };
+        if (selectedObject === obj) updateObjectPanel(obj);
+    }
+    if (obj.userData.flightBoardConfig) {
+        obj.userData.flightBoardConfig.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+        obj.userData.flightBoardConfig.rotation = { x: obj.rotation.x * 180 / Math.PI, y: obj.rotation.y * 180 / Math.PI, z: obj.rotation.z * 180 / Math.PI };
+        obj.userData.flightBoardConfig.scale = { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z };
         if (selectedObject === obj) updateObjectPanel(obj);
     }
     if (obj.userData.lightConfig) {
@@ -1331,6 +1341,15 @@ function selectObject(obj) {
             document.getElementById('object-props-animation').style.display = 'none';
             document.getElementById('object-props-taiko').style.display = 'none';
             document.getElementById('object-props-teleporter').style.display = '';
+        } else if (obj.userData.flightBoardConfig) {
+            updateObjectPanel(obj);
+            document.getElementById('object-hint').style.display = 'none';
+            document.getElementById('object-props').style.display = 'block';
+            document.getElementById('light-hint').style.display = 'block';
+            document.getElementById('light-props').style.display = 'none';
+            document.getElementById('object-props-animation').style.display = 'none';
+            document.getElementById('object-props-taiko').style.display = 'none';
+            document.getElementById('object-props-teleporter').style.display = 'none';
         } else {
             document.getElementById('object-hint').style.display = 'block';
             document.getElementById('object-props').style.display = 'none';
@@ -1489,7 +1508,7 @@ function updateGlbAnimInteractPanel(obj) {
 
 function updateObjectPanel(obj) {
     if (!obj) return;
-    const c = obj.userData.config || obj.userData.pdfConfig;
+    const c = obj.userData.config || obj.userData.pdfConfig || obj.userData.flightBoardConfig;
     if (!c) return;
     const mtlRow = document.getElementById('obj-mtl-row');
     const mtlSel = document.getElementById('obj-mtl-path');
@@ -1502,8 +1521,13 @@ function updateObjectPanel(obj) {
             mtlRow.style.display = 'none';
         }
     }
-    document.getElementById('obj-path').value =
-        (c.path || (c.framePaths && c.framePaths[0])) || '';
+    if (obj.userData.flightBoardConfig) {
+        document.getElementById('obj-path').value =
+            boardFilterEditorLabel(obj.userData.flightBoardConfig.filter);
+    } else {
+        document.getElementById('obj-path').value =
+            (c.path || (c.framePaths && c.framePaths[0])) || '';
+    }
     document.getElementById('obj-pos-x').value = obj.position.x;
     document.getElementById('obj-pos-y').value = obj.position.y;
     document.getElementById('obj-pos-z').value = obj.position.z;
@@ -1592,6 +1616,11 @@ function updateObjectPanel(obj) {
         if (gb) gb.style.display = 'none';
         const lodDet = document.getElementById('object-props-prefab-lod');
         if (lodDet) lodDet.style.display = 'none';
+    } else if (obj.userData.flightBoardConfig) {
+        const gb = document.getElementById('object-props-glb-anim');
+        if (gb) gb.style.display = 'none';
+        const lodDet = document.getElementById('object-props-prefab-lod');
+        if (lodDet) lodDet.style.display = 'none';
     }
 }
 
@@ -1602,7 +1631,9 @@ function updateObjectPanel(obj) {
 function syncObjectFromPanel(opts) {
     const recordUndo = !opts || opts.recordUndo !== false;
     if (!selectedObject) return;
-    const c = selectedObject.userData.config || selectedObject.userData.pdfConfig;
+    const c = selectedObject.userData.config
+        || selectedObject.userData.pdfConfig
+        || selectedObject.userData.flightBoardConfig;
     if (!c) return;
     if (recordUndo) pushUndo();
     selectedObject.position.set(
@@ -1627,6 +1658,9 @@ function syncObjectFromPanel(opts) {
         z: selectedObject.rotation.z * 180 / Math.PI
     };
     c.scale = { x: selectedObject.scale.x, y: selectedObject.scale.y, z: selectedObject.scale.z };
+    if (selectedObject.userData.flightBoardConfig && !selectedObject.userData.config && !selectedObject.userData.pdfConfig) {
+        return;
+    }
     if (selectedObject.userData.config) {
         const p = c.path || '';
         if (isObjPath(p)) {
@@ -2796,6 +2830,11 @@ function animate() {
             selectedObject.userData.pdfConfig.position = { x: selectedObject.position.x, y: selectedObject.position.y, z: selectedObject.position.z };
             selectedObject.userData.pdfConfig.rotation = { x: selectedObject.rotation.x * 180 / Math.PI, y: selectedObject.rotation.y * 180 / Math.PI, z: selectedObject.rotation.z * 180 / Math.PI };
             selectedObject.userData.pdfConfig.scale = { x: selectedObject.scale.x, y: selectedObject.scale.y, z: selectedObject.scale.z };
+        }
+        if (selectedObject && selectedObject.userData.flightBoardConfig) {
+            selectedObject.userData.flightBoardConfig.position = { x: selectedObject.position.x, y: selectedObject.position.y, z: selectedObject.position.z };
+            selectedObject.userData.flightBoardConfig.rotation = { x: selectedObject.rotation.x * 180 / Math.PI, y: selectedObject.rotation.y * 180 / Math.PI, z: selectedObject.rotation.z * 180 / Math.PI };
+            selectedObject.userData.flightBoardConfig.scale = { x: selectedObject.scale.x, y: selectedObject.scale.y, z: selectedObject.scale.z };
         }
     }
     controls.update();
