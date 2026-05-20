@@ -1,22 +1,36 @@
-// addons/matsuyama-flights/server.js — 松山空港発着 ODPT + Jetstar ポーリング + HTTP API
+// addons/matsuyama-flights/server.js — 松山空港公式 HTML 主軸 + ODPT/Jetstar バックアップ
 import { HOOKS } from '../../lib/hook-registry.js';
-import { jstTodayYmd } from './lib/flight-date-jst.js';
-import { fetchJetstarDepartures } from './lib/jetstar-client.js';
 import {
-    fetchMatsuyamaFlights,
-    mergeFlights,
-    orderFlightsForBoard,
-    resolveAirportId,
-} from './lib/odpt-client.js';
+    DEFAULT_TIMETABLE_URL,
+    fetchMatsuyamaAirportBoard,
+} from './lib/airport-timetable-client.js';
+import { fetchBackupBoard } from './lib/backup-board.js';
+import { jstTodayYmd } from './lib/flight-date-jst.js';
 
-/** @type {{ ok: boolean, airport: string, updatedAt: string|null, departures: object[], arrivals: object[], error?: string }} */
+const LAYOUT_WARN_MSG =
+    '[matsuyama-flights] ⚠️ 松山空港公式サイトのレイアウト変更を検知しました。ODPT/Jetstar バックアップに切り替えます。';
+
+/** @type {{
+ *   ok: boolean,
+ *   airport: string,
+ *   serviceDate: string|null,
+ *   dataSource: string|null,
+ *   layoutAlert: boolean,
+ *   updatedAt: string|null,
+ *   departures: object[],
+ *   arrivals: object[],
+ *   error?: string
+ * }} */
 let cachedBoard = {
     ok: false,
     airport: 'MYJ',
+    serviceDate: null,
+    dataSource: null,
+    layoutAlert: false,
     updatedAt: null,
     departures: [],
     arrivals: [],
-    error: 'ODPT consumer key not configured',
+    error: '初期化中',
 };
 
 /** @type {string|null} */
@@ -36,7 +50,7 @@ function numConfig(v, fallback) {
 }
 
 /**
- * マージ済み config から文字列を取得（env は snake_case に正規化される）
+ * マージ済み config から文字列を取得
  * @param {Record<string, unknown>} config
  * @param {string[]} keys
  * @returns {string}
@@ -50,7 +64,7 @@ function configStr(config, keys) {
 }
 
 /**
- * 設定が有効（true）か — 未設定時は既定 true
+ * 設定が有効（true）か
  * @param {unknown} v
  * @param {boolean} [defaultOn]
  */
@@ -63,78 +77,129 @@ function configEnabled(v, defaultOn = true) {
 }
 
 /**
- * ODPT から発着を取得してキャッシュを更新する
+ * レイアウト変更をログ警告
+ * @param {object} ctx
+ * @param {string[]} reasons
+ */
+function warnLayoutChange(ctx, reasons) {
+    ctx.logger.error(LAYOUT_WARN_MSG);
+    for (const r of reasons) {
+        ctx.logger.error(`[matsuyama-flights]   理由: ${r}`);
+    }
+}
+
+/**
+ * バックアップ経路で board を取得
+ * @param {object} ctx
+ * @param {string} airportIata
+ * @param {string} key
+ * @returns {Promise<boolean>} 成功したか
+ */
+async function applyBackupBoard(ctx, airportIata, key) {
+    const backupOn = configEnabled(
+        ctx.config.backup_enabled ?? ctx.config.backupEnabled ?? ctx.config.backupenabled,
+        true
+    );
+    if (!backupOn) {
+        cachedBoard = {
+            ...cachedBoard,
+            ok: false,
+            error: 'レイアウト変更検知・バックアップ無効',
+            layoutAlert: true,
+        };
+        return false;
+    }
+
+    const backup = await fetchBackupBoard({
+        consumerKey: key,
+        airportIata,
+        airportId: resolvedAirportId,
+        config: ctx.config,
+    });
+    if (backup.airportId) resolvedAirportId = backup.airportId;
+
+    if (!backup.ok) {
+        cachedBoard = {
+            ...cachedBoard,
+            ok: false,
+            airport: airportIata,
+            dataSource: 'backup',
+            layoutAlert: true,
+            error: backup.error || 'Backup fetch failed',
+            updatedAt: cachedBoard.updatedAt,
+        };
+        return false;
+    }
+
+    cachedBoard = {
+        ok: true,
+        airport: airportIata,
+        serviceDate: jstTodayYmd(),
+        dataSource: 'backup',
+        layoutAlert: true,
+        updatedAt: new Date().toISOString(),
+        departures: backup.departures,
+        arrivals: backup.arrivals,
+    };
+    ctx.logger.info(
+        `board updated (backup): ${backup.departures.length} departures, ${backup.arrivals.length} arrivals`
+    );
+    return true;
+}
+
+/**
+ * 発着キャッシュを更新
  * @param {object} ctx
  */
 async function refreshBoard(ctx) {
-    const key = configStr(ctx.config, ['odpt_consumer_key', 'odptConsumerKey', 'odptconsumerkey']);
     const airportIata = configStr(ctx.config, ['airport_iata', 'airportIata', 'airportiata']) || 'MYJ';
-
-    if (!key) {
-        cachedBoard = {
-            ok: false,
-            airport: airportIata,
-            updatedAt: null,
-            departures: [],
-            arrivals: [],
-            error: 'Set ADDON_MATSUYAMA_FLIGHTS_ODPT_CONSUMER_KEY and restart the server',
-        };
-        return;
-    }
+    const timetableUrl =
+        configStr(ctx.config, ['timetable_url', 'timetableUrl', 'timetableurl'])
+        || DEFAULT_TIMETABLE_URL;
+    const odptKey = configStr(ctx.config, ['odpt_consumer_key', 'odptConsumerKey', 'odptconsumerkey']);
 
     try {
-        if (!resolvedAirportId) {
-            resolvedAirportId = await resolveAirportId(key, airportIata);
-            if (resolvedAirportId) {
-                ctx.logger.info(`resolved airport ${airportIata} -> ${resolvedAirportId}`);
-            }
+        const airport = await fetchMatsuyamaAirportBoard({ url: timetableUrl });
+
+        if (airport.layoutValid) {
+            cachedBoard = {
+                ok: true,
+                airport: airportIata,
+                serviceDate: jstTodayYmd(),
+                dataSource: 'airport',
+                layoutAlert: false,
+                updatedAt: new Date().toISOString(),
+                departures: airport.departures,
+                arrivals: airport.arrivals,
+            };
+            ctx.logger.info(
+                `board updated (airport): ${airport.departures.length} departures, ${airport.arrivals.length} arrivals`
+            );
+            return;
         }
 
-        const { departures, arrivals, airportId } = await fetchMatsuyamaFlights({
-            consumerKey: key,
-            airportIata,
-            airportId: resolvedAirportId,
-        });
-        if (airportId) resolvedAirportId = airportId;
+        warnLayoutChange(ctx, airport.layoutReasons);
 
-        const jetstarOn = configEnabled(
-            ctx.config.jetstar_enabled ?? ctx.config.jetstarEnabled ?? ctx.config.jetstarenabled,
-            true
-        );
-        if (jetstarOn) {
-            const dest =
-                configStr(ctx.config, ['jetstar_destination', 'jetstarDestination', 'jetstardestination'])
-                || 'NRT';
-            try {
-                const jetDeps = await fetchJetstarDepartures({
-                    origin: airportIata,
-                    destination: dest,
-                });
-                mergeFlights(departures, jetDeps);
-                const ordered = orderFlightsForBoard(departures);
-                departures.length = 0;
-                departures.push(...ordered);
-                ctx.logger.info(`jetstar merged: ${jetDeps.length} departures (${airportIata}->${dest})`);
-            } catch (e) {
-                const msg = e instanceof Error ? e.message : String(e);
-                ctx.logger.warn('jetstar fetch failed:', msg);
-            }
+        if (await applyBackupBoard(ctx, airportIata, odptKey)) {
+            return;
         }
 
-        cachedBoard = {
-            ok: true,
-            airport: airportIata,
-            serviceDate: jstTodayYmd(),
-            updatedAt: new Date().toISOString(),
-            departures,
-            arrivals,
-        };
-        ctx.logger.info(
-            `board updated: ${departures.length} departures, ${arrivals.length} arrivals`
-        );
+        if (!odptKey) {
+            ctx.logger.error(
+                '[matsuyama-flights] バックアップには ADDON_MATSUYAMA_FLIGHTS_ODPT_CONSUMER_KEY が必要です'
+            );
+        }
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        ctx.logger.warn('board refresh failed:', msg);
+        ctx.logger.warn('airport timetable fetch failed:', msg);
+
+        if (odptKey) {
+            warnLayoutChange(ctx, [`取得失敗: ${msg}`]);
+            if (await applyBackupBoard(ctx, airportIata, odptKey)) {
+                return;
+            }
+        }
+
         cachedBoard = {
             ...cachedBoard,
             ok: false,
@@ -156,17 +221,6 @@ export default {
 
         ctx.hooks.on(HOOKS.EXPRESS_SETUP, ({ app }) => {
             app.get(`${ctx.paths.httpBasePath}/board`, (_req, res) => {
-                const key = configStr(ctx.config, ['odpt_consumer_key', 'odptConsumerKey', 'odptconsumerkey']);
-                if (!key) {
-                    res.status(503).json({
-                        ok: false,
-                        error: 'ODPT consumer key not configured (ADDON_MATSUYAMA_FLIGHTS_ODPT_CONSUMER_KEY)',
-                        airport: cachedBoard.airport,
-                        departures: [],
-                        arrivals: [],
-                    });
-                    return;
-                }
                 if (!cachedBoard.ok && cachedBoard.error) {
                     res.status(503).json(cachedBoard);
                     return;
@@ -182,18 +236,11 @@ export default {
             }
         });
 
-        const key = configStr(ctx.config, ['odpt_consumer_key', 'odptConsumerKey', 'odptconsumerkey']);
-        if (key) {
-            await refreshBoard(ctx);
-            pollTimer = setInterval(() => {
-                refreshBoard(ctx).catch((e) => ctx.logger.warn('poll error', e));
-            }, pollMs);
-        } else {
-            ctx.logger.warn(
-                'ODPT key missing — set ADDON_MATSUYAMA_FLIGHTS_ODPT_CONSUMER_KEY; GET /board returns 503'
-            );
-        }
+        await refreshBoard(ctx);
+        pollTimer = setInterval(() => {
+            refreshBoard(ctx).catch((e) => ctx.logger.warn('poll error', e));
+        }, pollMs);
 
-        ctx.logger.info('registered');
+        ctx.logger.info('registered (v2 airport timetable primary)');
     },
 };

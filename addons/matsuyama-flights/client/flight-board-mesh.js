@@ -97,7 +97,9 @@ export function drawFlightBoardCanvas(ctx, data, message) {
     drawLedText(ctx, 'MATSUYAMA  MYJ', CANVAS_W / 2, 46, COLOR_LED_BRIGHT, true);
     ctx.font = LED_FONT_HEADER;
     const dateLabel = data?.serviceDate ? data.serviceDate.replace(/-/g, '/') : '';
-    drawLedText(ctx, dateLabel ? `運行状況  ${dateLabel}` : '運行状況', CANVAS_W / 2, 78, COLOR_LED_DIM, false);
+    let subTitle = dateLabel ? `運行状況  ${dateLabel}` : '運行状況';
+    if (data?.layoutAlert) subTitle += '  LAYOUT ALERT';
+    drawLedText(ctx, subTitle, CANVAS_W / 2, 78, data?.layoutAlert ? COLOR_ERROR : COLOR_LED_DIM, false);
 
     if (!data || !data.ok) {
         ctx.font = LED_FONT;
@@ -118,7 +120,11 @@ export function drawFlightBoardCanvas(ctx, data, message) {
     const updated = data.updatedAt ? new Date(data.updatedAt).toLocaleString('ja-JP') : '';
     drawLedText(ctx, updated ? `UPD ${updated}` : '', CANVAS_W - padX, CANVAS_H - 14, COLOR_LED_DIM);
     ctx.textAlign = 'left';
-    drawLedText(ctx, 'SRC ODPT / JETSTAR', padX, CANVAS_H - 14, COLOR_LED_DIM);
+    const srcLabel =
+        data.dataSource === 'backup'
+            ? 'SRC ODPT/JETSTAR (backup)'
+            : 'SRC 松山空港';
+    drawLedText(ctx, srcLabel, padX, CANVAS_H - 14, COLOR_LED_DIM);
 
     drawScanlines(ctx);
 }
@@ -178,11 +184,20 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
                 ? (row.destination || row.counterpart || '—')
                 : (row.origin || row.counterpart || '—');
         const displayTime = row.displayTime || row.scheduledTime || row.time || '—';
-        const status = String(row.status || '—');
+        const changeNote = row.changeNote && row.changeNote !== '-' ? String(row.changeNote) : '';
+        const remark = row.remark ? String(row.remark) : '';
+        let statusText = '—';
+        if (changeNote) {
+            statusText = changeNote;
+        } else if (remark) {
+            statusText = remark;
+        } else if (row.status) {
+            statusText = String(row.status);
+        }
 
         ctx.font = LED_FONT;
         const textColor = row.completed ? COLOR_LED_DIM : COLOR_LED;
-        const statusColor = /欠航|遅延|キャンセ/i.test(status) ? COLOR_ERROR : textColor;
+        const statusColor = /欠航|遅延|キャンセ/i.test(statusText) ? COLOR_ERROR : textColor;
         const timeColor = row.timeChanged ? COLOR_LED_HIGHLIGHT : textColor;
         drawLedText(ctx, String(displayTime).slice(0, 8), colX[0], y, timeColor, row.timeChanged);
         if (row.timeChanged) {
@@ -193,11 +208,12 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
             row.flightNumber || '—',
             row.airline || '—',
             place,
-            status,
+            statusText,
         ];
         cells.forEach((c, i) => {
             const color = i === 3 ? statusColor : textColor;
-            drawLedText(ctx, String(c).slice(0, 14), colX[i + 1], y, color, false);
+            const maxLen = i === 3 ? 18 : 14;
+            drawLedText(ctx, String(c).slice(0, maxLen), colX[i + 1], y, color, false);
         });
         y += ROW_H;
     }
