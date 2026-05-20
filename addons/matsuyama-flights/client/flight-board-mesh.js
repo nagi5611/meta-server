@@ -3,7 +3,7 @@ import * as THREE from 'three';
 
 const BOARD_API = '/api/addons/matsuyama-flights/board';
 const POLL_MS = 60_000;
-const MAX_ROWS_PER_SECTION = 10;
+const ROW_H = 26;
 
 /** テクスチャ・メッシュの縦横比（横 3 : 縦 2） */
 export const BOARD_ASPECT_W = 3;
@@ -161,33 +161,22 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
     ctx.lineTo(x0 + w - 8, y0 + 68);
     ctx.stroke();
 
-    const slice = rows.slice(0, MAX_ROWS_PER_SECTION);
     let y = y0 + 96;
-    const rowH = 30;
-    if (slice.length === 0) {
+    if (rows.length === 0) {
         ctx.font = LED_FONT;
         drawLedText(ctx, '--- NO DATA ---', x0 + 14, y, COLOR_LED_DIM);
         return;
     }
 
-    for (let ri = 0; ri < slice.length; ri++) {
-        const row = slice[ri];
-        if (y > y0 + h - 28) break;
-
-        if (row.isLastCompleted) {
-            ctx.fillStyle = 'rgba(255, 204, 51, 0.14)';
-            ctx.fillRect(x0 + 6, y - 22, w - 12, rowH);
-            ctx.font = LED_FONT_SM;
-            //drawLedText(ctx, '>> LAST', x0 + 14, y - 6, COLOR_LED_HIGHLIGHT, true);
-        }
+    for (let ri = 0; ri < rows.length; ri++) {
+        const row = rows[ri];
+        if (y > y0 + h - 24) break;
 
         const place =
             counterpartKey === 'destination'
                 ? (row.destination || row.counterpart || '—')
                 : (row.origin || row.counterpart || '—');
-        const displayTime = row.isLastCompleted
-            ? (row.actualTime || row.time || row.scheduledTime || '—')
-            : (row.scheduledTime || row.time || '—');
+        const displayTime = row.scheduledTime || row.time || '—';
         const status = String(row.status || '—');
         const cells = [
             displayTime,
@@ -198,13 +187,13 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
         ];
 
         ctx.font = LED_FONT;
-        const textColor = row.isLastCompleted ? COLOR_LED_HIGHLIGHT : COLOR_LED;
+        const textColor = row.completed ? COLOR_LED_DIM : COLOR_LED;
         const statusColor = /欠航|遅延|キャンセ/i.test(status) ? COLOR_ERROR : textColor;
         cells.forEach((c, i) => {
             const color = i === 4 ? statusColor : textColor;
-            drawLedText(ctx, String(c).slice(0, 14), colX[i], y, color, row.isLastCompleted && i === 0);
+            drawLedText(ctx, String(c).slice(0, 14), colX[i], y, color, false);
         });
-        y += rowH;
+        y += ROW_H;
     }
 }
 

@@ -4,8 +4,8 @@ const JETSTAR_STATUS_URL = 'https://digitalapi.jetstar.com/v1/flight-status';
 
 /** @type {Record<string, string>} */
 const STATUS_LABELS = {
-    arrived: '到着',
-    departed: '出発',
+    arrived: '到着済み',
+    departed: '出発済み',
     cancelled: '欠航',
     canceled: '欠航',
     delayed: '遅延',
@@ -135,7 +135,7 @@ function normalizeJetstarDeparture(flight, originIata) {
     const num = String(flight.flightNumber || '').trim();
     const op = String(flight.operator || 'GK').trim();
     const flightNumber = num ? `${op}${num}` : '—';
-    const airline = String(flight.operatorDisplayText || 'ジェットスター').trim() || 'GK';
+    const airline = 'JJP';
     const destination = String(flight.destination || flight.destinationCode || '—').trim() || '—';
 
     const scheduledTime =
@@ -149,22 +149,20 @@ function normalizeJetstarDeparture(flight, originIata) {
 
     const status = formatJetstarStatus(flight.statusInfo);
     const nowMin = nowMinutesJst();
-    const schedMin = timelineMinutes(scheduledTime, nowMin);
-    const actMin = actualTime ? timelineMinutes(actualTime, nowMin) : null;
-    const sortMin = actMin ?? schedMin ?? 0;
+    const schedMin = timelineMinutes(scheduledTime, nowMin) ?? 0;
 
     const hasActual = actualTime != null && actualTime !== '—';
     const completed =
         hasActual
-        || status === '出発'
-        || status === '到着'
+        || status === '出発済み'
+        || status === '到着済み'
         || /欠航/.test(status)
         || (schedMin != null && schedMin < nowMin - 20 && status !== '定刻');
 
     return {
         airline,
         flightNumber,
-        time: completed ? (actualTime || scheduledTime) : scheduledTime,
+        time: scheduledTime,
         scheduledTime,
         actualTime,
         counterpart: destination,
@@ -172,8 +170,7 @@ function normalizeJetstarDeparture(flight, originIata) {
         status,
         direction: 'departure',
         completed,
-        sortMinutes: sortMin,
-        isLastCompleted: false,
+        sortMinutes: schedMin,
     };
 }
 

@@ -188,8 +188,8 @@ function formatStatus(status, delay) {
     if (!s) return '—';
     if (/delay|遅延/i.test(s)) return '遅延';
     if (/cancel|欠航/i.test(s)) return '欠航';
-    if (/depart|出発/i.test(s)) return '出発';
-    if (/arriv|到着|landing/i.test(s)) return '到着';
+    if (/depart|出発/i.test(s)) return '出発済み';
+    if (/arriv|到着|landing/i.test(s)) return '到着済み';
     if (/on.?time|定刻|予定/i.test(s)) return '定刻';
     const tail = s.split(/[:.]/).pop();
     return tail || s;
@@ -253,22 +253,20 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
     const actualTime = actual != null && actual !== '' ? formatTime(actual) : null;
     const status = formatStatus(row['odpt:flightStatus'], row['odpt:delay']);
     const nowMin = nowMinutesJst();
-    const schedMin = timelineMinutes(scheduledTime, nowMin);
-    const actMin = actualTime ? timelineMinutes(actualTime, nowMin) : null;
-    const sortMin = actMin ?? schedMin ?? 0;
+    const schedMin = timelineMinutes(scheduledTime, nowMin) ?? 0;
 
     const hasActual = actual != null && String(actual).trim() !== '';
     const completed =
         hasActual
-        || status === '出発'
-        || status === '到着'
+        || status === '出発済み'
+        || status === '到着済み'
         || /欠航/.test(status)
         || (schedMin != null && schedMin < nowMin - 20 && status !== '定刻');
 
     return {
         airline,
         flightNumber: String(row['odpt:flightNumber'] || row['odpt:flightNumberSuffix'] || '—'),
-        time: completed ? (actualTime || scheduledTime) : scheduledTime,
+        time: scheduledTime,
         scheduledTime,
         actualTime,
         counterpart: counterpartLabel,
@@ -277,36 +275,22 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
         status,
         direction,
         completed,
-        sortMinutes: sortMin,
-        isLastCompleted: false,
+        sortMinutes: schedMin,
     };
 }
 
 /**
- * 案内板表示順: 直近の発着済み1件 → 未発着（時刻昇順）
+ * 案内板表示順: 定刻（scheduledTime）の昇順で当日分を一覧表示
  * @param {object[]} flights
  * @returns {object[]}
  */
 export function orderFlightsForBoard(flights) {
-    const completed = [];
-    const upcoming = [];
-    for (const f of flights) {
-        if (f.completed) completed.push(f);
-        else upcoming.push(f);
-    }
-
-    completed.sort((a, b) => (b.sortMinutes ?? 0) - (a.sortMinutes ?? 0));
-    upcoming.sort((a, b) => (a.sortMinutes ?? 0) - (b.sortMinutes ?? 0));
-
-    const result = [];
-    if (completed.length > 0) {
-        const last = { ...completed[0], isLastCompleted: true };
-        result.push(last);
-    }
-    for (const f of upcoming) {
-        result.push({ ...f, isLastCompleted: false });
-    }
-    return result;
+    return [...flights].sort((a, b) => {
+        const sa = a.sortMinutes ?? 0;
+        const sb = b.sortMinutes ?? 0;
+        if (sa !== sb) return sa - sb;
+        return String(a.flightNumber || '').localeCompare(String(b.flightNumber || ''));
+    });
 }
 
 /**
