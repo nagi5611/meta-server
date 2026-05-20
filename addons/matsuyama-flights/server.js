@@ -1,6 +1,12 @@
-// addons/matsuyama-flights/server.js — 松山空港発着 ODPT ポーリング + HTTP API
+// addons/matsuyama-flights/server.js — 松山空港発着 ODPT + Jetstar ポーリング + HTTP API
 import { HOOKS } from '../../lib/hook-registry.js';
-import { fetchMatsuyamaFlights, resolveAirportId } from './lib/odpt-client.js';
+import { fetchJetstarDepartures } from './lib/jetstar-client.js';
+import {
+    fetchMatsuyamaFlights,
+    mergeFlights,
+    orderFlightsForBoard,
+    resolveAirportId,
+} from './lib/odpt-client.js';
 
 /** @type {{ ok: boolean, airport: string, updatedAt: string|null, departures: object[], arrivals: object[], error?: string }} */
 let cachedBoard = {
@@ -43,6 +49,19 @@ function configStr(config, keys) {
 }
 
 /**
+ * 設定が有効（true）か — 未設定時は既定 true
+ * @param {unknown} v
+ * @param {boolean} [defaultOn]
+ */
+function configEnabled(v, defaultOn = true) {
+    if (v === undefined || v === null || String(v).trim() === '') return defaultOn;
+    if (v === false || v === 0) return false;
+    const s = String(v).trim().toLowerCase();
+    if (s === '0' || s === 'false' || s === 'no' || s === 'off') return false;
+    return true;
+}
+
+/**
  * ODPT から発着を取得してキャッシュを更新する
  * @param {object} ctx
  */
@@ -76,6 +95,30 @@ async function refreshBoard(ctx) {
             airportId: resolvedAirportId,
         });
         if (airportId) resolvedAirportId = airportId;
+
+        const jetstarOn = configEnabled(
+            ctx.config.jetstar_enabled ?? ctx.config.jetstarEnabled ?? ctx.config.jetstarenabled,
+            true
+        );
+        if (jetstarOn) {
+            const dest =
+                configStr(ctx.config, ['jetstar_destination', 'jetstarDestination', 'jetstardestination'])
+                || 'NRT';
+            try {
+                const jetDeps = await fetchJetstarDepartures({
+                    origin: airportIata,
+                    destination: dest,
+                });
+                mergeFlights(departures, jetDeps);
+                const ordered = orderFlightsForBoard(departures);
+                departures.length = 0;
+                departures.push(...ordered);
+                ctx.logger.info(`jetstar merged: ${jetDeps.length} departures (${airportIata}->${dest})`);
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                ctx.logger.warn('jetstar fetch failed:', msg);
+            }
+        }
 
         cachedBoard = {
             ok: true,

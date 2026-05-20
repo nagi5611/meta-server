@@ -41,7 +41,7 @@ export function drawFlightBoardCanvas(ctx, data, message) {
     ctx.fillText(updated ? `更新: ${updated}` : '', CANVAS_W - 24, CANVAS_H - 16);
     ctx.textAlign = 'left';
     ctx.font = '18px sans-serif';
-    ctx.fillText('出典: 公共交通オープンデータセンター', 24, CANVAS_H - 16);
+    ctx.fillText('出典: ODPT / Jetstar', 24, CANVAS_H - 16);
 }
 
 /**

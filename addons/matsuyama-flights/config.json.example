@@ -1,4 +1,6 @@
 {
     "pollIntervalMs": 60000,
-    "airportIata": "MYJ"
+    "airportIata": "MYJ",
+    "jetstarEnabled": true,
+    "jetstarDestination": "NRT"
 }

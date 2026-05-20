@@ -287,7 +287,7 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
  * @param {object[]} flights
  * @returns {object[]}
  */
-function orderFlightsForBoard(flights) {
+export function orderFlightsForBoard(flights) {
     const completed = [];
     const upcoming = [];
     for (const f of flights) {
@@ -323,7 +323,7 @@ function flightDedupeKey(f) {
  * @param {object[]} target
  * @param {object[]} incoming
  */
-function mergeFlights(target, incoming) {
+export function mergeFlights(target, incoming) {
     const seen = new Set(target.map(flightDedupeKey));
     for (const f of incoming) {
         const k = flightDedupeKey(f);
