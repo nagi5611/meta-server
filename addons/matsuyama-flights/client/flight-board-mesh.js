@@ -206,7 +206,7 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
 
     const placeLabel = counterpartKey === 'destination' ? '行先' : '出発';
     const cols = ['時刻', '便名', '会社', placeLabel, '状況'];
-    const colRatios = [0, 0.20, 0.33, 0.50, 0.62];
+    const colRatios = [0, 0.24, 0.38, 0.56, 0.72];
     const colX = colRatios.map((r) => x0 + 12 + w * r);
     const nearestIdx = findNearestRowIndex(rows);
 
