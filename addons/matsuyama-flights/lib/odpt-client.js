@@ -1,5 +1,11 @@
 // addons/matsuyama-flights/lib/odpt-client.js — ODPT 航空発着 API クライアント
 
+import {
+    isFlightServiceTodayJst,
+    nowMinutesJst,
+    parseServiceDateJst,
+} from './flight-date-jst.js';
+
 const ODPT_API_BASE = 'https://api.odpt.org/api/v4';
 
 /** @type {{ code: string, filters: string[] }[]} */
@@ -147,22 +153,6 @@ function parseMinutes(hhmm) {
 }
 
 /**
- * 現在時刻（日本）の分
- * @returns {number}
- */
-function nowMinutesJst() {
-    const parts = new Intl.DateTimeFormat('ja-JP', {
-        timeZone: 'Asia/Tokyo',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-    }).formatToParts(new Date());
-    const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
-    const min = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
-    return h * 60 + min;
-}
-
-/**
  * 表示時刻を「今日」のタイムライン上の分に（深夜跨ぎ補正）
  * @param {string} hhmm
  * @param {number} nowMin
@@ -251,16 +241,28 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
 
     const scheduledTime = formatTime(scheduled);
     const actualTime = actual != null && actual !== '' ? formatTime(actual) : null;
+    const serviceDate =
+        parseServiceDateJst(scheduled)
+        || parseServiceDateJst(actual)
+        || parseServiceDateJst(row['odpt:originTime'])
+        || parseServiceDateJst(row['dc:date']);
     const status = formatStatus(row['odpt:flightStatus'], row['odpt:delay']);
     const nowMin = nowMinutesJst();
-    const schedMin = timelineMinutes(scheduledTime, nowMin) ?? 0;
 
     const hasActual = actual != null && String(actual).trim() !== '';
-    const completed =
+    const completedEarly =
         hasActual
         || status === '出発済み'
         || status === '到着済み'
-        || /欠航/.test(status)
+        || /欠航/.test(status);
+
+    if (!isFlightServiceTodayJst(serviceDate, scheduledTime, completedEarly, nowMin)) {
+        return null;
+    }
+    const schedMin = timelineMinutes(scheduledTime, nowMin) ?? 0;
+
+    const completed =
+        completedEarly
         || (schedMin != null && schedMin < nowMin - 20 && status !== '定刻');
 
     return {
@@ -269,6 +271,7 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
         time: scheduledTime,
         scheduledTime,
         actualTime,
+        serviceDate: serviceDate || null,
         counterpart: counterpartLabel,
         destination: direction === 'departure' ? counterpartLabel : undefined,
         origin: direction === 'arrival' ? counterpartLabel : undefined,

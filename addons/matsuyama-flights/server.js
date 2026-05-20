@@ -1,5 +1,6 @@
 // addons/matsuyama-flights/server.js — 松山空港発着 ODPT + Jetstar ポーリング + HTTP API
 import { HOOKS } from '../../lib/hook-registry.js';
+import { jstTodayYmd } from './lib/flight-date-jst.js';
 import { fetchJetstarDepartures } from './lib/jetstar-client.js';
 import {
     fetchMatsuyamaFlights,
@@ -123,6 +124,7 @@ async function refreshBoard(ctx) {
         cachedBoard = {
             ok: true,
             airport: airportIata,
+            serviceDate: jstTodayYmd(),
             updatedAt: new Date().toISOString(),
             departures,
             arrivals,

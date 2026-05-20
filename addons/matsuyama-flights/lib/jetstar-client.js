@@ -1,6 +1,15 @@
 // addons/matsuyama-flights/lib/jetstar-client.js — Jetstar フライトステータス API（MYJ 発）
 
+import {
+    isFlightServiceTodayJst,
+    jetstarDateParamJst,
+    nowMinutesJst,
+    parseServiceDateJst,
+} from './flight-date-jst.js';
+
 const JETSTAR_STATUS_URL = 'https://digitalapi.jetstar.com/v1/flight-status';
+
+export { jetstarDateParamJst };
 
 /** @type {Record<string, string>} */
 const STATUS_LABELS = {
@@ -14,23 +23,6 @@ const STATUS_LABELS = {
     ontime: '定刻',
     'on time': '定刻',
 };
-
-/**
- * JST の当日を Jetstar API の date クエリ形式（YYYY/MM/DD）にする
- * @returns {string}
- */
-export function jetstarDateParamJst() {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Tokyo',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    }).formatToParts(new Date());
-    const y = parts.find((p) => p.type === 'year')?.value ?? '1970';
-    const m = parts.find((p) => p.type === 'month')?.value ?? '01';
-    const d = parts.find((p) => p.type === 'day')?.value ?? '01';
-    return `${y}/${m}/${d}`;
-}
 
 /**
  * ISO 風文字列から HH:mm
@@ -56,22 +48,6 @@ function parseMinutes(hhmm) {
     const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
     if (!m) return null;
     return Number(m[1]) * 60 + Number(m[2]);
-}
-
-/**
- * 現在 JST の分
- * @returns {number}
- */
-function nowMinutesJst() {
-    const parts = new Intl.DateTimeFormat('ja-JP', {
-        timeZone: 'Asia/Tokyo',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-    }).formatToParts(new Date());
-    const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
-    const min = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
-    return h * 60 + min;
 }
 
 /**
@@ -147,16 +123,26 @@ function normalizeJetstarDeparture(flight, originIata) {
                 || formatTime(flight.actualDepartureDateTime))
             : null;
 
+    const serviceDate = parseServiceDateJst(flight.scheduledDepartureDateTime)
+        || parseServiceDateJst(flight.actualDepartureDateTime);
+
     const status = formatJetstarStatus(flight.statusInfo);
     const nowMin = nowMinutesJst();
-    const schedMin = timelineMinutes(scheduledTime, nowMin) ?? 0;
 
-    const hasActual = actualTime != null && actualTime !== '—';
-    const completed =
-        hasActual
+    const hasActualEarly = actualTime != null && actualTime !== '—';
+    const completedEarly =
+        hasActualEarly
         || status === '出発済み'
         || status === '到着済み'
-        || /欠航/.test(status)
+        || /欠航/.test(status);
+
+    if (!isFlightServiceTodayJst(serviceDate, scheduledTime, completedEarly, nowMin)) {
+        return null;
+    }
+    const schedMin = timelineMinutes(scheduledTime, nowMin) ?? 0;
+
+    const completed =
+        completedEarly
         || (schedMin != null && schedMin < nowMin - 20 && status !== '定刻');
 
     return {
@@ -165,6 +151,7 @@ function normalizeJetstarDeparture(flight, originIata) {
         time: scheduledTime,
         scheduledTime,
         actualTime,
+        serviceDate,
         counterpart: destination,
         destination,
         status,

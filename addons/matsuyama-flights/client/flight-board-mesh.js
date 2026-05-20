@@ -96,7 +96,8 @@ export function drawFlightBoardCanvas(ctx, data, message) {
     ctx.textAlign = 'center';
     drawLedText(ctx, 'MATSUYAMA  MYJ', CANVAS_W / 2, 46, COLOR_LED_BRIGHT, true);
     ctx.font = LED_FONT_HEADER;
-    drawLedText(ctx, '運行状況', CANVAS_W / 2, 78, COLOR_LED_DIM, false);
+    const dateLabel = data?.serviceDate ? data.serviceDate.replace(/-/g, '/') : '';
+    drawLedText(ctx, dateLabel ? `運行状況  ${dateLabel}` : '運行状況', CANVAS_W / 2, 78, COLOR_LED_DIM, false);
 
     if (!data || !data.ok) {
         ctx.font = LED_FONT;
