@@ -2,9 +2,16 @@
 
 const ODPT_API_BASE = 'https://api.odpt.org/api/v4';
 
+/** @type {{ code: string, filters: string[] }[]} */
 const AIRLINE_OPERATORS = [
-    { code: 'JAL', filter: 'odpt.Operator:JAL' },
-    { code: 'ANA', filter: 'odpt.Operator:ANA' },
+    {
+        code: 'JAL',
+        filters: ['odpt.Airline:JAL', 'odpt.Operator:JAL', 'odpt:Operator:JAL'],
+    },
+    {
+        code: 'ANA',
+        filters: ['odpt.Airline:ANA', 'odpt.Operator:ANA', 'odpt:Operator:ANA'],
+    },
 ];
 
 /**
@@ -22,7 +29,7 @@ async function odptGet(endpoint, consumerKey, extraParams = {}) {
     }
     const res = await fetch(url.toString(), {
         headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(60_000),
     });
     if (!res.ok) {
         const text = await res.text().catch(() => '');
@@ -33,7 +40,7 @@ async function odptGet(endpoint, consumerKey, extraParams = {}) {
 }
 
 /**
- * 文字列が松山空港（MYJ）を指すか
+ * 文字列が対象空港（IATA）を指すか
  * @param {string} idOrTitle
  * @param {string} airportIata
  * @returns {boolean}
@@ -46,6 +53,20 @@ function matchesAirportRef(idOrTitle, airportIata) {
     if (/Matsuyama/i.test(s)) return true;
     if (/松山/.test(s)) return true;
     return false;
+}
+
+/**
+ * 空港参照が対象空港か（ID 完全一致または IATA/名称ヒューリスティック）
+ * @param {unknown} ref
+ * @param {string|null} airportId
+ * @param {string} airportIata
+ * @returns {boolean}
+ */
+function isAirportMatch(ref, airportId, airportIata) {
+    const s = String(ref || '');
+    if (!s) return false;
+    if (airportId && s === airportId) return true;
+    return matchesAirportRef(s, airportIata);
 }
 
 /**
@@ -132,25 +153,40 @@ function formatStatus(status, delay) {
 }
 
 /**
- * ODPT フライト行を正規化
+ * 行から出発・到着空港フィールドを取り出す
+ * @param {Record<string, unknown>} row
+ * @returns {{ dep: string, dest: string, arrivalAt: string }}
+ */
+function extractAirportFields(row) {
+    const dep = row['odpt:departureAirport'] || row['odpt:originAirport'] || '';
+    const dest = row['odpt:destinationAirport'] || '';
+    const arrivalAt =
+        row['odpt:destinationAirport']
+        || row['odpt:arrivalAirport']
+        || row['odpt:airport']
+        || dest;
+    return { dep: String(dep), dest: String(dest), arrivalAt: String(arrivalAt) };
+}
+
+/**
+ * ODPT フライト行を正規化（対象空港の発着のみ）
  * @param {Record<string, unknown>} row
  * @param {'departure'|'arrival'} direction
- * @param {string} airportId
+ * @param {string|null} airportId
+ * @param {string} airportIata
  * @param {Map<string, string>} airportNames
+ * @param {string} [defaultAirlineCode]
  * @returns {object|null}
  */
-function normalizeFlightRow(row, direction, airportId, airportNames) {
-    const dep = row['odpt:departureAirport'];
-    const dest = row['odpt:destinationAirport'];
-    const depStr = String(dep || '');
-    const destStr = String(dest || '');
+function normalizeFlightRow(row, direction, airportId, airportIata, airportNames, defaultAirlineCode) {
+    const { dep, dest, arrivalAt } = extractAirportFields(row);
 
     if (direction === 'departure') {
-        if (airportId && depStr !== airportId && !matchesAirportRef(depStr, 'MYJ')) return null;
-        if (!airportId && !matchesAirportRef(depStr, 'MYJ')) return null;
+        if (!isAirportMatch(dep, airportId, airportIata)) return null;
     } else {
-        if (airportId && destStr !== airportId && !matchesAirportRef(destStr, 'MYJ')) return null;
-        if (!airportId && !matchesAirportRef(destStr, 'MYJ')) return null;
+        if (!isAirportMatch(arrivalAt, airportId, airportIata) && !isAirportMatch(dest, airportId, airportIata)) {
+            return null;
+        }
     }
 
     const scheduled =
@@ -164,18 +200,131 @@ function normalizeFlightRow(row, direction, airportId, airportNames) {
         || row['odpt:actualArrivalTime']
         || row['odpt:actualTime'];
 
-    const counterpart = direction === 'departure' ? dest : dep;
+    const counterpart = direction === 'departure' ? dest || arrivalAt : dep;
     const counterpartLabel = airportDisplay(counterpart, airportNames);
 
+    let airline = airlineLabel(row['odpt:airline'] || row['odpt:operator']);
+    if (airline === '—' && defaultAirlineCode) airline = defaultAirlineCode;
+
     return {
-        airline: airlineLabel(row['odpt:airline'] || row['odpt:operator']),
+        airline,
         flightNumber: String(row['odpt:flightNumber'] || row['odpt:flightNumberSuffix'] || '—'),
         time: formatTime(actual || scheduled),
         scheduledTime: formatTime(scheduled),
         counterpart: counterpartLabel,
+        destination: direction === 'departure' ? counterpartLabel : undefined,
+        origin: direction === 'arrival' ? counterpartLabel : undefined,
         status: formatStatus(row['odpt:flightStatus'], row['odpt:delay']),
         direction,
     };
+}
+
+/**
+ * 便の重複キー
+ * @param {object} f
+ * @returns {string}
+ */
+function flightDedupeKey(f) {
+    return `${f.direction}|${f.airline}|${f.flightNumber}|${f.time}|${f.counterpart}`;
+}
+
+/**
+ * 配列に正規化済み便をマージ（重複除去）
+ * @param {object[]} target
+ * @param {object[]} incoming
+ */
+function mergeFlights(target, incoming) {
+    const seen = new Set(target.map(flightDedupeKey));
+    for (const f of incoming) {
+        const k = flightDedupeKey(f);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        target.push(f);
+    }
+}
+
+/**
+ * 生データ配列を正規化してマージ
+ * @param {object[]} target
+ * @param {unknown[]} rows
+ * @param {'departure'|'arrival'} direction
+ * @param {string|null} airportId
+ * @param {string} airportIata
+ * @param {Map<string, string>} airportNames
+ * @param {string} [defaultAirlineCode]
+ */
+function mergeNormalizedRows(target, rows, direction, airportId, airportIata, airportNames, defaultAirlineCode) {
+    const batch = [];
+    for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        const n = normalizeFlightRow(
+            /** @type {Record<string, unknown>} */ (row),
+            direction,
+            airportId,
+            airportIata,
+            airportNames,
+            defaultAirlineCode
+        );
+        if (n) batch.push(n);
+    }
+    mergeFlights(target, batch);
+}
+
+/**
+ * 指定エンドポイントをパラメータなしで全件取得し、対象空港でフィルタ
+ * @param {object} opts
+ * @param {string} opts.endpoint
+ * @param {'departure'|'arrival'} opts.direction
+ * @param {string} opts.consumerKey
+ * @param {string|null} opts.airportId
+ * @param {string} opts.airportIata
+ * @param {Map<string, string>} opts.airportNames
+ * @returns {Promise<object[]>}
+ */
+async function fetchAllFiltered(opts) {
+    const { endpoint, direction, consumerKey, airportId, airportIata, airportNames } = opts;
+    const rows = await odptGet(endpoint, consumerKey);
+    const out = [];
+    mergeNormalizedRows(out, rows, direction, airportId, airportIata, airportNames);
+    return out;
+}
+
+/**
+ * 航空会社別フィルタを複数パターン試す（空港クエリは付けない）
+ * @param {object} opts
+ * @param {string} opts.endpoint
+ * @param {'departure'|'arrival'} opts.direction
+ * @param {string} opts.consumerKey
+ * @param {string|null} opts.airportId
+ * @param {string} opts.airportIata
+ * @param {Map<string, string>} opts.airportNames
+ * @param {object[]} opts.target
+ */
+async function fetchByAirlineOperators(opts) {
+    const { endpoint, direction, consumerKey, airportId, airportIata, airportNames, target } = opts;
+
+    for (const { code, filters } of AIRLINE_OPERATORS) {
+        let gotAny = false;
+        for (const airlineFilter of filters) {
+            try {
+                const rows = await odptGet(endpoint, consumerKey, { 'odpt:airline': airlineFilter });
+                if (rows.length > 0) {
+                    mergeNormalizedRows(target, rows, direction, airportId, airportIata, airportNames, code);
+                    gotAny = true;
+                }
+            } catch {
+                /* try next filter */
+            }
+        }
+        if (!gotAny) {
+            try {
+                const rows = await odptGet(endpoint, consumerKey, { 'odpt:operator': `odpt.Operator:${code}` });
+                mergeNormalizedRows(target, rows, direction, airportId, airportIata, airportNames, code);
+            } catch {
+                /* ignore */
+            }
+        }
+    }
 }
 
 /**
@@ -187,9 +336,10 @@ function normalizeFlightRow(row, direction, airportId, airportNames) {
  * @returns {Promise<{ departures: object[], arrivals: object[], airportId: string|null }>}
  */
 export async function fetchMatsuyamaFlights({ consumerKey, airportIata, airportId: knownAirportId }) {
+    const iata = String(airportIata || 'MYJ').trim().toUpperCase() || 'MYJ';
     let airportId = knownAirportId || null;
     if (!airportId) {
-        airportId = await resolveAirportId(consumerKey, airportIata);
+        airportId = await resolveAirportId(consumerKey, iata);
     }
 
     /** @type {Map<string, string>} */
@@ -211,55 +361,55 @@ export async function fetchMatsuyamaFlights({ consumerKey, airportIata, airportI
     /** @type {object[]} */
     const arrivals = [];
 
-    const depParams = airportId ? { 'odpt:departureAirport': airportId } : {};
-    const arrParams = airportId ? { 'odpt:destinationAirport': airportId } : {};
-
-    for (const { code, filter } of AIRLINE_OPERATORS) {
-        try {
-            const depRows = await odptGet('odpt:FlightInformationDeparture', consumerKey, {
-                ...depParams,
-                'odpt:airline': filter,
-            });
-            for (const row of depRows) {
-                const n = normalizeFlightRow(row, 'departure', airportId, airportNames);
-                if (n) {
-                    n.airline = n.airline === '—' ? code : n.airline;
-                    departures.push(n);
-                }
-            }
-        } catch (e) {
-            console.warn(`[matsuyama-flights] departure ${code}:`, e.message);
-        }
-
-        try {
-            const arrRows = await odptGet('odpt:FlightInformationArrival', consumerKey, {
-                ...arrParams,
-                'odpt:airline': filter,
-            });
-            for (const row of arrRows) {
-                const n = normalizeFlightRow(row, 'arrival', airportId, airportNames);
-                if (n) {
-                    n.airline = n.airline === '—' ? code : n.airline;
-                    arrivals.push(n);
-                }
-            }
-        } catch (e) {
-            console.warn(`[matsuyama-flights] arrival ${code}:`, e.message);
-        }
+    // 到着: クエリ絞り込みなしで全件取得 → 松山着のみクライアント側フィルタ（APIの空港パラメータ不一致を避ける）
+    try {
+        const allArrivals = await fetchAllFiltered({
+            endpoint: 'odpt:FlightInformationArrival',
+            direction: 'arrival',
+            consumerKey,
+            airportId,
+            airportIata: iata,
+            airportNames,
+        });
+        mergeFlights(arrivals, allArrivals);
+    } catch (e) {
+        console.warn('[matsuyama-flights] arrival full fetch:', e.message);
     }
 
-    if (departures.length === 0 && arrivals.length === 0 && !airportId) {
-        const allDep = await odptGet('odpt:FlightInformationDeparture', consumerKey);
-        const allArr = await odptGet('odpt:FlightInformationArrival', consumerKey);
-        for (const row of allDep) {
-            const n = normalizeFlightRow(row, 'departure', null, airportNames);
-            if (n) departures.push(n);
-        }
-        for (const row of allArr) {
-            const n = normalizeFlightRow(row, 'arrival', null, airportNames);
-            if (n) arrivals.push(n);
-        }
+    await fetchByAirlineOperators({
+        endpoint: 'odpt:FlightInformationArrival',
+        direction: 'arrival',
+        consumerKey,
+        airportId,
+        airportIata: iata,
+        airportNames,
+        target: arrivals,
+    });
+
+    // 出発: 全件 + 航空会社別をマージ
+    try {
+        const allDepartures = await fetchAllFiltered({
+            endpoint: 'odpt:FlightInformationDeparture',
+            direction: 'departure',
+            consumerKey,
+            airportId,
+            airportIata: iata,
+            airportNames,
+        });
+        mergeFlights(departures, allDepartures);
+    } catch (e) {
+        console.warn('[matsuyama-flights] departure full fetch:', e.message);
     }
+
+    await fetchByAirlineOperators({
+        endpoint: 'odpt:FlightInformationDeparture',
+        direction: 'departure',
+        consumerKey,
+        airportId,
+        airportIata: iata,
+        airportNames,
+        target: departures,
+    });
 
     const sortByTime = (a, b) => String(a.time).localeCompare(String(b.time));
     departures.sort(sortByTime);

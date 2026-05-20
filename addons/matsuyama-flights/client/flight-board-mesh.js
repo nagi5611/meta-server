@@ -79,7 +79,10 @@ function drawSection(ctx, title, rows, y0, y1, counterpartKey) {
         return;
     }
     for (const row of slice) {
-        const place = row[counterpartKey] || row.counterpart || '—';
+        const place =
+            counterpartKey === 'destination'
+                ? (row.destination || row.counterpart || '—')
+                : (row.origin || row.counterpart || '—');
         const cells = [
             row.time || row.scheduledTime || '—',
             row.flightNumber || '—',
