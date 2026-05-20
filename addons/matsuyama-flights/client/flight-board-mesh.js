@@ -202,7 +202,7 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
         drawLedText(ctx, String(displayTime).slice(0, 8), colX[0], y, timeColor, row.timeChanged);
         if (row.timeChanged) {
             const tw = ctx.measureText(String(displayTime).slice(0, 8)).width;
-            drawLedText(ctx, 'changed', colX[0] + tw + 10, y, COLOR_LED_HIGHLIGHT, false);
+            drawLedText(ctx, 'changed', colX[0] + tw + 5, y, COLOR_LED_HIGHLIGHT, false);
         }
         const cells = [
             row.flightNumber || '—',
