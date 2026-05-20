@@ -1,16 +1,16 @@
-// addons/matsuyama-flights/client/flight-board-mesh.js — 発着情報 Canvas テクスチャ板（電光掲示板風・横 3:縦 2）
+// addons/matsuyama-flights/client/flight-board-mesh.js — 発着情報 Canvas テクスチャ板（電光掲示板風・横 5:縦 4）
 import * as THREE from 'three';
 
 const BOARD_API = '/api/addons/matsuyama-flights/board';
 const POLL_MS = 60_000;
 const ROW_H = 26;
 
-/** テクスチャ・メッシュの縦横比（横 3 : 縦 2） */
-export const BOARD_ASPECT_W = 3;
-export const BOARD_ASPECT_H = 2;
+/** テクスチャ・メッシュの縦横比（横 5 : 縦 4） */
+export const BOARD_ASPECT_W = 5;
+export const BOARD_ASPECT_H = 4;
 
-export const CANVAS_W = 1536;
-export const CANVAS_H = 1024;
+export const CANVAS_W = 1920;
+export const CANVAS_H = 1536;
 
 const LED_FONT = "700 26px ui-monospace, 'Cascadia Mono', 'Consolas', monospace";
 const LED_FONT_SM = "600 20px ui-monospace, 'Cascadia Mono', 'Consolas', monospace";
@@ -26,6 +26,8 @@ const COLOR_LED_BRIGHT = '#fff4c8';
 const COLOR_LED_HIGHLIGHT = '#ffe566';
 const COLOR_ERROR = '#ff6644';
 const COLOR_SCANLINE = 'rgba(0, 0, 0, 0.22)';
+/** 現在時刻に最も近い便の行背景 */
+const COLOR_NOW_NEAR = 'rgba(72, 200, 110, 0.22)';
 
 /**
  * 電光掲示板風の発光テキスト
@@ -72,6 +74,57 @@ function drawBoardFrame(ctx) {
     ctx.strokeStyle = 'rgba(255, 180, 50, 0.25)';
     ctx.lineWidth = 1;
     ctx.strokeRect(14, 14, CANVAS_W - 28, CANVAS_H - 28);
+}
+
+/**
+ * 現在 JST の分（0–1439）
+ * @returns {number}
+ */
+function nowMinutesJst() {
+    const parts = new Intl.DateTimeFormat('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(new Date());
+    const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+    const min = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+    return h * 60 + min;
+}
+
+/**
+ * 便行の表示時刻を分に
+ * @param {object} row
+ * @returns {number|null}
+ */
+function rowMinutes(row) {
+    if (Number.isFinite(row.sortMinutes)) return row.sortMinutes;
+    const t = String(row.displayTime || row.scheduledTime || row.time || '');
+    const m = t.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/**
+ * 現在時刻に最も近い便の行インデックス（24h 環で距離最小）
+ * @param {object[]} rows
+ * @returns {number}
+ */
+function findNearestRowIndex(rows) {
+    const nowMin = nowMinutesJst();
+    let best = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < rows.length; i++) {
+        const m = rowMinutes(rows[i]);
+        if (m == null) continue;
+        let d = Math.abs(m - nowMin);
+        d = Math.min(d, 1440 - d);
+        if (d < bestDist) {
+            bestDist = d;
+            best = i;
+        }
+    }
+    return best;
 }
 
 /**
@@ -153,8 +206,9 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
 
     const placeLabel = counterpartKey === 'destination' ? '行先' : '出発';
     const cols = ['時刻', '便名', '会社', placeLabel, '状況'];
-    const colRatios = [0, 0.17, 0.34, 0.52, 0.76];
+    const colRatios = [0, 0.20, 0.33, 0.50, 0.62];
     const colX = colRatios.map((r) => x0 + 12 + w * r);
+    const nearestIdx = findNearestRowIndex(rows);
 
     ctx.font = LED_FONT_SM;
     ctx.fillStyle = COLOR_LED_DIM;
@@ -195,6 +249,11 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
             statusText = String(row.status);
         }
 
+        if (ri === nearestIdx) {
+            ctx.fillStyle = COLOR_NOW_NEAR;
+            ctx.fillRect(x0 + 6, y - 22, w - 12, ROW_H);
+        }
+
         ctx.font = LED_FONT;
         const textColor = row.completed ? COLOR_LED_DIM : COLOR_LED;
         const statusColor = /欠航|遅延|キャンセ/i.test(statusText) ? COLOR_ERROR : textColor;
@@ -202,7 +261,7 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
         drawLedText(ctx, String(displayTime).slice(0, 8), colX[0], y, timeColor, row.timeChanged);
         if (row.timeChanged) {
             const tw = ctx.measureText(String(displayTime).slice(0, 8)).width;
-            drawLedText(ctx, 'changed', colX[0] + tw + 5, y, COLOR_LED_HIGHLIGHT, false);
+            drawLedText(ctx, 'changed', colX[0] + tw + 10, y, COLOR_LED_HIGHLIGHT, false);
         }
         const cells = [
             row.flightNumber || '—',
@@ -212,7 +271,7 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
         ];
         cells.forEach((c, i) => {
             const color = i === 3 ? statusColor : textColor;
-            const maxLen = i === 3 ? 18 : 14;
+            const maxLen = i === 0 ? 14 : i === 1 ? 18 : i === 2 ? 14 : 24;
             drawLedText(ctx, String(c).slice(0, maxLen), colX[i + 1], y, color, false);
         });
         y += ROW_H;
@@ -246,7 +305,7 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
 }
 
 /**
- * ワールド内発着ボード用メッシュを生成する（平面 3:2）
+ * ワールド内発着ボード用メッシュを生成する（平面 5:4）
  * @param {object} config position, rotation, scale
  * @returns {THREE.Mesh}
  */

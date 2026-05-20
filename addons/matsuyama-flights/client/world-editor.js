@@ -10,7 +10,7 @@ import {
 
 const DEFAULT_POS = { x: 0, y: 2, z: -5 };
 const DEFAULT_ROT = { x: 0, y: 0, z: 0 };
-/** 平面が 3:2 のため、横長の既定スケール */
+/** 平面が 5:4 のため、横長の既定スケール */
 const DEFAULT_SCALE = { x: 2, y: 2, z: 1 };
 
 /**
