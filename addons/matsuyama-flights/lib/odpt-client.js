@@ -133,6 +133,49 @@ function formatTime(raw) {
 }
 
 /**
+ * HH:mm を 0–1439 分に変換（失敗時は null）
+ * @param {string} hhmm
+ * @returns {number|null}
+ */
+function parseMinutes(hhmm) {
+    const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
+    return h * 60 + min;
+}
+
+/**
+ * 現在時刻（日本）の分
+ * @returns {number}
+ */
+function nowMinutesJst() {
+    const parts = new Intl.DateTimeFormat('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(new Date());
+    const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+    const min = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+    return h * 60 + min;
+}
+
+/**
+ * 表示時刻を「今日」のタイムライン上の分に（深夜跨ぎ補正）
+ * @param {string} hhmm
+ * @param {number} nowMin
+ * @returns {number|null}
+ */
+function timelineMinutes(hhmm, nowMin) {
+    const min = parseMinutes(hhmm);
+    if (min == null) return null;
+    if (min > nowMin + 12 * 60) return min - 24 * 60;
+    return min;
+}
+
+/**
  * 運航状況を表示用に
  * @param {unknown} status
  * @param {unknown} delay
@@ -206,17 +249,64 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
     let airline = airlineLabel(row['odpt:airline'] || row['odpt:operator']);
     if (airline === '—' && defaultAirlineCode) airline = defaultAirlineCode;
 
+    const scheduledTime = formatTime(scheduled);
+    const actualTime = actual != null && actual !== '' ? formatTime(actual) : null;
+    const status = formatStatus(row['odpt:flightStatus'], row['odpt:delay']);
+    const nowMin = nowMinutesJst();
+    const schedMin = timelineMinutes(scheduledTime, nowMin);
+    const actMin = actualTime ? timelineMinutes(actualTime, nowMin) : null;
+    const sortMin = actMin ?? schedMin ?? 0;
+
+    const hasActual = actual != null && String(actual).trim() !== '';
+    const completed =
+        hasActual
+        || status === '出発'
+        || status === '到着'
+        || /欠航/.test(status)
+        || (schedMin != null && schedMin < nowMin - 20 && status !== '定刻');
+
     return {
         airline,
         flightNumber: String(row['odpt:flightNumber'] || row['odpt:flightNumberSuffix'] || '—'),
-        time: formatTime(actual || scheduled),
-        scheduledTime: formatTime(scheduled),
+        time: completed ? (actualTime || scheduledTime) : scheduledTime,
+        scheduledTime,
+        actualTime,
         counterpart: counterpartLabel,
         destination: direction === 'departure' ? counterpartLabel : undefined,
         origin: direction === 'arrival' ? counterpartLabel : undefined,
-        status: formatStatus(row['odpt:flightStatus'], row['odpt:delay']),
+        status,
         direction,
+        completed,
+        sortMinutes: sortMin,
+        isLastCompleted: false,
     };
+}
+
+/**
+ * 案内板表示順: 直近の発着済み1件 → 未発着（時刻昇順）
+ * @param {object[]} flights
+ * @returns {object[]}
+ */
+function orderFlightsForBoard(flights) {
+    const completed = [];
+    const upcoming = [];
+    for (const f of flights) {
+        if (f.completed) completed.push(f);
+        else upcoming.push(f);
+    }
+
+    completed.sort((a, b) => (b.sortMinutes ?? 0) - (a.sortMinutes ?? 0));
+    upcoming.sort((a, b) => (a.sortMinutes ?? 0) - (b.sortMinutes ?? 0));
+
+    const result = [];
+    if (completed.length > 0) {
+        const last = { ...completed[0], isLastCompleted: true };
+        result.push(last);
+    }
+    for (const f of upcoming) {
+        result.push({ ...f, isLastCompleted: false });
+    }
+    return result;
 }
 
 /**
@@ -411,9 +501,9 @@ export async function fetchMatsuyamaFlights({ consumerKey, airportIata, airportI
         target: departures,
     });
 
-    const sortByTime = (a, b) => String(a.time).localeCompare(String(b.time));
-    departures.sort(sortByTime);
-    arrivals.sort(sortByTime);
-
-    return { departures, arrivals, airportId };
+    return {
+        departures: orderFlightsForBoard(departures),
+        arrivals: orderFlightsForBoard(arrivals),
+        airportId,
+    };
 }

@@ -68,31 +68,45 @@ function drawSection(ctx, title, rows, y0, y1, counterpartKey) {
     ctx.font = '22px sans-serif';
     cols.forEach((c, i) => ctx.fillText(c, colX[i], y0 + 72));
 
-    ctx.fillStyle = '#e8f4ff';
-    ctx.font = '24px sans-serif';
     const slice = rows.slice(0, MAX_ROWS_PER_SECTION);
     let y = y0 + 108;
     const rowH = 36;
     if (slice.length === 0) {
         ctx.fillStyle = '#8899aa';
+        ctx.font = '24px sans-serif';
         ctx.fillText('（該当便なし）', 32, y);
         return;
     }
-    for (const row of slice) {
+    for (let ri = 0; ri < slice.length; ri++) {
+        const row = slice[ri];
+        if (y > y1 - 24) break;
+
+        if (row.isLastCompleted) {
+            ctx.fillStyle = 'rgba(126, 200, 255, 0.18)';
+            ctx.fillRect(24, y - 26, CANVAS_W - 48, rowH);
+            ctx.fillStyle = '#9ed4ff';
+            ctx.font = '20px sans-serif';
+            ctx.fillText('▶ 直近', 32, y - 8);
+        }
+
         const place =
             counterpartKey === 'destination'
                 ? (row.destination || row.counterpart || '—')
                 : (row.origin || row.counterpart || '—');
+        const displayTime = row.isLastCompleted
+            ? (row.actualTime || row.time || row.scheduledTime || '—')
+            : (row.scheduledTime || row.time || '—');
         const cells = [
-            row.time || row.scheduledTime || '—',
+            displayTime,
             row.flightNumber || '—',
             row.airline || '—',
             place,
             row.status || '—',
         ];
+        ctx.fillStyle = row.isLastCompleted ? '#dff4ff' : '#e8f4ff';
+        ctx.font = '24px sans-serif';
         cells.forEach((c, i) => ctx.fillText(String(c).slice(0, 16), colX[i], y));
         y += rowH;
-        if (y > y1 - 24) break;
     }
 }
 
