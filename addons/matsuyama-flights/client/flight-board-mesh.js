@@ -178,7 +178,7 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
             ctx.fillStyle = 'rgba(255, 204, 51, 0.14)';
             ctx.fillRect(x0 + 6, y - 22, w - 12, rowH);
             ctx.font = LED_FONT_SM;
-            drawLedText(ctx, '>> LAST', x0 + 14, y - 6, COLOR_LED_HIGHLIGHT, true);
+            //drawLedText(ctx, '>> LAST', x0 + 14, y - 6, COLOR_LED_HIGHLIGHT, true);
         }
 
         const place =
