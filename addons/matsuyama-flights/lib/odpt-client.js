@@ -1,9 +1,12 @@
 // addons/matsuyama-flights/lib/odpt-client.js — ODPT 航空発着 API クライアント
 
 import {
+    firstServiceDateJst,
+    formatTimeHm,
     isFlightServiceTodayJst,
     nowMinutesJst,
-    parseServiceDateJst,
+    parseMinutes,
+    resolveFlightDisplayTimes,
 } from './flight-date-jst.js';
 
 const ODPT_API_BASE = 'https://api.odpt.org/api/v4';
@@ -124,45 +127,37 @@ function airportDisplay(airportRef, airportNames) {
 }
 
 /**
- * ISO 時刻または odpt:Time から HH:mm を得る
- * @param {unknown} raw
- * @returns {string}
+ * 方向に応じた ODPT 時刻フィールド
+ * @param {Record<string, unknown>} row
+ * @param {'departure'|'arrival'} direction
  */
-function formatTime(raw) {
-    if (raw == null || raw === '') return '—';
-    const s = String(raw);
-    const iso = s.match(/T(\d{2}):(\d{2})/);
-    if (iso) return `${iso[1]}:${iso[2]}`;
-    const hm = s.match(/^(\d{1,2}):(\d{2})/);
-    if (hm) return `${hm[1].padStart(2, '0')}:${hm[2]}`;
-    return s.length > 8 ? s.slice(0, 8) : s;
-}
-
-/**
- * HH:mm を 0–1439 分に変換（失敗時は null）
- * @param {string} hhmm
- * @returns {number|null}
- */
-function parseMinutes(hhmm) {
-    const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
-    if (!m) return null;
-    const h = Number(m[1]);
-    const min = Number(m[2]);
-    if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
-    return h * 60 + min;
-}
-
-/**
- * 表示時刻を「今日」のタイムライン上の分に（深夜跨ぎ補正）
- * @param {string} hhmm
- * @param {number} nowMin
- * @returns {number|null}
- */
-function timelineMinutes(hhmm, nowMin) {
-    const min = parseMinutes(hhmm);
-    if (min == null) return null;
-    if (min > nowMin + 12 * 60) return min - 24 * 60;
-    return min;
+function pickOdptTimeFields(row, direction) {
+    if (direction === 'departure') {
+        return {
+            scheduled:
+                row['odpt:scheduledDepartureTime']
+                || row['odpt:scheduledTime']
+                || row['odpt:departureTime'],
+            estimated:
+                row['odpt:estimatedDepartureTime']
+                || row['odpt:estimateDepartureTime'],
+            actual:
+                row['odpt:actualDepartureTime']
+                || row['odpt:actualTime'],
+        };
+    }
+    return {
+        scheduled:
+            row['odpt:scheduledArrivalTime']
+            || row['odpt:scheduledTime']
+            || row['odpt:arrivalTime'],
+        estimated:
+            row['odpt:estimatedArrivalTime']
+            || row['odpt:estimateArrivalTime'],
+        actual:
+            row['odpt:actualArrivalTime']
+            || row['odpt:actualTime'],
+    };
 }
 
 /**
@@ -222,16 +217,7 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
         }
     }
 
-    const scheduled =
-        row['odpt:scheduledDepartureTime']
-        || row['odpt:scheduledArrivalTime']
-        || row['odpt:scheduledTime']
-        || row['odpt:departureTime']
-        || row['odpt:arrivalTime'];
-    const actual =
-        row['odpt:actualDepartureTime']
-        || row['odpt:actualArrivalTime']
-        || row['odpt:actualTime'];
+    const { scheduled, estimated, actual } = pickOdptTimeFields(row, direction);
 
     const counterpart = direction === 'departure' ? dest || arrivalAt : dep;
     const counterpartLabel = airportDisplay(counterpart, airportNames);
@@ -239,37 +225,37 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
     let airline = airlineLabel(row['odpt:airline'] || row['odpt:operator']);
     if (airline === '—' && defaultAirlineCode) airline = defaultAirlineCode;
 
-    const scheduledTime = formatTime(scheduled);
-    const actualTime = actual != null && actual !== '' ? formatTime(actual) : null;
-    const serviceDate =
-        parseServiceDateJst(scheduled)
-        || parseServiceDateJst(actual)
-        || parseServiceDateJst(row['odpt:originTime'])
-        || parseServiceDateJst(row['dc:date']);
+    const { scheduledTime, displayTime, timeChanged } = resolveFlightDisplayTimes(
+        scheduled,
+        estimated,
+        row['odpt:delay']
+    );
+    const actualTime = actual != null && actual !== '' ? formatTimeHm(actual) : null;
+    const serviceDate = firstServiceDateJst(
+        estimated,
+        scheduled,
+        actual,
+        row['odpt:originTime'],
+        row['dc:date']
+    );
     const status = formatStatus(row['odpt:flightStatus'], row['odpt:delay']);
     const nowMin = nowMinutesJst();
 
-    const hasActual = actual != null && String(actual).trim() !== '';
-    const completedEarly =
-        hasActual
-        || status === '出発済み'
-        || status === '到着済み'
-        || /欠航/.test(status);
-
-    if (!isFlightServiceTodayJst(serviceDate, scheduledTime, completedEarly, nowMin)) {
+    if (!isFlightServiceTodayJst(serviceDate, scheduledTime, nowMin)) {
         return null;
     }
-    const schedMin = timelineMinutes(scheduledTime, nowMin) ?? 0;
 
-    const completed =
-        completedEarly
-        || (schedMin != null && schedMin < nowMin - 20 && status !== '定刻');
+    const hasActual = actual != null && String(actual).trim() !== '';
+    const completed = hasActual || /欠航/.test(status);
+    const sortMin = parseMinutes(displayTime) ?? parseMinutes(scheduledTime) ?? 0;
 
     return {
         airline,
         flightNumber: String(row['odpt:flightNumber'] || row['odpt:flightNumberSuffix'] || '—'),
-        time: scheduledTime,
+        time: displayTime,
         scheduledTime,
+        displayTime,
+        timeChanged,
         actualTime,
         serviceDate: serviceDate || null,
         counterpart: counterpartLabel,
@@ -278,7 +264,7 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
         status,
         direction,
         completed,
-        sortMinutes: schedMin,
+        sortMinutes: sortMin,
     };
 }
 
@@ -289,8 +275,8 @@ function normalizeFlightRow(row, direction, airportId, airportIata, airportNames
  */
 export function orderFlightsForBoard(flights) {
     return [...flights].sort((a, b) => {
-        const sa = a.sortMinutes ?? 0;
-        const sb = b.sortMinutes ?? 0;
+        const sa = a.sortMinutes ?? parseMinutes(a.displayTime || a.scheduledTime) ?? 0;
+        const sb = b.sortMinutes ?? parseMinutes(b.displayTime || b.scheduledTime) ?? 0;
         if (sa !== sb) return sa - sb;
         return String(a.flightNumber || '').localeCompare(String(b.flightNumber || ''));
     });

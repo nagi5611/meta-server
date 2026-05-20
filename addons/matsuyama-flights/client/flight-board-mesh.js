@@ -177,22 +177,27 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
             counterpartKey === 'destination'
                 ? (row.destination || row.counterpart || '—')
                 : (row.origin || row.counterpart || '—');
-        const displayTime = row.scheduledTime || row.time || '—';
+        const displayTime = row.displayTime || row.scheduledTime || row.time || '—';
         const status = String(row.status || '—');
+
+        ctx.font = LED_FONT;
+        const textColor = row.completed ? COLOR_LED_DIM : COLOR_LED;
+        const statusColor = /欠航|遅延|キャンセ/i.test(status) ? COLOR_ERROR : textColor;
+        const timeColor = row.timeChanged ? COLOR_LED_HIGHLIGHT : textColor;
+        drawLedText(ctx, String(displayTime).slice(0, 8), colX[0], y, timeColor, row.timeChanged);
+        if (row.timeChanged) {
+            const tw = ctx.measureText(String(displayTime).slice(0, 8)).width;
+            drawLedText(ctx, 'changed', colX[0] + tw + 10, y, COLOR_LED_HIGHLIGHT, false);
+        }
         const cells = [
-            displayTime,
             row.flightNumber || '—',
             row.airline || '—',
             place,
             status,
         ];
-
-        ctx.font = LED_FONT;
-        const textColor = row.completed ? COLOR_LED_DIM : COLOR_LED;
-        const statusColor = /欠航|遅延|キャンセ/i.test(status) ? COLOR_ERROR : textColor;
         cells.forEach((c, i) => {
-            const color = i === 4 ? statusColor : textColor;
-            drawLedText(ctx, String(c).slice(0, 14), colX[i], y, color, false);
+            const color = i === 3 ? statusColor : textColor;
+            drawLedText(ctx, String(c).slice(0, 14), colX[i + 1], y, color, false);
         });
         y += ROW_H;
     }

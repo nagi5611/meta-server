@@ -1,10 +1,13 @@
 // addons/matsuyama-flights/lib/jetstar-client.js — Jetstar フライトステータス API（MYJ 発）
 
 import {
+    firstServiceDateJst,
+    formatTimeHm,
     isFlightServiceTodayJst,
     jetstarDateParamJst,
     nowMinutesJst,
-    parseServiceDateJst,
+    parseMinutes,
+    resolveFlightDisplayTimes,
 } from './flight-date-jst.js';
 
 const JETSTAR_STATUS_URL = 'https://digitalapi.jetstar.com/v1/flight-status';
@@ -23,44 +26,6 @@ const STATUS_LABELS = {
     ontime: '定刻',
     'on time': '定刻',
 };
-
-/**
- * ISO 風文字列から HH:mm
- * @param {unknown} raw
- * @returns {string}
- */
-function formatTime(raw) {
-    if (raw == null || raw === '') return '—';
-    const s = String(raw);
-    const iso = s.match(/T(\d{2}):(\d{2})/);
-    if (iso) return `${iso[1]}:${iso[2]}`;
-    const hm = s.match(/^(\d{1,2}):(\d{2})/);
-    if (hm) return `${hm[1].padStart(2, '0')}:${hm[2]}`;
-    return s.length > 8 ? s.slice(0, 8) : s;
-}
-
-/**
- * HH:mm を分に
- * @param {string} hhmm
- * @returns {number|null}
- */
-function parseMinutes(hhmm) {
-    const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
-    if (!m) return null;
-    return Number(m[1]) * 60 + Number(m[2]);
-}
-
-/**
- * @param {string} hhmm
- * @param {number} nowMin
- * @returns {number|null}
- */
-function timelineMinutes(hhmm, nowMin) {
-    const min = parseMinutes(hhmm);
-    if (min == null) return null;
-    if (min > nowMin + 12 * 60) return min - 24 * 60;
-    return min;
-}
 
 /**
  * Jetstar statusInfo を表示用に
@@ -114,42 +79,40 @@ function normalizeJetstarDeparture(flight, originIata) {
     const airline = 'JJP';
     const destination = String(flight.destination || flight.destinationCode || '—').trim() || '—';
 
-    const scheduledTime =
-        flight.scheduledDepartureDateTimeTimeInfo?.timeString
-        || formatTime(flight.scheduledDepartureDateTime);
+    const { scheduledTime, displayTime, timeChanged } = resolveFlightDisplayTimes(
+        flight.scheduledDepartureDateTime,
+        flight.estimatedDepartureDateTime
+    );
     const actualTime =
         flight.actualDepartureDateTime != null && flight.actualDepartureDateTime !== ''
             ? (flight.actualDepartureDateTimeInfo?.timeString
-                || formatTime(flight.actualDepartureDateTime))
+                || formatTimeHm(flight.actualDepartureDateTime))
             : null;
 
-    const serviceDate = parseServiceDateJst(flight.scheduledDepartureDateTime)
-        || parseServiceDateJst(flight.actualDepartureDateTime);
+    const serviceDate = firstServiceDateJst(
+        flight.estimatedDepartureDateTime,
+        flight.scheduledDepartureDateTime,
+        flight.actualDepartureDateTime
+    );
 
     const status = formatJetstarStatus(flight.statusInfo);
     const nowMin = nowMinutesJst();
 
-    const hasActualEarly = actualTime != null && actualTime !== '—';
-    const completedEarly =
-        hasActualEarly
-        || status === '出発済み'
-        || status === '到着済み'
-        || /欠航/.test(status);
-
-    if (!isFlightServiceTodayJst(serviceDate, scheduledTime, completedEarly, nowMin)) {
+    if (!isFlightServiceTodayJst(serviceDate, scheduledTime, nowMin)) {
         return null;
     }
-    const schedMin = timelineMinutes(scheduledTime, nowMin) ?? 0;
 
-    const completed =
-        completedEarly
-        || (schedMin != null && schedMin < nowMin - 20 && status !== '定刻');
+    const hasActual = actualTime != null && actualTime !== '—';
+    const completed = hasActual || /欠航/.test(status);
+    const sortMin = parseMinutes(displayTime) ?? parseMinutes(scheduledTime) ?? 0;
 
     return {
         airline,
         flightNumber,
-        time: scheduledTime,
+        time: displayTime,
         scheduledTime,
+        displayTime,
+        timeChanged,
         actualTime,
         serviceDate,
         counterpart: destination,
@@ -157,7 +120,7 @@ function normalizeJetstarDeparture(flight, originIata) {
         status,
         direction: 'departure',
         completed,
-        sortMinutes: schedMin,
+        sortMinutes: sortMin,
     };
 }
 
