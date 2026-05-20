@@ -27,6 +27,7 @@ import {
     addFlightBoardToEditor,
     loadFlightBoardIntoEditor,
 } from '../../addons/matsuyama-flights/client/world-editor.js';
+import { boardFilterEditorLabel } from '../../addons/matsuyama-flights/client/flight-board-filter.js';
 import {
     loadPrefabGroupFromManifest,
     normalizePrefabManifest,
@@ -3165,7 +3166,7 @@ function renderWorldObjectList() {
 
     function makeItemLabel(child) {
         if (child.userData.flightBoardConfig) {
-            return '発着情報パネル';
+            return boardFilterEditorLabel(child.userData.flightBoardConfig.filter);
         }
         if (child.userData.pdfConfig) {
             const path = child.userData.pdfConfig.path || '';
@@ -4555,15 +4556,19 @@ function bindEvents() {
         else alert('PDFをアップロードするか、一覧から選択してください');
     });
 
-    const btnAddFlightBoard = document.getElementById('btn-add-flight-board');
-    if (btnAddFlightBoard) {
-        btnAddFlightBoard.addEventListener('click', () => {
+    function bindAddFlightBoardButton(btnId, filter) {
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
+        btn.addEventListener('click', () => {
             if (!selectedWorldId || !editGroup) return;
             pushUndo();
-            addFlightBoardToEditor(editGroup);
+            addFlightBoardToEditor(editGroup, filter);
             renderWorldObjectList();
         });
     }
+    bindAddFlightBoardButton('btn-add-flight-board-all', 'all');
+    bindAddFlightBoardButton('btn-add-flight-board-domestic', 'domestic');
+    bindAddFlightBoardButton('btn-add-flight-board-international', 'international');
 
     let modelUploadModalBusy = false;
     let modelUploadQueuePollId = null;

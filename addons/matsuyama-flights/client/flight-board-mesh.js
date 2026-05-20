@@ -1,9 +1,19 @@
 // addons/matsuyama-flights/client/flight-board-mesh.js — 発着情報 Canvas テクスチャ板（電光掲示板風・横 5:縦 4）
 import * as THREE from 'three';
+import {
+    boardFilterCanvasTag,
+    filterBoardData,
+    normalizeBoardFilter,
+} from './flight-board-filter.js';
 
 const BOARD_API = '/api/addons/matsuyama-flights/board';
 const POLL_MS = 60_000;
 const ROW_H = 26;
+const STACK_LINE_H = 14;
+/** changed あり時の列位置（幅の比率） */
+const COL_RATIOS_WITH_CHANGED = [0, 0.24, 0.38, 0.56, 0.72];
+/** 当日 changed なし時は便名以降を左へ */
+const COL_RATIOS_NO_CHANGED = [0, 0.17, 0.30, 0.44, 0.56];
 
 /** テクスチャ・メッシュの縦横比（横 5 : 縦 4） */
 export const BOARD_ASPECT_W = 5;
@@ -132,8 +142,9 @@ function findNearestRowIndex(rows) {
  * @param {CanvasRenderingContext2D} ctx
  * @param {object|null} data
  * @param {string} [message]
+ * @param {import('./flight-board-filter.js').FlightBoardFilter} [filter]
  */
-export function drawFlightBoardCanvas(ctx, data, message) {
+export function drawFlightBoardCanvas(ctx, data, message, filter = 'all') {
     drawBoardFrame(ctx);
 
     const headerH = 64;
@@ -150,14 +161,18 @@ export function drawFlightBoardCanvas(ctx, data, message) {
     drawLedText(ctx, 'MATSUYAMA  MYJ', CANVAS_W / 2, 46, COLOR_LED_BRIGHT, true);
     ctx.font = LED_FONT_HEADER;
     const dateLabel = data?.serviceDate ? data.serviceDate.replace(/-/g, '/') : '';
+    const filterTag = boardFilterCanvasTag(filter);
     let subTitle = dateLabel ? `運行状況  ${dateLabel}` : '運行状況';
+    if (filterTag) subTitle = `${subTitle}  ${filterTag}`;
     if (data?.layoutAlert) subTitle += '  LAYOUT ALERT';
     drawLedText(ctx, subTitle, CANVAS_W / 2, 78, data?.layoutAlert ? COLOR_ERROR : COLOR_LED_DIM, false);
 
-    if (!data || !data.ok) {
+    const boardData = filterBoardData(data, filter);
+
+    if (!boardData || !boardData.ok) {
         ctx.font = LED_FONT;
         ctx.textAlign = 'center';
-        const msg = message || data?.error || 'データ取得中…';
+        const msg = message || boardData?.error || data?.error || 'データ取得中…';
         drawLedText(ctx, msg, CANVAS_W / 2, CANVAS_H / 2, COLOR_ERROR, true);
         drawScanlines(ctx);
         return;
@@ -165,12 +180,12 @@ export function drawFlightBoardCanvas(ctx, data, message) {
 
     const depX = padX;
     const arrX = padX + colW + colGap;
-    drawSection(ctx, '出発 DEP', data.departures || [], depX, contentTop, colW, contentH, 'destination');
-    drawSection(ctx, '到着 ARR', data.arrivals || [], arrX, contentTop, colW, contentH, 'counterpart');
+    drawSection(ctx, '出発 DEP', boardData.departures || [], depX, contentTop, colW, contentH, 'destination');
+    drawSection(ctx, '到着 ARR', boardData.arrivals || [], arrX, contentTop, colW, contentH, 'counterpart');
 
     ctx.font = LED_FONT_SM;
     ctx.textAlign = 'right';
-    const updated = data.updatedAt ? new Date(data.updatedAt).toLocaleString('ja-JP') : '';
+    const updated = boardData.updatedAt ? new Date(boardData.updatedAt).toLocaleString('ja-JP') : '';
     drawLedText(ctx, updated ? `UPD ${updated}` : '', CANVAS_W - padX, CANVAS_H - 14, COLOR_LED_DIM);
     ctx.textAlign = 'left';
     const srcLabel =
@@ -180,6 +195,50 @@ export function drawFlightBoardCanvas(ctx, data, message) {
     drawLedText(ctx, srcLabel, padX, CANVAS_H - 14, COLOR_LED_DIM);
 
     drawScanlines(ctx);
+}
+
+/**
+ * スラッシュ区切りの複数値を配列に
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function splitMultiParts(raw) {
+    const s = String(raw || '').trim();
+    if (!s || s === '—') return [];
+    return s.split('/').map((p) => p.trim()).filter(Boolean);
+}
+
+/**
+ * 4件以上なら2列×2行で描画、それ以外は1行
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {unknown} raw
+ * @param {number} x
+ * @param {number} y
+ * @param {number} xEnd
+ * @param {string} color
+ * @param {number} [maxSingleLen]
+ */
+function drawCellValue(ctx, raw, x, y, xEnd, color, maxSingleLen = 14) {
+    const parts = splitMultiParts(raw);
+    if (parts.length < 4) {
+        ctx.font = LED_FONT;
+        const text = parts.length ? parts.join('/') : String(raw || '—');
+        drawLedText(ctx, text.slice(0, maxSingleLen), x, y, color, false);
+        return ROW_H;
+    }
+
+    const colW = Math.max(36, (xEnd - x - 4) / 2);
+    const slots = parts.slice(0, 4);
+    ctx.font = LED_FONT_SM;
+    for (let row = 0; row < 2; row++) {
+        if (slots[row]) {
+            drawLedText(ctx, slots[row].slice(0, 12), x, y + row * STACK_LINE_H, color, false);
+        }
+        if (slots[row + 2]) {
+            drawLedText(ctx, slots[row + 2].slice(0, 12), x + colW, y + row * STACK_LINE_H, color, false);
+        }
+    }
+    return ROW_H + STACK_LINE_H;
 }
 
 /**
@@ -204,9 +263,10 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
     ctx.textAlign = 'left';
     drawLedText(ctx, `■ ${title}`, x0 + 14, y0 + 32, COLOR_LED_BRIGHT, true);
 
-    const placeLabel = counterpartKey === 'destination' ? '行先' : '出発';
+    const placeLabel = counterpartKey === 'destination' ? '行き先' : '出発';
     const cols = ['時刻', '便名', '会社', placeLabel, '状況'];
-    const colRatios = [0, 0.24, 0.38, 0.56, 0.72];
+    const anyChanged = rows.some((r) => r.timeChanged);
+    const colRatios = anyChanged ? COL_RATIOS_WITH_CHANGED : COL_RATIOS_NO_CHANGED;
     const colX = colRatios.map((r) => x0 + 12 + w * r);
     const nearestIdx = findNearestRowIndex(rows);
 
@@ -249,9 +309,14 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
             statusText = String(row.status);
         }
 
+        const flightParts = splitMultiParts(row.flightNumber);
+        const airlineParts = splitMultiParts(row.airline);
+        const stackRow = flightParts.length >= 4 || airlineParts.length >= 4;
+        let rowH = stackRow ? ROW_H + STACK_LINE_H : ROW_H;
+
         if (ri === nearestIdx) {
             ctx.fillStyle = COLOR_NOW_NEAR;
-            ctx.fillRect(x0 + 6, y - 22, w - 12, ROW_H);
+            ctx.fillRect(x0 + 6, y - 22, w - 12, rowH);
         }
 
         ctx.font = LED_FONT;
@@ -263,18 +328,17 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
             const tw = ctx.measureText(String(displayTime).slice(0, 8)).width;
             drawLedText(ctx, 'changed', colX[0] + tw + 10, y, COLOR_LED_HIGHLIGHT, false);
         }
-        const cells = [
-            row.flightNumber || '—',
-            row.airline || '—',
-            place,
-            statusText,
-        ];
-        cells.forEach((c, i) => {
-            const color = i === 3 ? statusColor : textColor;
-            const maxLen = i === 0 ? 14 : i === 1 ? 18 : i === 2 ? 14 : 24;
-            drawLedText(ctx, String(c).slice(0, maxLen), colX[i + 1], y, color, false);
-        });
-        y += ROW_H;
+        rowH = Math.max(
+            rowH,
+            drawCellValue(ctx, row.flightNumber, colX[1], y, colX[2], textColor, 14)
+        );
+        rowH = Math.max(
+            rowH,
+            drawCellValue(ctx, row.airline, colX[2], y, colX[3], textColor, 18)
+        );
+        drawLedText(ctx, String(place).slice(0, 14), colX[3], y, textColor, false);
+        drawLedText(ctx, statusText.slice(0, 24), colX[4], y, statusColor, false);
+        y += rowH;
     }
 }
 
@@ -336,6 +400,7 @@ export function createFlightBoardMesh(config) {
         position: { ...pos },
         rotation: { ...rot },
         scale: { ...scale },
+        filter: normalizeBoardFilter(config.filter),
     };
     mesh.userData.flightBoardCanvas = canvas;
     mesh.userData.flightBoardTexture = tex;
@@ -361,21 +426,42 @@ export async function fetchFlightBoardData() {
 }
 
 /**
- * メッシュのテクスチャを API データで更新する
+ * メッシュのテクスチャを board データで更新する
  * @param {THREE.Mesh} mesh
+ * @param {object} data
  */
-export async function updateFlightBoardMesh(mesh) {
+export function paintFlightBoardMesh(mesh, data) {
     const canvas = mesh.userData.flightBoardCanvas;
     const tex = mesh.userData.flightBoardTexture;
     if (!canvas || !tex) return;
     const ctx = canvas.getContext('2d');
+    const filter = normalizeBoardFilter(mesh.userData.flightBoardConfig?.filter);
+    drawFlightBoardCanvas(ctx, data, data?.error, filter);
+    tex.needsUpdate = true;
+}
+
+/**
+ * メッシュのテクスチャを API データで更新する
+ * @param {THREE.Mesh} mesh
+ */
+export async function updateFlightBoardMesh(mesh) {
     try {
         const data = await fetchFlightBoardData();
-        drawFlightBoardCanvas(ctx, data, data.error);
+        paintFlightBoardMesh(mesh, data);
     } catch (e) {
-        drawFlightBoardCanvas(ctx, null, e instanceof Error ? e.message : '取得失敗');
+        const canvas = mesh.userData.flightBoardCanvas;
+        const tex = mesh.userData.flightBoardTexture;
+        if (!canvas || !tex) return;
+        const ctx = canvas.getContext('2d');
+        const filter = normalizeBoardFilter(mesh.userData.flightBoardConfig?.filter);
+        drawFlightBoardCanvas(
+            ctx,
+            null,
+            e instanceof Error ? e.message : '取得失敗',
+            filter
+        );
+        tex.needsUpdate = true;
     }
-    tex.needsUpdate = true;
 }
 
 /**
@@ -386,9 +472,16 @@ export function startFlightBoardPolling(meshes) {
     const list = meshes.filter((m) => m.userData?.flightBoardCanvas);
     if (!list.length) return () => {};
 
-    const tick = () => {
-        for (const m of list) {
-            updateFlightBoardMesh(m).catch(() => {});
+    const tick = async () => {
+        try {
+            const data = await fetchFlightBoardData();
+            for (const m of list) {
+                paintFlightBoardMesh(m, data);
+            }
+        } catch {
+            for (const m of list) {
+                updateFlightBoardMesh(m).catch(() => {});
+            }
         }
     };
     tick();
