@@ -104,6 +104,9 @@ const SOCKET_AUTH_COOKIE_NAME = 'metaverse_socket_auth';
 const isProductionBuild = process.env.NODE_ENV === 'production' &&
     fs.existsSync(path.join(__dirname, 'dist', 'index.html'));
 const STATIC_DIR = path.join(__dirname, isProductionBuild ? 'dist' : 'public');
+const DIST_JS_DIR = path.join(__dirname, 'dist', 'js');
+const DIST_CSS_DIR = path.join(__dirname, 'dist', 'css');
+const DIST_ADDONS_DIR = path.join(__dirname, 'dist', 'addons');
 
 /**
  * ENABLE_CHART_FEATURES: 太鼓・譜面・譜面BGM・admin 譜面編集。未設定時は有効。0 / false / off / no で無効。
@@ -1719,9 +1722,13 @@ if (HOST_MONITOR_UNITS.length > 0) {
     );
 }
 
-// Serve admin.html with basic auth (before static files; admin.html is always in public)
+// Serve admin.html with basic auth（本番 dist にコピー済みなら dist を優先）
 app.get('/admin.html', basicAuth, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+    const distAdmin = path.join(__dirname, 'dist', 'admin.html');
+    const adminPath = isProductionBuild && fs.existsSync(distAdmin)
+        ? distAdmin
+        : path.join(__dirname, 'public', 'admin.html');
+    res.sendFile(adminPath);
 });
 
 // ワールド編集は admin に統合済み。setting.html は admin のワールド編集タブへリダイレクト
@@ -1840,6 +1847,9 @@ app.use('/avatars', (req, res, next) => {
 app.use('/pdfs', express.static(PDFS_DIR));
 app.use('/images', express.static(IMAGES_DIR));
 app.use('/env', express.static(ENV_DIR));
+if (isProductionBuild && fs.existsSync(DIST_ADDONS_DIR)) {
+    app.use('/addons', express.static(DIST_ADDONS_DIR));
+}
 app.use('/addons', express.static(path.join(__dirname, 'addons')));
 if (CHART_FEATURES_ENABLED) {
     app.use('/chart-bgm', express.static(CHART_BGM_DIR, {
@@ -1851,7 +1861,7 @@ if (CHART_FEATURES_ENABLED) {
     }));
 }
 
-// admin.html 用の /js, /css は常に public から（dist に含まれないため）
+// admin / ワールド編集用の /js, /css — 本番ビルド後は dist にコピー済みを優先、なければ public
 if (MODULE_SCRIPT_CORS_ORIGIN) {
     app.use('/js', (req, res, next) => {
         const acao = MODULE_SCRIPT_CORS_ORIGIN === '1' || MODULE_SCRIPT_CORS_ORIGIN === '*'
@@ -1861,7 +1871,13 @@ if (MODULE_SCRIPT_CORS_ORIGIN) {
         next();
     });
 }
+if (isProductionBuild && fs.existsSync(DIST_JS_DIR)) {
+    app.use('/js', express.static(DIST_JS_DIR));
+}
 app.use('/js', express.static(path.join(__dirname, 'public', 'js')));
+if (isProductionBuild && fs.existsSync(DIST_CSS_DIR)) {
+    app.use('/css', express.static(DIST_CSS_DIR));
+}
 app.use('/css', express.static(path.join(__dirname, 'public', 'css')));
 
 // 静的ファイル（本番時は dist、開発時は public）
