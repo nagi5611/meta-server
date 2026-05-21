@@ -1,4 +1,4 @@
-// addons/matsuyama-flights/client/flight-board-mesh.js — 発着情報 Canvas テクスチャ板（電光掲示板風・横 5:縦 4）
+// addons/matsuyama-flights/client/flight-board-mesh.js — 発着情報 Canvas テクスチャ板（電光掲示板風・横 6.5:縦 4）
 import * as THREE from 'three';
 import {
     boardFilterCanvasTag,
@@ -10,18 +10,20 @@ const BOARD_API = '/api/addons/matsuyama-flights/board';
 const POLL_MS = 60_000;
 const ROW_H = 26;
 const STACK_LINE_H = 14;
-/** changed あり時の列位置（幅の比率） */
-const COL_RATIOS_WITH_CHANGED = [0, 0.24, 0.38, 0.56, 0.72];
-/** 当日 changed なし時は便名以降を左へ */
-const COL_RATIOS_NO_CHANGED = [0, 0.17, 0.30, 0.44, 0.56];
+/** changed あり時の列位置（状況列を広く確保） */
+const COL_RATIOS_WITH_CHANGED = [0, 0.22, 0.34, 0.48, 0.60];
+/** 当日 changed なし時は便名以降を左へ（状況列を広く） */
+const COL_RATIOS_NO_CHANGED = [0, 0.16, 0.27, 0.38, 0.46];
 /** 状況列だけ右へずらす文字数 */
 const STATUS_COL_SHIFT_CHARS = 2;
+/** 状況列右端の内側余白 */
+const STATUS_COL_PAD_RIGHT = 10;
 
-/** テクスチャ・メッシュの縦横比（横 5 : 縦 4） */
-export const BOARD_ASPECT_W = 5;
+/** テクスチャ・メッシュの縦横比（横 6.5 : 縦 4） */
+export const BOARD_ASPECT_W = 6.5;
 export const BOARD_ASPECT_H = 4;
 
-export const CANVAS_W = 1920;
+export const CANVAS_W = 2496;
 export const CANVAS_H = 1536;
 
 const LED_FONT = "700 26px ui-monospace, 'Cascadia Mono', 'Consolas', monospace";
@@ -283,6 +285,8 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
     const colRatios = anyChanged ? COL_RATIOS_WITH_CHANGED : COL_RATIOS_NO_CHANGED;
     const colX = colRatios.map((r) => x0 + 12 + w * r);
     const statusColX = colX[4] + measureMonoCharWidth(ctx, LED_FONT, STATUS_COL_SHIFT_CHARS);
+    const statusColRight = x0 + w - STATUS_COL_PAD_RIGHT;
+    const statusColWidth = Math.max(0, statusColRight - statusColX);
     const nearestIdx = findNearestRowIndex(rows);
 
     ctx.font = LED_FONT_SM;
@@ -355,7 +359,18 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
             drawCellValue(ctx, row.airline, colX[2], y, colX[3], textColor, 18)
         );
         drawLedText(ctx, String(place).slice(0, 14), colX[3], y, textColor, false);
-        drawLedText(ctx, statusText.slice(0, 24), statusColX, y, statusColor, false);
+        const statusMaxChars = Math.max(
+            8,
+            Math.floor(statusColWidth / Math.max(1, measureMonoCharWidth(ctx, LED_FONT, 1)))
+        );
+        drawLedText(
+            ctx,
+            statusText.slice(0, statusMaxChars),
+            statusColX,
+            y,
+            statusColor,
+            false
+        );
         y += rowH;
     }
 }
@@ -387,7 +402,7 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
 }
 
 /**
- * ワールド内発着ボード用メッシュを生成する（平面 5:4）
+ * ワールド内発着ボード用メッシュを生成する（平面 6.5:4）
  * @param {object} config position, rotation, scale
  * @returns {THREE.Mesh}
  */
