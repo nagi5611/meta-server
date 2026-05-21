@@ -26,6 +26,8 @@ import {
 import {
     addFlightBoardToEditor,
     loadFlightBoardIntoEditor,
+    startFlightBoardEditorPolling,
+    stopFlightBoardEditorPolling,
 } from '../../addons/matsuyama-flights/client/world-editor.js';
 import { boardFilterEditorLabel } from '../../addons/matsuyama-flights/client/flight-board-filter.js';
 import {
@@ -2693,13 +2695,21 @@ async function loadWorldModelEntryForEditor(config, idx) {
  */
 async function loadWorldIntoScene(world) {
     ensureWorldLodShape(world);
+    stopFlightBoardEditorPolling();
     while (editGroup.children.length) {
         const c = editGroup.children[0];
         editGroup.remove(c);
         if (c.geometry) c.geometry.dispose();
         if (c.material) {
-            if (Array.isArray(c.material)) c.material.forEach((m) => m.dispose());
-            else c.material.dispose();
+            if (Array.isArray(c.material)) {
+                c.material.forEach((m) => {
+                    if (m.map) m.map.dispose();
+                    m.dispose();
+                });
+            } else {
+                if (c.material.map) c.material.map.dispose();
+                c.material.dispose();
+            }
         }
     }
     lightHelpers = [];
@@ -2745,6 +2755,9 @@ async function loadWorldIntoScene(world) {
     flightBoards.forEach((config) => {
         loadFlightBoardIntoEditor(editGroup, config);
     });
+    if (flightBoards.length) {
+        startFlightBoardEditorPolling(editGroup);
+    }
 
     document.getElementById('spawn-x').value = (world.spawnPoint && world.spawnPoint.x) ?? 0;
     document.getElementById('spawn-y').value = (world.spawnPoint && world.spawnPoint.y) ?? 10;
@@ -4546,6 +4559,7 @@ function bindEvents() {
         if (!selectedObject) return;
         pushUndo();
         const obj = selectedObject;
+        const wasFlightBoard = !!(obj.userData && obj.userData.flightBoardConfig);
         editGroup.remove(obj);
         obj.traverse((o) => {
             if (o.geometry) o.geometry.dispose();
@@ -4554,6 +4568,12 @@ function bindEvents() {
                 else { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
             }
         });
+        if (wasFlightBoard && editGroup) {
+            const anyBoard = editGroup.children.some(
+                (c) => c.isMesh && c.userData?.flightBoardConfig
+            );
+            if (!anyBoard) stopFlightBoardEditorPolling();
+        }
         selectedObject = null;
         transformControls.detach();
         document.getElementById('object-hint').style.display = 'block';

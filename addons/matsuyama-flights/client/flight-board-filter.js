@@ -1,4 +1,5 @@
 // addons/matsuyama-flights/client/flight-board-filter.js — 発着ボード表示フィルタ
+import { t } from '../../../public/js/metaverse-i18n.js';
 
 /** @typedef {'all'|'domestic'|'international'} FlightBoardFilter */
 
@@ -56,9 +57,9 @@ export function isInternationalFlight(row) {
  */
 export function boardFilterEditorLabel(filter) {
     const f = normalizeBoardFilter(filter);
-    if (f === 'domestic') return '発着（国内線）';
-    if (f === 'international') return '発着（国際線）';
-    return '発着（全便）';
+    if (f === 'domestic') return t('flightBoard.editorDomestic');
+    if (f === 'international') return t('flightBoard.editorInternational');
+    return t('flightBoard.editorAll');
 }
 
 /**
@@ -68,9 +69,23 @@ export function boardFilterEditorLabel(filter) {
  */
 export function boardFilterCanvasTag(filter) {
     const f = normalizeBoardFilter(filter);
-    if (f === 'domestic') return '国内線';
-    if (f === 'international') return '国際線';
+    if (f === 'domestic') return t('flightBoard.filterDomestic');
+    if (f === 'international') return t('flightBoard.filterInternational');
     return '';
+}
+
+/**
+ * ワールド編集プレビュー用メッセージ
+ * @param {FlightBoardFilter} filter
+ * @param {boolean} [afterSave]
+ * @returns {string}
+ */
+export function flightBoardEditorPreviewMessage(filter, afterSave = true) {
+    const tag = boardFilterCanvasTag(filter);
+    if (afterSave) {
+        return tag ? t('flightBoard.previewWithTag', { tag }) : t('flightBoard.previewDefault');
+    }
+    return tag ? t('flightBoard.previewTagOnly', { tag }) : t('flightBoard.previewOps');
 }
 
 /**

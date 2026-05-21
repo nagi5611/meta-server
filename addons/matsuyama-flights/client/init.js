@@ -1,6 +1,7 @@
 // addons/matsuyama-flights/client/init.js — 本番ワールドへの発着板配置
 import {
     createFlightBoardMesh,
+    repaintFlightBoardsForLocale,
     startFlightBoardPolling,
 } from './flight-board-mesh.js';
 
@@ -50,6 +51,12 @@ async function loadWorldFlightBoards(app, world) {
  * @param {object} app MetaverseApp
  */
 export async function initMatsuyamaFlightsSubsystem(app) {
+    if (typeof window !== 'undefined') {
+        window.addEventListener('metaverse-locale-changed', () => {
+            repaintFlightBoardsForLocale();
+        });
+    }
+
     if (app.worldManager) {
         app.worldManager._loadWorldFlightBoards = (world) => loadWorldFlightBoards(app, world);
     }

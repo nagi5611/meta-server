@@ -1,5 +1,6 @@
 // addons/matsuyama-flights/client/flight-board-mesh.js — 発着情報 Canvas テクスチャ板（電光掲示板風・横 6.5:縦 4）
 import * as THREE from 'three';
+import { getMetaverseLocale, t } from '../../../public/js/metaverse-i18n.js';
 import {
     boardFilterCanvasTag,
     filterBoardData,
@@ -8,6 +9,22 @@ import {
 
 const BOARD_API = '/api/addons/matsuyama-flights/board';
 const POLL_MS = 60_000;
+
+/** @type {THREE.Mesh[]} */
+let activeBoardMeshes = [];
+/** @type {object|null} */
+let lastBoardData = null;
+
+/**
+ * Intl 用 BCP 47 タグ
+ * @returns {string}
+ */
+function boardLocaleTag() {
+    const loc = getMetaverseLocale();
+    if (loc === 'en') return 'en-US';
+    if (loc === 'zh') return 'zh-CN';
+    return 'ja-JP';
+}
 const ROW_H = 26;
 const STACK_LINE_H = 14;
 /** changed あり時の列位置（状況列を広く確保） */
@@ -166,9 +183,11 @@ export function drawFlightBoardCanvas(ctx, data, message, filter = 'all') {
     ctx.font = LED_FONT_HEADER;
     const dateLabel = data?.serviceDate ? data.serviceDate.replace(/-/g, '/') : '';
     const filterTag = boardFilterCanvasTag(filter);
-    let subTitle = dateLabel ? `運行状況  ${dateLabel}` : '運行状況';
+    let subTitle = dateLabel
+        ? `${t('flightBoard.opsStatus')}  ${dateLabel}`
+        : t('flightBoard.opsStatus');
     if (filterTag) subTitle = `${subTitle}  ${filterTag}`;
-    if (data?.layoutAlert) subTitle += '  LAYOUT ALERT';
+    if (data?.layoutAlert) subTitle += `  ${t('flightBoard.layoutAlert')}`;
     drawLedText(ctx, subTitle, CANVAS_W / 2, 78, data?.layoutAlert ? COLOR_ERROR : COLOR_LED_DIM, false);
 
     const boardData = filterBoardData(data, filter);
@@ -176,7 +195,7 @@ export function drawFlightBoardCanvas(ctx, data, message, filter = 'all') {
     if (!boardData || !boardData.ok) {
         ctx.font = LED_FONT;
         ctx.textAlign = 'center';
-        const msg = message || boardData?.error || data?.error || 'データ取得中…';
+        const msg = message || boardData?.error || data?.error || t('flightBoard.loading');
         drawLedText(ctx, msg, CANVAS_W / 2, CANVAS_H / 2, COLOR_ERROR, true);
         drawScanlines(ctx);
         return;
@@ -184,18 +203,20 @@ export function drawFlightBoardCanvas(ctx, data, message, filter = 'all') {
 
     const depX = padX;
     const arrX = padX + colW + colGap;
-    drawSection(ctx, '出発 DEP', boardData.departures || [], depX, contentTop, colW, contentH, 'destination');
-    drawSection(ctx, '到着 ARR', boardData.arrivals || [], arrX, contentTop, colW, contentH, 'counterpart');
+    drawSection(ctx, t('flightBoard.depSection'), boardData.departures || [], depX, contentTop, colW, contentH, 'destination');
+    drawSection(ctx, t('flightBoard.arrSection'), boardData.arrivals || [], arrX, contentTop, colW, contentH, 'counterpart');
 
     ctx.font = LED_FONT_SM;
     ctx.textAlign = 'right';
-    const updated = boardData.updatedAt ? new Date(boardData.updatedAt).toLocaleString('ja-JP') : '';
+    const updated = boardData.updatedAt
+        ? new Date(boardData.updatedAt).toLocaleString(boardLocaleTag())
+        : '';
     drawLedText(ctx, updated ? `UPD ${updated}` : '', CANVAS_W - padX, CANVAS_H - 14, COLOR_LED_DIM);
     ctx.textAlign = 'left';
     const srcLabel =
         data.dataSource === 'backup'
-            ? 'SRC ODPT/JETSTAR (backup)'
-            : 'SRC 松山空港';
+            ? t('flightBoard.srcBackup')
+            : t('flightBoard.srcAirport');
     drawLedText(ctx, srcLabel, padX, CANVAS_H - 14, COLOR_LED_DIM);
 
     drawScanlines(ctx);
@@ -279,8 +300,16 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
     ctx.textAlign = 'left';
     drawLedText(ctx, `■ ${title}`, x0 + 14, y0 + 32, COLOR_LED_BRIGHT, true);
 
-    const placeLabel = counterpartKey === 'destination' ? '行き先' : '出発';
-    const cols = ['時刻', '便名', '会社', placeLabel, '状況'];
+    const placeLabel = counterpartKey === 'destination'
+        ? t('flightBoard.colDestination')
+        : t('flightBoard.colOrigin');
+    const cols = [
+        t('flightBoard.colTime'),
+        t('flightBoard.colFlight'),
+        t('flightBoard.colAirline'),
+        placeLabel,
+        t('flightBoard.colStatus'),
+    ];
     const anyChanged = rows.some((r) => r.timeChanged);
     const colRatios = anyChanged ? COL_RATIOS_WITH_CHANGED : COL_RATIOS_NO_CHANGED;
     const colX = colRatios.map((r) => x0 + 12 + w * r);
@@ -307,7 +336,7 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
     let y = y0 + 96;
     if (rows.length === 0) {
         ctx.font = LED_FONT;
-        drawLedText(ctx, '--- NO DATA ---', x0 + 14, y, COLOR_LED_DIM);
+        drawLedText(ctx, t('flightBoard.noData'), x0 + 14, y, COLOR_LED_DIM);
         return;
     }
 
@@ -343,12 +372,14 @@ function drawSection(ctx, title, rows, x0, y0, w, h, counterpartKey) {
 
         ctx.font = LED_FONT;
         const textColor = row.completed ? COLOR_LED_DIM : COLOR_LED;
-        const statusColor = /欠航|遅延|キャンセ/i.test(statusText) ? COLOR_ERROR : textColor;
+        const statusColor = /欠航|遅延|キャンセ|cancel|delay|divert/i.test(statusText)
+            ? COLOR_ERROR
+            : textColor;
         const timeColor = row.timeChanged ? COLOR_LED_HIGHLIGHT : textColor;
         drawLedText(ctx, String(displayTime).slice(0, 8), colX[0], y, timeColor, row.timeChanged);
         if (row.timeChanged) {
             const tw = ctx.measureText(String(displayTime).slice(0, 8)).width;
-            drawLedText(ctx, 'changed', colX[0] + tw + 10, y, COLOR_LED_HIGHLIGHT, false);
+            drawLedText(ctx, t('flightBoard.changed'), colX[0] + tw + 10, y, COLOR_LED_HIGHLIGHT, false);
         }
         rowH = Math.max(
             rowH,
@@ -415,7 +446,7 @@ export function createFlightBoardMesh(config) {
     canvas.width = CANVAS_W;
     canvas.height = CANVAS_H;
     const ctx = canvas.getContext('2d');
-    drawFlightBoardCanvas(ctx, null, '読込中…');
+    drawFlightBoardCanvas(ctx, null, t('flightBoard.loading'));
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
@@ -490,7 +521,7 @@ export async function updateFlightBoardMesh(mesh) {
         drawFlightBoardCanvas(
             ctx,
             null,
-            e instanceof Error ? e.message : '取得失敗',
+            e instanceof Error ? e.message : t('flightBoard.fetchFailed'),
             filter
         );
         tex.needsUpdate = true;
@@ -501,17 +532,45 @@ export async function updateFlightBoardMesh(mesh) {
  * シーン内の全発着ボードをポーリング更新する
  * @param {THREE.Object3D[]} meshes
  */
+/**
+ * 言語変更時に最後の board データで全板を再描画する
+ */
+export function repaintFlightBoardsForLocale() {
+    for (const m of activeBoardMeshes) {
+        if (lastBoardData) {
+            paintFlightBoardMesh(m, lastBoardData);
+        } else {
+            const canvas = m.userData.flightBoardCanvas;
+            const tex = m.userData.flightBoardTexture;
+            if (!canvas || !tex) continue;
+            const ctx = canvas.getContext('2d');
+            const filter = normalizeBoardFilter(m.userData.flightBoardConfig?.filter);
+            drawFlightBoardCanvas(ctx, null, t('flightBoard.loading'), filter);
+            tex.needsUpdate = true;
+        }
+    }
+}
+
 export function startFlightBoardPolling(meshes) {
     const list = meshes.filter((m) => m.userData?.flightBoardCanvas);
-    if (!list.length) return () => {};
+    activeBoardMeshes = list;
+    if (!list.length) {
+        lastBoardData = null;
+        return () => {
+            activeBoardMeshes = [];
+            lastBoardData = null;
+        };
+    }
 
     const tick = async () => {
         try {
             const data = await fetchFlightBoardData();
+            lastBoardData = data;
             for (const m of list) {
                 paintFlightBoardMesh(m, data);
             }
         } catch {
+            lastBoardData = null;
             for (const m of list) {
                 updateFlightBoardMesh(m).catch(() => {});
             }
@@ -519,5 +578,9 @@ export function startFlightBoardPolling(meshes) {
     };
     tick();
     const id = setInterval(tick, POLL_MS);
-    return () => clearInterval(id);
+    return () => {
+        clearInterval(id);
+        activeBoardMeshes = [];
+        lastBoardData = null;
+    };
 }
