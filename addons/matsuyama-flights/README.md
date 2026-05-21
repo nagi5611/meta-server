@@ -40,7 +40,7 @@ HTML レイアウトが想定と異なる場合は **ODPT（JAL/ANA）+ Jetstar*
 
 ## 表示言語
 
-パネルの見出し・列名など UI 文言は `public/js/metaverse-i18n.js` の `flightBoard.*` キーに従い、メタバース設定の言語（ja / en / zh）と連動します。設定変更時は `metaverse-locale-changed` で再描画されます。便データ（行き先・備考など）は公式ページの日本語のままです。
+パネルの見出し・列名など UI 文言は `/js/metaverse-i18n.js` の `flightBoard.*` キーに従い、メタバース設定の言語（ja / en / zh）と連動します。設定変更時は `metaverse-locale-changed` で再描画されます。便データ（行き先・備考など）は公式ページの日本語のままです。
 
 管理画面のワールド編集でも `/api/addons/matsuyama-flights/board` を約60秒ごとに取得し、本番と同じキャンバス描画でプレビューします（アドオン有効・サーバー起動が必要）。
 

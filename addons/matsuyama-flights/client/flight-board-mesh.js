@@ -1,6 +1,6 @@
 // addons/matsuyama-flights/client/flight-board-mesh.js — 発着情報 Canvas テクスチャ板（電光掲示板風・横 6.5:縦 4）
 import * as THREE from 'three';
-import { getMetaverseLocale, t } from '../../../public/js/metaverse-i18n.js';
+import { getMetaverseLocale, t } from '/js/metaverse-i18n.js';
 import {
     boardFilterCanvasTag,
     filterBoardData,

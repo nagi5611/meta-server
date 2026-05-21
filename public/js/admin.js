@@ -1079,7 +1079,7 @@ async function getClientConfigForModules() {
  * setting.js を dynamic import。ページオリジンで失敗したら moduleScriptOrigin とキャッシュバストで再試行する。
  * setting.js をデプロイし直したらこの版を上げる（ブラウザ・中間キャッシュが古いモジュールを掴み続けるのを避ける）
  */
-const SETTING_EDITOR_MODULE_VER = '5';
+const SETTING_EDITOR_MODULE_VER = '6';
 /** 強制再読込後に setting.js の import URL を一意にする（sessionStorage） */
 const SETTING_EDITOR_MODULE_BUST_KEY = 'ADMIN_JS_MODULE_BUST';
 

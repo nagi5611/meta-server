@@ -1,5 +1,5 @@
 // addons/matsuyama-flights/client/flight-board-filter.js — 発着ボード表示フィルタ
-import { t } from '../../../public/js/metaverse-i18n.js';
+import { t } from '/js/metaverse-i18n.js';
 
 /** @typedef {'all'|'domestic'|'international'} FlightBoardFilter */
 
