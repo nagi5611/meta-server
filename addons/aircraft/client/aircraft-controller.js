@@ -17,6 +17,8 @@ const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
 /** 地上判定の Y 余裕（この範囲なら接地扱いで横スリップのみ除去） */
 const GROUNDED_Y_TOLERANCE = 0.15;
+/** 前後速度がこの値未満なら静止摩擦（横滑り抑制に tireStaticFriction を使用） */
+const FWD_SPEED_STATIC_FRICTION_EPS = 0.05;
 
 /** レバー表記（右矢印でインデックス増＝展開大） */
 export const AIRCRAFT_FLAP_LABELS = Object.freeze(['UP', '1', '5', '15', '20', '25', '30']);
@@ -759,7 +761,9 @@ export default class AircraftController {
                         const latZ = this.velocity.z - hz * fwdSpeed;
                         const latMag = Math.hypot(latX, latZ);
                         const muLat =
-                            latMag < 0.35 ? ph.tireStaticFriction : ph.tireKineticFriction;
+                            Math.abs(fwdSpeed) < FWD_SPEED_STATIC_FRICTION_EPS
+                                ? ph.tireStaticFriction
+                                : ph.tireKineticFriction;
                         const latK = muLat * g;
                         if (latK > 0 && latMag > 1e-9) {
                             const reduce = Math.min(latMag, latK * dt);
