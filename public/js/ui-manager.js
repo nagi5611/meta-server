@@ -594,7 +594,7 @@ ${t('ui.aircraftHudLinesHtml')}
 
     /**
      * 飛行機操縦中の計器表示（showAircraftHud 後・毎フレーム）
-     * @param {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean, throttle?: number, flapLabel?: string, vfeMs?: number, vfeWarn?: boolean }|null} snap
+     * @param {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean, throttle?: number, engineRpm?: number, flapLabel?: string, vfeMs?: number, vfeWarn?: boolean }|null} snap
      */
     updateAircraftHudTelemetry(snap) {
         if (!this.aircraftHud || !snap) return;
@@ -623,6 +623,10 @@ ${t('ui.aircraftHudLinesHtml')}
         const th = el('aircraft-hud-throttle');
         if (th) th.textContent = typeof snap.throttle === 'number' && Number.isFinite(snap.throttle)
             ? (snap.throttle * 100).toFixed(0)
+            : '—';
+        const er = el('aircraft-hud-enginerpm');
+        if (er) er.textContent = typeof snap.engineRpm === 'number' && Number.isFinite(snap.engineRpm)
+            ? Math.round(snap.engineRpm).toLocaleString()
             : '—';
         const fl = el('aircraft-hud-flap');
         if (fl) fl.textContent = snap.flapLabel != null ? String(snap.flapLabel) : '—';

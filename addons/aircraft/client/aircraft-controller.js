@@ -8,6 +8,7 @@ import {
     flapAuthorityMultipliers,
     flapLiftCoeff,
     flapVfeMs,
+    thrustAccelFromEngineRpm,
     AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
 import { findObjectByNamePath, stepEngineBladeRotation, stepFlapDeflection } from './runtime-prefab-aircraft-anim.js';
@@ -59,7 +60,7 @@ export default class AircraftController {
         /** 無次元スロットル THROTTLE_MIN..THROTTLE_MAX */
         this._throttle = 0;
         this._prevThrottle = 0;
-        /** 正規化エンジン回転数 0..1（スロットルに追従） */
+        /** エンジン回転数 (RPM)。スロットル目標に engineRpmAccel で追従 */
         this._engineRpm = 0;
         /** 0..6 = UP..30 */
         this._flapIndex = 0;
@@ -596,20 +597,22 @@ export default class AircraftController {
 
         if (this._flapReliefCooldown > 0) this._flapReliefCooldown = Math.max(0, this._flapReliefCooldown - dt);
 
-        const rpmSpool = ph.engineRpmAccelPerThrottle;
+        const throttleSpool = ph.throttleSpoolPerS;
         if (this.keys.throttleUp) {
-            this._throttle = Math.min(THROTTLE_MAX, this._throttle + rpmSpool * dt);
+            this._throttle = Math.min(THROTTLE_MAX, this._throttle + throttleSpool * dt);
         }
         if (this.keys.throttleDown) {
-            this._throttle = Math.max(THROTTLE_MIN, this._throttle - rpmSpool * dt);
+            this._throttle = Math.max(THROTTLE_MIN, this._throttle - throttleSpool * dt);
         }
         this._throttle = THREE.MathUtils.clamp(this._throttle, THROTTLE_MIN, THROTTLE_MAX);
 
-        const targetRpm = Math.max(0, this._throttle);
+        const maxRpm = ph.engineMaxRpm;
+        const targetRpm = Math.max(0, this._throttle) * maxRpm;
+        const rpmAccel = ph.engineRpmAccel;
         if (this._engineRpm < targetRpm) {
-            this._engineRpm = Math.min(targetRpm, this._engineRpm + rpmSpool * dt);
+            this._engineRpm = Math.min(targetRpm, this._engineRpm + rpmAccel * dt);
         } else if (this._engineRpm > targetRpm) {
-            this._engineRpm = Math.max(targetRpm, this._engineRpm - rpmSpool * dt);
+            this._engineRpm = Math.max(targetRpm, this._engineRpm - rpmAccel * dt);
         }
 
         root.updateMatrixWorld(true);
@@ -671,9 +674,9 @@ export default class AircraftController {
 
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
-        let thrust = this._engineRpm * ph.thrustAccelPerEngineRpm;
+        let thrust = thrustAccelFromEngineRpm(this._engineRpm, ph);
         if (this._throttle < 0) {
-            thrust = this._throttle * ph.thrustAccelPerEngineRpm;
+            thrust = (this._throttle / THROTTLE_MIN) * ph.thrustAccelPerEngineRpm;
         }
         this.velocity.addScaledVector(this._fwd, thrust * dt);
         this.velocity.multiplyScalar(AIRCRAFT_PHYSICS_INTERNAL.drag);
@@ -794,8 +797,9 @@ export default class AircraftController {
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
         if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
-        const throttleVis = THREE.MathUtils.clamp(this._throttle, 0, 1);
-        let t01 = Math.max(this._engineRpm, throttleVis);
+        const maxRpmVis = ph.engineMaxRpm;
+        let t01 = maxRpmVis > 0 ? this._engineRpm / maxRpmVis : 0;
+        t01 = THREE.MathUtils.clamp(t01, 0, 1);
         const maxSpd = ph.maxThrustSpeed;
         if (maxSpd > 0) {
             t01 = Math.max(t01, THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / maxSpd, 0, 1));
@@ -867,6 +871,7 @@ export default class AircraftController {
      *   omegaRoll: number,
      *   grounded: boolean,
      *   throttle: number,
+     *   engineRpm: number,
      *   flapLabel: string,
      *   vfeMs: number,
      *   vfeWarn: boolean
@@ -894,6 +899,7 @@ export default class AircraftController {
             omegaRoll: this._omegaRoll,
             grounded: this._aircraftGrounded,
             throttle: this._throttle,
+            engineRpm: this._engineRpm,
             flapLabel: AIRCRAFT_FLAP_LABELS[this._flapIndex] || 'UP',
             vfeMs: Number.isFinite(vfe) ? vfe : this.physics.maxThrustSpeed,
             vfeWarn

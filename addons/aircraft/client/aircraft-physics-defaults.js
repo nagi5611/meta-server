@@ -68,9 +68,13 @@ export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     flapLiftCoeff4: 0.094,
     flapLiftCoeff5: 0.097,
     flapLiftCoeff6: 0.1,
-    /** スロットル→エンジン回転数（正規化 0–1）の追従加速度 (1/s²)。全開まで約5–6 s（推論） */
-    engineRpmAccelPerThrottle: 0.18,
-    /** エンジン回転数 1.0 時の前進加速度 (m/s²)。787-9 推力/重量比 ≈2.5（推論） */
+    /** エンジン最大回転数 (RPM)。HUD・推力の基準（ゲーム表示用の目安） */
+    engineMaxRpm: 10500,
+    /** 上下矢印でスロットル 0–1 が変化する速度 (1/s)。全開まで約5–6 s（推論） */
+    throttleSpoolPerS: 0.18,
+    /** 目標回転数へ追従する回転数加速度 (RPM/s)。maxRpm まで約5–6 s（推論） */
+    engineRpmAccel: 1890,
+    /** 最大回転数時の前進推力加速度 (m/s²)。787-9 推力/重量比 ≈2.5（推論） */
     thrustAccelPerEngineRpm: 2.5,
     /** Space ブレーキ減速度 (m/s²)。着陸 autobrake 高めの目安（推論） */
     tireBrakeAccel: 5.5
@@ -118,6 +122,19 @@ export function flapLiftCoeff(flapIndex, ph) {
  * @param {number} flapIndex
  * @returns {number}
  */
+/**
+ * エンジン回転数 (RPM) から前進推力加速度 (m/s²) を算出する（最大回転数で thrustAccelPerEngineRpm）
+ * @param {number} engineRpm
+ * @param {Record<string, number>} ph merge 済み physics
+ * @returns {number}
+ */
+export function thrustAccelFromEngineRpm(engineRpm, ph) {
+    const max = ph.engineMaxRpm;
+    if (!(max > 0) || !Number.isFinite(engineRpm)) return 0;
+    const rpm = Math.max(0, engineRpm);
+    return (rpm / max) * ph.thrustAccelPerEngineRpm;
+}
+
 export function flapVfeMs(flapIndex) {
     const idx = Math.round(Number(flapIndex));
     const i = Math.max(0, Math.min(6, Number.isFinite(idx) ? idx : 0));
@@ -140,8 +157,18 @@ function applyLegacyPhysicsAliases(r) {
     if (typeof r.wheelBrakeDecel === 'number' && typeof r.tireBrakeAccel !== 'number') {
         r.tireBrakeAccel = r.wheelBrakeDecel;
     }
-    if (typeof r.throttleSpoolPerS === 'number' && typeof r.engineRpmAccelPerThrottle !== 'number') {
-        r.engineRpmAccelPerThrottle = r.throttleSpoolPerS;
+    if (typeof r.throttleSpoolPerS !== 'number' && typeof r.engineRpmAccelPerThrottle === 'number') {
+        r.throttleSpoolPerS = r.engineRpmAccelPerThrottle;
+    }
+    if (typeof r.engineRpmAccel !== 'number') {
+        const spool =
+            (typeof r.throttleSpoolPerS === 'number' ? r.throttleSpoolPerS : undefined) ??
+            (typeof r.engineRpmAccelPerThrottle === 'number' ? r.engineRpmAccelPerThrottle : undefined);
+        const maxRpm =
+            typeof r.engineMaxRpm === 'number' && Number.isFinite(r.engineMaxRpm)
+                ? r.engineMaxRpm
+                : DEFAULT_AIRCRAFT_PHYSICS.engineMaxRpm;
+        if (typeof spool === 'number' && maxRpm > 0) r.engineRpmAccel = spool * maxRpm;
     }
     if (typeof r.thrustAccel === 'number' && typeof r.thrustAccelPerEngineRpm !== 'number') {
         r.thrustAccelPerEngineRpm = r.thrustAccel;
@@ -200,7 +227,9 @@ function clipPhysicsValue(key, v) {
     if (key === 'tireStaticFriction' || key === 'tireKineticFriction') {
         return Math.min(2, Math.max(0.05, v));
     }
-    if (key === 'engineRpmAccelPerThrottle') return Math.min(5, Math.max(0.02, v));
+    if (key === 'engineMaxRpm') return Math.min(120000, Math.max(100, v));
+    if (key === 'throttleSpoolPerS') return Math.min(5, Math.max(0.02, v));
+    if (key === 'engineRpmAccel') return Math.min(50000, Math.max(10, v));
     if (key === 'thrustAccelPerEngineRpm') return Math.min(50, Math.max(0.1, v));
     if (key === 'tireBrakeAccel') return Math.min(15, Math.max(0.5, v));
     return Math.min(500, Math.max(0.001, v));

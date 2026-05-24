@@ -23,8 +23,10 @@ const LABEL_JA = {
     flapLiftCoeff4: '揚力係数 Flap 20',
     flapLiftCoeff5: '揚力係数 Flap 25',
     flapLiftCoeff6: '揚力係数 Flap 30',
-    engineRpmAccelPerThrottle: 'スロットル→エンジン回転数加速度 (1/s²)',
-    thrustAccelPerEngineRpm: 'エンジン回転数→推力加速度 (m/s²)',
+    engineMaxRpm: 'エンジン最大回転数 (RPM)',
+    throttleSpoolPerS: 'スロットル変化速度 (1/s)',
+    engineRpmAccel: 'エンジン回転数加速度 (RPM/s)',
+    thrustAccelPerEngineRpm: '最大回転数時の推力加速度 (m/s²)',
     tireBrakeAccel: 'タイヤブレーキ減速度 (m/s²)',
 };
 
