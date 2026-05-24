@@ -1,7 +1,7 @@
 // addons/aircraft/client/aircraft-controller.js — キネマティック飛行（四元数・-Z 前進・BVH 下向きレイ接地）
 // 入力: 矢印=スロットル/フラップ、W/S=ピッチ、A/D=ロール、Q/E=ラダー、Space=ブレーキ
 // 直線運動は AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale（既定 0.4）でワールド移動のみ縮小。パラメータ・HUD は名目 m/s。
-// FBW 風は簡易モデル（一般向け航空解説ベースのゲイン・Vfe 近似。実機 FCOM 非根拠）
+// 推力=機首 -Z 方向、揚力=機体 +Y、重力=ワールド -Y。姿勢は角速度上限のみ（姿勢角ハード上限なし）。Vfe 近似。
 
 import * as THREE from 'three';
 import {
@@ -584,46 +584,6 @@ export default class AircraftController {
     }
 
     /**
-     * ワールド YXZ のヨー・ピッチ・ロールを physics の上限 (°) に収める
-     * @param {import('three').Object3D} root
-     * @param {{ yawMaxDeg: number, pitchMaxDeg: number, rollMaxDeg: number }} ph
-     */
-    _clampWorldAttitude(root, ph) {
-        root.updateMatrixWorld(true);
-        root.getWorldQuaternion(this._worldQuat);
-        this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
-        const yawLim = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(ph.yawMaxDeg, 1, 90));
-        const pitchLim = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(ph.pitchMaxDeg, 1, 90));
-        const rollLim = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(ph.rollMaxDeg, 1, 90));
-        const y0 = this._eulerScratch.y;
-        const x0 = this._eulerScratch.x;
-        const z0 = this._eulerScratch.z;
-        this._eulerScratch.y = THREE.MathUtils.clamp(y0, -yawLim, yawLim);
-        this._eulerScratch.x = THREE.MathUtils.clamp(x0, -pitchLim, pitchLim);
-        this._eulerScratch.z = THREE.MathUtils.clamp(z0, -rollLim, rollLim);
-        if (
-            this._eulerScratch.y === y0 &&
-            this._eulerScratch.x === x0 &&
-            this._eulerScratch.z === z0
-        ) {
-            return;
-        }
-        if (this._eulerScratch.y !== y0) this._omegaYaw = 0;
-        if (this._eulerScratch.x !== x0) this._omegaPitch = 0;
-        if (this._eulerScratch.z !== z0) this._omegaRoll = 0;
-        this._qClampWorld.setFromEuler(this._eulerScratch);
-        if (root.parent) {
-            root.parent.updateMatrixWorld(true);
-            root.parent.getWorldQuaternion(this._qParentWorld);
-            const qLocal = this._qParentWorld.clone().invert().multiply(this._qClampWorld);
-            root.quaternion.copy(qLocal);
-        } else {
-            root.quaternion.copy(this._qClampWorld);
-        }
-        root.updateMatrixWorld(true);
-    }
-
-    /**
      * @param {number} deltaTime
      */
     update(deltaTime) {
@@ -683,14 +643,6 @@ export default class AircraftController {
         const pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
         const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
 
-        root.getWorldQuaternion(this._worldQuat);
-        this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
-        const rollLimRad = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(ph.rollMaxDeg, 1, 90));
-        const bank = this._eulerScratch.z;
-        let rollInEff = rollIn;
-        if (bank >= rollLimRad - 0.02 && rollIn > 0) rollInEff = 0;
-        if (bank <= -rollLimRad + 0.02 && rollIn < 0) rollInEff = 0;
-
         this._omegaYaw = this._integrateOmega(
             yawIn,
             this._omegaYaw,
@@ -708,7 +660,7 @@ export default class AircraftController {
             dt
         );
         this._omegaRoll = this._integrateOmega(
-            rollInEff,
+            rollIn,
             this._omegaRoll,
             ph.rollMaxAccel * fa.rollMul,
             ph.rollMaxRate * fa.rollMul,
@@ -720,21 +672,16 @@ export default class AircraftController {
         root.rotateOnAxis(new THREE.Vector3(1, 0, 0), this._omegaPitch * dt);
         root.rotateOnAxis(new THREE.Vector3(0, 0, 1), -this._omegaRoll * dt);
         root.updateMatrixWorld(true);
-        this._clampWorldAttitude(root, ph);
 
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
+        if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
         let thrust = thrustAccelFromEngineRpm(this._engineRpm, ph) * ls;
         if (this._throttle < 0) {
             thrust = (this._throttle / THROTTLE_MIN) * ph.thrustAccelPerEngineRpm * ls;
         }
-        // 推力は水平成分のみ（機首上げでスロットルがそのまま上昇力にならないようにする）
-        const hx = this._fwd.x;
-        const hz = this._fwd.z;
-        const hLen = Math.hypot(hx, hz);
-        if (hLen > 1e-6 && thrust !== 0) {
-            this.velocity.x += (hx / hLen) * thrust * dt;
-            this.velocity.z += (hz / hLen) * thrust * dt;
+        if (thrust !== 0) {
+            this.velocity.addScaledVector(this._fwd, thrust * dt);
         }
         this.velocity.multiplyScalar(AIRCRAFT_PHYSICS_INTERNAL.drag);
         this._bodyUp.set(0, 1, 0).applyQuaternion(this._worldQuat).normalize();
