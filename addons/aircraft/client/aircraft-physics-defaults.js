@@ -114,6 +114,29 @@ export function flapAuthorityMultipliers(flapIndex) {
  * @param {Record<string, number>} ph merge 済み physics
  * @returns {number}
  */
+/** レバー表記（右矢印でインデックス増＝展開大） */
+export const AIRCRAFT_FLAP_LABELS = Object.freeze(['UP', '1', '5', '15', '20', '25', '30']);
+
+/** フラップレバー最大段の角度（°）。AIRCRAFT_FLAP_LABELS の「30」に対応 */
+export const AIRCRAFT_FLAP_MAX_DEG = 30;
+
+/**
+ * フラップ段階の展開量 0..1（UP=0、1°=1/30 … 30°=1）。表示アニメ用。
+ * @param {number} flapIndex
+ * @returns {number}
+ */
+export function flapDeployNorm01(flapIndex) {
+    const idx = Math.round(Number(flapIndex));
+    const i = Math.max(0, Math.min(AIRCRAFT_FLAP_LABELS.length - 1, Number.isFinite(idx) ? idx : 0));
+    const label = AIRCRAFT_FLAP_LABELS[i];
+    if (label === 'UP') return 0;
+    const deg = Number(label);
+    if (Number.isFinite(deg) && deg > 0) {
+        return Math.min(1, deg / AIRCRAFT_FLAP_MAX_DEG);
+    }
+    return AIRCRAFT_FLAP_LABELS.length > 1 ? i / (AIRCRAFT_FLAP_LABELS.length - 1) : 0;
+}
+
 export function flapLiftCoeff(flapIndex, ph) {
     const idx = Math.round(Number(flapIndex));
     const i = Math.max(0, Math.min(6, Number.isFinite(idx) ? idx : 0));

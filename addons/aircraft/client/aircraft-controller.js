@@ -7,9 +7,11 @@ import * as THREE from 'three';
 import {
     mergeAircraftPhysicsFromWorld,
     flapAuthorityMultipliers,
+    flapDeployNorm01,
     flapLiftCoeff,
     flapVfeMs,
     thrustAccelFromEngineRpm,
+    AIRCRAFT_FLAP_LABELS,
     AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
 import { findObjectByNamePath, stepEngineBladeRotation, stepFlapDeflection } from './runtime-prefab-aircraft-anim.js';
@@ -21,13 +23,14 @@ const GROUNDED_Y_TOLERANCE = 0.15;
 /** 前後速度がこの値未満なら静止摩擦（横滑り抑制に tireStaticFriction を使用） */
 const FWD_SPEED_STATIC_FRICTION_EPS = 0.05;
 
-/** レバー表記（右矢印でインデックス増＝展開大） */
-export const AIRCRAFT_FLAP_LABELS = Object.freeze(['UP', '1', '5', '15', '20', '25', '30']);
-
 const THROTTLE_MIN = -0.3;
 const THROTTLE_MAX = 1;
 /** 荷重解放: 連続収納の間隔 (s) */
 const FLAP_RELIEF_COOLDOWN_S = 0.22;
+/** 手動フラップ操作後、Vfe による自動収納を抑止する時間 (ms) */
+const FLAP_MANUAL_LOCK_MS = 2500;
+/** 矢印キー長押し時の段切り替え間隔 (ms) */
+const FLAP_KEY_REPEAT_MS = 200;
 
 /**
  * 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -68,6 +71,8 @@ export default class AircraftController {
         /** 0..6 = UP..30 */
         this._flapIndex = 0;
         this._flapReliefCooldown = 0;
+        this._flapManualLockUntilMs = 0;
+        this._lastFlapBumpMs = 0;
         /** @type {'cockpit'|'chase'} */
         this.cameraMode = 'cockpit';
         this._onKeyDown = (e) => this._handleKey(e, true);
@@ -150,6 +155,8 @@ export default class AircraftController {
         this._engineRpm = 0;
         this._flapIndex = 0;
         this._flapReliefCooldown = 0;
+        this._flapManualLockUntilMs = 0;
+        this._lastFlapBumpMs = 0;
         this.physics = mergeAircraftPhysicsFromWorld(
             slot?.physics && typeof slot.physics === 'object' ? slot.physics : this._worldAircraftPhysicsRaw
         );
@@ -270,6 +277,8 @@ export default class AircraftController {
         this._engineRpm = 0;
         this._flapIndex = 0;
         this._flapReliefCooldown = 0;
+        this._flapManualLockUntilMs = 0;
+        this._lastFlapBumpMs = 0;
         this.physics = mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
@@ -374,7 +383,46 @@ export default class AircraftController {
      * @param {number} delta
      */
     _bumpFlap(delta) {
+        const prev = this._flapIndex;
         this._flapIndex = THREE.MathUtils.clamp(this._flapIndex + delta, 0, AIRCRAFT_FLAP_LABELS.length - 1);
+        if (this._flapIndex !== prev) {
+            this._flapManualLockUntilMs = performance.now() + FLAP_MANUAL_LOCK_MS;
+            this._syncFlapVisualToIndex();
+        }
+    }
+
+    /**
+     * フラップメッシュのローカル角をレバー段階に即時合わせる（段ごとの角度差を反映）
+     */
+    _syncFlapVisualToIndex() {
+        if (!this._libAnim?.flaps?.length) return;
+        const norm = flapDeployNorm01(this._flapIndex);
+        for (const f of this._libAnim.flaps) {
+            const target = norm * f.maxAngleRad * f.sign;
+            f.state.angle = target;
+            if (f.axis === 'x') f.mesh.rotation.x = target;
+            else if (f.axis === 'y') f.mesh.rotation.y = target;
+            else f.mesh.rotation.z = target;
+        }
+    }
+
+    /**
+     * @param {KeyboardEvent} e
+     * @returns {boolean}
+     */
+    _tryFlapKeyBump(e) {
+        const now = performance.now();
+        if (e.repeat && now - this._lastFlapBumpMs < FLAP_KEY_REPEAT_MS) return false;
+        this._lastFlapBumpMs = now;
+        if (e.code === 'ArrowRight') {
+            this._bumpFlap(1);
+            return true;
+        }
+        if (e.code === 'ArrowLeft') {
+            this._bumpFlap(-1);
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -386,18 +434,8 @@ export default class AircraftController {
         if (this._isInputActive()) return;
         const c = e.code;
 
-        if (c === 'ArrowRight') {
-            if (down && !e.repeat) {
-                this._bumpFlap(1);
-                e.preventDefault();
-            }
-            return;
-        }
-        if (c === 'ArrowLeft') {
-            if (down && !e.repeat) {
-                this._bumpFlap(-1);
-                e.preventDefault();
-            }
+        if (c === 'ArrowRight' || c === 'ArrowLeft') {
+            if (down && this._tryFlapKeyBump(e)) e.preventDefault();
             return;
         }
 
@@ -628,9 +666,16 @@ export default class AircraftController {
         const vfe = flapVfeMs(this._flapIndex);
         const vfeCap = Number.isFinite(vfe) ? Math.min(maxSpd, vfe * ls) : maxSpd;
 
-        if (this._flapIndex > 0 && airForward > vfe * 0.995 * ls && this._flapReliefCooldown <= 0) {
+        const flapManualLocked = performance.now() < this._flapManualLockUntilMs;
+        if (
+            !flapManualLocked &&
+            this._flapIndex > 0 &&
+            airForward > vfe * 0.995 * ls &&
+            this._flapReliefCooldown <= 0
+        ) {
             this._flapIndex -= 1;
             this._flapReliefCooldown = FLAP_RELIEF_COOLDOWN_S;
+            this._syncFlapVisualToIndex();
         }
 
         const fa = flapAuthorityMultipliers(this._flapIndex);
@@ -683,15 +728,23 @@ export default class AircraftController {
         if (this._throttle < 0) {
             thrust = (this._throttle / THROTTLE_MIN) * ph.thrustAccelPerEngineRpm * ls;
         }
-        this.velocity.addScaledVector(this._fwd, thrust * dt);
+        // 推力は水平成分のみ（機首上げでスロットルがそのまま上昇力にならないようにする）
+        const hx = this._fwd.x;
+        const hz = this._fwd.z;
+        const hLen = Math.hypot(hx, hz);
+        if (hLen > 1e-6 && thrust !== 0) {
+            this.velocity.x += (hx / hLen) * thrust * dt;
+            this.velocity.z += (hz / hLen) * thrust * dt;
+        }
         this.velocity.multiplyScalar(AIRCRAFT_PHYSICS_INTERNAL.drag);
         this._bodyUp.set(0, 1, 0).applyQuaternion(this._worldQuat).normalize();
         const vAlongBodyUp = this.velocity.dot(this._bodyUp);
         const vH = Math.sqrt(
             Math.max(0, this.velocity.lengthSq() - vAlongBodyUp * vAlongBodyUp)
         );
-        const liftAccel = flapLiftCoeff(this._flapIndex, ph) * vH;
-        this.velocity.y += (liftAccel - g) * dt;
+        const liftMag = flapLiftCoeff(this._flapIndex, ph) * vH * ls;
+        this.velocity.addScaledVector(this._bodyUp, liftMag * dt);
+        this.velocity.y -= g * dt;
         let sp = this.velocity.length();
         if (sp > vfeCap) this.velocity.multiplyScalar(vfeCap / sp);
         sp = this.velocity.length();
@@ -819,8 +872,7 @@ export default class AircraftController {
             }
         }
         if (this._libAnim?.flaps?.length) {
-            const n = AIRCRAFT_FLAP_LABELS.length - 1;
-            const norm = n > 0 ? this._flapIndex / n : 0;
+            const norm = flapDeployNorm01(this._flapIndex);
             for (const f of this._libAnim.flaps) {
                 const target = norm * f.maxAngleRad * f.sign;
                 stepFlapDeflection(f.mesh, f.axis, target, f.maxOmegaRadPerS, dt, f.state);
