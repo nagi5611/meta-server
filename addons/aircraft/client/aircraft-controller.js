@@ -26,7 +26,9 @@ const FWD_SPEED_STATIC_FRICTION_EPS = 0.05;
 const THROTTLE_MIN = -0.3;
 const THROTTLE_MAX = 1;
 /** 荷重解放: 連続収納の間隔 (s) */
-const FLAP_RELIEF_COOLDOWN_S = 0.22;
+const FLAP_RELIEF_COOLDOWN_S = 1.5;
+/** Vfe 自動収納の速度余裕。前進速度 > Vfe×此×linearWorldScale のときのみ 1 段収納（大きいほど甘い） */
+const VFE_RELIEF_SPEED_MARGIN = 1.45;
 /** 手動フラップ操作後、Vfe による自動収納を抑止する時間 (ms) */
 const FLAP_MANUAL_LOCK_MS = 2500;
 /** 矢印キー長押し時の段切り替え間隔 (ms) */
@@ -670,7 +672,7 @@ export default class AircraftController {
         if (
             !flapManualLocked &&
             this._flapIndex > 0 &&
-            airForward > vfe * 0.995 * ls &&
+            airForward > vfe * VFE_RELIEF_SPEED_MARGIN * ls &&
             this._flapReliefCooldown <= 0
         ) {
             this._flapIndex -= 1;
