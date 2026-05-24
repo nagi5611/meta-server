@@ -1,5 +1,6 @@
 // addons/aircraft/client/aircraft-controller.js — キネマティック飛行（四元数・-Z 前進・BVH 下向きレイ接地）
 // 入力: 矢印=スロットル/フラップ、W/S=ピッチ、A/D=ロール、Q/E=ラダー、Space=ブレーキ
+// 直線運動は AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale（既定 0.1）でワールド移動のみ縮小。パラメータ・HUD は名目 m/s。
 // FBW 風は簡易モデル（一般向け航空解説ベースのゲイン・Vfe 近似。実機 FCOM 非根拠）
 
 import * as THREE from 'three';
@@ -594,8 +595,10 @@ export default class AircraftController {
 
         const ph = this.physics;
         const dec = AIRCRAFT_PHYSICS_INTERNAL.angularDecel;
-        const g = AIRCRAFT_PHYSICS_INTERNAL.gravity;
-        const maxSpd = ph.maxThrustSpeed;
+        const ls = AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale;
+        const g = AIRCRAFT_PHYSICS_INTERNAL.gravity * ls;
+        const maxSpdNom = ph.maxThrustSpeed;
+        const maxSpd = maxSpdNom * ls;
 
         if (this._flapReliefCooldown > 0) this._flapReliefCooldown = Math.max(0, this._flapReliefCooldown - dt);
 
@@ -623,9 +626,9 @@ export default class AircraftController {
         if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
         const airForward = Math.max(0, this.velocity.dot(this._fwd));
         const vfe = flapVfeMs(this._flapIndex);
-        const vfeCap = Number.isFinite(vfe) ? Math.min(maxSpd, vfe) : maxSpd;
+        const vfeCap = Number.isFinite(vfe) ? Math.min(maxSpd, vfe * ls) : maxSpd;
 
-        if (this._flapIndex > 0 && airForward > vfe * 0.995 && this._flapReliefCooldown <= 0) {
+        if (this._flapIndex > 0 && airForward > vfe * 0.995 * ls && this._flapReliefCooldown <= 0) {
             this._flapIndex -= 1;
             this._flapReliefCooldown = FLAP_RELIEF_COOLDOWN_S;
         }
@@ -676,9 +679,9 @@ export default class AircraftController {
 
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
-        let thrust = thrustAccelFromEngineRpm(this._engineRpm, ph);
+        let thrust = thrustAccelFromEngineRpm(this._engineRpm, ph) * ls;
         if (this._throttle < 0) {
-            thrust = (this._throttle / THROTTLE_MIN) * ph.thrustAccelPerEngineRpm;
+            thrust = (this._throttle / THROTTLE_MIN) * ph.thrustAccelPerEngineRpm * ls;
         }
         this.velocity.addScaledVector(this._fwd, thrust * dt);
         this.velocity.multiplyScalar(AIRCRAFT_PHYSICS_INTERNAL.drag);
@@ -750,7 +753,7 @@ export default class AircraftController {
                             }
                         }
                         if (this.keys.brake) {
-                            const step = ph.tireBrakeAccel * dt;
+                            const step = ph.tireBrakeAccel * ls * dt;
                             const mag = Math.abs(fwdSpeed);
                             if (mag > 0) {
                                 const ds = Math.min(mag, step);
@@ -804,9 +807,9 @@ export default class AircraftController {
         const maxRpmVis = ph.engineMaxRpm;
         let t01 = maxRpmVis > 0 ? this._engineRpm / maxRpmVis : 0;
         t01 = THREE.MathUtils.clamp(t01, 0, 1);
-        const maxSpd = ph.maxThrustSpeed;
-        if (maxSpd > 0) {
-            t01 = Math.max(t01, THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / maxSpd, 0, 1));
+        const maxSpdVis = ph.maxThrustSpeed * ls;
+        if (maxSpdVis > 0) {
+            t01 = Math.max(t01, THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / maxSpdVis, 0, 1));
         }
 
         if (this._libAnim?.blades?.length) {
@@ -891,10 +894,11 @@ export default class AircraftController {
         const vfe = flapVfeMs(this._flapIndex);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
         if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
-        const airF = Math.max(0, this.velocity.dot(this._fwd));
+        const ls = AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale;
+        const airF = Math.max(0, this.velocity.dot(this._fwd)) / ls;
         const vfeWarn = this._flapIndex > 0 && Number.isFinite(vfe) && airF > vfe * 0.92;
         return {
-            speedMs: this.velocity.length(),
+            speedMs: this.velocity.length() / ls,
             pitchDeg: this._eulerScratch.x * r2d,
             yawDeg: this._eulerScratch.y * r2d,
             rollDeg: this._eulerScratch.z * r2d,
