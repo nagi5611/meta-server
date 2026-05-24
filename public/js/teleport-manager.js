@@ -296,8 +296,15 @@ class TeleportManager {
      * Handle teleport action when E is pressed (PDF viewer takes priority over teleport)
      */
     handleTeleport() {
-        if (this._tryAircraftBoard && this._tryAircraftBoard()) {
-            return;
+        if (this._tryAircraftBoard) {
+            const boardResult = this._tryAircraftBoard();
+            if (boardResult === true) return;
+            if (boardResult && typeof boardResult.then === 'function') {
+                void boardResult.then((ok) => {
+                    if (ok) return;
+                });
+                return;
+            }
         }
         // 優先度: 太鼓 > PDF > GLBインタラクト > テレポート
         if (this.nearestTaikoZone && this.openTaikoGame) {

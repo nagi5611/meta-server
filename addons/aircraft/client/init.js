@@ -25,17 +25,21 @@ export async function initAircraftSubsystem(app) {
         app.uiManager
     );
     app.aircraftManager.setMobileMode(app.isMobileMode);
-    await app.sceneManager.hydrateAircraftSlotsFromLibrary();
+    try {
+        await app.sceneManager.hydrateAircraftSlotsFromLibrary();
+    } catch (e) {
+        console.warn('[Aircraft] hydrateAircraftSlotsFromLibrary failed', e);
+    }
     app.aircraftManager.refreshSlotsFromScene();
 
+    const tryBoardFromUi = () => app.aircraftManager?.tryBoardNearest();
     app.uiManager.setAircraftBoardHandler(() => {
-        app.aircraftManager.tryBoardNearest();
+        void tryBoardFromUi();
     });
-    app.teleportManager.setAircraftBoardHandler(() => {
+    app.teleportManager.setAircraftBoardHandler(async () => {
         if (app.characterController.isInputActive()) return false;
         if (!app.aircraftManager?.nearestSlot || !app.aircraftManager.canBoard()) return false;
-        void app.aircraftManager.tryBoardNearest();
-        return true;
+        return app.aircraftManager.tryBoardNearest();
     });
     app.uiManager.setAircraftHudHandlers({
         onExit: () => app.aircraftManager.exitPiloting(),

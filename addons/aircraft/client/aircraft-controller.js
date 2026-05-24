@@ -930,6 +930,11 @@ export default class AircraftController {
         this.camera.quaternion.multiply(this._qParentWorld);
     }
 
+    /** 操縦開始直後などにコックピット／チェイス視点へ即時切替 */
+    snapPilotCamera() {
+        this._updateCamera();
+    }
+
     _updateCamera() {
         const root = this.slot?.root;
         if (!root) return;

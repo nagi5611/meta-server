@@ -344,7 +344,11 @@ class MetaverseApp {
         };
         this.setupClientPerfObservers();
 
-        initAircraftSubsystem(this).catch((e) => console.warn('[Aircraft] init failed', e));
+        try {
+            await initAircraftSubsystem(this);
+        } catch (e) {
+            console.warn('[Aircraft] init failed', e);
+        }
         initAvatorScalableAnimations(this);
         initMatsuyamaFlightsSubsystem(this).catch((e) => console.warn('[matsuyama-flights] init failed', e));
 

@@ -4,6 +4,18 @@ import * as THREE from 'three';
 import AircraftController from './aircraft-controller.js';
 
 const STORAGE_CAMERA = 'metaverse-aircraft-camera';
+const BOARD_SOCKET_WAIT_MS = 10000;
+const BOARD_ACK_TIMEOUT_MS = 8000;
+
+/** @type {Record<string, string>} */
+const BOARD_ERROR_JA = {
+    deps_unconfigured: '飛行機機能がサーバーで有効になっていません。',
+    bad_request: '搭乗リクエストが不正です。',
+    invalid_slot: 'このワールドに飛行機が登録されていません（ID不一致）。',
+    busy: 'すでに他のプレイヤーが操縦しています。',
+    no_player: 'サーバーにプレイヤーが登録されていません。再接続してください。',
+    already_piloting: 'すでに別の飛行機を操縦しています。',
+};
 
 /**
  * @typedef {object} AircraftSlot
@@ -135,33 +147,96 @@ export default class AircraftManager {
     }
 
     /**
-     * @returns {boolean}
+     * @param {number} [timeoutMs]
+     * @returns {Promise<boolean>}
+     */
+    async _waitForSocketConnected(timeoutMs = BOARD_SOCKET_WAIT_MS) {
+        const socket = this.networkManager?.socket;
+        if (!socket) return false;
+        if (socket.connected) return true;
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = (ok) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                socket.off('connect', onConnect);
+                resolve(ok);
+            };
+            const onConnect = () => finish(true);
+            const timer = setTimeout(() => finish(false), timeoutMs);
+            socket.once('connect', onConnect);
+        });
+    }
+
+    /**
+     * @param {string} [code]
+     */
+    _reportBoardFailure(code) {
+        const msg =
+            (code && BOARD_ERROR_JA[code]) ||
+            (code ? `搭乗できませんでした（${code}）` : '搭乗できませんでした。');
+        console.warn('[AircraftManager] board failed:', code || 'unknown');
+        if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+            window.alert(msg);
+        }
+    }
+
+    /**
+     * @returns {Promise<boolean>}
      */
     async tryBoardNearest() {
         if (!this.nearestSlot || this.isPiloting || this.isPassenger || this.isMobileMode) return false;
         if (this.characterController.xrPresenting) return false;
         const slot = this.nearestSlot;
-        const socket = this.networkManager.socket;
-        if (!socket?.connected) return false;
+        if (!slot?.id || !slot?.root) {
+            this._reportBoardFailure('invalid_slot');
+            return false;
+        }
 
         if (this._slotHasOtherPilot(slot.id)) {
             this._enterPassenger(slot);
             return true;
         }
 
+        const socket = this.networkManager?.socket;
+        if (!socket) {
+            this._reportBoardFailure('bad_request');
+            return false;
+        }
+        if (!socket.connected) {
+            const connected = await this._waitForSocketConnected();
+            if (!connected) {
+                this._reportBoardFailure('bad_request');
+                return false;
+            }
+        }
+
         return new Promise((resolve) => {
+            let settled = false;
+            const finish = (ok) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve(ok);
+            };
+            const timer = setTimeout(() => {
+                this._reportBoardFailure('timeout');
+                finish(false);
+            }, BOARD_ACK_TIMEOUT_MS);
             socket.emit('aircraft-board', { slotId: slot.id }, (res) => {
                 if (res?.ok) {
                     this._enterPiloting(slot);
-                    resolve(true);
+                    finish(true);
                     return;
                 }
                 if (res?.error === 'busy') {
                     this._enterPassenger(slot);
-                    resolve(true);
+                    finish(true);
                     return;
                 }
-                resolve(false);
+                this._reportBoardFailure(res?.error);
+                finish(false);
             });
         });
     }
@@ -203,6 +278,7 @@ export default class AircraftManager {
         });
         this.aircraftController.unbind();
         this.aircraftController.bindPassengerView(slot);
+        this.aircraftController.updatePassengerCamera();
         this.uiManager.hideAircraftBoardPrompt();
 
         this._pilotKeyHandler = (e) => {
@@ -257,6 +333,7 @@ export default class AircraftManager {
             getQuaternion: (out) => this.aircraftController.getAvatarQuaternion(out)
         });
         this.aircraftController.bindSlot(slot);
+        this.aircraftController.snapPilotCamera();
         this.uiManager.showAircraftHud();
         this.uiManager.hideAircraftBoardPrompt();
 
