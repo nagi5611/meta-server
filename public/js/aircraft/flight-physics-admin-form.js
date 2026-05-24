@@ -4,6 +4,7 @@ import { DEFAULT_AIRCRAFT_PHYSICS, mergeAircraftPhysicsFromWorld } from '../../.
 
 /** @type {Record<string, string>} */
 const LABEL_JA = {
+    gravity: '重力加速度 (m/s²)',
     maxThrustSpeed: '最大推進速度 (m/s)',
     yawMaxDeg: 'ヨー 最大角度 (°)',
     yawMaxRate: 'ヨー 最大角速度 (rad/s)',

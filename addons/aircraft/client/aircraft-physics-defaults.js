@@ -9,8 +9,7 @@ export const AIRCRAFT_PHYSICS_INTERNAL = Object.freeze({
      * 直線運動のワールドスケール。パラメータ・HUD は名目 m / m/s のまま、
      * 実際の移動・加減速はこの倍率で適用（0.1 = 同じ表示速度で移動距離 1/10）。
      */
-    linearWorldScale: 0.4,
-    gravity: 9.81,
+    linearWorldScale: 0.6,
     /** 毎フレーム速度乗算（ゲーム用減衰） */
     drag: 0.985,
     /** 操縦入力オフ時の角速度減速 (rad/s²) */
@@ -41,6 +40,8 @@ export const FLAP_VFE_KNOTS = Object.freeze([250, 230, 215, 210, 190, 180]);
  * @type {Readonly<Record<string, number>>}
  */
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
+    /** 機体に働く重力加速度 (m/s²)。地球標準 9.81 */
+    gravity: 9.81,
     /** 最大推進速度 (m/s)。ユーザー指定 default 254 */
     maxThrustSpeed: 254,
     /** ヨー: 最大姿勢角 (°)。ラダー・側滑の粗い上限（推論） */
@@ -205,7 +206,10 @@ function applyLegacyPhysicsAliases(r) {
         r.rollMaxRate = r.rollRate;
     }
     if (typeof r.groundTireLateralDecel === 'number' && typeof r.tireKineticFriction !== 'number') {
-        const g = AIRCRAFT_PHYSICS_INTERNAL.gravity;
+        const g =
+            typeof r.gravity === 'number' && Number.isFinite(r.gravity)
+                ? r.gravity
+                : DEFAULT_AIRCRAFT_PHYSICS.gravity;
         if (g > 0) r.tireKineticFriction = r.groundTireLateralDecel / g;
     }
     if (typeof r.liftPerHorizontalSpeed === 'number') {
@@ -224,6 +228,7 @@ function applyLegacyPhysicsAliases(r) {
  * @returns {number}
  */
 function clipPhysicsValue(key, v) {
+    if (key === 'gravity') return Math.max(0.1, v);
     if (key === 'maxThrustSpeed') return Math.max(1, v);
     if (key.endsWith('Deg')) return Math.max(1, v);
     if (key.endsWith('MaxRate')) return Math.max(0.005, v);

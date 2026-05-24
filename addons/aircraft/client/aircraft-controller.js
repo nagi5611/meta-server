@@ -596,7 +596,7 @@ export default class AircraftController {
         const ph = this.physics;
         const dec = AIRCRAFT_PHYSICS_INTERNAL.angularDecel;
         const ls = AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale;
-        const g = AIRCRAFT_PHYSICS_INTERNAL.gravity * ls;
+        const g = ph.gravity * ls;
         const maxSpdNom = ph.maxThrustSpeed;
         const maxSpd = maxSpdNom * ls;
 
