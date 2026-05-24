@@ -1,6 +1,6 @@
 // addons/aircraft/client/aircraft-controller.js — キネマティック飛行（四元数・-Z 前進・BVH 下向きレイ接地）
 // 入力: 矢印=スロットル/フラップ、W/S=ピッチ、A/D=ロール、Q/E=ラダー、Space=ブレーキ
-// 直線運動は AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale（既定 0.1）でワールド移動のみ縮小。パラメータ・HUD は名目 m/s。
+// 直線運動は AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale（既定 0.4）でワールド移動のみ縮小。パラメータ・HUD は名目 m/s。
 // FBW 風は簡易モデル（一般向け航空解説ベースのゲイン・Vfe 近似。実機 FCOM 非根拠）
 
 import * as THREE from 'three';

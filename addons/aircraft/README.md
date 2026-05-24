@@ -82,7 +82,7 @@ Blender 側で **オブジェクト名をユニークに**し、階層パス（�
 
 操縦中のプロペラ表示はエンジン回転数（RPM / `engineMaxRpm`）を基準にします。推力は回転数から `thrustAccelFromEngineRpm` で算出し、上下矢印はスロットル 0–100%（`throttleSpoolPerS`）、回転数は目標 RPM へ `engineRpmAccel` で追従します。
 
-直線運動は `AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale`（既定 **0.1**）でワールド上の移動・加減速のみ縮小します。`maxThrustSpeed` や HUD の m/s 表示は名目値のままです（254 m/s 表示時の実移動は約 25.4 m/s 相当）。
+直線運動は `AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale`（既定 **0.4**）でワールド上の移動・加減速のみ縮小します。`maxThrustSpeed` や HUD の m/s 表示は名目値のままです（254 m/s 表示時の実移動は約 101.6 m/s 相当）。
 
 ## Blender / 命名の注意
 

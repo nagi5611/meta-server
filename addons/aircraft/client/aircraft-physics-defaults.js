@@ -9,7 +9,7 @@ export const AIRCRAFT_PHYSICS_INTERNAL = Object.freeze({
      * 直線運動のワールドスケール。パラメータ・HUD は名目 m / m/s のまま、
      * 実際の移動・加減速はこの倍率で適用（0.1 = 同じ表示速度で移動距離 1/10）。
      */
-    linearWorldScale: 0.1,
+    linearWorldScale: 0.4,
     gravity: 9.81,
     /** 毎フレーム速度乗算（ゲーム用減衰） */
     drag: 0.985,
