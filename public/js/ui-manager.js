@@ -604,7 +604,10 @@ ${t('ui.aircraftHudLinesHtml')}
         const p = el('aircraft-hud-pitch');
         const r = el('aircraft-hud-roll');
         const y = el('aircraft-hud-yaw');
-        if (s) s.textContent = q(snap.speedMs, 1);
+        if (s) {
+            const kmh = Number.isFinite(snap.speedMs) ? snap.speedMs * 3.6 : NaN;
+            s.textContent = q(kmh, 0);
+        }
         if (p) p.textContent = q(snap.pitchDeg, 1);
         if (r) r.textContent = q(snap.rollDeg, 1);
         if (y) {
