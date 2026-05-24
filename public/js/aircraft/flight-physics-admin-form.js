@@ -40,7 +40,7 @@ export function mountFlightPhysicsForm(container) {
     hint.className = 'hint';
     hint.style.margin = '0 0 8px';
     hint.textContent =
-        'B787-9 目安の既定値です。保存時にクリップされます。旧キー（maxSpeed 等）は読み込み時に自動変換されます。';
+        'B787-9 目安の既定値です。保存時は下限のみクランプされます（上限なし）。旧キー（maxSpeed 等）は読み込み時に自動変換されます。';
     container.appendChild(hint);
     for (const key of Object.keys(DEFAULT_AIRCRAFT_PHYSICS)) {
         const def = /** @type {number} */ (DEFAULT_AIRCRAFT_PHYSICS[/** @type {keyof typeof DEFAULT_AIRCRAFT_PHYSICS} */ (key)]);

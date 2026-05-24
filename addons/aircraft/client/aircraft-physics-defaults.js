@@ -219,24 +219,24 @@ function applyLegacyPhysicsAliases(r) {
  * @returns {number}
  */
 function clipPhysicsValue(key, v) {
-    if (key === 'maxThrustSpeed') return Math.min(600, Math.max(1, v));
-    if (key.endsWith('Deg')) return Math.min(90, Math.max(1, v));
-    if (key.endsWith('MaxRate')) return Math.min(10, Math.max(0.005, v));
-    if (key.endsWith('MaxAccel')) return Math.min(40, Math.max(0.01, v));
-    if (key.startsWith('flapLiftCoeff')) return Math.min(3, Math.max(0, v));
+    if (key === 'maxThrustSpeed') return Math.max(1, v);
+    if (key.endsWith('Deg')) return Math.max(1, v);
+    if (key.endsWith('MaxRate')) return Math.max(0.005, v);
+    if (key.endsWith('MaxAccel')) return Math.max(0.01, v);
+    if (key.startsWith('flapLiftCoeff')) return Math.max(0, v);
     if (key === 'tireStaticFriction' || key === 'tireKineticFriction') {
-        return Math.min(2, Math.max(0.05, v));
+        return Math.max(0.05, v);
     }
-    if (key === 'engineMaxRpm') return Math.min(120000, Math.max(100, v));
-    if (key === 'throttleSpoolPerS') return Math.min(5, Math.max(0.02, v));
-    if (key === 'engineRpmAccel') return Math.min(50000, Math.max(10, v));
-    if (key === 'thrustAccelPerEngineRpm') return Math.min(50, Math.max(0.1, v));
-    if (key === 'tireBrakeAccel') return Math.min(15, Math.max(0.5, v));
-    return Math.min(500, Math.max(0.001, v));
+    if (key === 'engineMaxRpm') return Math.max(100, v);
+    if (key === 'throttleSpoolPerS') return Math.max(0.02, v);
+    if (key === 'engineRpmAccel') return Math.max(10, v);
+    if (key === 'thrustAccelPerEngineRpm') return Math.max(0.1, v);
+    if (key === 'tireBrakeAccel') return Math.max(0.5, v);
+    return Math.max(0.001, v);
 }
 
 /**
- * worlds.json の aircraftPhysics を既定値でマージして検証クリップする。
+ * worlds.json の aircraftPhysics を既定値でマージし、下限のみクランプする。
  * @param {Record<string, unknown>|null|undefined} raw
  */
 export function mergeAircraftPhysicsFromWorld(raw) {
@@ -268,7 +268,7 @@ export function mergeAircraftPhysicsForObject(worldRaw, objectOverrideRaw) {
 }
 
 /**
- * ユーザーが貼り付けた JSON から、既知キーのみをクリップした機体上書きオブジェクトを返す。
+ * ユーザーが貼り付けた JSON から、既知キーのみを下限クランプした機体上書きオブジェクトを返す。
  * @param {unknown} raw
  * @returns {Record<string, number>|null}
  */
