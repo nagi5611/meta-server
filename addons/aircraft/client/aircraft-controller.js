@@ -807,6 +807,7 @@ export default class AircraftController {
         const maxRpmVis = ph.engineMaxRpm;
         let t01 = maxRpmVis > 0 ? this._engineRpm / maxRpmVis : 0;
         t01 = THREE.MathUtils.clamp(t01, 0, 1);
+        const ls = AIRCRAFT_PHYSICS_INTERNAL.linearWorldScale;
         const maxSpdVis = ph.maxThrustSpeed * ls;
         if (maxSpdVis > 0) {
             t01 = Math.max(t01, THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / maxSpdVis, 0, 1));
