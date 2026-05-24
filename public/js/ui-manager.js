@@ -637,7 +637,7 @@ ${t('ui.aircraftHudLinesHtml')}
         if (vf) {
             const lab = snap.flapLabel != null ? String(snap.flapLabel) : '';
             if (lab === 'UP' || typeof snap.vfeMs !== 'number' || !Number.isFinite(snap.vfeMs)) vf.textContent = '—';
-            else vf.textContent = q(snap.vfeMs, 0);
+            else vf.textContent = q(snap.vfeMs * 3.6, 0);
         }
         const vw = el('aircraft-hud-vfewarn');
         if (vw) vw.textContent = snap.vfeWarn ? t('ui.aircraftVfeWarn') : '';
