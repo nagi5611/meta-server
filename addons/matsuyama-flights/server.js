@@ -10,6 +10,9 @@ import { jstTodayYmd } from './lib/flight-date-jst.js';
 const LAYOUT_WARN_MSG =
     '[matsuyama-flights] ⚠️ 松山空港公式サイトのレイアウト変更を検知しました。ODPT/Jetstar バックアップに切り替えます。';
 
+const FETCH_WARN_MSG =
+    '[matsuyama-flights] ⚠️ 松山空港公式サイトの取得に失敗しました。ODPT/Jetstar バックアップに切り替えます。';
+
 /** @type {{
  *   ok: boolean,
  *   airport: string,
@@ -86,6 +89,16 @@ function warnLayoutChange(ctx, reasons) {
     for (const r of reasons) {
         ctx.logger.error(`[matsuyama-flights]   理由: ${r}`);
     }
+}
+
+/**
+ * 公式 HTML 取得失敗をログ警告（レイアウト変更とは別）
+ * @param {object} ctx
+ * @param {string} message
+ */
+function warnFetchFailure(ctx, message) {
+    ctx.logger.error(FETCH_WARN_MSG);
+    ctx.logger.error(`[matsuyama-flights]   理由: ${message}`);
 }
 
 /**
@@ -194,7 +207,7 @@ async function refreshBoard(ctx) {
         ctx.logger.warn('airport timetable fetch failed:', msg);
 
         if (odptKey) {
-            warnLayoutChange(ctx, [`取得失敗: ${msg}`]);
+            warnFetchFailure(ctx, msg);
             if (await applyBackupBoard(ctx, airportIata, odptKey)) {
                 return;
             }

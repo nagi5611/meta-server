@@ -1,5 +1,7 @@
 // addons/matsuyama-flights/lib/airport-timetable-client.js — 松山空港公式運行状況 HTML
 import * as cheerio from 'cheerio';
+import dns from 'node:dns';
+import https from 'node:https';
 import { jstTodayYmd, parseMinutes } from './flight-date-jst.js';
 import { orderFlightsForBoard } from './odpt-client.js';
 import { validateAirportTimetableLayout } from './layout-signature.js';
@@ -7,11 +9,24 @@ import { validateAirportTimetableLayout } from './layout-signature.js';
 export const DEFAULT_TIMETABLE_URL =
     'https://www.matsuyama-airport.co.jp/flight/timetable.html';
 
+/** Windows 等で IPv6 経路が失敗する環境向け */
+try {
+    dns.setDefaultResultOrder('ipv4first');
+} catch {
+    /* Node < 17 */
+}
+
 const FETCH_HEADERS = {
-    Accept: 'text/html,application/xhtml+xml',
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'ja,en;q=0.9',
-    'User-Agent': 'metaverse-matsuyama-flights/2.0',
+    'Cache-Control': 'no-cache',
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 metaverse-matsuyama-flights/2.1',
+    Referer: 'https://www.matsuyama-airport.co.jp/',
 };
+
+const FETCH_RETRY_ATTEMPTS = 3;
+const FETCH_RETRY_DELAY_MS = 2000;
 
 /**
  * 時刻文字列を HH:mm に正規化
@@ -32,7 +47,7 @@ function normalizeHm(raw) {
  */
 function parseScheduleCellHtml(html) {
     const s = String(html || '');
-    const struck = s.match(/<s[^>]*>([^<]*)<\/s>\s*([^<\s][^<]*)/i);
+    const struck = s.match(/<(?:s|del)[^>]*>([^<]*)<\/(?:s|del)>\s*([^<\s][^<]*)/i);
     if (struck) {
         const scheduledTime = normalizeHm(struck[1]);
         const displayTime = normalizeHm(struck[2]);
@@ -206,20 +221,123 @@ export function parseAirportTimetable(html) {
 }
 
 /**
- * 公式ページ HTML を取得
+ * fetch 失敗の原因コードをメッセージに付与
+ * @param {unknown} err
+ * @returns {string}
+ */
+function formatFetchError(err) {
+    const base = err instanceof Error ? err.message : String(err);
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause : null;
+    if (!cause) return base;
+    const code = cause.code ? ` (${cause.code})` : '';
+    return `${base}${code}: ${cause.message}`;
+}
+
+/**
+ * @param {number} ms
+ */
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+/**
+ * node:https で HTML を取得（fetch 失敗時のフォールバック）
+ * @param {string} url
+ * @returns {Promise<string>}
+ */
+function fetchAirportTimetableHtmlHttps(url) {
+    return new Promise((resolve, reject) => {
+        const req = https.get(
+            url,
+            {
+                headers: FETCH_HEADERS,
+                timeout: 30_000,
+            },
+            (res) => {
+                const loc = res.headers.location;
+                if (
+                    res.statusCode
+                    && res.statusCode >= 300
+                    && res.statusCode < 400
+                    && loc
+                ) {
+                    res.resume();
+                    fetchAirportTimetableHtmlHttps(
+                        loc.startsWith('http') ? loc : new URL(loc, url).href
+                    )
+                        .then(resolve)
+                        .catch(reject);
+                    return;
+                }
+                if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+                    reject(
+                        new Error(`Airport timetable HTTP ${res.statusCode ?? 'unknown'}`)
+                    );
+                    res.resume();
+                    return;
+                }
+                /** @type {Buffer[]} */
+                const chunks = [];
+                res.on('data', (chunk) => chunks.push(chunk));
+                res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+            }
+        );
+        req.on('timeout', () => {
+            req.destroy(new Error('Airport timetable HTTPS timeout'));
+        });
+        req.on('error', reject);
+    });
+}
+
+/**
+ * 1 回の fetch 試行
+ * @param {string} url
+ * @returns {Promise<string>}
+ */
+async function fetchAirportTimetableHtmlOnce(url) {
+    try {
+        const res = await fetch(url, {
+            headers: FETCH_HEADERS,
+            redirect: 'follow',
+            signal: AbortSignal.timeout(30_000),
+        });
+        if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            throw new Error(`Airport timetable HTTP ${res.status}: ${text.slice(0, 200)}`);
+        }
+        return res.text();
+    } catch (fetchErr) {
+        try {
+            return await fetchAirportTimetableHtmlHttps(url);
+        } catch (httpsErr) {
+            const msg = formatFetchError(fetchErr);
+            const httpsMsg = formatFetchError(httpsErr);
+            throw new Error(`${msg}; https fallback: ${httpsMsg}`);
+        }
+    }
+}
+
+/**
+ * 公式ページ HTML を取得（リトライ付き）
  * @param {string} url
  * @returns {Promise<string>}
  */
 export async function fetchAirportTimetableHtml(url = DEFAULT_TIMETABLE_URL) {
-    const res = await fetch(url, {
-        headers: FETCH_HEADERS,
-        signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Airport timetable HTTP ${res.status}: ${text.slice(0, 200)}`);
+    /** @type {Error|null} */
+    let lastErr = null;
+    for (let attempt = 1; attempt <= FETCH_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+            return await fetchAirportTimetableHtmlOnce(url);
+        } catch (err) {
+            lastErr = err instanceof Error ? err : new Error(String(err));
+            if (attempt < FETCH_RETRY_ATTEMPTS) {
+                await sleep(FETCH_RETRY_DELAY_MS);
+            }
+        }
     }
-    return res.text();
+    throw lastErr ?? new Error('Airport timetable fetch failed');
 }
 
 /**

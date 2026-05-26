@@ -51,6 +51,8 @@ HTML レイアウトが想定と異なる場合は **ODPT（JAL/ANA）+ Jetstar*
 
 ## 注意
 
+- コンソールの「レイアウト変更」と「取得失敗」は別です。`fetch failed` はネットワーク到達性の問題です（IPv6・プロキシ・DNS 等）。v3.1.4 以降はリトライ・IPv4 優先・HTTPS フォールバックを試行します。
+- オフライン検証: `node addons/matsuyama-flights/test-fixtures/test-parse.mjs`
 - 公式サイトの HTML 構造変更時は `lib/layout-signature.js` の更新が必要になる場合があります。
 - 公式ページの利用条件は未確認です。アクセス頻度は `pollIntervalMs` で控えめにしてください。
 - バックアップ利用時の ODPT データは [公共交通オープンデータ基本ライセンス](https://developer.odpt.org/terms) に従ってください。
