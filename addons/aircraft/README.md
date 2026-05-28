@@ -2,6 +2,7 @@
 
 ## バージョン
 
+- **1.3.0** — 操縦 **Hard / Easy** 二系統。機体ライブラリに `controlMode` と Hard/Easy それぞれの `flightPhysics*` / `camera*` を保存。管理パネルでモード宣言・両プロファイル編集。
 - **1.1.0** — 管理パネル「飛行機」タブで機体ライブラリ（prefab ZIP・パーツロール・アニメ JSON）を SQLite に保存。`prefabManifest` と `aircraft` の併用、`aircraftLibraryId` による操縦中のエンジンブレード等のローカル表示。
 
 ## 有効化
@@ -43,6 +44,20 @@
 ### 機体ライブラリ ID（任意）
 
 `models[].aircraft.aircraftLibraryId` に、管理画面「飛行機」で登録した機体 ID（例: `b787`）を書くと、クライアントが `GET /api/addons/aircraft/airframes/b787` で定義を取得し、**エンジンブレード**（`bindings.engineBlade` の名前パス + `animation.engineBlade`）に基づきローカルで回転表示します。ネットワークにはプロペラ角を載せません（各クライアントが同じ定義で再現）。
+
+### 操縦モード Hard / Easy
+
+| | **Hard** | **Easy** |
+|---|----------|----------|
+| 用途 | 現行の本格キネマティック（RPM・フラップ・Vfe） | アーケード（Git `9239d93` 由来の旧 public/js 操縦） |
+| 推力 | 上下矢印スロットル | W/S |
+| ヨー | Q/E | A/D |
+| ピッチ/ロール | W/S・A/D | 矢印キー |
+| バンク | FBW 目安（大きめ） | ±30° クランプ |
+| DB | `physics_json` / `camera_json` | `physics_easy_json` / `camera_easy_json` |
+| 実行 | `control_mode` が `hard` または `easy` |
+
+管理「飛行機」タブで **ZIP アップロード前に Hard/Easy を宣言**し、パラメータ・視点は Hard/Easy サブタブでそれぞれ編集します。API 応答の `flightPhysics` / `camera` は `controlMode` に対応するアクティブ側のエイリアスです。
 
 ### worlds.json の例
 

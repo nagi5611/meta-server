@@ -4738,6 +4738,26 @@ body.admin-dark .admin-avatar-editor {
     padding: 12px;
     overflow: auto;
 }
+.ac-control-mode-toolbar,
+.ac-control-mode-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin: 0 0 10px;
+    font-size: 12px;
+}
+.ac-control-mode-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+.ac-profile-tabbar {
+    display: flex;
+    gap: 4px;
+    margin: 6px 0 8px;
+}
 .ac-right-tabbar {
     display: flex;
     flex-wrap: wrap;

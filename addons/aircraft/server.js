@@ -3,7 +3,14 @@ import express from 'express';
 import { HOOKS } from '../../lib/hook-registry.js';
 import { registerAircraftSocketHandlers } from '../../lib/aircraft-server/register-socket.js';
 import { mergeAircraftPhysicsFromWorld } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
-import { appendAircraftPhysicsValidationErrors } from '../../lib/aircraft-server/validate-worlds.js';
+import {
+    mergeEasyAircraftPhysicsFromWorld,
+    normalizeAircraftControlMode,
+} from '../../addons/aircraft/client/aircraft-physics-easy-defaults.js';
+import {
+    appendAircraftPhysicsValidationErrors,
+    appendEasyAircraftPhysicsValidationErrors,
+} from '../../lib/aircraft-server/validate-worlds.js';
 
 const AIRFRAME_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 const JSON_BODY_LIMIT = 512 * 1024;
@@ -78,17 +85,32 @@ function parseAnimation(raw) {
 
 /**
  * @param {unknown} raw
+ * @param {'hard'|'easy'} kind
  * @returns {{ ok: true, obj: Record<string, number> } | { ok: false, error: string }}
  */
-function parseFlightPhysics(raw) {
-    if (raw == null) return { ok: true, obj: mergeAircraftPhysicsFromWorld(null) };
-    if (!isPlainObject(raw)) return { ok: false, error: 'flightPhysics must be an object' };
-    const merged = mergeAircraftPhysicsFromWorld(raw);
+function parseFlightPhysics(raw, kind = 'hard') {
+    const label = kind === 'easy' ? 'flightPhysicsEasy' : 'flightPhysicsHard';
+    if (raw == null) {
+        return {
+            ok: true,
+            obj:
+                kind === 'easy'
+                    ? mergeEasyAircraftPhysicsFromWorld(null)
+                    : mergeAircraftPhysicsFromWorld(null),
+        };
+    }
+    if (!isPlainObject(raw)) return { ok: false, error: `${label} must be an object` };
+    const merged =
+        kind === 'easy' ? mergeEasyAircraftPhysicsFromWorld(raw) : mergeAircraftPhysicsFromWorld(raw);
     const errs = [];
-    appendAircraftPhysicsValidationErrors(merged, 'flightPhysics', errs);
+    if (kind === 'easy') {
+        appendEasyAircraftPhysicsValidationErrors(merged, label, errs);
+    } else {
+        appendAircraftPhysicsValidationErrors(merged, label, errs);
+    }
     if (errs.length) return { ok: false, error: errs[0] };
     const s = JSON.stringify(merged);
-    if (s.length > 32000) return { ok: false, error: 'flightPhysics JSON too large' };
+    if (s.length > 32000) return { ok: false, error: `${label} JSON too large` };
     return { ok: true, obj: merged };
 }
 
@@ -161,8 +183,10 @@ function rowToAirframe(db, id) {
     if (!row) return null;
     let bindings = {};
     let animation = {};
-    let flightPhysicsRaw = {};
-    let cameraRaw = {};
+    let flightPhysicsHardRaw = {};
+    let flightPhysicsEasyRaw = {};
+    let cameraHardRaw = {};
+    let cameraEasyRaw = {};
     try {
         bindings = row.bindings_json ? JSON.parse(String(row.bindings_json)) : {};
     } catch {
@@ -174,25 +198,49 @@ function rowToAirframe(db, id) {
         animation = {};
     }
     try {
-        flightPhysicsRaw = row.physics_json ? JSON.parse(String(row.physics_json)) : {};
+        flightPhysicsHardRaw = row.physics_json ? JSON.parse(String(row.physics_json)) : {};
     } catch {
-        flightPhysicsRaw = {};
+        flightPhysicsHardRaw = {};
     }
     try {
-        cameraRaw = row.camera_json ? JSON.parse(String(row.camera_json)) : {};
+        flightPhysicsEasyRaw = row.physics_easy_json ? JSON.parse(String(row.physics_easy_json)) : {};
     } catch {
-        cameraRaw = {};
+        flightPhysicsEasyRaw = {};
     }
-    const fp = parseFlightPhysics(flightPhysicsRaw);
-    const cam = parseCameraJson(cameraRaw);
+    try {
+        cameraHardRaw = row.camera_json ? JSON.parse(String(row.camera_json)) : {};
+    } catch {
+        cameraHardRaw = {};
+    }
+    try {
+        cameraEasyRaw = row.camera_easy_json ? JSON.parse(String(row.camera_easy_json)) : {};
+    } catch {
+        cameraEasyRaw = {};
+    }
+    const controlMode = normalizeAircraftControlMode(row.control_mode);
+    const fpHard = parseFlightPhysics(flightPhysicsHardRaw, 'hard');
+    const fpEasy = parseFlightPhysics(flightPhysicsEasyRaw, 'easy');
+    const camHard = parseCameraJson(cameraHardRaw);
+    const camEasy = parseCameraJson(cameraEasyRaw);
+    const flightPhysicsHard = fpHard.ok ? fpHard.obj : mergeAircraftPhysicsFromWorld(null);
+    const flightPhysicsEasy = fpEasy.ok ? fpEasy.obj : mergeEasyAircraftPhysicsFromWorld(null);
+    const cameraHard = camHard.ok && isPlainObject(camHard.obj) ? camHard.obj : {};
+    const cameraEasy = camEasy.ok && isPlainObject(camEasy.obj) ? camEasy.obj : {};
+    const activePhysics = controlMode === 'easy' ? flightPhysicsEasy : flightPhysicsHard;
+    const activeCamera = controlMode === 'easy' ? cameraEasy : cameraHard;
     return {
         id: String(row.id),
         displayName: String(row.display_name || ''),
         prefabManifest: String(row.prefab_manifest || ''),
+        controlMode,
         bindings: isPlainObject(bindings) ? bindings : {},
         animation: isPlainObject(animation) ? animation : {},
-        flightPhysics: fp.ok ? fp.obj : mergeAircraftPhysicsFromWorld(null),
-        camera: cam.ok && isPlainObject(cam.obj) ? cam.obj : {},
+        flightPhysicsHard,
+        flightPhysicsEasy,
+        cameraHard,
+        cameraEasy,
+        flightPhysics: activePhysics,
+        camera: activeCamera,
         updatedAt: String(row.updated_at || ''),
     };
 }
@@ -230,7 +278,7 @@ export default {
                     const db = ctx.openDatabase();
                     const rows = db
                         .prepare(
-                            'SELECT id, display_name, prefab_manifest, updated_at FROM aircraft_airframe ORDER BY id ASC'
+                            'SELECT id, display_name, prefab_manifest, control_mode, updated_at FROM aircraft_airframe ORDER BY id ASC'
                         )
                         .all();
                     res.json({
@@ -239,6 +287,7 @@ export default {
                             id: String(r.id),
                             displayName: String(r.display_name || ''),
                             prefabManifest: String(r.prefab_manifest || ''),
+                            controlMode: normalizeAircraftControlMode(r.control_mode),
                             updatedAt: String(r.updated_at || ''),
                         })),
                     });
@@ -275,10 +324,20 @@ export default {
                     if (!b.ok) return res.status(400).json({ error: b.error });
                     const a = parseAnimation(body.animation);
                     if (!a.ok) return res.status(400).json({ error: a.error });
-                    const fp = parseFlightPhysics(body.flightPhysics);
-                    if (!fp.ok) return res.status(400).json({ error: fp.error });
-                    const cam = parseCameraJson(body.camera);
-                    if (!cam.ok) return res.status(400).json({ error: cam.error });
+                    const controlMode = normalizeAircraftControlMode(body.controlMode);
+                    const fpHardRaw =
+                        body.flightPhysicsHard != null ? body.flightPhysicsHard : body.flightPhysics;
+                    const fpEasyRaw = body.flightPhysicsEasy;
+                    const camHardRaw = body.cameraHard != null ? body.cameraHard : body.camera;
+                    const camEasyRaw = body.cameraEasy;
+                    const fpHard = parseFlightPhysics(fpHardRaw, 'hard');
+                    if (!fpHard.ok) return res.status(400).json({ error: fpHard.error });
+                    const fpEasy = parseFlightPhysics(fpEasyRaw, 'easy');
+                    if (!fpEasy.ok) return res.status(400).json({ error: fpEasy.error });
+                    const camHard = parseCameraJson(camHardRaw);
+                    if (!camHard.ok) return res.status(400).json({ error: camHard.error });
+                    const camEasy = parseCameraJson(camEasyRaw);
+                    if (!camEasy.ok) return res.status(400).json({ error: camEasy.error });
 
                     const exists = db.prepare('SELECT 1 FROM aircraft_airframe WHERE id = ?').get(id);
                     if (exists) {
@@ -290,6 +349,9 @@ export default {
                                 animation_json = ?,
                                 physics_json = ?,
                                 camera_json = ?,
+                                control_mode = ?,
+                                physics_easy_json = ?,
+                                camera_easy_json = ?,
                                 updated_at = datetime('now')
                              WHERE id = ?`
                         ).run(
@@ -297,22 +359,28 @@ export default {
                             prefabManifest,
                             JSON.stringify(b.obj),
                             JSON.stringify(a.obj),
-                            JSON.stringify(fp.obj),
-                            JSON.stringify(cam.obj),
+                            JSON.stringify(fpHard.obj),
+                            JSON.stringify(camHard.obj),
+                            controlMode,
+                            JSON.stringify(fpEasy.obj),
+                            JSON.stringify(camEasy.obj),
                             id
                         );
                     } else {
                         db.prepare(
-                            `INSERT INTO aircraft_airframe (id, display_name, prefab_manifest, bindings_json, animation_json, physics_json, camera_json, updated_at)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+                            `INSERT INTO aircraft_airframe (id, display_name, prefab_manifest, bindings_json, animation_json, physics_json, camera_json, control_mode, physics_easy_json, camera_easy_json, updated_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
                         ).run(
                             id,
                             displayName,
                             prefabManifest,
                             JSON.stringify(b.obj),
                             JSON.stringify(a.obj),
-                            JSON.stringify(fp.obj),
-                            JSON.stringify(cam.obj)
+                            JSON.stringify(fpHard.obj),
+                            JSON.stringify(camHard.obj),
+                            controlMode,
+                            JSON.stringify(fpEasy.obj),
+                            JSON.stringify(camEasy.obj)
                         );
                     }
                     const row = rowToAirframe(db, id);

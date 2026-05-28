@@ -29,7 +29,8 @@ const BOARD_ERROR_JA = {
  * @property {import('three').Vector3} parkedPosition
  * @property {import('three').Quaternion} parkedQuaternion
  * @property {import('three').Vector3} parkedScale
- * @property {Record<string, number>} [physics] — ワールド aircraftPhysics と models[].aircraft.aircraftPhysics をマージした操縦パラメータ
+ * @property {Record<string, number>} [physics] — 操縦パラメータ（hard/easy マージ済み）
+ * @property {'hard'|'easy'} [controlMode] — ライブラリの実行操縦モード
  * @property {string|null} [aircraftLibraryId] — SQLite 機体ライブラリ ID（prefab + 視覚アニメ用）
  * @property {string|null} [prefabManifest] — models[].prefabManifest（ライブラリ未指定時にマニフェスト一致で ID 解決）
  */

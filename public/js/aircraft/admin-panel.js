@@ -12,6 +12,12 @@ import {
     fillFlightPhysicsForm,
     readFlightPhysicsFromForm,
 } from './flight-physics-admin-form.js';
+import {
+    mountEasyFlightPhysicsForm,
+    fillEasyFlightPhysicsForm,
+    readEasyFlightPhysicsFromForm,
+} from './flight-physics-easy-admin-form.js';
+import { normalizeAircraftControlMode } from '../../../addons/aircraft/client/aircraft-physics-easy-defaults.js';
 import { migrateLegacyCameraToViewpoints, buildCameraJsonForPut } from './camera-viewpoints.js';
 import { applyMeshVisualEulerDegToModel, normalizeMeshVisualEulerDeg } from './mesh-visual-pivot.js';
 
@@ -26,6 +32,10 @@ let draftAirframe = null;
 let selectedViewpointId = null;
 /** @type {'object'|'params'|'branch'} */
 let activeRightTab = 'object';
+/** @type {'hard'|'easy'} */
+let activePhysicsProfile = 'hard';
+/** @type {'hard'|'easy'} */
+let activeViewpointProfile = 'hard';
 /** @type {((e: KeyboardEvent) => void) | null} */
 let acVpKeydownHandler = null;
 
@@ -145,7 +155,8 @@ async function reloadList() {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = `ac-airframe-item${selectedAirframeId === a.id ? ' selected' : ''}`;
-        btn.textContent = `${a.id} — ${a.displayName || '(無名)'}`;
+        const modeTag = normalizeAircraftControlMode(a.controlMode) === 'easy' ? 'EASY' : 'HARD';
+        btn.textContent = `${a.id} — ${a.displayName || '(無名)'} [${modeTag}]`;
         btn.dataset.id = a.id;
         btn.addEventListener('click', () => {
             void selectAirframe(a.id);
@@ -264,8 +275,18 @@ function syncFormFromDraft() {
     }
     const delBtn = document.getElementById('ac-btn-delete');
     if (delBtn) delBtn.disabled = !d?.id;
-    fillFlightPhysicsForm(d?.flightPhysics);
-    const camMesh = d?.camera && typeof d.camera === 'object' ? d.camera : {};
+    const cm = normalizeAircraftControlMode(d?.controlMode);
+    document.querySelectorAll('input[name="ac-control-mode"]').forEach((el) => {
+        if (el instanceof HTMLInputElement) el.checked = el.value === cm;
+    });
+    fillFlightPhysicsForm(d?.flightPhysicsHard ?? d?.flightPhysics);
+    fillEasyFlightPhysicsForm(d?.flightPhysicsEasy);
+    const camMesh =
+        d?.cameraHard && typeof d.cameraHard === 'object'
+            ? d.cameraHard
+            : d?.camera && typeof d.camera === 'object'
+              ? d.camera
+              : {};
     const me = normalizeMeshVisualEulerDeg(camMesh.meshVisualEulerDeg);
     setVal('ac-mesh-rx', String(me.x));
     setVal('ac-mesh-ry', String(me.y));
@@ -276,10 +297,36 @@ function syncFormFromDraft() {
 }
 
 /**
+ * @returns {'hard'|'easy'}
+ */
+function readControlModeFromForm() {
+    const el = /** @type {HTMLInputElement|null} */ (
+        document.querySelector('input[name="ac-control-mode"]:checked')
+    );
+    return normalizeAircraftControlMode(el?.value);
+}
+
+/**
+ * @param {'hard'|'easy'} profile
+ * @returns {Record<string, unknown>}
+ */
+function getDraftCameraBucket(profile) {
+    if (!draftAirframe) return {};
+    const key = profile === 'easy' ? 'cameraEasy' : 'cameraHard';
+    const cur = draftAirframe[key];
+    if (cur && typeof cur === 'object' && !Array.isArray(cur)) return /** @type {Record<string, unknown>} */ (cur);
+    if (profile === 'hard' && draftAirframe.camera && typeof draftAirframe.camera === 'object') {
+        return /** @type {Record<string, unknown>} */ (draftAirframe.camera);
+    }
+    draftAirframe[key] = {};
+    return /** @type {Record<string, unknown>} */ (draftAirframe[key]);
+}
+
+/**
  * @returns {ReturnType<typeof migrateLegacyCameraToViewpoints>}
  */
 function getViewpointsList() {
-    return migrateLegacyCameraToViewpoints(draftAirframe?.camera);
+    return migrateLegacyCameraToViewpoints(getDraftCameraBucket(activeViewpointProfile));
 }
 
 /**
@@ -288,7 +335,38 @@ function getViewpointsList() {
  */
 function applyViewpointsToDraftCamera(vps) {
     if (!draftAirframe) return;
-    draftAirframe.camera = buildCameraJsonForPut(draftAirframe.camera || {}, vps);
+    const key = activeViewpointProfile === 'easy' ? 'cameraEasy' : 'cameraHard';
+    draftAirframe[key] = buildCameraJsonForPut(getDraftCameraBucket(activeViewpointProfile), vps);
+}
+
+/**
+ * @param {'hard'|'easy'} profile
+ * @returns {void}
+ */
+function setActivePhysicsProfile(profile) {
+    activePhysicsProfile = profile === 'easy' ? 'easy' : 'hard';
+    document.querySelectorAll('[data-ac-physics-profile]').forEach((btn) => {
+        const t = /** @type {HTMLElement} */ (btn).dataset.acPhysicsProfile;
+        btn.classList.toggle('is-active', t === activePhysicsProfile);
+    });
+    const hardPane = document.getElementById('ac-physics-pane-hard');
+    const easyPane = document.getElementById('ac-physics-pane-easy');
+    if (hardPane) hardPane.style.display = activePhysicsProfile === 'hard' ? '' : 'none';
+    if (easyPane) easyPane.style.display = activePhysicsProfile === 'easy' ? '' : 'none';
+}
+
+/**
+ * @param {'hard'|'easy'} profile
+ * @returns {void}
+ */
+function setActiveViewpointProfile(profile) {
+    readViewpointDetailIntoDraft();
+    activeViewpointProfile = profile === 'easy' ? 'easy' : 'hard';
+    document.querySelectorAll('[data-ac-vp-profile]').forEach((btn) => {
+        const t = /** @type {HTMLElement} */ (btn).dataset.acVpProfile;
+        btn.classList.toggle('is-active', t === activeViewpointProfile);
+    });
+    syncViewpointPanelFromDraft();
 }
 
 /**
@@ -539,16 +617,28 @@ async function saveDraft() {
     const prevAnim =
         draftAirframe.animation && typeof draftAirframe.animation === 'object' ? draftAirframe.animation : {};
     const animation = { ...prevAnim, ...readAnimationFromForm() };
+    if (activeRightTab === 'branch') readViewpointDetailIntoDraft();
+    const meshEuler = readMeshVisualEulerFromForm();
+    const camHardBase =
+        draftAirframe.cameraHard && typeof draftAirframe.cameraHard === 'object'
+            ? draftAirframe.cameraHard
+            : draftAirframe.camera || {};
+    const camEasyBase =
+        draftAirframe.cameraEasy && typeof draftAirframe.cameraEasy === 'object'
+            ? draftAirframe.cameraEasy
+            : {};
+    const hardVps = migrateLegacyCameraToViewpoints(camHardBase);
+    const easyVps = migrateLegacyCameraToViewpoints(camEasyBase);
     const body = {
         displayName: String(document.getElementById('ac-field-display')?.value || '').trim(),
         prefabManifest: String(document.getElementById('ac-field-manifest')?.value || '').trim(),
+        controlMode: readControlModeFromForm(),
         bindings,
         animation,
-        flightPhysics: readFlightPhysicsFromForm(),
-        camera: buildCameraJsonForPut(
-            { ...(draftAirframe.camera || {}), meshVisualEulerDeg: readMeshVisualEulerFromForm() },
-            getViewpointsList()
-        ),
+        flightPhysicsHard: readFlightPhysicsFromForm(),
+        flightPhysicsEasy: readEasyFlightPhysicsFromForm(),
+        cameraHard: buildCameraJsonForPut({ ...camHardBase, meshVisualEulerDeg: meshEuler }, hardVps),
+        cameraEasy: buildCameraJsonForPut({ ...camEasyBase, meshVisualEulerDeg: meshEuler }, easyVps),
     };
     setStatus('保存中…');
     const data = await fetchJson(`/admin/addons/aircraft/airframes/${encodeURIComponent(draftAirframe.id)}`, {
@@ -574,6 +664,11 @@ export function initAircraftAdminPanel() {
     root.innerHTML = `
         <div class="ac-admin-layout">
             <aside class="ac-admin-left">
+                <div class="ac-control-mode-toolbar">
+                    <span class="prop-label">操縦モード（アップロード・新規機体時）</span>
+                    <label class="ac-control-mode-opt"><input type="radio" name="ac-control-mode" value="hard" checked /> Hard（本格）</label>
+                    <label class="ac-control-mode-opt"><input type="radio" name="ac-control-mode" value="easy" /> Easy（アーケード）</label>
+                </div>
                 <div class="ac-plane-upload-toolbar">
                     <button type="button" class="btn btn-secondary" id="ac-btn-upload-model">モデルをアップロードする</button>
                     <input type="file" id="ac-plane-zip-input" accept=".zip,application/zip" hidden />
@@ -596,6 +691,11 @@ export function initAircraftAdminPanel() {
                     <input type="text" id="ac-field-id" class="prop-input full" readonly /></div>
                 <div class="field-row"><label class="prop-label" for="ac-field-display">表示名</label>
                     <input type="text" id="ac-field-display" class="prop-input full" /></div>
+                <div class="field-row ac-control-mode-row">
+                    <span class="prop-label">実行操縦モード</span>
+                    <label class="ac-control-mode-opt"><input type="radio" name="ac-control-mode" value="hard" checked /> Hard</label>
+                    <label class="ac-control-mode-opt"><input type="radio" name="ac-control-mode" value="easy" /> Easy</label>
+                </div>
                 <div class="field-row"><label class="prop-label" for="ac-field-manifest">prefab マニフェスト</label>
                     <input type="text" id="ac-field-manifest" class="prop-input full" readonly placeholder="plane/...-prefab-manifest.json" /></div>
                 <div class="field-row">
@@ -625,7 +725,12 @@ export function initAircraftAdminPanel() {
                 </div>
                 <div id="ac-pane-params" class="ac-tab-pane" style="display:none">
                     <h3 class="section-subtitle">操縦パラメータ</h3>
-                    <div id="ac-flight-physics-mount"></div>
+                    <div class="ac-profile-tabbar" role="tablist">
+                        <button type="button" class="ac-tab-btn is-active" data-ac-physics-profile="hard" role="tab">Hard</button>
+                        <button type="button" class="ac-tab-btn" data-ac-physics-profile="easy" role="tab">Easy</button>
+                    </div>
+                    <div id="ac-physics-pane-hard"><div id="ac-flight-physics-mount"></div></div>
+                    <div id="ac-physics-pane-easy" style="display:none"><div id="ac-flight-physics-easy-mount"></div></div>
                     <h3 class="section-subtitle">メッシュ見た目（°・YXZ）</h3>
                     <p class="hint" style="margin:0 0 8px;font-size:11px;">GLB 全体を機体ローカルで回すだけです。<strong>推力・ネット同期の前後はルートのまま</strong>なので、モデルの前向きと推進の見え方を合わせる用途に使います。</p>
                     <div class="prop-group-label">回転（Pitch X / Yaw Y / Roll Z）</div>
@@ -645,6 +750,10 @@ export function initAircraftAdminPanel() {
                 </div>
                 <div id="ac-pane-branch" class="ac-tab-pane" style="display:none">
                     <h3 class="section-subtitle">視点（カメラ）</h3>
+                    <div class="ac-profile-tabbar" role="tablist">
+                        <button type="button" class="ac-tab-btn is-active" data-ac-vp-profile="hard" role="tab">Hard 視点</button>
+                        <button type="button" class="ac-tab-btn" data-ac-vp-profile="easy" role="tab">Easy 視点</button>
+                    </div>
                     <p class="hint" style="margin:0 0 8px;">3D 上のマーカーをドラッグするか、数値・矢印キーで移動。ビューアを一度クリックしてからキー操作してください。</p>
                     <div class="ac-admin-actions" style="margin-top:0;">
                         <button type="button" class="btn btn-sm btn-primary" id="ac-vp-add">視点を追加</button>
@@ -692,6 +801,8 @@ export function initAircraftAdminPanel() {
     `;
 
     mountFlightPhysicsForm(document.getElementById('ac-flight-physics-mount'));
+    mountEasyFlightPhysicsForm(document.getElementById('ac-flight-physics-easy-mount'));
+    setActivePhysicsProfile('hard');
 
     const mount = document.getElementById('ac-viewer-mount');
     if (mount) {
@@ -719,6 +830,7 @@ export function initAircraftAdminPanel() {
                 body: JSON.stringify({
                     displayName,
                     prefabManifest: '',
+                    controlMode: readControlModeFromForm(),
                     bindings: {},
                     animation: defaultAnimationJson(),
                 }),
@@ -800,7 +912,10 @@ export function initAircraftAdminPanel() {
             const pm = String(json.prefabManifest || '').trim();
             if (!pm) throw new Error('no_prefab_manifest_in_response');
             await reloadPlaneManifestSelect();
-            setStatus(`アップロード完了: ${pm}`);
+            if (draftAirframe) {
+                draftAirframe.controlMode = readControlModeFromForm();
+            }
+            setStatus(`アップロード完了: ${pm}（操縦モード: ${readControlModeFromForm()}）`);
         } catch (e) {
             if (e instanceof Error && e.message === 'cancelled') {
                 setStatus('キャンセルしました');
@@ -841,8 +956,19 @@ export function initAircraftAdminPanel() {
 
     document.querySelectorAll('.ac-tab-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
-            const t = /** @type {HTMLElement} */ (btn).dataset.acTab;
+            const el = /** @type {HTMLElement} */ (btn);
+            const t = el.dataset.acTab;
             if (t === 'object' || t === 'params' || t === 'branch') setActiveRightTab(t);
+            const phys = el.dataset.acPhysicsProfile;
+            if (phys === 'hard' || phys === 'easy') setActivePhysicsProfile(phys);
+            const vp = el.dataset.acVpProfile;
+            if (vp === 'hard' || vp === 'easy') setActiveViewpointProfile(vp);
+        });
+    });
+
+    document.querySelectorAll('input[name="ac-control-mode"]').forEach((inp) => {
+        inp.addEventListener('change', () => {
+            if (draftAirframe) draftAirframe.controlMode = readControlModeFromForm();
         });
     });
 

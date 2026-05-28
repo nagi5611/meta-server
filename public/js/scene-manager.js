@@ -27,6 +27,10 @@ import {
     countTrianglesInObject
 } from './model-load-limits.js';
 import { mergeAircraftPhysicsForObject, mergeAircraftPhysicsFromWorld } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
+import {
+    mergeEasyAircraftPhysicsFromWorld,
+    normalizeAircraftControlMode,
+} from '../../addons/aircraft/client/aircraft-physics-easy-defaults.js';
 import { resolveLegacyCameraFromLibrary } from './aircraft/camera-viewpoints.js';
 import { applyMeshVisualEulerDegToModel } from './aircraft/mesh-visual-pivot.js';
 import {
@@ -1847,6 +1851,7 @@ class SceneManager {
         this.aircraftSlots.push({
             id,
             aircraftLibraryId: libId || null,
+            controlMode: 'hard',
             /** hydrate 前にマニフェストからライブラリ ID を解決するために保持 */
             prefabManifest: prefabManifest || null,
             position: { x: position.x, y: position.y, z: position.z },
@@ -1918,12 +1923,33 @@ class SceneManager {
                 const j = await r.json();
                 if (!r.ok || !j?.ok || !j?.airframe) continue;
                 const af = j.airframe;
-                const cam = af.camera && typeof af.camera === 'object' ? af.camera : {};
-                const fp = af.flightPhysics && typeof af.flightPhysics === 'object' ? af.flightPhysics : {};
-                const leg = resolveLegacyCameraFromLibrary(cam);
+                const controlMode = normalizeAircraftControlMode(af.controlMode);
+                const cam =
+                    controlMode === 'easy'
+                        ? af.cameraEasy && typeof af.cameraEasy === 'object'
+                            ? af.cameraEasy
+                            : af.camera
+                        : af.cameraHard && typeof af.cameraHard === 'object'
+                          ? af.cameraHard
+                          : af.camera;
+                const camObj = cam && typeof cam === 'object' ? cam : {};
+                const fpRaw =
+                    controlMode === 'easy'
+                        ? af.flightPhysicsEasy && typeof af.flightPhysicsEasy === 'object'
+                            ? af.flightPhysicsEasy
+                            : af.flightPhysics
+                        : af.flightPhysicsHard && typeof af.flightPhysicsHard === 'object'
+                          ? af.flightPhysicsHard
+                          : af.flightPhysics;
+                const fp = fpRaw && typeof fpRaw === 'object' ? fpRaw : {};
+                const leg = resolveLegacyCameraFromLibrary(camObj);
                 for (const slot of slots) {
                     if (String(slot.aircraftLibraryId || '').trim() !== lid) continue;
-                    slot.physics = mergeAircraftPhysicsFromWorld(fp);
+                    slot.controlMode = controlMode;
+                    slot.physics =
+                        controlMode === 'easy'
+                            ? mergeEasyAircraftPhysicsFromWorld(fp)
+                            : mergeAircraftPhysicsFromWorld(fp);
                     const ck = leg.cockpitOffset;
                     slot.cockpitOffset = {
                         x: typeof ck.x === 'number' && Number.isFinite(ck.x) ? ck.x : slot.cockpitOffset.x,

@@ -36,3 +36,10 @@ Thumbs.db
 
 # Data (DB, JSON - 環境ごとのデータはリポジトリに含めない)
 data/
+
+# 旧 meta-server 参照用ローカルコピー（リポジトリに含めない）
+/oldsystem/
+oldsystem/
+oldsystem/*
+oldsystem.zip
+
