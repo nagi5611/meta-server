@@ -7,7 +7,6 @@ const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
 const GROUNDED_Y_TOLERANCE = 0.15;
 const MAX_BANK_RAD = Math.PI / 6;
-const WHEEL_BRAKE_DECEL_MS2 = 32;
 
 /**
  * easy 操縦: 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -560,7 +559,7 @@ export default class AircraftControllerEasy {
                         hz /= lenH;
                         let fwdSpeed = this.velocity.x * hx + this.velocity.z * hz;
                         if (this.keys.brake) {
-                            const step = WHEEL_BRAKE_DECEL_MS2 * dt;
+                            const step = ph.wheelBrakeDecel * dt;
                             const mag = Math.abs(fwdSpeed);
                             if (mag > 0) {
                                 const ds = Math.min(mag, step);

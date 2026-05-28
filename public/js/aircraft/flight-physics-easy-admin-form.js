@@ -26,6 +26,7 @@ const LABEL_JA = {
     excessClimbDamping: '上昇過剰減衰 (1/s・0=無効)',
     gravity: '重力 (m/s²)',
     liftPerHorizontalSpeed: '揚力係数×水平速度 (1/s)',
+    wheelBrakeDecel: 'Space ブレーキ減速度・地上 (m/s²)',
 };
 
 /**
@@ -38,7 +39,7 @@ export function mountEasyFlightPhysicsForm(container) {
     hint.className = 'hint';
     hint.style.margin = '0 0 8px';
     hint.textContent =
-        'Easy（アーケード）操縦用。W/S=推力、A/D=ヨー、矢印=ピッチ/ロール、バンク ±30°。';
+        'Easy（アーケード）操縦用。W/S=推力、A/D=ヨー、矢印=ピッチ/ロール、Space=地上ブレーキ、バンク ±30°。';
     container.appendChild(hint);
     for (const key of Object.keys(DEFAULT_EASY_AIRCRAFT_PHYSICS)) {
         const def = /** @type {number} */ (

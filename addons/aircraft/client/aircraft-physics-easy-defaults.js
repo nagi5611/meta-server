@@ -21,6 +21,8 @@ export const DEFAULT_EASY_AIRCRAFT_PHYSICS = Object.freeze({
     excessClimbDamping: 0,
     gravity: 9.81,
     liftPerHorizontalSpeed: 0.35,
+    /** Space 押下時の地上ブレーキ減速度 (m/s²) */
+    wheelBrakeDecel: 32,
 });
 
 /**
@@ -39,6 +41,7 @@ function clipEasyPhysicsValue(key, v) {
     if (key === 'angularDecel' || key === 'yawGroundFrictionLeft' || key === 'yawGroundFrictionRight') {
         return Math.min(30, Math.max(0, v));
     }
+    if (key === 'wheelBrakeDecel') return Math.min(80, Math.max(0.5, v));
     if (
         key === 'pitchAccelGround' ||
         key === 'pitchAccelAir' ||
@@ -81,6 +84,9 @@ export function mergeEasyAircraftPhysicsFromWorld(raw) {
         if (typeof r.pitchAccelAir !== 'number') r.pitchAccelAir = r.pitchAccel;
     }
     if (typeof r.rollRate === 'number' && typeof r.rollMaxRate !== 'number') r.rollMaxRate = r.rollRate;
+    if (typeof r.tireBrakeAccel === 'number' && typeof r.wheelBrakeDecel !== 'number') {
+        r.wheelBrakeDecel = r.tireBrakeAccel;
+    }
 
     for (const k of Object.keys(DEFAULT_EASY_AIRCRAFT_PHYSICS)) {
         const v = r[k];
