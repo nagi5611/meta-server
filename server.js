@@ -81,6 +81,7 @@ import {
 } from './lib/plugin-bootstrap.js';
 import { getScalableAnimationSlotsForAdmin } from './lib/avator-scalable-bindings.js';
 import { setAddonEnabled, getAddonConfigEntries, setAddonConfigValue, deleteAddonConfigValue } from './db/addons-registry.js';
+import { registerAdminDatabaseExplorerRoutes } from './lib/admin-database-explorer.js';
 import { setAircraftServerDeps } from './lib/aircraft-server/deps-registry.js';
 import { validateWorldsAircraft, validateWorldsAircraftPhysics } from './lib/aircraft-server/validate-worlds.js';
 import {
@@ -1747,6 +1748,8 @@ app.get('/admin/', basicAuth, sendAdminMetaverseIndex);
 app.use('/admin', basicAuth);
 /** 管理画面（Basic 済み）から plane プレハブを取得する。/plane は S3 本番で Socket Cookie 必須のため別経路 */
 app.use('/admin/plane-asset', express.static(PLANE_DIR));
+
+registerAdminDatabaseExplorerRoutes(app);
 
 app.get('/admin/addons', (req, res) => {
     try {

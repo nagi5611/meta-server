@@ -4875,3 +4875,330 @@ body.admin-dark .ac-airframe-item.selected {
         min-height: 280px;
     }
 }
+
+/* データベース探索（D1 風） */
+.admin-panel-database {
+    display: none;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+}
+.admin-panel-database.active {
+    display: flex;
+}
+.db-explorer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    padding: 16px 20px;
+}
+.db-explorer-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+    margin-bottom: 8px;
+}
+.db-explorer-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.db-explorer-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.db-mode-tabs {
+    display: flex;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.db-mode-btn {
+    border: none;
+    background: #fafafa;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+}
+.db-mode-btn.active {
+    background: #e3f2fd;
+    color: #1565c0;
+    font-weight: 500;
+}
+.db-explorer-status {
+    font-size: 13px;
+    color: #666;
+    min-height: 1.2em;
+    flex-shrink: 0;
+}
+.db-status-error {
+    color: #c62828;
+}
+.db-explorer-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+}
+.db-explorer-col {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid #e0e0e0;
+}
+.db-explorer-databases {
+    width: 200px;
+    flex-shrink: 0;
+    background: #fafafa;
+}
+.db-explorer-tables {
+    width: 220px;
+    flex-shrink: 0;
+    background: #fcfcfc;
+}
+.db-explorer-main-col {
+    flex: 1;
+    min-width: 0;
+    border-right: none;
+}
+.db-col-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #888;
+    padding: 10px 12px 6px;
+    flex-shrink: 0;
+}
+.db-list-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 8px 12px;
+}
+.db-db-group-title {
+    font-size: 11px;
+    color: #999;
+    padding: 8px 4px 4px;
+}
+.db-db-item,
+.db-table-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 2px;
+}
+.db-db-item:hover,
+.db-table-item:hover {
+    background: #eee;
+}
+.db-db-item.active,
+.db-table-item.active {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+.db-db-missing {
+    opacity: 0.55;
+}
+.db-db-label,
+.db-table-name {
+    font-size: 13px;
+    font-weight: 500;
+}
+.db-db-meta,
+.db-table-meta {
+    font-size: 11px;
+    color: #888;
+}
+.db-explorer-main {
+    flex: 1;
+    overflow: auto;
+    padding: 12px 16px;
+    min-height: 0;
+}
+.db-main-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.db-main-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+.db-main-meta {
+    font-size: 13px;
+    color: #666;
+}
+.db-table-wrap {
+    overflow: auto;
+    max-height: min(55vh, 480px);
+    border: 1px solid #e8e8e8;
+    border-radius: 6px;
+    margin-bottom: 10px;
+}
+.db-data-table,
+.db-schema-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.db-data-table th,
+.db-data-table td,
+.db-schema-table th,
+.db-schema-table td {
+    border-bottom: 1px solid #eee;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.db-data-table th {
+    position: sticky;
+    top: 0;
+    background: #f5f5f5;
+    font-weight: 600;
+    z-index: 1;
+}
+.db-cell-redacted {
+    color: #888;
+    font-style: italic;
+}
+.db-empty,
+.db-empty-cell,
+.db-main-placeholder {
+    color: #888;
+    font-size: 13px;
+    padding: 12px;
+}
+.db-loading {
+    color: #666;
+    font-size: 13px;
+    padding: 12px;
+}
+.db-schema-details {
+    margin-bottom: 10px;
+    font-size: 13px;
+}
+.db-schema-details summary {
+    cursor: pointer;
+    font-weight: 500;
+    margin-bottom: 6px;
+}
+.db-sort-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.db-sort-chip {
+    border: 1px solid #ddd;
+    background: #fafafa;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.db-sort-chip.active {
+    border-color: #1565c0;
+    background: #e3f2fd;
+    color: #1565c0;
+}
+.db-pager {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+.db-sql-hint {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 8px;
+}
+.db-sql-input {
+    width: 100%;
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    resize: vertical;
+    margin-bottom: 8px;
+}
+.db-sql-warn {
+    font-size: 12px;
+    color: #e65100;
+    margin-bottom: 8px;
+}
+body.admin-dark .db-explorer-body {
+    background: #1e1e1e;
+    border-color: rgba(255, 255, 255, 0.12);
+}
+body.admin-dark .db-explorer-databases,
+body.admin-dark .db-explorer-tables {
+    background: #252525;
+}
+body.admin-dark .db-explorer-col {
+    border-right-color: rgba(255, 255, 255, 0.1);
+}
+body.admin-dark .db-db-item:hover,
+body.admin-dark .db-table-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+body.admin-dark .db-db-item.active,
+body.admin-dark .db-table-item.active {
+    background: rgba(21, 101, 192, 0.35);
+}
+body.admin-dark .db-data-table th {
+    background: #333;
+}
+body.admin-dark .db-data-table th,
+body.admin-dark .db-data-table td {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+body.admin-dark .db-table-wrap {
+    border-color: rgba(255, 255, 255, 0.12);
+}
+body.admin-dark .db-mode-tabs {
+    border-color: rgba(255, 255, 255, 0.15);
+}
+body.admin-dark .db-mode-btn {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ddd;
+}
+body.admin-dark .db-sql-input {
+    background: #2a2a2a;
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #eee;
+}
+@media (max-width: 900px) {
+    .db-explorer-body {
+        flex-direction: column;
+    }
+    .db-explorer-databases,
+    .db-explorer-tables {
+        width: 100%;
+        max-height: 160px;
+        border-right: none;
+        border-bottom: 1px solid #e0e0e0;
+    }
+}

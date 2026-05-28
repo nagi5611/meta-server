@@ -34,6 +34,7 @@ let lastTrafficSample = null;
 let bandwidthHistory = [];
 let worldEditInitialized = false;
 let aircraftAdminInitialized = false;
+let databaseAdminInitialized = false;
 let chartPanelInitialized = false;
 let securityPanelInitialized = false;
 /** アバター管理: GET /admin/avatars のキャッシュ（パネル内 UI 用） */
@@ -1736,6 +1737,17 @@ function switchPanel(panelId) {
             .catch((e) => {
                 console.error('Aircraft admin panel init failed:', e);
                 aircraftAdminInitialized = false;
+            });
+    }
+    if (panelId === 'panel-database' && !databaseAdminInitialized) {
+        databaseAdminInitialized = true;
+        import('/js/database-admin-panel.js')
+            .then((m) => {
+                m.initDatabaseAdminPanel();
+            })
+            .catch((e) => {
+                console.error('Database admin panel init failed:', e);
+                databaseAdminInitialized = false;
             });
     }
     if (panelId === 'panel-avatar-management') {
@@ -6114,7 +6126,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let initialPanel = params.get('panel');
     if (initialPanel === 'world-edit') initialPanel = 'panel-world-edit';
     if (initialPanel === 'security') initialPanel = 'panel-security';
-    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-aircraft', 'panel-avatar-management', 'panel-chart', 'panel-chart-inactive', 'panel-addons'];
+    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-aircraft', 'panel-database', 'panel-avatar-management', 'panel-chart', 'panel-chart-inactive', 'panel-addons'];
     if (initialPanel && validPanels.includes(initialPanel)) {
         switchPanel(initialPanel);
     }
