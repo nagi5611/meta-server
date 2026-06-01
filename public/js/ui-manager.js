@@ -345,6 +345,7 @@ class UIManager {
         this.hideMobileInteractButton();
         this.teleportPrompt.textContent = `${t('ui.teleportPrefix')}${destinationName}`;
         this.teleportPrompt.style.display = 'block';
+        this.teleportPrompt.setAttribute('aria-hidden', 'false');
     }
 
     /**
@@ -354,6 +355,7 @@ class UIManager {
         if (!this.teleportPrompt) return;
 
         this.teleportPrompt.style.display = 'none';
+        this.teleportPrompt.setAttribute('aria-hidden', 'true');
         this.hideMobileInteractButton();
     }
 

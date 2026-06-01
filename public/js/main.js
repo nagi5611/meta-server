@@ -300,6 +300,7 @@ class MetaverseApp {
             this.physicsManager,
             { isMobileMode: this.isMobileMode }
         );
+        this.teleportManager.setInputActiveCheck(() => this.characterController.isInputActive());
 
         // Set initial position
         this.characterController.setPosition(spawnPoint.x, spawnPoint.y, spawnPoint.z);

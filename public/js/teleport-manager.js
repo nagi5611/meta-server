@@ -34,6 +34,8 @@ class TeleportManager {
         this.teleportCallback = null;
         /** @type {(() => boolean)|null} E キー時に true を返すとテレポート等を行わない（飛行機搭乗用） */
         this._tryAircraftBoard = null;
+        /** @type {(() => boolean)|null} チャット入力中等はインタラクトを無効化 */
+        this._isInputActive = null;
         /** @type {((zone: { model: import('three').Object3D, clipName: string }) => void) | null} */
         this._glbInteractPlayHandler = null;
         /** @type {{ model: import('three').Object3D, radius: number, clipName: string, label: string, worldId: string, access: string }[]} */
@@ -77,6 +79,20 @@ class TeleportManager {
             e.preventDefault();
             doHandle();
         }, { passive: false });
+        // ポインターロック中はプロンプト要素へクリックが届かないため、座標で判定
+        document.addEventListener('mousedown', (e) => {
+            if (el.style.display !== 'block' || e.button !== 0) return;
+            const rect = el.getBoundingClientRect();
+            if (
+                e.clientX < rect.left || e.clientX > rect.right ||
+                e.clientY < rect.top || e.clientY > rect.bottom
+            ) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            doHandle();
+        }, true);
     }
 
     setPdfCallbacks(getPdfPath, openPdfViewer) {
@@ -94,6 +110,14 @@ class TeleportManager {
      */
     setAircraftBoardHandler(fn) {
         this._tryAircraftBoard = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * 入力欄フォーカス中などインタラクトを抑止する判定
+     * @param {(() => boolean)|null} fn
+     */
+    setInputActiveCheck(fn) {
+        this._isInputActive = typeof fn === 'function' ? fn : null;
     }
 
     /**
@@ -296,16 +320,27 @@ class TeleportManager {
      * Handle teleport action when E is pressed (PDF viewer takes priority over teleport)
      */
     handleTeleport() {
+        if (this._isInputActive && this._isInputActive()) return;
+
+        const runInteract = () => this._runInteractAfterAircraftCheck();
+
         if (this._tryAircraftBoard) {
             const boardResult = this._tryAircraftBoard();
             if (boardResult === true) return;
             if (boardResult && typeof boardResult.then === 'function') {
                 void boardResult.then((ok) => {
-                    if (ok) return;
+                    if (!ok) runInteract();
                 });
                 return;
             }
         }
+        runInteract();
+    }
+
+    /**
+     * 飛行機搭乗チェック後の E / クリック処理（太鼓・PDF・GLB・テレポート）
+     */
+    _runInteractAfterAircraftCheck() {
         // 優先度: 太鼓 > PDF > GLBインタラクト > テレポート
         if (this.nearestTaikoZone && this.openTaikoGame) {
             this.uiManager.hideTeleportPrompt();
