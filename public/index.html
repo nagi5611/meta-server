@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/visual-mode-high-contrast.css">
     <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
     <script>
         // アクセス制御
@@ -513,6 +514,14 @@
                             </div>
                         </div>
                         <div class="setting-description" data-i18n="settings.viewModeHint">1人称はアバターの頭部視点になります</div>
+                        <div class="setting-item">
+                            <label for="visualMode" data-i18n="settings.visualModeLabel">描画方法:</label>
+                            <select id="visualMode">
+                                <option value="standard" data-i18n="settings.visualModeStandard">標準</option>
+                                <option value="highContrast" data-i18n="settings.visualModeHighContrast">ハイコントラスト</option>
+                            </select>
+                            <div class="setting-description" data-i18n="settings.visualModeHint">空・地面・オブジェクトの明暗差を強め、UI も高コントラスト表示にします。露出はハイコントラスト時に少し上がります</div>
+                        </div>
                         <div class="setting-item">
                             <label for="graphicsTier" data-i18n="settings.graphicsTierLabel">描画品質:</label>
                             <select id="graphicsTier">

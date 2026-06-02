@@ -92,7 +92,8 @@ class MenuManager {
             pixelRatioCap: 1,
             viewDistanceM: 50,
             showViewRangeSpheres: false,
-            viewMode: 'third'
+            viewMode: 'third',
+            visualMode: 'standard'
         };
         
         this.init();
@@ -152,6 +153,14 @@ class MenuManager {
      */
     setSceneManager(sceneManager) {
         this.sceneManager = sceneManager;
+    }
+
+    /**
+     * PlayerManager を設定（描画方法のプレイヤー適用に使用）
+     * @param {import('./player-manager.js').default} playerManager
+     */
+    setPlayerManager(playerManager) {
+        this.playerManager = playerManager;
     }
 
     /**
@@ -542,6 +551,15 @@ class MenuManager {
         });
 
         // Draw settings
+        document.getElementById('visualMode')?.addEventListener('change', (e) => {
+            const v = e.target.value;
+            if (v === 'standard' || v === 'highContrast') {
+                this.settings.visualMode = v;
+            }
+            this.saveSettings();
+            this.sceneManager?.applyGraphicsSettings(this.settings);
+            this.playerManager?.applyVisualMode(this.settings.visualMode);
+        });
         document.getElementById('graphicsTier')?.addEventListener('change', (e) => {
             const v = e.target.value;
             if (v === 'high' || v === 'medium' || v === 'low') {
@@ -930,6 +948,7 @@ class MenuManager {
                 this.settings.pixelRatioCap = g.pixelRatioCap;
                 this.settings.viewDistanceM = g.viewDistanceM;
                 this.settings.showViewRangeSpheres = g.showViewRangeSpheres;
+                this.settings.visualMode = g.visualMode;
             } catch (e) {
                 console.error('Failed to load settings:', e);
             }
@@ -955,6 +974,11 @@ class MenuManager {
             document.getElementById('speakerDevice').value = this.settings.speakerDevice;
         }
 
+        const visualModeEl = document.getElementById('visualMode');
+        if (visualModeEl) {
+            const vm = this.settings.visualMode === 'highContrast' ? 'highContrast' : 'standard';
+            visualModeEl.value = vm;
+        }
         const graphicsTierEl = document.getElementById('graphicsTier');
         const toneExpEl = document.getElementById('toneMappingExposure');
         const toneExpValEl = document.getElementById('toneMappingExposureValue');

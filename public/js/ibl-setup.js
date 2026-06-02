@@ -10,6 +10,7 @@ export const DEFAULT_WORLD_AMBIENT_INTENSITY = 0.6;
 export const DEFAULT_WORLD_DIRECTIONAL_INTENSITY = 0.8;
 
 /** @typedef {'high'|'medium'|'low'} GraphicsTier */
+/** @typedef {'standard'|'highContrast'} VisualMode */
 
 /** メタバース描画距離（球半径・メートル相当）の既定・クランプ範囲 */
 export const VIEW_DISTANCE_M_DEFAULT = 50;
@@ -72,7 +73,7 @@ export function getAntialiasForTier(tier) {
 /**
  * localStorage 由来のオブジェクトを新スキーマに寄せる（旧 drawQualityLow / shadowQuality / fogFar を除去）
  * @param {Record<string, unknown>} raw
- * @returns {{ graphicsTier: GraphicsTier, toneMappingExposure: number, pixelRatioCap: number|'full', viewDistanceM: number, showViewRangeSpheres: boolean }}
+ * @returns {{ graphicsTier: GraphicsTier, toneMappingExposure: number, pixelRatioCap: number|'full', viewDistanceM: number, showViewRangeSpheres: boolean, visualMode: VisualMode }}
  */
 export function migrateLegacyGraphicsKeys(raw) {
     const s = { ...raw };
@@ -103,12 +104,16 @@ export function migrateLegacyGraphicsKeys(raw) {
 
     const showViewRangeSpheres = s.showViewRangeSpheres === true;
 
+    const visualMode =
+        s.visualMode === 'highContrast' ? 'highContrast' : 'standard';
+
     return {
         graphicsTier: normalizeGraphicsTier(String(graphicsTier)),
         toneMappingExposure,
         pixelRatioCap,
         viewDistanceM,
-        showViewRangeSpheres
+        showViewRangeSpheres,
+        visualMode
     };
 }
 

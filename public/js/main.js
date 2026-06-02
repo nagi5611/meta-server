@@ -495,7 +495,9 @@ class MetaverseApp {
             );
         });
         this.menuManager.setSceneManager(this.sceneManager);
+        this.menuManager.setPlayerManager(this.playerManager);
         this.sceneManager.applyGraphicsSettings(this.menuManager.settings);
+        this.playerManager.applyVisualMode(this.menuManager.settings.visualMode);
         this.characterController.setHeadPositionProvider((out) => this.playerManager.getLocalHeadWorldPosition(out));
 
         this.refreshLocalAvatarVisibility = () => {

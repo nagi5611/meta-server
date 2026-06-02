@@ -24,6 +24,16 @@ import {
     DEFAULT_WORLD_DIRECTIONAL_INTENSITY
 } from './ibl-setup.js';
 import {
+    applyVisualModeToObject3D,
+    applySkyDomeUniforms,
+    applySceneBackground,
+    applyEnvironmentVisuals,
+    getEffectiveToneMappingExposure,
+    normalizeVisualMode,
+    setVisualModeOnDocument,
+    VISUAL_MODE_HIGH_CONTRAST
+} from './visual-mode.js';
+import {
     addFlightBoardToEditor,
     loadFlightBoardIntoEditor,
     startFlightBoardEditorPolling,
@@ -135,6 +145,8 @@ let editorAnimLastT = typeof performance !== 'undefined' ? performance.now() : 0
 /** ワールド切り替えの非同期競合を防ぐ（新しい選択だけ UI を確定させる） */
 let worldSelectLoadGen = 0;
 let editorGround = null; // 編集プレビュー用の床メッシュ（表示切替用）
+/** @type {import('three').Mesh|null} */
+let editorSkyDome = null;
 let editorGrid = null;   // 編集プレビュー用のグリッド（表示切替用）
 let editorDracoLoader = null;
 /** サーバー ENABLE_CHART_FEATURES。無効時はワールド編集の太鼓・譜面UIと taiko 同期を行わない */
@@ -738,7 +750,11 @@ function initScene() {
     camera.position.set(0, 10, 20);
 
     renderer = new THREE.WebGLRenderer({ canvas, antialias: getAntialiasForTier(tier) });
-    applyToneMapping(THREE, renderer, g.toneMappingExposure);
+    applyToneMapping(
+        THREE,
+        renderer,
+        getEffectiveToneMappingExposure(g.toneMappingExposure, g.visualMode)
+    );
     renderer.setSize(canvas.clientWidth, canvas.clientHeight);
     renderer.setPixelRatio(getEditorPixelRatio());
     renderer.shadowMap.enabled = true;
@@ -759,7 +775,8 @@ function initScene() {
     editGroup = new THREE.Group();
     scene.add(editGroup);
 
-    scene.add(createGradientSkyDomeMesh(THREE));
+    editorSkyDome = createGradientSkyDomeMesh(THREE);
+    scene.add(editorSkyDome);
 
     // Editor-only preview lights（メタバース addWorldLights 既定と同スケール）
     const previewAmbient = new THREE.AmbientLight(0xffffff, DEFAULT_WORLD_AMBIENT_INTENSITY);
@@ -785,6 +802,8 @@ function initScene() {
     controls.enableRotate = true;
     // 左クリック=オブジェクト選択用に無効 / ホイール押し込み=回転、ホイール押し込み+Shift=水平移動
     controls.mouseButtons = { LEFT: -1, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+
+    applyEditorVisualMode();
 
     transformControls = new TransformControls(camera, canvas);
     transformControls.setSpace('world');
@@ -2821,6 +2840,27 @@ async function loadWorldIntoScene(world) {
     if (wCur) ensureWorldLodShape(wCur);
     renderWorldObjectList();
     renderWorldLodPanel();
+    applyEditorVisualMode();
+}
+
+/**
+ * メタバースと同じ描画方法をワールド編集プレビューに反映する
+ */
+function applyEditorVisualMode() {
+    if (!scene || !renderer) return;
+    const g = readEditorGraphicsOptions();
+    const mode = normalizeVisualMode(g.visualMode);
+    setVisualModeOnDocument(mode);
+    applySceneBackground(scene, mode, THREE);
+    applySkyDomeUniforms(editorSkyDome, mode, THREE);
+    applyEnvironmentVisuals({ groundMesh: editorGround, gridHelper: editorGrid }, mode, THREE);
+    if (editGroup) applyVisualModeToObject3D(editGroup, mode, THREE);
+    applyToneMapping(
+        THREE,
+        renderer,
+        getEffectiveToneMappingExposure(g.toneMappingExposure, mode)
+    );
+    renderer.shadowMap.enabled = mode !== VISUAL_MODE_HIGH_CONTRAST;
 }
 
 function animate() {

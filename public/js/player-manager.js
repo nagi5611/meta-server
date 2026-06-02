@@ -3,6 +3,7 @@ import { AnimationMixer } from 'three';
 import { createGLTFLoaderWithDraco } from './gltf-loader-draco.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { resolveModelAssetHref } from './asset-resolve.js';
+import { applyVisualModeToObject3D, normalizeVisualMode } from './visual-mode.js';
 
 class PlayerManager {
     constructor(scene) {
@@ -21,6 +22,8 @@ class PlayerManager {
         this._localPilotGhostMode = false;
         /** @type {Map<THREE.Material, { transparent: boolean, opacity: number, depthWrite: boolean }>|null} */
         this._localPilotGhostMatRestore = null;
+        /** @type {import('./visual-mode.js').VisualMode} */
+        this._visualMode = 'standard';
     }
 
     /**
@@ -516,6 +519,10 @@ class PlayerManager {
             console.error(`Failed to load avatar for ${playerId}, keeping placeholder:`, error);
             placeholder.userData.isLoading = false;
         }
+        const playerObj = this.remotePlayers.get(playerId);
+        if (playerObj) {
+            applyVisualModeToObject3D(playerObj, this._visualMode, THREE);
+        }
     }
 
     /**
@@ -927,6 +934,21 @@ class PlayerManager {
 
     getPlayerCount() {
         return this.remotePlayers.size + 1; // +1 for local player
+    }
+
+    /**
+     * 描画方法をローカル・リモートプレイヤーに適用する
+     * @param {import('./visual-mode.js').VisualMode|string} mode
+     */
+    applyVisualMode(mode) {
+        const m = normalizeVisualMode(mode);
+        this._visualMode = m;
+        if (this.localPlayer) {
+            applyVisualModeToObject3D(this.localPlayer, m, THREE);
+        }
+        for (const player of this.remotePlayers.values()) {
+            applyVisualModeToObject3D(player, m, THREE);
+        }
     }
 }
 

@@ -319,6 +319,18 @@ export const METAVERSE_STRINGS = {
     },
     'settings.viewFirst': { ja: '1人称視点', en: 'First person', zh: '第一人称' },
     'settings.viewThird': { ja: '3人称視点', en: 'Third person', zh: '第三人称' },
+    'settings.visualModeLabel': { ja: '描画方法:', en: 'Render mode:', zh: '渲染方式：' },
+    'settings.visualModeStandard': { ja: '標準', en: 'Standard', zh: '标准' },
+    'settings.visualModeHighContrast': {
+        ja: 'ハイコントラスト',
+        en: 'High contrast',
+        zh: '高对比度',
+    },
+    'settings.visualModeHint': {
+        ja: '空・地面・オブジェクトの明暗差を強め、UI も高コントラスト表示にします。露出はハイコントラスト時に少し上がります',
+        en: 'Boosts scene and UI contrast for low vision. Exposure is slightly higher in high contrast mode',
+        zh: '增强场景与界面对比度，便于低视力用户。高对比度模式下曝光会略提高',
+    },
     'settings.graphicsTierLabel': { ja: '描画品質:', en: 'Quality:', zh: '画质：' },
     'settings.graphicsTierHigh': { ja: '高（シャドウ・AA 重視）', en: 'High (shadows & AA)', zh: '高（阴影与抗锯齿）' },
     'settings.graphicsTierMedium': { ja: '中', en: 'Medium', zh: '中' },
@@ -652,6 +664,17 @@ export function t(key, vars) {
  * select#graphicsTier / #pixelRatioCap などの文言を現在語に合わせる
  */
 function applyMetaverseSelectOptions() {
+    const visualMode = document.getElementById('visualMode');
+    if (visualMode) {
+        const map = {
+            standard: 'settings.visualModeStandard',
+            highContrast: 'settings.visualModeHighContrast',
+        };
+        for (const opt of visualMode.querySelectorAll('option')) {
+            const k = map[opt.value];
+            if (k) opt.textContent = t(k);
+        }
+    }
     const gfx = document.getElementById('graphicsTier');
     if (gfx) {
         const map = {

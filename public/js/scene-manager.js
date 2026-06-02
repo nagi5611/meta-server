@@ -19,6 +19,14 @@ import {
     DEFAULT_HDR_PATH
 } from './ibl-setup.js';
 import {
+    applyVisualModeToObject3D,
+    applyVisualModeToSceneManager,
+    getEffectiveToneMappingExposure,
+    normalizeVisualMode,
+    VISUAL_MODE_HIGH_CONTRAST,
+    updatePdfOutline
+} from './visual-mode.js';
+import {
     MODEL_MAX_BYTES_OBJ,
     MODEL_MAX_BYTES_GLTF,
     MODEL_MAX_TRIANGLES_TOTAL,
@@ -174,8 +182,11 @@ class SceneManager {
             toneMappingExposure: 1,
             pixelRatioCap: 1,
             viewDistanceM: 50,
-            showViewRangeSpheres: false
+            showViewRangeSpheres: false,
+            visualMode: 'standard'
         };
+        /** @type {import('three').Mesh|null} */
+        this._skyDomeMesh = null;
         /** @type {THREE.Group|null} 描画距離 R・2R の半透明球（足元基準） */
         this._viewRangeDebugGroup = null;
         /** @type {import('three').Object3D[]} */
@@ -254,6 +265,7 @@ class SceneManager {
                 this.graphicsOptions.pixelRatioCap = migrated.pixelRatioCap;
                 this.graphicsOptions.viewDistanceM = migrated.viewDistanceM;
                 this.graphicsOptions.showViewRangeSpheres = migrated.showViewRangeSpheres;
+                this.graphicsOptions.visualMode = migrated.visualMode;
             } catch (e) { /* ignore */ }
         }
 
@@ -280,7 +292,14 @@ class SceneManager {
         });
         this.renderer = renderer;
         this.renderer.xr.enabled = true;
-        applyToneMapping(THREE, this.renderer, this.graphicsOptions.toneMappingExposure);
+        applyToneMapping(
+            THREE,
+            this.renderer,
+            getEffectiveToneMappingExposure(
+                this.graphicsOptions.toneMappingExposure,
+                this.graphicsOptions.visualMode
+            )
+        );
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(this._getPixelRatio());
         this.renderer.shadowMap.enabled = true;
@@ -296,6 +315,8 @@ class SceneManager {
 
         // Add static environment
         this.addEnvironment();
+
+        this._applyVisualMode();
 
         this._createViewRangeDebugHelpers();
 
@@ -350,7 +371,14 @@ class SceneManager {
         });
         this.renderer.xr.enabled = true;
         this._rendererAntialias = antialias;
-        applyToneMapping(THREE, this.renderer, this.graphicsOptions.toneMappingExposure);
+        applyToneMapping(
+            THREE,
+            this.renderer,
+            getEffectiveToneMappingExposure(
+                this.graphicsOptions.toneMappingExposure,
+                this.graphicsOptions.visualMode
+            )
+        );
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(this._getPixelRatio());
         this.renderer.shadowMap.enabled = true;
@@ -367,6 +395,7 @@ class SceneManager {
                 }
             }
         });
+        this._applyVisualMode();
         requestAnimationFrame(() => {
             this._loadIBLAsync();
         });
@@ -1049,6 +1078,9 @@ class SceneManager {
             console.log(`  Position: (${position.x}, ${position.y}, ${position.z})`);
             console.log(`  Rotation: (${rotation.x}°, ${rotation.y}°, ${rotation.z}°)`);
             console.log(`  Scale: (${scale.x}, ${scale.y}, ${scale.z})`);
+            if (normalizeVisualMode(this.graphicsOptions.visualMode) === VISUAL_MODE_HIGH_CONTRAST) {
+                applyVisualModeToObject3D(model, VISUAL_MODE_HIGH_CONTRAST, THREE);
+            }
         };
 
         const loadOne = async (config, idx) => {
@@ -1426,6 +1458,10 @@ class SceneManager {
                 this.environmentGroup.add(mesh);
                 mesh.updateMatrixWorld(true);
                 this._registerDrawCullTarget(mesh);
+                if (normalizeVisualMode(this.graphicsOptions.visualMode) === VISUAL_MODE_HIGH_CONTRAST) {
+                    applyVisualModeToObject3D(mesh, VISUAL_MODE_HIGH_CONTRAST, THREE);
+                    updatePdfOutline(mesh, VISUAL_MODE_HIGH_CONTRAST, THREE);
+                }
                 if (loadState) {
                     loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
                 }
@@ -1630,6 +1666,7 @@ class SceneManager {
         });
 
         console.log(`World lights added: ${this.worldLights.length}`);
+        this._applyVisualMode();
     }
 
     clearWorldLights() {
@@ -1645,7 +1682,26 @@ class SceneManager {
      */
     addSkyDome() {
         const skyDome = createGradientSkyDomeMesh(THREE);
+        this._skyDomeMesh = skyDome;
         this.scene.add(skyDome);
+    }
+
+    /**
+     * 描画方法（標準 / ハイコントラスト）を 3D シーンに反映する
+     */
+    _applyVisualMode() {
+        if (!this.scene) return;
+        applyVisualModeToSceneManager(this, THREE);
+        if (this.renderer) {
+            applyToneMapping(
+                THREE,
+                this.renderer,
+                getEffectiveToneMappingExposure(
+                    this.graphicsOptions.toneMappingExposure,
+                    this.graphicsOptions.visualMode
+                )
+            );
+        }
     }
 
     addEnvironment() {
@@ -2098,7 +2154,8 @@ class SceneManager {
             toneMappingExposure: migrated.toneMappingExposure,
             pixelRatioCap: migrated.pixelRatioCap,
             viewDistanceM: migrated.viewDistanceM,
-            showViewRangeSpheres: migrated.showViewRangeSpheres
+            showViewRangeSpheres: migrated.showViewRangeSpheres,
+            visualMode: migrated.visualMode
         };
 
         if (this._viewRangeDebugGroup) {
@@ -2114,7 +2171,14 @@ class SceneManager {
         }
 
         if (this.renderer) {
-            applyToneMapping(THREE, this.renderer, this.graphicsOptions.toneMappingExposure);
+            applyToneMapping(
+                THREE,
+                this.renderer,
+                getEffectiveToneMappingExposure(
+                    this.graphicsOptions.toneMappingExposure,
+                    this.graphicsOptions.visualMode
+                )
+            );
             this.renderer.setPixelRatio(this._getPixelRatio());
             const shadowConfig = this._getShadowConfigForEffectiveTier();
             this.renderer.shadowMap.type = shadowConfig.type;
@@ -2130,6 +2194,7 @@ class SceneManager {
                 }
             }
         });
+        this._applyVisualMode();
     }
 
     /**
