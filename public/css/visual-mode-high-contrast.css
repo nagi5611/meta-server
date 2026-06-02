@@ -1,139 +1,149 @@
-/* public/css/visual-mode-high-contrast.css — 描画方法: ハイコントラスト時の HUD/UI */
+/* public/css/visual-mode-high-contrast.css — ハイコントラスト時の HUD/UI（白ベース・高コントラスト） */
 
 [data-visual-mode="highContrast"] #info,
 [data-visual-mode="highContrast"] #mobile-info,
 [data-visual-mode="highContrast"] .admin-player-info-panel {
-    background: #000 !important;
-    color: #fff !important;
-    border: 2px solid #fff !important;
+    background: #fff !important;
+    color: #000 !important;
+    border: 3px solid #000 !important;
     backdrop-filter: none !important;
-    box-shadow: 0 0 0 2px #000 !important;
+    box-shadow: 0 0 0 1px #000 !important;
 }
 
 [data-visual-mode="highContrast"] #info h1,
 [data-visual-mode="highContrast"] #info-stats p,
-[data-visual-mode="highContrast"] #info-stats span,
 [data-visual-mode="highContrast"] .admin-player-info-header,
 [data-visual-mode="highContrast"] .admin-player-info-row,
 [data-visual-mode="highContrast"] .admin-player-info-row .label,
 [data-visual-mode="highContrast"] .admin-player-info-row span:last-child {
-    color: #fff !important;
+    color: #000 !important;
+    font-weight: 700 !important;
 }
 
 [data-visual-mode="highContrast"] #info-stats span,
 [data-visual-mode="highContrast"] .admin-player-info-header {
-    color: #ff0 !important;
+    color: #0047ab !important;
 }
 
 [data-visual-mode="highContrast"] #chat-container {
-    background: #000 !important;
-    border: 2px solid #fff !important;
+    background: #fff !important;
+    border: 3px solid #000 !important;
     backdrop-filter: none !important;
-    box-shadow: none !important;
+    box-shadow: 0 0 0 1px #000 !important;
 }
 
 [data-visual-mode="highContrast"] #chat-header {
-    background: #000 !important;
-    color: #fff !important;
-    border-bottom: 2px solid #fff !important;
+    background: #fff !important;
+    color: #000 !important;
+    border-bottom: 3px solid #000 !important;
+    font-weight: 700 !important;
 }
 
 [data-visual-mode="highContrast"] #chat-header .bi,
 [data-visual-mode="highContrast"] #chat-minimize-btn {
-    color: #fff !important;
+    color: #000 !important;
+}
+
+[data-visual-mode="highContrast"] #chat-minimize-btn {
+    border: 2px solid #000 !important;
 }
 
 [data-visual-mode="highContrast"] #chat-messages {
-    background: #000 !important;
-    color: #fff !important;
+    background: #fff !important;
+    color: #000 !important;
 }
 
 [data-visual-mode="highContrast"] #chat-messages::-webkit-scrollbar-track {
-    background: #222 !important;
+    background: #eee !important;
 }
 
 [data-visual-mode="highContrast"] #chat-messages::-webkit-scrollbar-thumb {
-    background: #fff !important;
+    background: #000 !important;
 }
 
 [data-visual-mode="highContrast"] .chat-message {
-    color: #fff !important;
-    border-color: #666 !important;
+    color: #000 !important;
+    border-color: #000 !important;
 }
 
 [data-visual-mode="highContrast"] .chat-message .username {
-    color: #ff0 !important;
+    color: #0047ab !important;
+    font-weight: 700 !important;
 }
 
 [data-visual-mode="highContrast"] #chat-input-container {
-    background: #000 !important;
-    border-top: 2px solid #fff !important;
+    background: #fff !important;
+    border-top: 3px solid #000 !important;
 }
 
 [data-visual-mode="highContrast"] #chat-input {
-    background: #111 !important;
-    color: #fff !important;
-    border: 2px solid #fff !important;
+    background: #fff !important;
+    color: #000 !important;
+    border: 2px solid #000 !important;
 }
 
 [data-visual-mode="highContrast"] #chat-send-btn {
-    background: #fff !important;
-    color: #000 !important;
-    border: 2px solid #fff !important;
+    background: #000 !important;
+    color: #fff !important;
+    border: 2px solid #000 !important;
+    font-weight: 700 !important;
 }
 
 [data-visual-mode="highContrast"] #menu-bar {
-    background: #000 !important;
-    border: 2px solid #fff !important;
+    background: #fff !important;
+    border: 3px solid #000 !important;
     backdrop-filter: none !important;
-    box-shadow: none !important;
+    box-shadow: 0 0 0 1px #000 !important;
 }
 
 [data-visual-mode="highContrast"] .menu-button {
-    background: #000 !important;
-    color: #fff !important;
-    border: 2px solid #fff !important;
+    background: #fff !important;
+    color: #000 !important;
+    border: 2px solid #000 !important;
     box-shadow: none !important;
+    font-weight: 700 !important;
 }
 
 [data-visual-mode="highContrast"] .menu-button:hover,
 [data-visual-mode="highContrast"] .menu-button.active {
     background: #ff0 !important;
     color: #000 !important;
-    border-color: #ff0 !important;
+    border-color: #000 !important;
 }
 
 [data-visual-mode="highContrast"] .menu-button.muted,
 [data-visual-mode="highContrast"] .menu-button.danger {
-    background: #000 !important;
-    color: #f66 !important;
-    border-color: #f66 !important;
+    background: #fff !important;
+    color: #c00 !important;
+    border-color: #c00 !important;
 }
 
 [data-visual-mode="highContrast"] .admin-menu-button {
-    background: #000 !important;
-    color: #ff0 !important;
-    border: 2px solid #ff0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    border: 3px solid #000 !important;
 }
 
 [data-visual-mode="highContrast"] .admin-menu {
-    background: #000 !important;
-    border: 2px solid #ff0 !important;
-    color: #fff !important;
+    background: #fff !important;
+    border: 3px solid #000 !important;
+    color: #000 !important;
 }
 
 [data-visual-mode="highContrast"] .admin-menu-header {
-    background: #111 !important;
+    background: #ff0 !important;
+    border-bottom: 2px solid #000 !important;
 }
 
 [data-visual-mode="highContrast"] .admin-menu-title,
 [data-visual-mode="highContrast"] .admin-menu-body,
 [data-visual-mode="highContrast"] a.admin-menu-link {
-    color: #fff !important;
+    color: #000 !important;
+    font-weight: 700 !important;
 }
 
 [data-visual-mode="highContrast"] a.admin-menu-link {
-    color: #ff0 !important;
+    color: #0047ab !important;
 }
 
 [data-visual-mode="highContrast"] #settings-modal,
@@ -142,7 +152,7 @@
 [data-visual-mode="highContrast"] #restart-modal,
 [data-visual-mode="highContrast"] #video-modal {
     backdrop-filter: none !important;
-    background: rgba(0, 0, 0, 0.85) !important;
+    background: rgba(0, 0, 0, 0.6) !important;
 }
 
 [data-visual-mode="highContrast"] #settings-modal-content,
@@ -150,16 +160,16 @@
 [data-visual-mode="highContrast"] .logout-modal-content,
 [data-visual-mode="highContrast"] .restart-modal-content,
 [data-visual-mode="highContrast"] #video-modal-content {
-    background: #000 !important;
-    color: #fff !important;
-    border: 2px solid #fff !important;
+    background: #fff !important;
+    color: #000 !important;
+    border: 3px solid #000 !important;
     box-shadow: none !important;
 }
 
 [data-visual-mode="highContrast"] #settings-header,
 [data-visual-mode="highContrast"] #settings-sidebar {
-    background: #111 !important;
-    border-color: #fff !important;
+    background: #f5f5f5 !important;
+    border-color: #000 !important;
 }
 
 [data-visual-mode="highContrast"] #settings-header h3,
@@ -167,56 +177,59 @@
 [data-visual-mode="highContrast"] .settings-section h4,
 [data-visual-mode="highContrast"] .setting-item label,
 [data-visual-mode="highContrast"] .setting-description {
-    color: #fff !important;
+    color: #000 !important;
+    font-weight: 700 !important;
 }
 
 [data-visual-mode="highContrast"] .settings-category.active {
-    background: #333 !important;
-    color: #ff0 !important;
-    border-left-color: #ff0 !important;
+    background: #ff0 !important;
+    color: #000 !important;
+    border-left-color: #000 !important;
 }
 
 [data-visual-mode="highContrast"] .settings-category:hover {
-    background: #222 !important;
-    color: #fff !important;
+    background: #eee !important;
+    color: #000 !important;
 }
 
 [data-visual-mode="highContrast"] #settings-close-btn {
-    background: #fff !important;
-    color: #000 !important;
+    background: #000 !important;
+    color: #fff !important;
+    border: 2px solid #000 !important;
+    font-weight: 700 !important;
 }
 
 [data-visual-mode="highContrast"] #settings-content input,
 [data-visual-mode="highContrast"] #settings-content select {
-    background: #111 !important;
-    color: #fff !important;
-    border: 2px solid #fff !important;
+    background: #fff !important;
+    color: #000 !important;
+    border: 2px solid #000 !important;
 }
 
 [data-visual-mode="highContrast"] .world-load-overlay {
-    background: rgba(0, 0, 0, 0.9) !important;
-    color: #fff !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    color: #000 !important;
 }
 
 [data-visual-mode="highContrast"] .world-load-overlay .world-load-bar {
-    border: 2px solid #fff !important;
-    background: #111 !important;
+    border: 2px solid #000 !important;
+    background: #fff !important;
 }
 
 [data-visual-mode="highContrast"] .world-load-overlay .world-load-bar-fill {
-    background: #ff0 !important;
+    background: #0047ab !important;
 }
 
 [data-visual-mode="highContrast"] .pdf-viewer-overlay {
-    background: rgba(0, 0, 0, 0.95) !important;
+    background: rgba(255, 255, 255, 0.95) !important;
 }
 
 [data-visual-mode="highContrast"] .pdf-viewer-sidebar,
 [data-visual-mode="highContrast"] .pdf-viewer-close,
 [data-visual-mode="highContrast"] .pdf-viewer-pen-btn {
-    background: #000 !important;
-    color: #fff !important;
-    border: 2px solid #fff !important;
+    background: #fff !important;
+    color: #000 !important;
+    border: 2px solid #000 !important;
 }
 
 [data-visual-mode="highContrast"] .pdf-viewer-pen-btn.active {
@@ -226,19 +239,20 @@
 
 [data-visual-mode="highContrast"] .mobile-controls .mobile-btn,
 [data-visual-mode="highContrast"] #mobile-joystick-base {
-    border: 2px solid #fff !important;
-    background: rgba(0, 0, 0, 0.85) !important;
+    border: 3px solid #000 !important;
+    background: rgba(255, 255, 255, 0.95) !important;
 }
 
 [data-visual-mode="highContrast"] .taiko-game-overlay {
-    background: rgba(0, 0, 0, 0.92) !important;
-    color: #fff !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    color: #000 !important;
 }
 
 [data-visual-mode="highContrast"] .taiko-game-overlay button {
-    background: #000 !important;
-    color: #fff !important;
-    border: 2px solid #fff !important;
+    background: #fff !important;
+    color: #000 !important;
+    border: 2px solid #000 !important;
+    font-weight: 700 !important;
 }
 
 [data-visual-mode="highContrast"] #xr-dom-overlay-root #info,

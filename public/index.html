@@ -496,14 +496,6 @@
                             <div class="setting-description" data-i18n="settings.viewDistanceHint">足元を中心とした球。範囲外のワールド・PDF・他プレイヤーは非表示（スカイドームは常に表示）</div>
                         </div>
                         <div class="setting-item setting-row">
-                            <label for="showViewRangeSpheres" data-i18n="settings.showViewRangeLabel">描画範囲の表示</label>
-                            <label class="toggle-switch" data-i18n-title="settings.showViewRangeTitle" title="足元中心・描画距離の球（青）と2倍半径（黄）を半透明表示">
-                                <input type="checkbox" id="showViewRangeSpheres">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="setting-description" data-i18n="settings.showViewRangeHint">デバッグ用。青系＝描画距離 R、黄系＝半径 2R</div>
-                        <div class="setting-item setting-row">
                             <label for="viewModeToggle" data-i18n="settings.viewModeLabel">画面表示</label>
                             <div class="view-mode-control">
                                 <span id="viewModeLabel" class="view-mode-label">3人称視点</span>
@@ -514,14 +506,14 @@
                             </div>
                         </div>
                         <div class="setting-description" data-i18n="settings.viewModeHint">1人称はアバターの頭部視点になります</div>
-                        <div class="setting-item">
-                            <label for="visualMode" data-i18n="settings.visualModeLabel">描画方法:</label>
-                            <select id="visualMode">
-                                <option value="standard" data-i18n="settings.visualModeStandard">標準</option>
-                                <option value="highContrast" data-i18n="settings.visualModeHighContrast">ハイコントラスト</option>
-                            </select>
-                            <div class="setting-description" data-i18n="settings.visualModeHint">空・地面・オブジェクトの明暗差を強め、UI も高コントラスト表示にします。露出はハイコントラスト時に少し上がります</div>
+                        <div class="setting-item setting-row">
+                            <label for="highContrastToggle" data-i18n="settings.visualModeLabel">ハイコントラスト</label>
+                            <label class="toggle-switch" data-i18n-title="settings.visualModeTitle" title="白ベースのまま UI・シーンのコントラストを強めます">
+                                <input type="checkbox" id="highContrastToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
                         </div>
+                        <div class="setting-description" data-i18n="settings.visualModeHint">オブジェクトの明暗差を強め、UI を白ベースの高コントラスト表示にします。露出はハイコントラスト時に少し上がります</div>
                         <div class="setting-item">
                             <label for="graphicsTier" data-i18n="settings.graphicsTierLabel">描画品質:</label>
                             <select id="graphicsTier">
@@ -545,6 +537,14 @@
                             </select>
                             <div class="setting-description" data-i18n="settings.pixelRatioHint">低いほど軽くなります（WebXR 中は最大 1 に制限）</div>
                         </div>
+                        <div class="setting-item setting-row">
+                            <label for="showViewRangeSpheres" data-i18n="settings.showViewRangeLabel">描画範囲の表示</label>
+                            <label class="toggle-switch" data-i18n-title="settings.showViewRangeTitle" title="足元中心・描画距離の球（青）と2倍半径（黄）を半透明表示">
+                                <input type="checkbox" id="showViewRangeSpheres">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="setting-description" data-i18n="settings.showViewRangeHint">デバッグ用。青系＝描画距離 R、黄系＝半径 2R</div>
                     </div>
                 </div>
             </div>

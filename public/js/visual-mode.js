@@ -1,4 +1,4 @@
-// public/js/visual-mode.js — 描画方法（標準 / ハイコントラスト）の 3D・DOM 適用
+// public/js/visual-mode.js — ハイコントラストの 3D・DOM 適用
 
 /** @typedef {'standard'|'highContrast'} VisualMode */
 
@@ -12,12 +12,12 @@ const SCENE_BG_STANDARD = 0x87ceeb;
 const SCENE_BG_HC = 0xffffff;
 
 const GROUND_COLOR_STANDARD = 0x4a7c59;
-const GROUND_COLOR_HC = 0x1a1a1a;
+const GROUND_COLOR_HC = 0xe8e8e8;
 
 const GRID_COLOR1_STANDARD = 0x000000;
 const GRID_COLOR2_STANDARD = 0x2a4a2a;
-const GRID_COLOR1_HC = 0xffffff;
-const GRID_COLOR2_HC = 0x888888;
+const GRID_COLOR1_HC = 0x000000;
+const GRID_COLOR2_HC = 0x666666;
 
 /** @type {Record<VisualMode, { zenith: number, horizon: number, groundColor: number, midSky: number }>} */
 const SKY_UNIFORM_PRESETS = {

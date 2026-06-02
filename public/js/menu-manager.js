@@ -551,11 +551,8 @@ class MenuManager {
         });
 
         // Draw settings
-        document.getElementById('visualMode')?.addEventListener('change', (e) => {
-            const v = e.target.value;
-            if (v === 'standard' || v === 'highContrast') {
-                this.settings.visualMode = v;
-            }
+        document.getElementById('highContrastToggle')?.addEventListener('change', (e) => {
+            this.settings.visualMode = e.target.checked ? 'highContrast' : 'standard';
             this.saveSettings();
             this.sceneManager?.applyGraphicsSettings(this.settings);
             this.playerManager?.applyVisualMode(this.settings.visualMode);
@@ -974,10 +971,9 @@ class MenuManager {
             document.getElementById('speakerDevice').value = this.settings.speakerDevice;
         }
 
-        const visualModeEl = document.getElementById('visualMode');
-        if (visualModeEl) {
-            const vm = this.settings.visualMode === 'highContrast' ? 'highContrast' : 'standard';
-            visualModeEl.value = vm;
+        const highContrastEl = document.getElementById('highContrastToggle');
+        if (highContrastEl) {
+            highContrastEl.checked = this.settings.visualMode === 'highContrast';
         }
         const graphicsTierEl = document.getElementById('graphicsTier');
         const toneExpEl = document.getElementById('toneMappingExposure');
