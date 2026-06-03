@@ -15,7 +15,11 @@ export const DEFAULT_WORLD_DIRECTIONAL_INTENSITY = 0.8;
 /** メタバース描画距離（球半径・メートル相当）の既定・クランプ範囲 */
 export const VIEW_DISTANCE_M_DEFAULT = 50;
 export const VIEW_DISTANCE_M_MIN = 10;
-export const VIEW_DISTANCE_M_MAX = 150;
+export const VIEW_DISTANCE_M_MAX = 3000;
+/** 描画距離スライダーの内部位置（0〜この値）。実距離は非線形に変換する */
+export const VIEW_DISTANCE_SLIDER_STEPS = 1000;
+/** 左側ほど短距離域にスライダー幅を割り当てる指数（大きいほど低距離側が細かい） */
+const VIEW_DISTANCE_SLIDER_EXP = 3;
 
 /**
  * 描画距離（m）を許容範囲に収める
@@ -26,6 +30,46 @@ export function clampViewDistanceM(v) {
     const n = Number(v);
     if (!Number.isFinite(n)) return VIEW_DISTANCE_M_DEFAULT;
     return Math.min(VIEW_DISTANCE_M_MAX, Math.max(VIEW_DISTANCE_M_MIN, n));
+}
+
+/**
+ * 描画距離を段階的に丸める（低距離≈10m、高距離≈100m刻み）
+ * @param {number} m
+ * @returns {number}
+ */
+export function snapViewDistanceM(m) {
+    const c = clampViewDistanceM(m);
+    if (c <= 300) return Math.round(c / 10) * 10;
+    if (c <= 1500) return Math.round(c / 50) * 50;
+    return Math.round(c / 100) * 100;
+}
+
+/**
+ * スライダー内部位置から描画距離（m）へ変換する
+ * @param {unknown} pos
+ * @returns {number}
+ */
+export function viewDistanceMFromSliderPos(pos) {
+    const p = Number(pos);
+    if (!Number.isFinite(p)) return VIEW_DISTANCE_M_DEFAULT;
+    const t = Math.min(1, Math.max(0, p / VIEW_DISTANCE_SLIDER_STEPS));
+    const span = VIEW_DISTANCE_M_MAX - VIEW_DISTANCE_M_MIN;
+    const raw = VIEW_DISTANCE_M_MIN + span * Math.pow(t, VIEW_DISTANCE_SLIDER_EXP);
+    return snapViewDistanceM(raw);
+}
+
+/**
+ * 描画距離（m）からスライダー内部位置へ変換する
+ * @param {unknown} m
+ * @returns {number}
+ */
+export function viewDistanceSliderPosFromM(m) {
+    const vd = snapViewDistanceM(clampViewDistanceM(m));
+    const span = VIEW_DISTANCE_M_MAX - VIEW_DISTANCE_M_MIN;
+    if (span <= 0) return 0;
+    const t = (vd - VIEW_DISTANCE_M_MIN) / span;
+    const pos = Math.pow(Math.min(1, Math.max(0, t)), 1 / VIEW_DISTANCE_SLIDER_EXP) * VIEW_DISTANCE_SLIDER_STEPS;
+    return Math.round(Math.min(VIEW_DISTANCE_SLIDER_STEPS, Math.max(0, pos)));
 }
 
 const TIER_PRESETS = {

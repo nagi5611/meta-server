@@ -1,8 +1,9 @@
 import {
     migrateLegacyGraphicsKeys,
     clampViewDistanceM,
-    VIEW_DISTANCE_M_MIN,
-    VIEW_DISTANCE_M_MAX
+    viewDistanceMFromSliderPos,
+    viewDistanceSliderPosFromM,
+    VIEW_DISTANCE_SLIDER_STEPS
 } from './ibl-setup.js';
 import {
     t,
@@ -579,8 +580,13 @@ class MenuManager {
             this.sceneManager?.applyGraphicsSettings(this.settings);
         });
         document.getElementById('viewDistanceM')?.addEventListener('input', (e) => {
-            const n = parseFloat(e.target.value);
-            this.settings.viewDistanceM = clampViewDistanceM(Number.isFinite(n) ? n : undefined);
+            const pos = parseFloat(e.target.value);
+            this.settings.viewDistanceM = viewDistanceMFromSliderPos(pos);
+            const slider = e.target;
+            const snappedPos = viewDistanceSliderPosFromM(this.settings.viewDistanceM);
+            if (slider && String(slider.value) !== String(snappedPos)) {
+                slider.value = String(snappedPos);
+            }
             const span = document.getElementById('viewDistanceMValue');
             if (span) span.textContent = String(Math.round(this.settings.viewDistanceM));
             this.saveSettings();
@@ -999,9 +1005,9 @@ class MenuManager {
         const vd = clampViewDistanceM(this.settings.viewDistanceM);
         this.settings.viewDistanceM = vd;
         if (viewDistEl) {
-            viewDistEl.min = String(VIEW_DISTANCE_M_MIN);
-            viewDistEl.max = String(VIEW_DISTANCE_M_MAX);
-            viewDistEl.value = String(vd);
+            viewDistEl.min = '0';
+            viewDistEl.max = String(VIEW_DISTANCE_SLIDER_STEPS);
+            viewDistEl.value = String(viewDistanceSliderPosFromM(vd));
         }
         if (viewDistValEl) viewDistValEl.textContent = String(Math.round(vd));
         const showVrEl = document.getElementById('showViewRangeSpheres');
