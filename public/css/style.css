@@ -525,6 +525,52 @@ body {
     filter: brightness(1.08);
 }
 
+/* 飛行操縦ミニマップ（右下・North-up） */
+.aircraft-minimap {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    width: 176px;
+    height: 176px;
+    z-index: 103;
+    pointer-events: none;
+    filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.45));
+}
+
+.aircraft-minimap-canvas {
+    display: block;
+    width: 176px;
+    height: 176px;
+    border-radius: 50%;
+    background: rgba(20, 30, 50, 0.92);
+}
+
+.aircraft-minimap-north {
+    position: absolute;
+    top: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    font-weight: 900;
+    color: #e53935;
+    text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+    line-height: 1;
+    pointer-events: none;
+}
+
+@media (max-width: 768px) {
+    .aircraft-minimap {
+        right: 10px;
+        bottom: 10px;
+        width: 140px;
+        height: 140px;
+    }
+    .aircraft-minimap-canvas {
+        width: 140px;
+        height: 140px;
+    }
+}
+
 @keyframes pulse {
     0%, 100% {
         transform: translateX(-50%) scale(1);

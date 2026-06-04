@@ -1,5 +1,8 @@
 // addons/aircraft/server.js — Socket + 機体ライブラリ HTTP API（SQLite）
 import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import multer from 'multer';
 import { HOOKS } from '../../lib/hook-registry.js';
 import { registerAircraftSocketHandlers } from '../../lib/aircraft-server/register-socket.js';
 import { mergeAircraftPhysicsFromWorld } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
@@ -11,9 +14,24 @@ import {
     appendAircraftPhysicsValidationErrors,
     appendEasyAircraftPhysicsValidationErrors,
 } from '../../lib/aircraft-server/validate-worlds.js';
+import {
+    defaultFlightMapConfig,
+    parseFlightMapConfig,
+} from '../../lib/aircraft-server/flight-map-schema.js';
+import { STORAGE_PATHS } from '../../config/storage-paths.js';
 
 const AIRFRAME_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+const WORLD_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 const JSON_BODY_LIMIT = 512 * 1024;
+const MAP_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+const mapImageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 16 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        cb(null, MAP_IMAGE_EXTS.has(ext));
+    },
+});
 
 /**
  * @param {unknown} v
@@ -245,6 +263,44 @@ function rowToAirframe(db, id) {
     };
 }
 
+/**
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} worldId
+ * @returns {object|null}
+ */
+function rowToFlightMap(db, worldId) {
+    const row = db.prepare('SELECT * FROM aircraft_world_flight_map WHERE world_id = ?').get(worldId);
+    if (!row) return null;
+    let configRaw = {};
+    try {
+        configRaw = row.config_json ? JSON.parse(String(row.config_json)) : {};
+    } catch {
+        configRaw = {};
+    }
+    const parsed = parseFlightMapConfig(configRaw);
+    const config = parsed.ok ? parsed.config : defaultFlightMapConfig();
+    const imagePath = String(row.image_path || '').trim();
+    return {
+        worldId: String(row.world_id),
+        imagePath,
+        imageUrl: imagePath ? `/images/${imagePath.replace(/^\/+/, '')}` : '',
+        config,
+        updatedAt: String(row.updated_at || ''),
+    };
+}
+
+/**
+ * 地図画像ファイル名を安全化する
+ * @param {string} worldId
+ * @param {string} originalName
+ * @returns {string}
+ */
+function safeMapImageFilename(worldId, originalName) {
+    const ext = path.extname(originalName || '').toLowerCase();
+    const safeExt = MAP_IMAGE_EXTS.has(ext) ? ext : '.png';
+    return `flight-map-${worldId}${safeExt}`;
+}
+
 export default {
     /**
      * @param {object} ctx — アドオン登録コンテキスト
@@ -270,6 +326,20 @@ export default {
                     return res.status(400).json({ error: 'invalid_airframe_id' });
                 }
                 res.locals.airframeId = id;
+                next();
+            };
+
+            /**
+             * @param {import('express').Request} req
+             * @param {import('express').Response} res
+             * @param {import('express').NextFunction} next
+             */
+            const worldIdParam = (req, res, next) => {
+                const id = String(req.params?.worldId || '').trim();
+                if (!WORLD_ID_RE.test(id)) {
+                    return res.status(400).json({ error: 'invalid_world_id' });
+                }
+                res.locals.worldId = id;
                 next();
             };
 
@@ -440,6 +510,130 @@ export default {
                     res.json({ ok: true, airframe: row });
                 } catch (e) {
                     ctx.logger.error('GET public airframe', e);
+                    res.status(500).json({ error: 'get_failed' });
+                }
+            });
+
+            app.get('/admin/addons/aircraft/flight-maps', (_req, res) => {
+                try {
+                    const db = ctx.openDatabase();
+                    const rows = db
+                        .prepare(
+                            'SELECT world_id, image_path, updated_at FROM aircraft_world_flight_map ORDER BY world_id ASC'
+                        )
+                        .all();
+                    res.json({
+                        ok: true,
+                        maps: rows.map((r) => ({
+                            worldId: String(r.world_id),
+                            imagePath: String(r.image_path || ''),
+                            updatedAt: String(r.updated_at || ''),
+                        })),
+                    });
+                } catch (e) {
+                    ctx.logger.error('GET flight maps list', e);
+                    res.status(500).json({ error: 'list_failed' });
+                }
+            });
+
+            app.get('/admin/addons/aircraft/flight-maps/:worldId', worldIdParam, (req, res) => {
+                try {
+                    const db = ctx.openDatabase();
+                    const row = rowToFlightMap(db, res.locals.worldId);
+                    if (!row) {
+                        return res.json({
+                            ok: true,
+                            map: {
+                                worldId: res.locals.worldId,
+                                imagePath: '',
+                                imageUrl: '',
+                                config: defaultFlightMapConfig(),
+                                updatedAt: '',
+                            },
+                        });
+                    }
+                    res.json({ ok: true, map: row });
+                } catch (e) {
+                    ctx.logger.error('GET flight map', e);
+                    res.status(500).json({ error: 'get_failed' });
+                }
+            });
+
+            app.put('/admin/addons/aircraft/flight-maps/:worldId', worldIdParam, jsonMw, (req, res) => {
+                try {
+                    const db = ctx.openDatabase();
+                    const worldId = res.locals.worldId;
+                    const body = req.body && typeof req.body === 'object' ? req.body : {};
+                    const parsed = parseFlightMapConfig(body.config);
+                    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+                    const imagePath =
+                        typeof body.imagePath === 'string' ? body.imagePath.trim().slice(0, 512) : '';
+                    const exists = db
+                        .prepare('SELECT 1 FROM aircraft_world_flight_map WHERE world_id = ?')
+                        .get(worldId);
+                    if (exists) {
+                        db.prepare(
+                            `UPDATE aircraft_world_flight_map SET
+                                image_path = ?,
+                                config_json = ?,
+                                updated_at = datetime('now')
+                             WHERE world_id = ?`
+                        ).run(imagePath, JSON.stringify(parsed.config), worldId);
+                    } else {
+                        db.prepare(
+                            `INSERT INTO aircraft_world_flight_map (world_id, image_path, config_json, updated_at)
+                             VALUES (?, ?, ?, datetime('now'))`
+                        ).run(worldId, imagePath, JSON.stringify(parsed.config));
+                    }
+                    const row = rowToFlightMap(db, worldId);
+                    res.json({ ok: true, map: row });
+                } catch (e) {
+                    ctx.logger.error('PUT flight map', e);
+                    res.status(500).json({ error: 'save_failed' });
+                }
+            });
+
+            app.post(
+                '/admin/addons/aircraft/flight-maps/:worldId/upload-image',
+                worldIdParam,
+                mapImageUpload.single('image'),
+                (req, res) => {
+                    if (!req.file) {
+                        return res.status(400).json({ error: 'No file or invalid file (.png/.jpg/.webp)' });
+                    }
+                    const worldId = res.locals.worldId;
+                    const imagesDir = STORAGE_PATHS.IMAGES_DIR;
+                    const filename = safeMapImageFilename(worldId, req.file.originalname);
+                    const destPath = path.join(imagesDir, filename);
+                    try {
+                        if (!fs.existsSync(imagesDir)) {
+                            fs.mkdirSync(imagesDir, { recursive: true });
+                        }
+                        fs.writeFileSync(destPath, req.file.buffer);
+                        res.json({
+                            ok: true,
+                            imagePath: filename,
+                            imageUrl: `/images/${filename}`,
+                        });
+                    } catch (e) {
+                        ctx.logger.error('POST flight map image', e);
+                        res.status(500).json({ error: 'upload_failed' });
+                    }
+                }
+            );
+
+            /** ゲームクライアント用（認証なし） */
+            app.get('/api/addons/aircraft/flight-maps/:worldId', worldIdParam, (req, res) => {
+                try {
+                    const db = ctx.openDatabase();
+                    const row = rowToFlightMap(db, res.locals.worldId);
+                    if (!row || !row.imagePath) {
+                        return res.status(404).json({ error: 'not_found' });
+                    }
+                    res.setHeader('Cache-Control', 'public, max-age=60');
+                    res.json({ ok: true, map: row });
+                } catch (e) {
+                    ctx.logger.error('GET public flight map', e);
                     res.status(500).json({ error: 'get_failed' });
                 }
             });

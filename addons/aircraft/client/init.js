@@ -25,6 +25,12 @@ export async function initAircraftSubsystem(app) {
         app.uiManager
     );
     app.aircraftManager.setMobileMode(app.isMobileMode);
+    app.aircraftManager.setWorldIdProvider(() => app.worldManager?.getCurrentWorldId?.() || null);
+    app.worldManager?.onWorldChange?.((world) => {
+        if (app.aircraftManager?.isPiloting) {
+            void app.aircraftManager.loadFlightMapForWorld(world?.id);
+        }
+    });
     try {
         await app.sceneManager.hydrateAircraftSlotsFromLibrary();
     } catch (e) {

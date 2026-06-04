@@ -20,6 +20,7 @@ import {
 import { normalizeAircraftControlMode } from '../../../addons/aircraft/client/aircraft-physics-easy-defaults.js';
 import { migrateLegacyCameraToViewpoints, buildCameraJsonForPut } from './camera-viewpoints.js';
 import { applyMeshVisualEulerDegToModel, normalizeMeshVisualEulerDeg } from './mesh-visual-pivot.js';
+import { mountAircraftMapAdminPanel, refreshAircraftMapAdminPanel } from './map-admin-panel.js';
 
 let mounted = false;
 /** @type {AdminAircraftPrefabViewer|null} */
@@ -662,6 +663,11 @@ export function initAircraftAdminPanel() {
     if (!root) return;
     mounted = true;
     root.innerHTML = `
+        <div class="ac-admin-topbar" role="tablist">
+            <button type="button" class="ac-admin-mode-btn is-active" data-ac-admin-mode="airframes" role="tab">機体ライブラリ</button>
+            <button type="button" class="ac-admin-mode-btn" data-ac-admin-mode="map" role="tab">Map定義</button>
+        </div>
+        <div id="ac-airframes-section">
         <div class="ac-admin-layout">
             <aside class="ac-admin-left">
                 <div class="ac-control-mode-toolbar">
@@ -798,7 +804,30 @@ export function initAircraftAdminPanel() {
                 <p id="ac-admin-status" class="status-text" role="status"></p>
             </aside>
         </div>
+        </div>
+        <div id="ac-map-section" style="display:none"></div>
     `;
+
+    mountAircraftMapAdminPanel(document.getElementById('ac-map-section'));
+
+    root.querySelectorAll('[data-ac-admin-mode]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const mode = btn.getAttribute('data-ac-admin-mode');
+            root.querySelectorAll('[data-ac-admin-mode]').forEach((b) => {
+                b.classList.toggle('is-active', b === btn);
+            });
+            const airframes = document.getElementById('ac-airframes-section');
+            const mapSec = document.getElementById('ac-map-section');
+            if (mode === 'map') {
+                if (airframes) airframes.style.display = 'none';
+                if (mapSec) mapSec.style.display = 'block';
+                refreshAircraftMapAdminPanel();
+            } else {
+                if (airframes) airframes.style.display = 'block';
+                if (mapSec) mapSec.style.display = 'none';
+            }
+        });
+    });
 
     mountFlightPhysicsForm(document.getElementById('ac-flight-physics-mount'));
     mountEasyFlightPhysicsForm(document.getElementById('ac-flight-physics-easy-mount'));

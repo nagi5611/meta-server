@@ -1022,6 +1022,7 @@ class MetaverseApp {
             if (this.aircraftManager?.isPiloting && this.aircraftController) {
                 this.aircraftController.update(deltaTime);
                 this.uiManager.updateAircraftHudTelemetry(this.aircraftController.getHudSnapshot());
+                this.aircraftManager.updateMinimap();
             }
             if (this.aircraftManager?.isPassenger && this.aircraftController) {
                 this.aircraftController.updatePassengerCamera();

@@ -178,10 +178,16 @@ class WorldManager {
     }
 
     /**
-     * Set callback for world changes
+     * ワールド切替時コールバックを登録する（既存ハンドラは保持して連鎖）
+     * @param {(world: object) => void} callback
      */
     onWorldChange(callback) {
-        this.onWorldChangeCallback = callback;
+        if (typeof callback !== 'function') return;
+        const prev = this.onWorldChangeCallback;
+        this.onWorldChangeCallback = (world) => {
+            if (typeof prev === 'function') prev(world);
+            callback(world);
+        };
     }
 
     /**

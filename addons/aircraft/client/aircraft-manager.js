@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import AircraftController from './aircraft-controller.js';
+import AircraftMinimap from './aircraft-minimap.js';
 
 const STORAGE_CAMERA = 'metaverse-aircraft-camera';
 const BOARD_SOCKET_WAIT_MS = 10000;
@@ -68,7 +69,72 @@ export default class AircraftManager {
         this._pilotKeyHandler = null;
         /** @type {(() => void)|null} 操縦開始/終了時にローカルアバター表示を更新する */
         this._onPilotingChange = null;
+        /** @type {(() => string|null)|null} */
+        this._getCurrentWorldId = null;
+        this.minimap = new AircraftMinimap();
+        this._minimapPosScratch = new THREE.Vector3();
         this._loadCameraModeFromStorage();
+    }
+
+    /**
+     * @param {(() => string|null)|null} fn
+     */
+    setWorldIdProvider(fn) {
+        this._getCurrentWorldId = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * 現在ワールドの飛行ミニマップ定義を読み込む
+     * @param {string} [worldId]
+     */
+    async loadFlightMapForWorld(worldId) {
+        const wid = worldId || this._getCurrentWorldId?.() || '';
+        if (!wid) {
+            this.minimap.clearMap();
+            this.minimap.hide();
+            return;
+        }
+        try {
+            const res = await fetch(`/api/addons/aircraft/flight-maps/${encodeURIComponent(wid)}`);
+            if (!res.ok) {
+                this.minimap.clearMap();
+                this.minimap.hide();
+                return;
+            }
+            const j = await res.json();
+            const ok = await this.minimap.setMap(j.map);
+            if (ok && this.isPiloting) this.minimap.show();
+            else if (!ok) this.minimap.hide();
+        } catch {
+            this.minimap.clearMap();
+            this.minimap.hide();
+        }
+    }
+
+    /**
+     * ミニマップ更新用の機体位置・向き
+     * @returns {{ worldX: number, worldZ: number, yawDeg: number }|null}
+     */
+    getMinimapState() {
+        if (!this.isPiloting || !this.activeSlot?.root) return null;
+        const root = this.activeSlot.root;
+        root.updateMatrixWorld(true);
+        root.getWorldPosition(this._minimapPosScratch);
+        const snap = this.aircraftController.getHudSnapshot();
+        return {
+            worldX: this._minimapPosScratch.x,
+            worldZ: this._minimapPosScratch.z,
+            yawDeg: snap?.yawDeg ?? 0,
+        };
+    }
+
+    /**
+     * 毎フレームミニマップを更新する
+     */
+    updateMinimap() {
+        if (!this.isPiloting) return;
+        const state = this.getMinimapState();
+        if (state) this.minimap.update(state);
     }
 
     /**
@@ -336,6 +402,9 @@ export default class AircraftManager {
         this.aircraftController.bindSlot(slot);
         this.aircraftController.snapPilotCamera();
         this.uiManager.showAircraftHud();
+        void this.loadFlightMapForWorld().then(() => {
+            if (this.isPiloting) this.minimap.show();
+        });
         this.uiManager.hideAircraftBoardPrompt();
 
         this._pilotKeyHandler = (e) => {
@@ -385,6 +454,7 @@ export default class AircraftManager {
         this.characterController.setAircraftPoseProvider(null);
         this.isPiloting = false;
         this.activeSlot = null;
+        this.minimap.hide();
         this.uiManager.hideAircraftHud();
         this._notifyPilotingChange();
     }
@@ -505,6 +575,7 @@ export default class AircraftManager {
         this.characterController.setAircraftPoseProvider(null);
         this.isPiloting = false;
         this.activeSlot = null;
+        this.minimap.hide();
         this.uiManager.hideAircraftHud();
         this.uiManager.hideAircraftBoardPrompt();
         if (sid) this.resetSlotToParked(sid);
