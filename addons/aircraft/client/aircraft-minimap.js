@@ -1,11 +1,12 @@
 // addons/aircraft/client/aircraft-minimap.js — 操縦中の円形ミニマップ（3D俯瞰 + オーバーレイ）
 
 import * as THREE from 'three';
+import { parseFlightMapConfig } from '../../../lib/aircraft-server/flight-map-schema.js';
 import {
     aircraftIconRotationRad,
     applyNorthUpOrthoCamera,
     viewHalfExtentM,
-    worldDeltaToMinimapPx,
+    worldXzToMinimapScreen,
 } from './flight-map-coords.js';
 
 const SIZE_PX = 176;
@@ -110,7 +111,12 @@ export default class AircraftMinimap {
             this.clearMap();
             return false;
         }
-        this.mapConfig = map.config;
+        const parsed = parseFlightMapConfig(map.config);
+        if (!parsed.ok) {
+            this.clearMap();
+            return false;
+        }
+        this.mapConfig = JSON.parse(JSON.stringify(parsed.config));
         return true;
     }
 
@@ -129,22 +135,26 @@ export default class AircraftMinimap {
     }
 
     /**
+     * ワールド絶対 XZ の地点を 2D オーバーレイに描画する
      * @param {CanvasRenderingContext2D} ctx
-     * @param {number} cx
-     * @param {number} cy
-     * @param {number} dx
-     * @param {number} dz
-     * @param {{ x: number, z: number }} north
-     * @param {number} half
+     * @param {number} worldX
+     * @param {number} worldZ
+     * @param {number} groundY
+     * @param {import('three').Camera} camera
      * @param {string} label
      * @param {string} fillColor
      * @param {number} radius
      */
-    _drawMarkerAtDelta(ctx, cx, cy, dx, dz, north, half, label, fillColor, radius) {
-        const { px, py } = worldDeltaToMinimapPx(dx, dz, north, half, RADIUS_PX);
+    _drawMarkerAtWorld(ctx, worldX, worldZ, groundY, camera, label, fillColor, radius) {
+        const screen = worldXzToMinimapScreen(worldX, worldZ, groundY, camera, SIZE_PX);
+        if (!screen) return;
+        const cx = SIZE_PX / 2;
+        const cy = SIZE_PX / 2;
+        const px = screen.sx - cx;
+        const py = screen.sy - cy;
         if (Math.hypot(px, py) > RADIUS_PX - 4) return;
-        const sx = cx + px;
-        const sy = cy + py;
+        const sx = screen.sx;
+        const sy = screen.sy;
         ctx.beginPath();
         ctx.arc(sx, sy, radius, 0, Math.PI * 2);
         ctx.fillStyle = fillColor;
@@ -163,10 +173,10 @@ export default class AircraftMinimap {
      * @param {{ worldX: number, worldZ: number, yawDeg: number, otherAircraft?: { label: string, x: number, z: number }[] }} state
      */
     _drawOverlay(state) {
-        if (!this.ctxOverlay || !this.mapConfig) return;
-        const { worldX, worldZ, yawDeg } = state;
+        if (!this.ctxOverlay || !this.mapConfig || !this._orthoCam) return;
+        const { yawDeg } = state;
         const north = this.mapConfig.northDirection || { x: 0, z: -1 };
-        const half = viewHalfExtentM(this.mapConfig);
+        const groundY = this.mapConfig.groundRefY ?? 0;
         const cx = SIZE_PX / 2;
         const cy = SIZE_PX / 2;
         const ctx = this.ctxOverlay;
@@ -174,14 +184,13 @@ export default class AircraftMinimap {
 
         const spots = this.mapConfig.spots || [];
         for (const spot of spots) {
-            this._drawMarkerAtDelta(
+            if (!Number.isFinite(spot.x) || !Number.isFinite(spot.z)) continue;
+            this._drawMarkerAtWorld(
                 ctx,
-                cx,
-                cy,
-                spot.x - worldX,
-                spot.z - worldZ,
-                north,
-                half,
+                spot.x,
+                spot.z,
+                groundY,
+                this._orthoCam,
                 spot.name,
                 '#f57c00',
                 5
@@ -190,14 +199,13 @@ export default class AircraftMinimap {
 
         const others = state.otherAircraft || [];
         for (const ac of others) {
-            this._drawMarkerAtDelta(
+            if (!Number.isFinite(ac.x) || !Number.isFinite(ac.z)) continue;
+            this._drawMarkerAtWorld(
                 ctx,
-                cx,
-                cy,
-                ac.x - worldX,
-                ac.z - worldZ,
-                north,
-                half,
+                ac.x,
+                ac.z,
+                groundY,
+                this._orthoCam,
                 ac.label,
                 '#42a5f5',
                 4

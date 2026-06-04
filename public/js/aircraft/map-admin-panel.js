@@ -328,7 +328,12 @@ async function openSpotDefinitionModal() {
         if (name == null || !name.trim()) return;
         const nextCfg = readConfigFromForm();
         const id = nextSpotId();
-        nextCfg.spots.push({ id, name: name.trim(), x, z });
+        nextCfg.spots.push({
+            id,
+            name: name.trim(),
+            x,
+            z,
+        });
         if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
         draftMap.config = nextCfg;
         selectedSpotId = id;

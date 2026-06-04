@@ -1,5 +1,9 @@
 // addons/aircraft/client/flight-map-coords.js — 北固定トップダウン用 XZ 座標変換
 
+import * as THREE from 'three';
+
+const _projectScratch = new THREE.Vector3();
+
 /**
  * 設定から正射影半幅（m）
  * @param {object|null|undefined} config
@@ -48,6 +52,27 @@ export function worldDeltaToMinimapPx(dx, dz, north, halfExtentM, radiusPx) {
     return {
         px: eastComp * scale,
         py: -northComp * scale,
+    };
+}
+
+/**
+ * ワールド絶対 XZ をミニマップ canvas 座標へ（正射影カメラの project と一致）
+ * @param {number} worldX
+ * @param {number} worldZ
+ * @param {number} groundY
+ * @param {import('three').Camera} camera
+ * @param {number} canvasSizePx
+ * @returns {{ sx: number, sy: number }|null}
+ */
+export function worldXzToMinimapScreen(worldX, worldZ, groundY, camera, canvasSizePx) {
+    _projectScratch.set(worldX, groundY, worldZ);
+    _projectScratch.project(camera);
+    if (!Number.isFinite(_projectScratch.x) || !Number.isFinite(_projectScratch.y)) {
+        return null;
+    }
+    return {
+        sx: (_projectScratch.x * 0.5 + 0.5) * canvasSizePx,
+        sy: (-_projectScratch.y * 0.5 + 0.5) * canvasSizePx,
     };
 }
 

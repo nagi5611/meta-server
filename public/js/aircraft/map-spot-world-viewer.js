@@ -258,6 +258,8 @@ export class AdminMapSpotWorldViewer {
         if (rect.width < 1 || rect.height < 1) return;
         this._pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         this._pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        this._worldRoot.updateMatrixWorld(true);
+        this._pickPlane.updateMatrixWorld(true);
         this._raycaster.setFromCamera(this._pointer, this._camera);
         const hits = this._raycaster.intersectObjects(
             [...this._worldRoot.children, this._pickPlane],
@@ -265,7 +267,10 @@ export class AdminMapSpotWorldViewer {
         );
         if (!hits.length) return;
         const p = hits[0].point;
-        this.onSpotPick(p.x, p.z);
+        this.onSpotPick(
+            Math.round(p.x * 100) / 100,
+            Math.round(p.z * 100) / 100
+        );
     }
 
     /**
