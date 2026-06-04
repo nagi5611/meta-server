@@ -586,15 +586,21 @@ class UIManager {
     showAircraftHud() {
         if (!this.aircraftHud) return;
         this.aircraftHud.innerHTML = `
+<div class="aircraft-hud-bar">
 <div class="aircraft-hud-actions">
-<button type="button" id="aircraft-hud-exit">${escapeHtmlForUi(t('ui.aircraftExit'))}</button>
-<button type="button" id="aircraft-hud-camera">${escapeHtmlForUi(t('ui.aircraftCamera'))}</button>
+<button type="button" class="aircraft-hud-btn" id="aircraft-hud-exit">${escapeHtmlForUi(t('ui.aircraftExitShort'))}</button>
+<button type="button" class="aircraft-hud-btn" id="aircraft-hud-camera">${escapeHtmlForUi(t('ui.aircraftCameraShort'))}</button>
 </div>
-<div class="aircraft-hud-viewpoint" id="aircraft-hud-viewpoint" aria-live="polite"></div>
-<div class="aircraft-hud-telemetry">
-${t('ui.aircraftHudLinesHtml')}
-</div>`;
-        this.aircraftHud.style.display = 'flex';
+<div class="aircraft-hud-stats" aria-live="polite">
+<span class="aircraft-hud-speed"><strong id="aircraft-hud-speed">0</strong> km/h</span>
+<span class="aircraft-hud-stat" id="aircraft-hud-throttle-wrap"><span id="aircraft-hud-throttle">0</span>%</span>
+<span class="aircraft-hud-stat" id="aircraft-hud-flap-wrap"><span id="aircraft-hud-flap">UP</span></span>
+<span class="aircraft-hud-stat" id="aircraft-hud-ground">—</span>
+<span class="aircraft-hud-warn" id="aircraft-hud-vfewarn"></span>
+</div>
+</div>
+<div class="aircraft-hud-viewpoint" id="aircraft-hud-viewpoint" aria-live="polite"></div>`;
+        this.aircraftHud.style.display = 'block';
     }
 
     /**
@@ -635,46 +641,25 @@ ${t('ui.aircraftHudLinesHtml')}
         const q = (n, d) => (Number.isFinite(n) ? n.toFixed(d) : '—');
         const el = (id) => document.getElementById(id);
         const s = el('aircraft-hud-speed');
-        const p = el('aircraft-hud-pitch');
-        const r = el('aircraft-hud-roll');
-        const y = el('aircraft-hud-yaw');
         if (s) {
             const kmh = Number.isFinite(snap.speedMs) ? snap.speedMs * 3.6 : NaN;
             s.textContent = q(kmh, 0);
         }
-        if (p) p.textContent = q(snap.pitchDeg, 1);
-        if (r) r.textContent = q(snap.rollDeg, 1);
-        if (y) {
-            const deg = snap.yawDeg;
-            const norm = Number.isFinite(deg) ? ((deg % 360) + 360) % 360 : NaN;
-            y.textContent = q(norm, 0);
-        }
-        const wy = el('aircraft-hud-omegay');
-        const wp = el('aircraft-hud-omegap');
-        const wr = el('aircraft-hud-omegar');
-        const g = el('aircraft-hud-ground');
-        if (wy) wy.textContent = q(snap.omegaYaw, 2);
-        if (wp) wp.textContent = q(snap.omegaPitch, 2);
-        if (wr) wr.textContent = q(snap.omegaRoll, 2);
-        if (g) g.textContent = snap.grounded ? t('ui.aircraftGrounded') : t('ui.aircraftAirborne');
+        const thWrap = el('aircraft-hud-throttle-wrap');
         const th = el('aircraft-hud-throttle');
-        if (th) th.textContent = typeof snap.throttle === 'number' && Number.isFinite(snap.throttle)
-            ? (snap.throttle * 100).toFixed(0)
-            : '—';
-        const er = el('aircraft-hud-enginerpm');
-        if (er) er.textContent = typeof snap.engineRpm === 'number' && Number.isFinite(snap.engineRpm)
-            ? Math.round(snap.engineRpm).toLocaleString()
-            : '—';
+        const hasThrottle = typeof snap.throttle === 'number' && Number.isFinite(snap.throttle);
+        if (thWrap) thWrap.hidden = !hasThrottle;
+        if (th && hasThrottle) th.textContent = (snap.throttle * 100).toFixed(0);
+        const flapWrap = el('aircraft-hud-flap-wrap');
         const fl = el('aircraft-hud-flap');
-        if (fl) fl.textContent = snap.flapLabel != null ? String(snap.flapLabel) : '—';
-        const vf = el('aircraft-hud-vfe');
-        if (vf) {
-            const lab = snap.flapLabel != null ? String(snap.flapLabel) : '';
-            if (lab === 'UP' || typeof snap.vfeMs !== 'number' || !Number.isFinite(snap.vfeMs)) vf.textContent = '—';
-            else vf.textContent = q(snap.vfeMs * 3.6, 0);
-        }
+        const flapLabel = snap.flapLabel != null ? String(snap.flapLabel) : '';
+        const showFlap = flapLabel && flapLabel !== 'UP';
+        if (flapWrap) flapWrap.hidden = !showFlap;
+        if (fl && showFlap) fl.textContent = flapLabel;
+        const g = el('aircraft-hud-ground');
+        if (g) g.textContent = snap.grounded ? t('ui.aircraftGrounded') : t('ui.aircraftAirborne');
         const vw = el('aircraft-hud-vfewarn');
-        if (vw) vw.textContent = snap.vfeWarn ? t('ui.aircraftVfeWarn') : '';
+        if (vw) vw.textContent = snap.vfeWarn ? t('ui.aircraftVfeWarnShort') : '';
     }
 
     hideAircraftHud() {

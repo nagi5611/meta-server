@@ -234,37 +234,13 @@ export default class AircraftMinimap {
     _drawOwnAircraftIcon(ctx) {
         const s = UI_SCALE;
         ctx.beginPath();
-        ctx.moveTo(0, -22 * s);
-        ctx.lineTo(2.5 * s, -11 * s);
-        ctx.lineTo(15 * s, -7 * s);
-        ctx.lineTo(15 * s, 1 * s);
-        ctx.lineTo(3 * s, 3 * s);
-        ctx.lineTo(5.5 * s, 15 * s);
-        ctx.lineTo(0, 11 * s);
-        ctx.lineTo(-5.5 * s, 15 * s);
-        ctx.lineTo(-3 * s, 3 * s);
-        ctx.lineTo(-15 * s, 1 * s);
-        ctx.lineTo(-15 * s, -7 * s);
-        ctx.lineTo(-2.5 * s, -11 * s);
-        ctx.closePath();
-        ctx.fillStyle = '#141414';
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2 * s;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(0, -9 * s);
+        ctx.moveTo(0, -16 * s);
+        ctx.lineTo(11 * s, 12 * s);
         ctx.lineTo(0, 6 * s);
-        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-        ctx.lineWidth = 1.2 * s;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(0, -8 * s, 2.2 * s, 0, Math.PI * 2);
-        ctx.fillStyle = '#42a5f5';
+        ctx.lineTo(-11 * s, 12 * s);
+        ctx.closePath();
+        ctx.fillStyle = '#fff';
         ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1 * s;
-        ctx.stroke();
     }
 
     /**
