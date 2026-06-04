@@ -78,6 +78,9 @@ export default class AircraftManager {
         this._getCurrentWorldId = null;
         this.minimap = new AircraftMinimap();
         this._minimapPosScratch = new THREE.Vector3();
+        /** ミニマップ更新間隔（ms）。3D 正射影は重いため低 FPS で十分 */
+        this._minimapUpdateIntervalMs = 500;
+        this._minimapLastUpdateMs = 0;
         this._loadCameraModeFromStorage();
     }
 
@@ -108,8 +111,10 @@ export default class AircraftManager {
             }
             const j = await res.json();
             const ok = await this.minimap.setMap(j.map);
-            if (ok && this.isPiloting) this.minimap.show();
-            else if (!ok) this.minimap.hide();
+            if (ok && this.isPiloting) {
+                this.minimap.show();
+                this.updateMinimap(true);
+            } else if (!ok) this.minimap.hide();
         } catch {
             this.minimap.clearMap();
             this.minimap.hide();
@@ -158,10 +163,19 @@ export default class AircraftManager {
     }
 
     /**
-     * 毎フレームミニマップを更新する
+     * ミニマップを更新する（通常は約 2 FPS に間引き）
+     * @param {boolean} [force] true なら間引きを無視して即時更新
      */
-    updateMinimap() {
+    updateMinimap(force = false) {
         if (!this.isPiloting) return;
+        const now = performance.now();
+        if (
+            !force &&
+            now - this._minimapLastUpdateMs < this._minimapUpdateIntervalMs
+        ) {
+            return;
+        }
+        this._minimapLastUpdateMs = now;
         const state = this.getMinimapState();
         if (!state) return;
         state.otherAircraft = this.getMinimapOtherAircraft();
@@ -450,7 +464,10 @@ export default class AircraftManager {
         this.aircraftController.snapPilotCamera();
         this.uiManager.showAircraftHud();
         void this.loadFlightMapForWorld().then(() => {
-            if (this.isPiloting) this.minimap.show();
+            if (this.isPiloting) {
+                this.minimap.show();
+                this.updateMinimap(true);
+            }
         });
         this.uiManager.hideAircraftBoardPrompt();
 
