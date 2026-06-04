@@ -565,8 +565,8 @@ body {
     position: fixed;
     right: 16px;
     bottom: 16px;
-    width: 176px;
-    height: 176px;
+    width: 352px;
+    height: 352px;
     z-index: 103;
     pointer-events: none;
     filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.45));
@@ -578,8 +578,8 @@ body {
 .aircraft-minimap-overlay {
     position: absolute;
     inset: 0;
-    width: 176px;
-    height: 176px;
+    width: 352px;
+    height: 352px;
     border-radius: 50%;
 }
 
@@ -594,18 +594,18 @@ body {
 
 .aircraft-minimap-canvas {
     display: block;
-    width: 176px;
-    height: 176px;
+    width: 352px;
+    height: 352px;
     border-radius: 50%;
     background: rgba(20, 30, 50, 0.92);
 }
 
 .aircraft-minimap-north {
     position: absolute;
-    top: 2px;
+    top: 4px;
     left: 50%;
     transform: translateX(-50%);
-    font-size: 13px;
+    font-size: 18px;
     font-weight: 900;
     color: #e53935;
     text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
@@ -617,14 +617,14 @@ body {
     .aircraft-minimap {
         right: 10px;
         bottom: 10px;
-        width: 140px;
-        height: 140px;
+        width: 280px;
+        height: 280px;
     }
     .aircraft-minimap-3d,
     .aircraft-minimap-overlay,
     .aircraft-minimap-canvas {
-        width: 140px;
-        height: 140px;
+        width: 280px;
+        height: 280px;
     }
 }
 

@@ -9,8 +9,8 @@ import {
     worldXzToMinimapScreen,
 } from './flight-map-coords.js';
 
-const SIZE_PX = 176;
-const RADIUS_PX = SIZE_PX / 2 - 4;
+const SIZE_PX = 352;
+const RADIUS_PX = SIZE_PX / 2 - 6;
 
 /**
  * 飛行操縦中 HUD 右下の円形ミニマップ（3D ワールド俯瞰・North-up）
@@ -160,10 +160,10 @@ export default class AircraftMinimap {
         ctx.fillStyle = fillColor;
         ctx.fill();
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 2.5;
         ctx.stroke();
         ctx.fillStyle = 'rgba(255,255,255,0.95)';
-        ctx.font = '10px sans-serif';
+        ctx.font = '14px sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText(label, sx + radius + 2, sy + 3);
     }
@@ -193,7 +193,7 @@ export default class AircraftMinimap {
                 this._orthoCam,
                 spot.name,
                 '#f57c00',
-                5
+                10
             );
         }
 
@@ -208,7 +208,7 @@ export default class AircraftMinimap {
                 this._orthoCam,
                 ac.label,
                 '#42a5f5',
-                4
+                8
             );
         }
 
@@ -222,15 +222,15 @@ export default class AircraftMinimap {
             )
         );
         ctx.beginPath();
-        ctx.moveTo(0, -14);
-        ctx.lineTo(8, 10);
-        ctx.lineTo(0, 5);
-        ctx.lineTo(-8, 10);
+        ctx.moveTo(0, -28);
+        ctx.lineTo(16, 20);
+        ctx.lineTo(0, 10);
+        ctx.lineTo(-16, 20);
         ctx.closePath();
         ctx.fillStyle = '#111';
         ctx.fill();
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 2.5;
         ctx.stroke();
         ctx.restore();
     }
