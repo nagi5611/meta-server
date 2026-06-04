@@ -9,8 +9,10 @@ import {
     worldXzToMinimapScreen,
 } from './flight-map-coords.js';
 
-const SIZE_PX = 352;
-const RADIUS_PX = SIZE_PX / 2 - 6;
+const SIZE_PX = 264;
+const RADIUS_PX = SIZE_PX / 2 - 5;
+/** 352px 基準デザインからのスケール */
+const UI_SCALE = SIZE_PX / 352;
 
 /**
  * 飛行操縦中 HUD 右下の円形ミニマップ（3D ワールド俯瞰・North-up）
@@ -160,10 +162,10 @@ export default class AircraftMinimap {
         ctx.fillStyle = fillColor;
         ctx.fill();
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 2 * UI_SCALE;
         ctx.stroke();
         ctx.fillStyle = 'rgba(255,255,255,0.95)';
-        ctx.font = '14px sans-serif';
+        ctx.font = `${Math.round(14 * UI_SCALE)}px sans-serif`;
         ctx.textAlign = 'left';
         ctx.fillText(label, sx + radius + 2, sy + 3);
     }
@@ -193,7 +195,7 @@ export default class AircraftMinimap {
                 this._orthoCam,
                 spot.name,
                 '#f57c00',
-                10
+                Math.round(10 * UI_SCALE)
             );
         }
 
@@ -208,7 +210,7 @@ export default class AircraftMinimap {
                 this._orthoCam,
                 ac.label,
                 '#42a5f5',
-                8
+                Math.round(8 * UI_SCALE)
             );
         }
 
@@ -221,18 +223,48 @@ export default class AircraftMinimap {
                 this.mapConfig.aircraftIconOffsetDeg || 0
             )
         );
+        this._drawOwnAircraftIcon(ctx);
+        ctx.restore();
+    }
+
+    /**
+     * トップダウン視点の自機シルエット（先端=進行方向・北固定時は機首）
+     * @param {CanvasRenderingContext2D} ctx
+     */
+    _drawOwnAircraftIcon(ctx) {
+        const s = UI_SCALE;
         ctx.beginPath();
-        ctx.moveTo(0, -28);
-        ctx.lineTo(16, 20);
-        ctx.lineTo(0, 10);
-        ctx.lineTo(-16, 20);
+        ctx.moveTo(0, -22 * s);
+        ctx.lineTo(2.5 * s, -11 * s);
+        ctx.lineTo(15 * s, -7 * s);
+        ctx.lineTo(15 * s, 1 * s);
+        ctx.lineTo(3 * s, 3 * s);
+        ctx.lineTo(5.5 * s, 15 * s);
+        ctx.lineTo(0, 11 * s);
+        ctx.lineTo(-5.5 * s, 15 * s);
+        ctx.lineTo(-3 * s, 3 * s);
+        ctx.lineTo(-15 * s, 1 * s);
+        ctx.lineTo(-15 * s, -7 * s);
+        ctx.lineTo(-2.5 * s, -11 * s);
         ctx.closePath();
-        ctx.fillStyle = '#111';
+        ctx.fillStyle = '#141414';
         ctx.fill();
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 2 * s;
         ctx.stroke();
-        ctx.restore();
+        ctx.beginPath();
+        ctx.moveTo(0, -9 * s);
+        ctx.lineTo(0, 6 * s);
+        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+        ctx.lineWidth = 1.2 * s;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, -8 * s, 2.2 * s, 0, Math.PI * 2);
+        ctx.fillStyle = '#42a5f5';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1 * s;
+        ctx.stroke();
     }
 
     /**
