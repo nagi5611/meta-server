@@ -6189,6 +6189,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('user-session-modal').addEventListener('click', (e) => {
         if (e.target.id === 'user-session-modal') document.getElementById('user-session-modal').classList.remove('show');
     });
+    document.getElementById('enter-metaverse-world-cancel')?.addEventListener('click', closeEnterMetaverseWorldModal);
+    document.getElementById('enter-metaverse-world-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'enter-metaverse-world-modal') closeEnterMetaverseWorldModal();
+    });
     document.getElementById('login-users-tbody')?.addEventListener('click', (e) => {
         const btn = e.target.closest('.login-user-name-link');
         if (btn && btn.dataset.username) {
@@ -6247,31 +6251,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // メタバースへ入る（管理者）: Basic認証済みでトークン取得しメタバースへ遷移
-    document.getElementById('back-to-metaverse').addEventListener('click', async () => {
-        const btn = document.getElementById('back-to-metaverse');
-        btn.disabled = true;
-        btn.textContent = '読み込み中...';
-        try {
-            const res = await fetch('/admin/enter-metaverse', { credentials: 'include' });
-            if (!res.ok) {
-                alert('認証に失敗しました。再度ログインしてください。');
-                btn.disabled = false;
-                btn.textContent = 'メタバースへ入る（管理者）';
-                return;
-            }
-            const { token, username } = await res.json();
-            sessionStorage.setItem('metaverseAdminToken', token);
-            localStorage.setItem('username', username);
-            const q = window.location.search || '';
-            const h = window.location.hash || '';
-            window.location.href = '/admin' + q + h;
-        } catch (err) {
-            console.error('Failed to enter metaverse as admin:', err);
-            alert('メタバースへの入室に失敗しました。');
-            btn.disabled = false;
-            btn.textContent = 'メタバースへ入る（管理者）';
-        }
+    // メタバースへ入る（管理者）: ワールド選択後にトークン取得して /admin?world= へ遷移
+    document.getElementById('back-to-metaverse').addEventListener('click', () => {
+        void openEnterMetaverseWorldModal();
     });
     })();
 });
@@ -6506,6 +6488,114 @@ function drawBandwidthGraph(limitBps) {
         const val = (maxBps * (5 - i) / 5);
         const lab = formatBps(val);
         ctx.fillText(lab, padding.left - 8, padding.top + graphH * i / 5 + 4);
+    }
+}
+
+/** メタバース入室モーダルを閉じる */
+function closeEnterMetaverseWorldModal() {
+    const modal = document.getElementById('enter-metaverse-world-modal');
+    if (!modal) return;
+    modal.classList.remove('show');
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+/**
+ * メタバース入室: ワールド一覧を読み込み中央モーダルを表示する
+ */
+async function openEnterMetaverseWorldModal() {
+    const modal = document.getElementById('enter-metaverse-world-modal');
+    const listEl = document.getElementById('enter-metaverse-world-list');
+    const loadingEl = document.getElementById('enter-metaverse-world-loading');
+    const errorEl = document.getElementById('enter-metaverse-world-error');
+    if (!modal || !listEl || !loadingEl || !errorEl) return;
+
+    listEl.innerHTML = '';
+    loadingEl.hidden = false;
+    errorEl.hidden = true;
+    errorEl.textContent = '';
+    modal.classList.add('show');
+    modal.setAttribute('aria-hidden', 'false');
+
+    try {
+        const response = await fetch('/admin/worlds', { credentials: 'include' });
+        if (!response.ok) throw new Error('worlds fetch failed');
+        const worlds = await response.json();
+        loadingEl.hidden = true;
+
+        const entries = Object.entries(worlds || {})
+            .map(([id, w]) => ({
+                id,
+                name: w && w.name != null && String(w.name).trim() ? String(w.name).trim() : id,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+
+        if (entries.length === 0) {
+            errorEl.textContent = 'ワールドが登録されていません。';
+            errorEl.hidden = false;
+            return;
+        }
+
+        for (const { id, name } of entries) {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'enter-metaverse-world-item';
+            btn.dataset.worldId = id;
+            btn.setAttribute('role', 'option');
+            btn.innerHTML =
+                `<span class="enter-metaverse-world-item-name">${escapeHtml(name)}</span>` +
+                `<span class="enter-metaverse-world-item-id">${escapeHtml(id)}</span>`;
+            btn.addEventListener('click', () => {
+                void enterMetaverseAsAdmin(id, btn);
+            });
+            li.appendChild(btn);
+            listEl.appendChild(li);
+        }
+    } catch (err) {
+        console.error('Failed to load worlds for enter modal:', err);
+        loadingEl.hidden = true;
+        errorEl.textContent = 'ワールド一覧の取得に失敗しました。';
+        errorEl.hidden = false;
+    }
+}
+
+/**
+ * 管理者として指定ワールドのメタバースへ遷移する
+ * @param {string} worldId
+ * @param {HTMLButtonElement} itemBtn
+ */
+async function enterMetaverseAsAdmin(worldId, itemBtn) {
+    const modal = document.getElementById('enter-metaverse-world-modal');
+    const allItems = modal?.querySelectorAll('.enter-metaverse-world-item');
+    allItems?.forEach((b) => {
+        b.disabled = true;
+    });
+    if (itemBtn) {
+        itemBtn.querySelector('.enter-metaverse-world-item-name').textContent = '入室準備中…';
+        const idSpan = itemBtn.querySelector('.enter-metaverse-world-item-id');
+        if (idSpan) idSpan.textContent = '';
+    }
+
+    try {
+        const res = await fetch('/admin/enter-metaverse', { credentials: 'include' });
+        if (!res.ok) {
+            alert('認証に失敗しました。再度ログインしてください。');
+            closeEnterMetaverseWorldModal();
+            return;
+        }
+        const { token, username } = await res.json();
+        sessionStorage.setItem('metaverseAdminToken', token);
+        localStorage.setItem('username', username);
+        const url = new URL('/admin', window.location.origin);
+        url.searchParams.set('world', worldId);
+        window.location.href = url.pathname + url.search;
+    } catch (err) {
+        console.error('Failed to enter metaverse as admin:', err);
+        alert('メタバースへの入室に失敗しました。');
+        allItems?.forEach((b) => {
+            b.disabled = false;
+        });
+        void openEnterMetaverseWorldModal();
     }
 }
 

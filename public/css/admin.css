@@ -3369,6 +3369,106 @@ body.admin-dark .addon-admin-reboot-pin-input {
     color: #666;
 }
 
+.enter-metaverse-world-modal-content {
+    max-width: 420px;
+}
+
+.enter-metaverse-world-hint {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: #666;
+}
+
+.enter-metaverse-world-status {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: #555;
+}
+
+.enter-metaverse-world-error {
+    color: #c0392b;
+}
+
+.enter-metaverse-world-list {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 0;
+    max-height: min(50vh, 320px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.enter-metaverse-world-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid #dce3ea;
+    border-radius: 8px;
+    background: #f8fafc;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.enter-metaverse-world-item:hover:not(:disabled) {
+    border-color: #3498db;
+    background: #eef6fc;
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.12);
+}
+
+.enter-metaverse-world-item:disabled {
+    opacity: 0.65;
+    cursor: wait;
+}
+
+.enter-metaverse-world-item-name {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 15px;
+}
+
+.enter-metaverse-world-item-id {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #7f8c8d;
+    font-family: ui-monospace, Consolas, monospace;
+}
+
+body.admin-dark .enter-metaverse-world-hint {
+    color: #a8b4c0;
+}
+
+body.admin-dark .enter-metaverse-world-status {
+    color: #c5d0db;
+}
+
+body.admin-dark .enter-metaverse-world-error {
+    color: #f1948a;
+}
+
+body.admin-dark .enter-metaverse-world-item {
+    background: #2a3440;
+    border-color: #3d4f5f;
+}
+
+body.admin-dark .enter-metaverse-world-item:hover:not(:disabled) {
+    background: #324555;
+    border-color: #5dade2;
+}
+
+body.admin-dark .enter-metaverse-world-item-name {
+    color: #ecf0f1;
+}
+
+body.admin-dark .enter-metaverse-world-item-id {
+    color: #95a5a6;
+}
+
 .modal {
     display: none;
     position: fixed;

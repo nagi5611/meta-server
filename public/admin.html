@@ -1213,6 +1213,20 @@
         </div>
     </div>
 
+    <!-- メタバース入室: ワールド選択 -->
+    <div id="enter-metaverse-world-modal" class="modal" aria-hidden="true">
+        <div class="modal-content enter-metaverse-world-modal-content">
+            <h3>ワールドを選択</h3>
+            <p class="hint enter-metaverse-world-hint">入室するワールドを選んでください。</p>
+            <p id="enter-metaverse-world-loading" class="enter-metaverse-world-status">読み込み中…</p>
+            <p id="enter-metaverse-world-error" class="enter-metaverse-world-status enter-metaverse-world-error" hidden></p>
+            <ul id="enter-metaverse-world-list" class="enter-metaverse-world-list" role="listbox" aria-label="ワールド一覧"></ul>
+            <div class="modal-buttons">
+                <button type="button" id="enter-metaverse-world-cancel" class="btn btn-secondary">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Alert Modal -->
     <div id="alert-modal" class="modal">
         <div class="modal-content">
