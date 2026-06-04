@@ -2531,8 +2531,17 @@ async function applyWorldsStateFromJson(parsed) {
         writeWorldEditCache();
         return;
     }
-    const nextId = (selectedWorldId && worlds[selectedWorldId]) ? selectedWorldId : ids[0];
-    await selectWorld(nextId);
+    if (selectedWorldId && worlds[selectedWorldId]) {
+        await selectWorld(selectedWorldId);
+    } else {
+        syncSelectWorldChrome(null);
+        setWorldEditLoader(true, 'JSONを反映しています…');
+        try {
+            await loadWorldIntoScene(EMPTY_EDITOR_WORLD);
+        } finally {
+            setWorldEditLoader(false);
+        }
+    }
     writeWorldEditCache();
 }
 
@@ -5835,18 +5844,9 @@ async function init() {
         renderModelList();
         renderPdfList();
         populateDestWorldSelect();
-        setWorldEditLoader(true, '3Dモデルを読み込んでいます…');
-        const ids = Object.keys(worlds);
-        if (ids.length) {
-            syncSelectWorldChrome(ids[0]);
-            await loadWorldIntoScene(worlds[ids[0]]);
-            if (worldEditorChartFeaturesEnabled) {
-                await refreshTaikoChartSelect(null);
-            }
-        } else {
-            syncSelectWorldChrome(null);
-            await loadWorldIntoScene(EMPTY_EDITOR_WORLD);
-        }
+        syncSelectWorldChrome(null);
+        setWorldEditLoader(true, '3Dビューを準備しています…');
+        await loadWorldIntoScene(EMPTY_EDITOR_WORLD);
     } finally {
         setWorldEditLoader(false);
     }
