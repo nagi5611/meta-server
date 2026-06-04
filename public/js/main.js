@@ -281,6 +281,8 @@ class MetaverseApp {
         await new Promise((resolve) => {
             this.worldManager.loadWorld(initialWorldId, () => {
                 console.log('World loaded:', initialWorldId);
+                // onWorldChange は後で登録するため、初回ロード時も帰属表示を反映する
+                this.updateGoogleMapsCopyrightVisibility(this.worldManager.getCurrentWorld());
                 // Setup teleport zones after world is loaded
                 this.updateTeleportZones();
                 this.updateTaikoZones();
@@ -509,6 +511,7 @@ class MetaverseApp {
             const isPilot = !!(this.aircraftManager && this.aircraftManager.isPiloting);
             this.playerManager.setLocalPlayerVisible(!hideForFirst && !hideForAdmin && !isPassenger);
             this.playerManager.setLocalPlayerAircraftPilotGhostMode(!!isPilot);
+            this.playerManager.setAircraftPilotViewGhostRemotes(!!isPilot);
         };
         this.aircraftManager?.setOnPilotingChange?.(() => this.refreshLocalAvatarVisibility());
 
@@ -563,6 +566,8 @@ class MetaverseApp {
         this.worldManager.onWorldChange((world) => {
             this.onWorldChanged(world);
         });
+        // 初回ロード済みワールドの帰属表示を再同期（onWorldChange 登録前に読み込んだ場合の保険）
+        this.updateGoogleMapsCopyrightVisibility(this.worldManager.getCurrentWorld());
 
         // Admin: プレイヤーアバタークリックで情報表示
         if (isAdminMetaverseEntryPath()) {

@@ -20,8 +20,16 @@ class PlayerManager {
         this._headWorldOffset = new THREE.Vector3(0, 0.08, 0);
         /** 飛行機操縦中: 自アバターを透明化（カメラ位置に追従） */
         this._localPilotGhostMode = false;
-        /** @type {Map<THREE.Material, { transparent: boolean, opacity: number, depthWrite: boolean }>|null} */
-        this._localPilotGhostMatRestore = null;
+        /** @type {Map<THREE.Object3D, boolean>} */
+        this._localPilotGhostObjRestore = new Map();
+        /** @type {Map<THREE.Material, { transparent: boolean, opacity: number, depthWrite: boolean, visible?: boolean, colorWrite?: boolean }>} */
+        this._localPilotGhostMatRestore = new Map();
+        /** 操縦者視点: 他プレイヤーアバターを透明化 */
+        this._remotePilotViewGhostActive = false;
+        /** @type {Map<THREE.Object3D, boolean>} */
+        this._remotePilotGhostObjRestore = new Map();
+        /** @type {Map<THREE.Material, { transparent: boolean, opacity: number, depthWrite: boolean, visible?: boolean, colorWrite?: boolean }>} */
+        this._remotePilotGhostMatRestore = new Map();
         /** @type {import('./visual-mode.js').VisualMode} */
         this._visualMode = 'standard';
     }
@@ -286,7 +294,118 @@ class PlayerManager {
             this.scene.add(this.localPlayer);
             console.log('Local player created with placeholder');
         }
-        if (this._localPilotGhostMode) this._applyLocalPilotGhostMaterials();
+        if (this._localPilotGhostMode) this._applyLocalPilotGhost();
+    }
+
+    /**
+     * @param {THREE.Object3D} ch
+     * @returns {boolean}
+     */
+    _isPilotGhostRenderable(ch) {
+        return !!(ch.isMesh || ch.isSkinnedMesh || ch.isSprite || ch.type === 'Sprite');
+    }
+
+    /**
+     * 操縦者視点用: メッシュ・スプライトを非表示＋マテリアル opacity 0
+     * @param {THREE.Object3D} root
+     * @param {Map<THREE.Object3D, boolean>} objRestore
+     * @param {Map<THREE.Material, object>} matRestore
+     */
+    _applyPilotGhostToRoot(root, objRestore, matRestore) {
+        if (!root) return;
+        root.traverse((ch) => {
+            if (!this._isPilotGhostRenderable(ch)) return;
+            if (!objRestore.has(ch)) objRestore.set(ch, ch.visible);
+            ch.visible = false;
+            const mats = ch.material ? (Array.isArray(ch.material) ? ch.material : [ch.material]) : [];
+            for (const m of mats) {
+                if (!m || typeof m !== 'object') continue;
+                if (!matRestore.has(m)) {
+                    const snap = {
+                        transparent: !!m.transparent,
+                        opacity: typeof m.opacity === 'number' ? m.opacity : 1,
+                        depthWrite: m.depthWrite !== false,
+                    };
+                    if ('visible' in m) snap.visible = m.visible;
+                    if ('colorWrite' in m) snap.colorWrite = m.colorWrite;
+                    matRestore.set(m, snap);
+                }
+                if ('opacity' in m) {
+                    m.transparent = true;
+                    m.opacity = 0;
+                    m.depthWrite = false;
+                }
+                if ('visible' in m) m.visible = false;
+                if ('colorWrite' in m) m.colorWrite = false;
+                m.needsUpdate = true;
+            }
+        });
+    }
+
+    /**
+     * @param {Map<THREE.Object3D, boolean>} objRestore
+     * @param {Map<THREE.Material, object>} matRestore
+     */
+    _clearPilotGhostFromRestore(objRestore, matRestore) {
+        for (const [ch, vis] of objRestore) {
+            try {
+                ch.visible = vis;
+            } catch (_) {
+                /* ignore */
+            }
+        }
+        objRestore.clear();
+        for (const [m, s] of matRestore) {
+            try {
+                if ('opacity' in m) {
+                    m.transparent = s.transparent;
+                    m.opacity = s.opacity;
+                    m.depthWrite = s.depthWrite;
+                }
+                if (s.visible !== undefined && 'visible' in m) m.visible = s.visible;
+                if (s.colorWrite !== undefined && 'colorWrite' in m) m.colorWrite = s.colorWrite;
+                m.needsUpdate = true;
+            } catch (_) {
+                /* ignore */
+            }
+        }
+        matRestore.clear();
+    }
+
+    /**
+     * @returns {void}
+     */
+    _applyLocalPilotGhost() {
+        if (!this.localPlayer || !this._localPilotGhostMode) return;
+        this._applyPilotGhostToRoot(
+            this.localPlayer,
+            this._localPilotGhostObjRestore,
+            this._localPilotGhostMatRestore,
+        );
+    }
+
+    /**
+     * 操縦者視点で他プレイヤーアバターを完全透明化
+     * @param {boolean} on
+     */
+    setAircraftPilotViewGhostRemotes(on) {
+        const v = !!on;
+        if (this._remotePilotViewGhostActive === v) return;
+        this._remotePilotViewGhostActive = v;
+        if (!v) {
+            this._clearPilotGhostFromRestore(
+                this._remotePilotGhostObjRestore,
+                this._remotePilotGhostMatRestore,
+            );
+            return;
+        }
+        for (const player of this.remotePlayers.values()) {
+            this._applyPilotGhostToRoot(
+                player,
+                this._remotePilotGhostObjRestore,
+                this._remotePilotGhostMatRestore,
+            );
+        }
     }
 
     /**
@@ -341,57 +460,13 @@ class PlayerManager {
         if (this._localPilotGhostMode === v) return;
         this._localPilotGhostMode = v;
         if (!v) {
-            this._clearLocalPilotGhostMaterials();
+            this._clearPilotGhostFromRestore(
+                this._localPilotGhostObjRestore,
+                this._localPilotGhostMatRestore,
+            );
             return;
         }
-        this._applyLocalPilotGhostMaterials();
-    }
-
-    /**
-     * @returns {void}
-     */
-    _clearLocalPilotGhostMaterials() {
-        if (!this._localPilotGhostMatRestore) return;
-        for (const [m, s] of this._localPilotGhostMatRestore) {
-            try {
-                m.transparent = s.transparent;
-                m.opacity = s.opacity;
-                m.depthWrite = s.depthWrite;
-                m.needsUpdate = true;
-            } catch (_) {
-                /* ignore */
-            }
-        }
-        this._localPilotGhostMatRestore.clear();
-        this._localPilotGhostMatRestore = null;
-    }
-
-    /**
-     * @returns {void}
-     */
-    _applyLocalPilotGhostMaterials() {
-        if (!this.localPlayer || !this._localPilotGhostMode) return;
-        this._clearLocalPilotGhostMaterials();
-        const map = new Map();
-        this._localPilotGhostMatRestore = map;
-        this.localPlayer.traverse((ch) => {
-            if (!ch.isMesh && !ch.isSkinnedMesh && ch.type !== 'Sprite') return;
-            const mats = ch.material ? (Array.isArray(ch.material) ? ch.material : [ch.material]) : [];
-            for (const m of mats) {
-                if (!m || typeof m !== 'object' || !('opacity' in m)) continue;
-                if (!map.has(m)) {
-                    map.set(m, {
-                        transparent: !!m.transparent,
-                        opacity: typeof m.opacity === 'number' ? m.opacity : 1,
-                        depthWrite: m.depthWrite !== false,
-                    });
-                }
-                m.transparent = true;
-                m.opacity = 0;
-                m.depthWrite = false;
-                m.needsUpdate = true;
-            }
-        });
+        this._applyLocalPilotGhost();
     }
 
     /**
@@ -522,6 +597,13 @@ class PlayerManager {
         const playerObj = this.remotePlayers.get(playerId);
         if (playerObj) {
             applyVisualModeToObject3D(playerObj, this._visualMode, THREE);
+            if (this._remotePilotViewGhostActive) {
+                this._applyPilotGhostToRoot(
+                    playerObj,
+                    this._remotePilotGhostObjRestore,
+                    this._remotePilotGhostMatRestore,
+                );
+            }
         }
     }
 
@@ -691,6 +773,7 @@ class PlayerManager {
                 }
             }
         }
+        if (this._localPilotGhostMode) this._applyLocalPilotGhost();
     }
 
     /**
@@ -945,9 +1028,17 @@ class PlayerManager {
         this._visualMode = m;
         if (this.localPlayer) {
             applyVisualModeToObject3D(this.localPlayer, m, THREE);
+            if (this._localPilotGhostMode) this._applyLocalPilotGhost();
         }
         for (const player of this.remotePlayers.values()) {
             applyVisualModeToObject3D(player, m, THREE);
+            if (this._remotePilotViewGhostActive) {
+                this._applyPilotGhostToRoot(
+                    player,
+                    this._remotePilotGhostObjRestore,
+                    this._remotePilotGhostMatRestore,
+                );
+            }
         }
     }
 }
