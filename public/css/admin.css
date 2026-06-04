@@ -5148,8 +5148,10 @@ body.admin-dark .ac-map-spot-modal-inner {
 
 .ac-map-spot-viewer-mount {
     flex: 1;
-    min-height: 0;
+    min-height: 420px;
+    height: 100%;
     background: #1a1a22;
+    position: relative;
 }
 
 /* データベース探索（D1 風） */

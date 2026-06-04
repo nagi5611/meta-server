@@ -15,6 +15,12 @@ import {
     AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
 import { findObjectByNamePath, stepEngineBladeRotation, stepFlapDeflection } from './runtime-prefab-aircraft-anim.js';
+import {
+    applyAircraftViewpointCamera,
+    resolveSlotCameraViewpoints,
+    viewpointAtIndex,
+} from './camera-viewpoint-runtime.js';
+import { viewpointIndexFromLegacyMode } from '../../../public/js/aircraft/camera-viewpoints.js';
 
 const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
@@ -75,6 +81,7 @@ export default class AircraftControllerHard {
         this._lastFlapBumpMs = 0;
         /** @type {'cockpit'|'chase'} */
         this.cameraMode = 'cockpit';
+        this.viewpointIndex = 0;
         this._onKeyDown = (e) => this._handleKey(e, true);
         this._onKeyUp = (e) => this._handleKey(e, false);
         this._bound = false;
@@ -131,12 +138,28 @@ export default class AircraftControllerHard {
      * @param {'cockpit'|'chase'} mode
      */
     setCameraMode(mode) {
-        const next = mode === 'chase' ? 'chase' : 'cockpit';
-        if (next !== this.cameraMode) {
+        const slot = this.slot || this.passengerViewSlot;
+        this.setViewpointIndex(viewpointIndexFromLegacyMode(mode === 'chase' ? 'chase' : 'cockpit', resolveSlotCameraViewpoints(slot)));
+    }
+
+    /**
+     * @param {number} index
+     */
+    setViewpointIndex(index) {
+        const slot = this.slot || this.passengerViewSlot;
+        const vps = resolveSlotCameraViewpoints(slot);
+        const n = Math.max(1, vps.length);
+        const next = ((index % n) + n) % n;
+        const vp = viewpointAtIndex(vps, next);
+        const legacyMode = vp?.role === 'chase' ? 'chase' : 'cockpit';
+        if (next !== this.viewpointIndex || legacyMode !== this.cameraMode) {
             this.pilotLookYaw = 0;
             this.pilotLookPitch = 0;
+            this.passengerLookYaw = 0;
+            this.passengerLookPitch = 0;
         }
-        this.cameraMode = next;
+        this.viewpointIndex = next;
+        this.cameraMode = legacyMode;
     }
 
     /**
@@ -833,37 +856,22 @@ export default class AircraftControllerHard {
     updatePassengerCamera() {
         const slot = this.passengerViewSlot;
         if (!slot?.root) return;
-        const root = slot.root;
-        root.updateMatrixWorld(true);
-        const cockpit = slot.cockpitOffset || { x: 0, y: 1.2, z: 0 };
-        const chase = slot.chaseOffset || { x: 0, y: 2, z: 8 };
-        this._eulerScratch.set(this.passengerLookPitch, this.passengerLookYaw, 0, 'YXZ');
-        this._qClampWorld.setFromEuler(this._eulerScratch);
-        const qOff = this._qClampWorld;
-
-        if (this.cameraMode === 'cockpit') {
-            this._lookTarget.set(cockpit.x, cockpit.y, cockpit.z);
-            root.localToWorld(this._lookTarget);
-            this.camera.position.copy(this._lookTarget);
-            root.getWorldQuaternion(this._worldQuat);
-            this.camera.quaternion.copy(this._worldQuat);
-            this._applySlotCameraBodyEuler(slot, 'cockpit');
-            this.camera.quaternion.multiply(qOff);
-            return;
-        }
-
-        this._lookTarget.set(chase.x, chase.y, chase.z);
-        root.localToWorld(this._lookTarget);
-        this.camera.position.copy(this._lookTarget);
-        root.getWorldPosition(this._passengerAimScratch);
-        this._passengerAimScratch.y += 1;
-        const o = this._passengerBaseObj;
-        o.position.copy(this.camera.position);
-        o.quaternion.identity();
-        o.lookAt(this._passengerAimScratch);
-        this.camera.quaternion.copy(o.quaternion);
-        this._applySlotCameraBodyEuler(slot, 'chase');
-        this.camera.quaternion.multiply(qOff);
+        applyAircraftViewpointCamera({
+            camera: this.camera,
+            root: slot.root,
+            slot,
+            viewpointIndex: this.viewpointIndex,
+            mode: 'passenger',
+            lookTarget: this._lookTarget,
+            fwd: this._fwd,
+            worldQuat: this._worldQuat,
+            eulerScratch: this._eulerScratch,
+            qParentWorld: this._qParentWorld,
+            passengerBaseObj: this._passengerBaseObj,
+            passengerAimScratch: this._passengerAimScratch,
+            passengerLookYaw: this.passengerLookYaw,
+            passengerLookPitch: this.passengerLookPitch,
+        });
     }
 
     /**
@@ -914,51 +922,27 @@ export default class AircraftControllerHard {
         };
     }
 
-    /**
-     * 機体ローカル（ライブラリ camera.cockpitEulerDeg / chaseEulerDeg）の追加回転をカメラ姿勢に乗算する
-     * @param {object|null|undefined} slot
-     * @param {'cockpit'|'chase'} which
-     */
-    _applySlotCameraBodyEuler(slot, which) {
-        const deg = which === 'cockpit' ? slot?.cockpitEulerDeg : slot?.chaseEulerDeg;
-        if (!deg || typeof deg !== 'object') return;
-        const rx = THREE.MathUtils.degToRad(Number(deg.x) || 0);
-        const ry = THREE.MathUtils.degToRad(Number(deg.y) || 0);
-        const rz = THREE.MathUtils.degToRad(Number(deg.z) || 0);
-        this._eulerScratch.set(rx, ry, rz, 'YXZ');
-        this._qParentWorld.setFromEuler(this._eulerScratch);
-        this.camera.quaternion.multiply(this._qParentWorld);
-    }
-
     /** 操縦開始直後などにコックピット／チェイス視点へ即時切替 */
     snapPilotCamera() {
         this._updateCamera();
     }
 
     _updateCamera() {
-        const root = this.slot?.root;
+        const slot = this.slot;
+        const root = slot?.root;
         if (!root) return;
-        const cockpit = this.slot.cockpitOffset;
-        const chase = this.slot.chaseOffset;
-
-        if (this.cameraMode === 'cockpit') {
-            this._lookTarget.set(cockpit.x, cockpit.y, cockpit.z);
-            root.localToWorld(this._lookTarget);
-            this.camera.position.copy(this._lookTarget);
-            this._lookTarget.set(0, 0, -30);
-            root.localToWorld(this._lookTarget);
-            this.camera.lookAt(this._lookTarget);
-            this._applySlotCameraBodyEuler(this.slot, 'cockpit');
-            this._applyPilotLookOffset();
-        } else {
-            this._lookTarget.set(chase.x, chase.y, chase.z);
-            root.localToWorld(this._lookTarget);
-            this.camera.position.copy(this._lookTarget);
-            root.getWorldPosition(this._fwd);
-            this._fwd.y += 1;
-            this.camera.lookAt(this._fwd);
-            this._applySlotCameraBodyEuler(this.slot, 'chase');
-            this._applyPilotLookOffset();
-        }
+        applyAircraftViewpointCamera({
+            camera: this.camera,
+            root,
+            slot,
+            viewpointIndex: this.viewpointIndex,
+            mode: 'pilot',
+            lookTarget: this._lookTarget,
+            fwd: this._fwd,
+            worldQuat: this._worldQuat,
+            eulerScratch: this._eulerScratch,
+            qParentWorld: this._qParentWorld,
+            applyPilotLookOffset: () => this._applyPilotLookOffset(),
+        });
     }
 }

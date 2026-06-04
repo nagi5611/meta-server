@@ -39,7 +39,10 @@ import {
     mergeEasyAircraftPhysicsFromWorld,
     normalizeAircraftControlMode,
 } from '../../addons/aircraft/client/aircraft-physics-easy-defaults.js';
-import { resolveLegacyCameraFromLibrary } from './aircraft/camera-viewpoints.js';
+import {
+    migrateLegacyCameraToViewpoints,
+    resolveLegacyCameraFromLibrary,
+} from './aircraft/camera-viewpoints.js';
 import { applyMeshVisualEulerDegToModel } from './aircraft/mesh-visual-pivot.js';
 import {
     buildEncodedModelUrlFromPath,
@@ -1999,9 +2002,11 @@ class SceneManager {
                           : af.flightPhysics;
                 const fp = fpRaw && typeof fpRaw === 'object' ? fpRaw : {};
                 const leg = resolveLegacyCameraFromLibrary(camObj);
+                const libraryViewpoints = migrateLegacyCameraToViewpoints(camObj);
                 for (const slot of slots) {
                     if (String(slot.aircraftLibraryId || '').trim() !== lid) continue;
                     slot.controlMode = controlMode;
+                    slot.cameraViewpoints = libraryViewpoints;
                     slot.physics =
                         controlMode === 'easy'
                             ? mergeEasyAircraftPhysicsFromWorld(fp)

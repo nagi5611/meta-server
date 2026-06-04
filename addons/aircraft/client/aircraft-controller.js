@@ -1,5 +1,10 @@
 // addons/aircraft/client/aircraft-controller.js — hard/easy 操縦ファサード
 import * as THREE from 'three';
+import {
+    resolveSlotCameraViewpoints,
+    viewpointAtIndex,
+    viewpointIndexFromLegacyMode,
+} from '../../../public/js/aircraft/camera-viewpoints.js';
 import { normalizeAircraftControlMode } from './aircraft-physics-easy-defaults.js';
 import AircraftControllerHard from './aircraft-controller-hard.js';
 import AircraftControllerEasy from './aircraft-controller-easy.js';
@@ -20,6 +25,7 @@ export default class AircraftController {
         /** @type {AircraftControllerHard|AircraftControllerEasy} */
         this._active = this._hard;
         this.cameraMode = 'cockpit';
+        this.viewpointIndex = 0;
     }
 
     /**
@@ -49,9 +55,61 @@ export default class AircraftController {
      * @param {'cockpit'|'chase'} mode
      */
     setCameraMode(mode) {
-        this.cameraMode = mode === 'chase' ? 'chase' : 'cockpit';
-        this._hard.setCameraMode(mode);
-        this._easy.setCameraMode(mode);
+        const slot = this._active.slot || this._active.passengerViewSlot;
+        const vps = resolveSlotCameraViewpoints(slot);
+        this.setViewpointIndex(viewpointIndexFromLegacyMode(mode === 'chase' ? 'chase' : 'cockpit', vps));
+    }
+
+    /**
+     * @param {number} index
+     */
+    setViewpointIndex(index) {
+        this._hard.setViewpointIndex(index);
+        this._easy.setViewpointIndex(index);
+        this.viewpointIndex = this._active.viewpointIndex;
+        const slot = this._active.slot || this._active.passengerViewSlot;
+        const vp = viewpointAtIndex(resolveSlotCameraViewpoints(slot), this.viewpointIndex);
+        this.cameraMode = vp?.role === 'chase' ? 'chase' : 'cockpit';
+    }
+
+    /**
+     * 視点を1つ進め、表示名を返す
+     * @returns {string}
+     */
+    cycleViewpoint() {
+        const slot = this._active.slot || this._active.passengerViewSlot;
+        const vps = resolveSlotCameraViewpoints(slot);
+        const n = Math.max(1, vps.length);
+        const next = (this.viewpointIndex + 1) % n;
+        this.setViewpointIndex(next);
+        const vp = viewpointAtIndex(vps, this.viewpointIndex);
+        return vp?.name || vp?.id || '';
+    }
+
+    /**
+     * localStorage 等に保存した視点 ID をスロットへ反映する
+     * @param {object|null|undefined} slot
+     * @param {string|null|undefined} storedId
+     */
+    applyStoredViewpointForSlot(slot, storedId) {
+        const vps = resolveSlotCameraViewpoints(slot);
+        if (!vps.length) {
+            this.setViewpointIndex(0);
+            return;
+        }
+        const id = String(storedId || '').trim();
+        if (id) {
+            const byId = vps.findIndex((v) => v.id === id);
+            if (byId >= 0) {
+                this.setViewpointIndex(byId);
+                return;
+            }
+            if (id === 'chase' || id === 'cockpit') {
+                this.setViewpointIndex(viewpointIndexFromLegacyMode(id, vps));
+                return;
+            }
+        }
+        this.setViewpointIndex(0);
     }
 
     /**
@@ -60,6 +118,7 @@ export default class AircraftController {
     bindSlot(slot) {
         this._active = this._implForSlot(slot);
         this._active.bindSlot(slot);
+        this.viewpointIndex = this._active.viewpointIndex;
         this.cameraMode = this._active.cameraMode;
     }
 
@@ -72,6 +131,7 @@ export default class AircraftController {
     bindPassengerView(slot) {
         this._active = this._implForSlot(slot);
         this._active.bindPassengerView(slot);
+        this.viewpointIndex = this._active.viewpointIndex;
         this.cameraMode = this._active.cameraMode;
     }
 

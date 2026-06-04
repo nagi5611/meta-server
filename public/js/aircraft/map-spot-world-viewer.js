@@ -91,6 +91,31 @@ async function loadWorldModelEntry(config) {
 }
 
 /**
+ * 正射影カメラを北固定トップダウンに合わせる
+ * @param {THREE.OrthographicCamera} camera
+ * @param {number} cx
+ * @param {number} cz
+ * @param {number} groundY
+ * @param {number} cameraHeightM
+ * @param {{ x: number, z: number }} north
+ * @param {number} halfExtentM
+ */
+function applyTopDownCamera(camera, cx, cz, groundY, cameraHeightM, north, halfExtentM) {
+    const half = Math.max(halfExtentM, 50);
+    camera.left = -half;
+    camera.right = half;
+    camera.top = half;
+    camera.bottom = -half;
+    camera.near = 0.5;
+    camera.far = Math.max(cameraHeightM + 10000, 15000);
+    camera.position.set(cx, groundY + cameraHeightM, cz);
+    camera.up.set(north.x, 0, north.z);
+    camera.lookAt(cx, groundY, cz);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+}
+
+/**
  * Map定義 — ワールド上クリックでスポット XZ を取得するビューア
  */
 export class AdminMapSpotWorldViewer {
@@ -99,18 +124,23 @@ export class AdminMapSpotWorldViewer {
      */
     constructor(container) {
         this.container = container;
-        this._renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        this._cameraHeightM = 500;
+        this._groundY = 0;
+        this._north = { x: 0, z: -1 };
+        this._viewHalfExtentM = 425;
+        this._renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         this._renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         this._scene = new THREE.Scene();
         this._scene.background = new THREE.Color(0x87ceeb);
-        this._camera = new THREE.PerspectiveCamera(55, 1, 0.5, 20000);
-        this._camera.position.set(0, 400, 400);
+        this._camera = new THREE.OrthographicCamera(-500, 500, 500, -500, 0.5, 20000);
         this._controls = new OrbitControls(this._camera, this._renderer.domElement);
         this._controls.enableDamping = true;
-        this._controls.maxPolarAngle = Math.PI / 2 - 0.05;
-        this._scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-        const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-        dir.position.set(80, 200, 60);
+        this._controls.enableRotate = true;
+        this._controls.maxPolarAngle = Math.PI / 2 - 0.02;
+        this._controls.minPolarAngle = 0.05;
+        this._scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+        dir.position.set(120, 300, 80);
         this._scene.add(dir);
         /** @type {THREE.Group} */
         this._worldRoot = new THREE.Group();
@@ -118,8 +148,10 @@ export class AdminMapSpotWorldViewer {
         /** @type {THREE.Group} */
         this._spotMarkers = new THREE.Group();
         this._scene.add(this._spotMarkers);
+        /** @type {THREE.GridHelper|null} */
+        this._grid = null;
         this._pickPlane = new THREE.Mesh(
-            new THREE.PlaneGeometry(20000, 20000),
+            new THREE.PlaneGeometry(50000, 50000),
             new THREE.MeshBasicMaterial({ visible: false })
         );
         this._pickPlane.rotation.x = -Math.PI / 2;
@@ -137,21 +169,70 @@ export class AdminMapSpotWorldViewer {
         };
         this._boundPointerUp = (e) => this._onPointerUp(e);
         container.appendChild(this._renderer.domElement);
-        this._renderer.domElement.style.display = 'block';
-        this._renderer.domElement.style.width = '100%';
-        this._renderer.domElement.style.height = '100%';
-        this._renderer.domElement.style.cursor = 'crosshair';
+        const canvas = this._renderer.domElement;
+        canvas.style.display = 'block';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvas.style.cursor = 'crosshair';
+        this._resizeObserver = new ResizeObserver(() => this._resize());
+        this._resizeObserver.observe(container);
         window.addEventListener('resize', this._boundResize);
-        this._renderer.domElement.addEventListener('pointerdown', this._boundPointerDown);
-        this._renderer.domElement.addEventListener('pointerup', this._boundPointerUp);
-        this._resize();
+        canvas.addEventListener('pointerdown', this._boundPointerDown);
+        canvas.addEventListener('pointerup', this._boundPointerUp);
+        requestAnimationFrame(() => this._resize());
         this._tick();
     }
 
+    /**
+     * @param {{ cameraHeightM?: number, groundRefY?: number, northDirection?: { x: number, z: number } }} opts
+     */
+    setViewOptions(opts = {}) {
+        if (typeof opts.cameraHeightM === 'number' && opts.cameraHeightM > 0) {
+            this._cameraHeightM = opts.cameraHeightM;
+        }
+        if (typeof opts.groundRefY === 'number' && Number.isFinite(opts.groundRefY)) {
+            this._groundY = opts.groundRefY;
+        }
+        if (opts.northDirection) {
+            const n = opts.northDirection;
+            const len = Math.hypot(n.x, n.z);
+            if (len > 1e-9) this._north = { x: n.x / len, z: n.z / len };
+        }
+        this._viewHalfExtentM = this._cameraHeightM * 0.85;
+        this._updateGrid();
+    }
+
+    _updateGrid() {
+        if (this._grid) {
+            this._scene.remove(this._grid);
+            this._grid.geometry.dispose();
+            this._grid.material.dispose();
+            this._grid = null;
+        }
+        const span = Math.max(this._viewHalfExtentM * 4, 2000);
+        const divisions = Math.min(200, Math.max(20, Math.round(span / 100)));
+        this._grid = new THREE.GridHelper(span, divisions, 0x333333, 0x555555);
+        this._grid.position.y = this._groundY + 0.05;
+        this._scene.add(this._grid);
+        this._pickPlane.position.y = this._groundY;
+    }
+
     _resize() {
-        const w = this.container.clientWidth || 640;
-        const h = this.container.clientHeight || 480;
-        this._camera.aspect = w / h;
+        const w = Math.max(this.container.clientWidth, 320);
+        const h = Math.max(this.container.clientHeight, 240);
+        const half = this._viewHalfExtentM;
+        const aspect = w / h;
+        if (aspect >= 1) {
+            this._camera.left = -half * aspect;
+            this._camera.right = half * aspect;
+            this._camera.top = half;
+            this._camera.bottom = -half;
+        } else {
+            this._camera.left = -half;
+            this._camera.right = half;
+            this._camera.top = half / aspect;
+            this._camera.bottom = -half / aspect;
+        }
         this._camera.updateProjectionMatrix();
         this._renderer.setSize(w, h, false);
     }
@@ -174,6 +255,7 @@ export class AdminMapSpotWorldViewer {
         if (Math.hypot(dx, dy) > 6) return;
 
         const rect = this._renderer.domElement.getBoundingClientRect();
+        if (rect.width < 1 || rect.height < 1) return;
         this._pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         this._pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         this._raycaster.setFromCamera(this._pointer, this._camera);
@@ -187,21 +269,61 @@ export class AdminMapSpotWorldViewer {
     }
 
     /**
+     * ワールド内容の中心へカメラを合わせる
+     */
+    _frameWorldContent() {
+        const box = new THREE.Box3();
+        if (this._worldRoot.children.length) {
+            box.setFromObject(this._worldRoot);
+        }
+        let cx = 0;
+        let cz = 0;
+        let gy = this._groundY;
+        if (!box.isEmpty()) {
+            const center = box.getCenter(new THREE.Vector3());
+            cx = center.x;
+            cz = center.z;
+            gy = box.min.y;
+            this._groundY = gy;
+            this._updateGrid();
+        }
+        applyTopDownCamera(
+            this._camera,
+            cx,
+            cz,
+            gy,
+            this._cameraHeightM,
+            this._north,
+            this._viewHalfExtentM
+        );
+        this._controls.target.set(cx, gy, cz);
+        this._controls.update();
+    }
+
+    /**
      * @param {object} world
-     * @returns {Promise<void>}
+     * @returns {Promise<{ loaded: number, total: number }>}
      */
     async loadWorld(world) {
         this._clearWorldRoot();
         const models = Array.isArray(world?.models) ? world.models : [];
         const factories = models.map((cfg) => () => loadWorldModelEntry(cfg));
         const loaded = await runWithConcurrency(LOAD_CONCURRENCY, factories);
+        let count = 0;
         for (const m of loaded) {
-            if (m) this._worldRoot.add(m);
+            if (m) {
+                this._worldRoot.add(m);
+                count += 1;
+            }
         }
-        const sp = world?.spawnPoint || { x: 0, y: 10, z: 0 };
-        this._controls.target.set(sp.x, sp.y, sp.z);
-        this._camera.position.set(sp.x + 200, sp.y + 350, sp.z + 200);
-        this._controls.update();
+        const sp = world?.spawnPoint;
+        if (typeof sp?.y === 'number' && Number.isFinite(sp.y)) {
+            this._groundY = sp.y;
+            this._updateGrid();
+        }
+        this._frameWorldContent();
+        this._resize();
+        return { loaded: count, total: models.length };
     }
 
     _clearWorldRoot() {
@@ -225,10 +347,10 @@ export class AdminMapSpotWorldViewer {
             if (c.material) c.material.dispose();
         }
         for (const spot of spots) {
-            const geom = new THREE.CylinderGeometry(8, 8, 40, 16);
+            const geom = new THREE.CylinderGeometry(12, 12, 50, 16);
             const mat = new THREE.MeshStandardMaterial({ color: 0xf57c00, emissive: 0x442200 });
             const mesh = new THREE.Mesh(geom, mat);
-            mesh.position.set(spot.x, 20, spot.z);
+            mesh.position.set(spot.x, this._groundY + 25, spot.z);
             mesh.userData.spotId = spot.id;
             this._spotMarkers.add(mesh);
         }
@@ -238,10 +360,15 @@ export class AdminMapSpotWorldViewer {
         if (this._disposed) return;
         this._disposed = true;
         cancelAnimationFrame(this._raf);
+        this._resizeObserver?.disconnect();
         window.removeEventListener('resize', this._boundResize);
         this._renderer.domElement.removeEventListener('pointerdown', this._boundPointerDown);
         this._renderer.domElement.removeEventListener('pointerup', this._boundPointerUp);
         this._clearWorldRoot();
+        if (this._grid) {
+            this._grid.geometry.dispose();
+            this._grid.material.dispose();
+        }
         this._controls.dispose();
         this._renderer.dispose();
         if (this._renderer.domElement.parentNode) {

@@ -52,7 +52,8 @@ function setMapStatus(msg, isError = false) {
 function defaultMapConfig() {
     return {
         northDirection: { x: 0, z: -1 },
-        minimapRadiusM: 800,
+        cameraHeightM: 500,
+        groundRefY: 0,
         aircraftIconOffsetDeg: 0,
         spots: [],
     };
@@ -116,7 +117,8 @@ function syncMapFormFromDraft(map) {
         if (el) el.value = String(v ?? '');
     };
     syncNorthForm(cfg.northDirection || { x: 0, z: -1 });
-    setNum('ac-map-radius', cfg.minimapRadiusM ?? 800);
+    setNum('ac-map-camera-height', cfg.cameraHeightM ?? 500);
+    setNum('ac-map-ground-y', cfg.groundRefY ?? 0);
     setNum('ac-map-icon-offset', cfg.aircraftIconOffsetDeg ?? 0);
     renderSpotList();
     if (spotViewer) spotViewer.setSpotMarkers(cfg.spots || []);
@@ -133,7 +135,8 @@ function readConfigFromForm() {
     };
     return {
         northDirection: readNorthFromForm(),
-        minimapRadiusM: num('ac-map-radius', 800),
+        cameraHeightM: num('ac-map-camera-height', 500),
+        groundRefY: num('ac-map-ground-y', 0),
         aircraftIconOffsetDeg: num('ac-map-icon-offset', 0),
         spots: draftMap?.config?.spots ? [...draftMap.config.spots] : [],
     };
@@ -292,6 +295,13 @@ async function openSpotDefinitionModal() {
         setMapStatus('ワールドを選択してください', true);
         return;
     }
+    if (!worldsCache) {
+        try {
+            worldsCache = await fetchJson('/admin/worlds');
+        } catch {
+            worldsCache = {};
+        }
+    }
     const world = worldsCache?.[selectedWorldId];
     if (!world) {
         setMapStatus('ワールドデータが見つかりません', true);
@@ -304,23 +314,34 @@ async function openSpotDefinitionModal() {
     mount.innerHTML = '';
     modal.hidden = false;
     setMapStatus('ワールドを読み込み中…');
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const cfg = readConfigFromForm();
     spotViewer = new AdminMapSpotWorldViewer(mount);
-    spotViewer.setSpotMarkers(draftMap?.config?.spots || []);
+    spotViewer.setViewOptions({
+        cameraHeightM: cfg.cameraHeightM,
+        groundRefY: cfg.groundRefY,
+        northDirection: cfg.northDirection,
+    });
+    spotViewer.setSpotMarkers(cfg.spots || []);
     spotViewer.onSpotPick = (x, z) => {
         const name = window.prompt('スポット名', 'スポット');
         if (name == null || !name.trim()) return;
-        const cfg = readConfigFromForm();
+        const nextCfg = readConfigFromForm();
         const id = nextSpotId();
-        cfg.spots.push({ id, name: name.trim(), x, z });
+        nextCfg.spots.push({ id, name: name.trim(), x, z });
         if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
-        draftMap.config = cfg;
+        draftMap.config = nextCfg;
         selectedSpotId = id;
         syncMapFormFromDraft(draftMap);
+        spotViewer?.setSpotMarkers(nextCfg.spots);
         setMapStatus(`スポット追加: ${name.trim()} (X=${x.toFixed(1)}, Z=${z.toFixed(1)})`);
     };
     try {
-        await spotViewer.loadWorld(world);
-        setMapStatus('クリックでスポットを追加（ドラッグはカメラ操作）');
+        const { loaded, total } = await spotViewer.loadWorld(world);
+        spotViewer.setSpotMarkers(readConfigFromForm().spots || []);
+        setMapStatus(
+            `クリックでスポット追加（モデル ${loaded}/${total} 件読込・ドラッグで移動）`
+        );
     } catch (e) {
         setMapStatus(e instanceof Error ? e.message : String(e), true);
     }
@@ -359,8 +380,10 @@ export function mountAircraftMapAdminPanel(root) {
                     <div class="field-row"><label class="prop-label" for="ac-map-north-z">北 Z</label>
                         <input type="number" id="ac-map-north-z" class="prop-input num" step="0.01" value="-1" /></div>
                 </div>
-                <div class="field-row"><label class="prop-label" for="ac-map-radius">表示半径 (m)</label>
-                    <input type="number" id="ac-map-radius" class="prop-input num" step="50" min="50" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-map-camera-height">カメラ高度 (m)</label>
+                    <input type="number" id="ac-map-camera-height" class="prop-input num" step="25" min="50" title="地面（基準Y）からの高さ。大きいほど広い範囲が見えます" /></div>
+                <div class="field-row"><label class="prop-label" for="ac-map-ground-y">地面基準 Y</label>
+                    <input type="number" id="ac-map-ground-y" class="prop-input num" step="any" title="俯瞰カメラの注視点の高さ（通常は 0 またはスポーン付近）" /></div>
                 <div class="field-row"><label class="prop-label" for="ac-map-icon-offset">機体アイコン向き補正 (°)</label>
                     <input type="number" id="ac-map-icon-offset" class="prop-input num" step="1" /></div>
                 <div class="ac-admin-actions">

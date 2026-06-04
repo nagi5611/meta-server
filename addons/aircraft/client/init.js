@@ -25,6 +25,7 @@ export async function initAircraftSubsystem(app) {
         app.uiManager
     );
     app.aircraftManager.setMobileMode(app.isMobileMode);
+    app.aircraftManager.minimap.bindSceneManager(app.sceneManager);
     app.aircraftManager.setWorldIdProvider(() => app.worldManager?.getCurrentWorldId?.() || null);
     app.worldManager?.onWorldChange?.((world) => {
         if (app.aircraftManager?.isPiloting) {

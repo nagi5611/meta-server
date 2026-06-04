@@ -1,6 +1,10 @@
 // addons/aircraft/client/aircraft-manager.js — 近接・搭乗・サーバー同期・駐機位置リセット
 
 import * as THREE from 'three';
+import {
+    resolveSlotCameraViewpoints,
+    viewpointAtIndex,
+} from '../../../public/js/aircraft/camera-viewpoints.js';
 import AircraftController from './aircraft-controller.js';
 import AircraftMinimap from './aircraft-minimap.js';
 
@@ -26,6 +30,7 @@ const BOARD_ERROR_JA = {
  * @property {string} label
  * @property {{x:number,y:number,z:number}} cockpitOffset
  * @property {{x:number,y:number,z:number}} chaseOffset
+ * @property {import('../../../public/js/aircraft/camera-viewpoints.js').AircraftViewpoint[]} [cameraViewpoints]
  * @property {import('three').Object3D} root
  * @property {import('three').Vector3} parkedPosition
  * @property {import('three').Quaternion} parkedQuaternion
@@ -157,27 +162,41 @@ export default class AircraftManager {
 
     _loadCameraModeFromStorage() {
         try {
-            const v = localStorage.getItem(STORAGE_CAMERA);
-            this.aircraftController.setCameraMode(v === 'chase' ? 'chase' : 'cockpit');
+            this._storedViewpointId = localStorage.getItem(STORAGE_CAMERA);
         } catch (_) {
-            this.aircraftController.setCameraMode('cockpit');
+            this._storedViewpointId = null;
         }
     }
 
     /**
-     * @param {'cockpit'|'chase'} mode
+     * @param {AircraftSlot|null|undefined} slot
      */
-    setCameraModeAndPersist(mode) {
-        const m = mode === 'chase' ? 'chase' : 'cockpit';
-        this.aircraftController.setCameraMode(m);
+    _applyStoredViewpointForSlot(slot) {
+        this.aircraftController.applyStoredViewpointForSlot(slot, this._storedViewpointId);
+    }
+
+    /**
+     * 現在視点 ID を localStorage に保存する
+     */
+    _persistCurrentViewpoint() {
+        const slot = this.isPiloting ? this.activeSlot : this.isPassenger ? this.passengerSlot : null;
+        if (!slot) return;
+        const vp = viewpointAtIndex(
+            resolveSlotCameraViewpoints(slot),
+            this.aircraftController.viewpointIndex
+        );
+        const id = vp?.id;
+        if (!id) return;
         try {
-            localStorage.setItem(STORAGE_CAMERA, m);
+            localStorage.setItem(STORAGE_CAMERA, id);
+            this._storedViewpointId = id;
         } catch (_) { /* ignore */ }
     }
 
     toggleCameraMode() {
-        const next = this.aircraftController.cameraMode === 'chase' ? 'cockpit' : 'chase';
-        this.setCameraModeAndPersist(next);
+        const name = this.aircraftController.cycleViewpoint();
+        this._persistCurrentViewpoint();
+        this.uiManager?.flashAircraftViewpointName?.(name);
     }
 
     /**
@@ -345,6 +364,7 @@ export default class AircraftManager {
         });
         this.aircraftController.unbind();
         this.aircraftController.bindPassengerView(slot);
+        this._applyStoredViewpointForSlot(slot);
         this.aircraftController.updatePassengerCamera();
         this.uiManager.hideAircraftBoardPrompt();
 
@@ -400,6 +420,7 @@ export default class AircraftManager {
             getQuaternion: (out) => this.aircraftController.getAvatarQuaternion(out)
         });
         this.aircraftController.bindSlot(slot);
+        this._applyStoredViewpointForSlot(slot);
         this.aircraftController.snapPilotCamera();
         this.uiManager.showAircraftHud();
         void this.loadFlightMapForWorld().then(() => {

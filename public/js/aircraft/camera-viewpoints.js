@@ -127,6 +127,49 @@ export function buildCameraJsonForPut(cam, viewpoints) {
  * @param {unknown} cam
  * @returns {{ cockpitOffset: {x:number,y:number,z:number}, chaseOffset: {x:number,y:number,z:number}, cockpitEulerDeg?: object, chaseEulerDeg?: object }}
  */
+/**
+ * スロットに保持された viewpoints、または cockpit/chase レガシーから視点一覧を得る
+ * @param {object|null|undefined} slot
+ * @returns {AircraftViewpoint[]}
+ */
+export function resolveSlotCameraViewpoints(slot) {
+    if (slot?.cameraViewpoints?.length) {
+        return normalizeViewpointsArray(slot.cameraViewpoints);
+    }
+    return migrateLegacyCameraToViewpoints({
+        cockpitOffset: slot?.cockpitOffset,
+        chaseOffset: slot?.chaseOffset,
+        cockpitEulerDeg: slot?.cockpitEulerDeg,
+        chaseEulerDeg: slot?.chaseEulerDeg,
+    });
+}
+
+/**
+ * レガシー cockpit/chase モード文字列に対応する viewpoints 内インデックス
+ * @param {'cockpit'|'chase'} mode
+ * @param {AircraftViewpoint[]} viewpoints
+ * @returns {number}
+ */
+export function viewpointIndexFromLegacyMode(mode, viewpoints) {
+    const vps = normalizeViewpointsArray(viewpoints);
+    if (!vps.length) return 0;
+    const role = mode === 'chase' ? 'chase' : 'cockpit';
+    const i = vps.findIndex((v) => v.role === role);
+    return i >= 0 ? i : 0;
+}
+
+/**
+ * @param {AircraftViewpoint[]} viewpoints
+ * @param {number} index
+ * @returns {AircraftViewpoint|null}
+ */
+export function viewpointAtIndex(viewpoints, index) {
+    const vps = normalizeViewpointsArray(viewpoints);
+    if (!vps.length) return null;
+    const i = ((index % vps.length) + vps.length) % vps.length;
+    return vps[i] || null;
+}
+
 export function resolveLegacyCameraFromLibrary(cam) {
     const c = cam && typeof cam === 'object' && !Array.isArray(cam) ? cam : {};
     const vps = normalizeViewpointsArray(c.viewpoints);

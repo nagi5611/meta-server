@@ -45,6 +45,8 @@ class UIManager {
         this._aircraftHudExit = null;
         /** @type {(() => void)|null} */
         this._aircraftHudCamera = null;
+        /** @type {ReturnType<typeof setTimeout>|null} */
+        this._aircraftViewpointFlashTimer = null;
         /** @type {HTMLElement|null} */
         this.mobileInteractBtn = null;
         /** @type {(() => void)|null} */
@@ -588,10 +590,40 @@ class UIManager {
 <button type="button" id="aircraft-hud-exit">${escapeHtmlForUi(t('ui.aircraftExit'))}</button>
 <button type="button" id="aircraft-hud-camera">${escapeHtmlForUi(t('ui.aircraftCamera'))}</button>
 </div>
+<div class="aircraft-hud-viewpoint" id="aircraft-hud-viewpoint" aria-live="polite"></div>
 <div class="aircraft-hud-telemetry">
 ${t('ui.aircraftHudLinesHtml')}
 </div>`;
         this.aircraftHud.style.display = 'flex';
+    }
+
+    /**
+     * 視点切替時に HUD 計器の上へ視点名を約2秒表示する（同乗時は固定トースト）
+     * @param {string} name
+     */
+    flashAircraftViewpointName(name) {
+        const label = String(name || '').trim();
+        if (!label) return;
+        let el = document.getElementById('aircraft-hud-viewpoint');
+        if (!el) {
+            el = document.getElementById('aircraft-viewpoint-flash');
+        }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'aircraft-viewpoint-flash';
+            el.className = 'aircraft-viewpoint-flash';
+            el.setAttribute('aria-live', 'polite');
+            document.body.appendChild(el);
+        }
+        el.textContent = label;
+        el.classList.add('is-visible');
+        if (this._aircraftViewpointFlashTimer) {
+            clearTimeout(this._aircraftViewpointFlashTimer);
+        }
+        this._aircraftViewpointFlashTimer = setTimeout(() => {
+            el.classList.remove('is-visible');
+            this._aircraftViewpointFlashTimer = null;
+        }, 2000);
     }
 
     /**
@@ -649,6 +681,15 @@ ${t('ui.aircraftHudLinesHtml')}
         if (!this.aircraftHud) return;
         this.aircraftHud.style.display = 'none';
         this.aircraftHud.innerHTML = '';
+        const flash = document.getElementById('aircraft-viewpoint-flash');
+        if (flash) {
+            flash.classList.remove('is-visible');
+            flash.textContent = '';
+        }
+        if (this._aircraftViewpointFlashTimer) {
+            clearTimeout(this._aircraftViewpointFlashTimer);
+            this._aircraftViewpointFlashTimer = null;
+        }
     }
 }
 

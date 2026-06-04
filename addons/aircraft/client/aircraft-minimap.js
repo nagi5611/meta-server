@@ -1,23 +1,48 @@
-// addons/aircraft/client/aircraft-minimap.js — 操縦中の円形ミニマップ（North-up・トップダウン）
+// addons/aircraft/client/aircraft-minimap.js — 操縦中の円形ミニマップ（3D俯瞰 + オーバーレイ）
 
-import { aircraftIconRotationRad, worldDeltaToMinimapPx } from './flight-map-coords.js';
+import * as THREE from 'three';
+import {
+    aircraftIconRotationRad,
+    applyNorthUpOrthoCamera,
+    viewHalfExtentM,
+    worldDeltaToMinimapPx,
+} from './flight-map-coords.js';
 
 const SIZE_PX = 176;
 const RADIUS_PX = SIZE_PX / 2 - 4;
 
 /**
- * 飛行操縦中 HUD 右下の円形ミニマップ（地図画像なし・機体中心）
+ * 飛行操縦中 HUD 右下の円形ミニマップ（3D ワールド俯瞰・North-up）
  */
 export default class AircraftMinimap {
     constructor() {
         /** @type {HTMLElement|null} */
         this.root = null;
         /** @type {HTMLCanvasElement|null} */
-        this.canvas = null;
+        this.canvas3d = null;
+        /** @type {HTMLCanvasElement|null} */
+        this.canvasOverlay = null;
         /** @type {CanvasRenderingContext2D|null} */
-        this.ctx = null;
+        this.ctxOverlay = null;
+        /** @type {THREE.WebGLRenderer|null} */
+        this._renderer = null;
+        /** @type {THREE.OrthographicCamera|null} */
+        this._orthoCam = null;
+        /** @type {THREE.Scene|null} */
+        this._scene = null;
         /** @type {object|null} */
         this.mapConfig = null;
+    }
+
+    /**
+     * @param {{ getScene: () => THREE.Scene }} sceneManager
+     */
+    bindSceneManager(sceneManager) {
+        if (!sceneManager || typeof sceneManager.getScene !== 'function') return;
+        this._scene = sceneManager.getScene();
+        if (!this._orthoCam) {
+            this._orthoCam = new THREE.OrthographicCamera(-500, 500, 500, -500, 1, 15000);
+        }
     }
 
     /**
@@ -30,19 +55,39 @@ export default class AircraftMinimap {
         root.className = 'aircraft-minimap';
         root.setAttribute('aria-hidden', 'true');
         root.style.display = 'none';
-        const canvas = document.createElement('canvas');
-        canvas.className = 'aircraft-minimap-canvas';
-        canvas.width = SIZE_PX;
-        canvas.height = SIZE_PX;
-        root.appendChild(canvas);
+
+        const canvas3d = document.createElement('canvas');
+        canvas3d.className = 'aircraft-minimap-3d';
+        canvas3d.width = SIZE_PX;
+        canvas3d.height = SIZE_PX;
+
+        const canvasOverlay = document.createElement('canvas');
+        canvasOverlay.className = 'aircraft-minimap-overlay';
+        canvasOverlay.width = SIZE_PX;
+        canvasOverlay.height = SIZE_PX;
+
         const north = document.createElement('span');
         north.className = 'aircraft-minimap-north';
         north.textContent = 'N';
+
+        root.appendChild(canvas3d);
+        root.appendChild(canvasOverlay);
         root.appendChild(north);
         document.body.appendChild(root);
+
         this.root = root;
-        this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
+        this.canvas3d = canvas3d;
+        this.canvasOverlay = canvasOverlay;
+        this.ctxOverlay = canvasOverlay.getContext('2d');
+        this._renderer = new THREE.WebGLRenderer({
+            canvas: canvas3d,
+            alpha: false,
+            antialias: true,
+            powerPreference: 'low-power',
+        });
+        this._renderer.setSize(SIZE_PX, SIZE_PX, false);
+        this._renderer.setPixelRatio(1);
+        this._orthoCam = new THREE.OrthographicCamera(-500, 500, 500, -500, 1, 15000);
     }
 
     /**
@@ -59,9 +104,6 @@ export default class AircraftMinimap {
         return true;
     }
 
-    /**
-     * 地図定義をクリアする
-     */
     clearMap() {
         this.mapConfig = null;
     }
@@ -77,63 +119,18 @@ export default class AircraftMinimap {
     }
 
     /**
-     * 背景グリッドを描画する
-     * @param {CanvasRenderingContext2D} ctx
-     * @param {number} cx
-     * @param {number} cy
-     * @param {number} radiusM
+     * スポット・機体アイコンを 2D オーバーレイに描画する
+     * @param {{ worldX: number, worldZ: number, yawDeg: number }} state
      */
-    _drawGrid(ctx, cx, cy, radiusM) {
-        ctx.fillStyle = 'rgba(26, 38, 52, 0.95)';
-        ctx.fillRect(0, 0, SIZE_PX, SIZE_PX);
-
-        const stepM = radiusM >= 2000 ? 500 : radiusM >= 800 ? 200 : 100;
-        const scale = RADIUS_PX / radiusM;
-        ctx.strokeStyle = 'rgba(120, 150, 190, 0.35)';
-        ctx.lineWidth = 1;
-        for (let m = -radiusM; m <= radiusM; m += stepM) {
-            const off = m * scale;
-            ctx.beginPath();
-            ctx.moveTo(cx + off, cy - RADIUS_PX);
-            ctx.lineTo(cx + off, cy + RADIUS_PX);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(cx - RADIUS_PX, cy + off);
-            ctx.lineTo(cx + RADIUS_PX, cy + off);
-            ctx.stroke();
-        }
-        ctx.strokeStyle = 'rgba(180, 200, 230, 0.5)';
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - RADIUS_PX);
-        ctx.lineTo(cx, cy + RADIUS_PX);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(cx - RADIUS_PX, cy);
-        ctx.lineTo(cx + RADIUS_PX, cy);
-        ctx.stroke();
-    }
-
-    /**
-     * @param {{ worldX: number, worldZ: number, yawDeg: number }|null} state
-     */
-    update(state) {
-        if (!state || !this.ctx || !this.canvas || !this.mapConfig) return;
-        if (this.root?.style.display === 'none') return;
-
+    _drawOverlay(state) {
+        if (!this.ctxOverlay || !this.mapConfig) return;
         const { worldX, worldZ, yawDeg } = state;
         const north = this.mapConfig.northDirection || { x: 0, z: -1 };
-        const radiusM = this.mapConfig.minimapRadiusM || 800;
+        const half = viewHalfExtentM(this.mapConfig);
         const cx = SIZE_PX / 2;
         const cy = SIZE_PX / 2;
-        const ctx = this.ctx;
+        const ctx = this.ctxOverlay;
         ctx.clearRect(0, 0, SIZE_PX, SIZE_PX);
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cx, cy, RADIUS_PX, 0, Math.PI * 2);
-        ctx.clip();
-
-        this._drawGrid(ctx, cx, cy, radiusM);
 
         const spots = this.mapConfig.spots || [];
         for (const spot of spots) {
@@ -141,7 +138,7 @@ export default class AircraftMinimap {
                 spot.x - worldX,
                 spot.z - worldZ,
                 north,
-                radiusM,
+                half,
                 RADIUS_PX
             );
             if (Math.hypot(px, py) > RADIUS_PX - 4) continue;
@@ -159,8 +156,6 @@ export default class AircraftMinimap {
             ctx.textAlign = 'left';
             ctx.fillText(spot.name, sx + 7, sy + 3);
         }
-
-        ctx.restore();
 
         ctx.save();
         ctx.translate(cx, cy);
@@ -183,11 +178,43 @@ export default class AircraftMinimap {
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.restore();
+    }
 
-        ctx.beginPath();
-        ctx.arc(cx, cy, RADIUS_PX, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
+    /**
+     * @param {{ worldX: number, worldZ: number, yawDeg: number }|null} state
+     */
+    update(state) {
+        if (!state || !this.mapConfig || this.root?.style.display === 'none') return;
+        this.ensureDom();
+
+        const north = this.mapConfig.northDirection || { x: 0, z: -1 };
+        const groundY = this.mapConfig.groundRefY ?? 0;
+        const cameraHeightM = this.mapConfig.cameraHeightM ?? 500;
+        const half = viewHalfExtentM(this.mapConfig);
+
+        if (this._scene && this._renderer && this._orthoCam) {
+            applyNorthUpOrthoCamera(
+                this._orthoCam,
+                state.worldX,
+                state.worldZ,
+                groundY,
+                cameraHeightM,
+                north,
+                half
+            );
+            const prevAutoClear = this._renderer.autoClear;
+            this._renderer.autoClear = true;
+            this._renderer.setClearColor(0x1a2634, 1);
+            this._renderer.render(this._scene, this._orthoCam);
+            this._renderer.autoClear = prevAutoClear;
+        } else if (this.ctxOverlay && this.canvas3d) {
+            const g = this.canvas3d.getContext('2d');
+            if (g) {
+                g.fillStyle = '#1a2634';
+                g.fillRect(0, 0, SIZE_PX, SIZE_PX);
+            }
+        }
+
+        this._drawOverlay(state);
     }
 }
