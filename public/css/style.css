@@ -3565,6 +3565,29 @@ a.admin-menu-link:hover {
     transition: width 0.2s ease-out;
 }
 
+/* Google Maps Platform 由来データの帰属表示（ワールド設定で ON のとき） */
+.google-maps-attribution {
+    position: fixed;
+    right: 10px;
+    bottom: 10px;
+    z-index: 8500;
+    font-size: 10px;
+    line-height: 1.25;
+    font-weight: 500;
+    color: #fff;
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.75);
+    pointer-events: none;
+    user-select: none;
+    opacity: 0.92;
+}
+
+@media (max-width: 768px) {
+    .google-maps-attribution {
+        bottom: max(72px, calc(env(safe-area-inset-bottom, 0px) + 10px));
+        right: max(10px, env(safe-area-inset-right, 0px));
+    }
+}
+
 /* WebXR DOM Overlay: 2D UI 全体のラッパー（没入中もメニュー・チャット等を表示） */
 .xr-dom-overlay-root {
     position: relative;

@@ -167,6 +167,19 @@ function normalizedFloorDimensions(w) {
 }
 
 /**
+ * worlds.json 用: Google Maps 帰属表示が有効か
+ * @param {{ showGoogleMapsCopyright?: unknown }} [world]
+ * @param {string} worldId
+ * @returns {boolean}
+ */
+function worldShowsGoogleMapsCopyright(world, worldId) {
+    if (worldId === selectedWorldId) {
+        return document.getElementById('google-maps-copyright-enabled')?.checked === true;
+    }
+    return world && world.showGoogleMapsCopyright === true;
+}
+
+/**
  * エディタプレビューの床プレーン・グリッドをワールドの幅・奥行きに合わせる
  * @param {{ floorWidth?: unknown, floorDepth?: unknown, floorEnabled?: unknown }} [world]
  */
@@ -2347,6 +2360,9 @@ function buildWorldsFromScene() {
                 ? (parseFloat(document.getElementById('floor-depth')?.value) || DEFAULT_FLOOR_DEPTH_M)
                 : normalizedFloorDimensions(w).fd
         };
+        if (worldShowsGoogleMapsCopyright(w, wid)) {
+            out[wid].showGoogleMapsCopyright = true;
+        }
         if (wid !== selectedWorldId && w.physicsAssist && typeof w.physicsAssist === 'object') {
             const src = w.physicsAssist;
             out[wid].physicsAssist = {
@@ -2458,6 +2474,11 @@ function buildWorldsFromScene() {
             w.floorEnabled = document.getElementById('floor-enabled').checked;
             w.floorWidth = parseFloat(document.getElementById('floor-width')?.value) || DEFAULT_FLOOR_WIDTH_M;
             w.floorDepth = parseFloat(document.getElementById('floor-depth')?.value) || DEFAULT_FLOOR_DEPTH_M;
+            if (document.getElementById('google-maps-copyright-enabled')?.checked) {
+                w.showGoogleMapsCopyright = true;
+            } else {
+                delete w.showGoogleMapsCopyright;
+            }
             const paEn = document.getElementById('physics-assist-enabled')?.checked;
             const minRaw = document.getElementById('physics-assist-min-y')?.value?.trim() ?? '';
             const maxRaw = document.getElementById('physics-assist-max-y')?.value?.trim() ?? '';
@@ -2789,6 +2810,9 @@ async function loadWorldIntoScene(world) {
     if (floorWEl) floorWEl.value = String(fw);
     if (floorDEl) floorDEl.value = String(fd);
     applyEditorFloorMeshFromWorld(world);
+
+    const gmcEl = document.getElementById('google-maps-copyright-enabled');
+    if (gmcEl) gmcEl.checked = world.showGoogleMapsCopyright === true;
 
     const paEn = document.getElementById('physics-assist-enabled');
     const paMin = document.getElementById('physics-assist-min-y');
@@ -5636,6 +5660,17 @@ function bindEvents() {
         if (!selectedWorldId || !worlds[selectedWorldId]) return;
         pushUndo();
         applyFloorDimsFromInputs();
+    });
+
+    document.getElementById('google-maps-copyright-enabled')?.addEventListener('change', () => {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        pushUndo();
+        const w = worlds[selectedWorldId];
+        if (document.getElementById('google-maps-copyright-enabled')?.checked) {
+            w.showGoogleMapsCopyright = true;
+        } else {
+            delete w.showGoogleMapsCopyright;
+        }
     });
 
     function applyPhysicsAssistPanelToSelectedWorld() {

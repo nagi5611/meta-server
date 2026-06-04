@@ -794,8 +794,22 @@ class MetaverseApp {
         console.log(`Setting up ${cfgs.length} GLB interact zones for world: ${currentWorldId}`);
     }
 
+    /**
+     * ワールド設定に応じて Google Maps 帰属（© Google）の表示を切り替える
+     * @param {{ showGoogleMapsCopyright?: unknown } | null} [world]
+     */
+    updateGoogleMapsCopyrightVisibility(world) {
+        const el = document.getElementById('google-maps-attribution');
+        if (!el) return;
+        const show = !!(world && world.showGoogleMapsCopyright === true);
+        el.hidden = !show;
+        el.setAttribute('aria-hidden', show ? 'false' : 'true');
+    }
+
     async onWorldChanged(world) {
         console.log(`World changed to: ${world.id}`);
+
+        this.updateGoogleMapsCopyrightVisibility(world);
 
         if (this.aircraftController && world) {
             this.aircraftController.applyWorldPhysics(world.aircraftPhysics);
