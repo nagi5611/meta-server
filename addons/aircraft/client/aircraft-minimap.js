@@ -1,12 +1,12 @@
-// addons/aircraft/client/aircraft-minimap.js — 操縦中の円形ミニマップ（North-up）
+// addons/aircraft/client/aircraft-minimap.js — 操縦中の円形ミニマップ（North-up・トップダウン）
 
-import { worldToMapUv } from './flight-map-coords.js';
+import { aircraftIconRotationRad, worldDeltaToMinimapPx } from './flight-map-coords.js';
 
 const SIZE_PX = 176;
 const RADIUS_PX = SIZE_PX / 2 - 4;
 
 /**
- * 飛行操縦中 HUD 右下の円形ミニマップ
+ * 飛行操縦中 HUD 右下の円形ミニマップ（地図画像なし・機体中心）
  */
 export default class AircraftMinimap {
     constructor() {
@@ -16,12 +16,8 @@ export default class AircraftMinimap {
         this.canvas = null;
         /** @type {CanvasRenderingContext2D|null} */
         this.ctx = null;
-        /** @type {HTMLImageElement|null} */
-        this.mapImage = null;
         /** @type {object|null} */
         this.mapConfig = null;
-        /** @type {string} */
-        this._loadToken = '';
     }
 
     /**
@@ -55,25 +51,10 @@ export default class AircraftMinimap {
      */
     async setMap(map) {
         this.ensureDom();
-        if (!map?.imageUrl || !map?.config?.worldBounds) {
+        if (!map?.config?.northDirection) {
             this.clearMap();
             return false;
         }
-        const token = `${Date.now()}-${Math.random()}`;
-        this._loadToken = token;
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        const loaded = await new Promise((resolve) => {
-            img.onload = () => resolve(true);
-            img.onerror = () => resolve(false);
-            img.src = map.imageUrl;
-        });
-        if (this._loadToken !== token) return false;
-        if (!loaded) {
-            this.clearMap();
-            return false;
-        }
-        this.mapImage = img;
         this.mapConfig = map.config;
         return true;
     }
@@ -82,14 +63,12 @@ export default class AircraftMinimap {
      * 地図定義をクリアする
      */
     clearMap() {
-        this.mapImage = null;
         this.mapConfig = null;
-        this._loadToken = '';
     }
 
     show() {
         this.ensureDom();
-        if (!this.root || !this.mapImage || !this.mapConfig) return;
+        if (!this.root || !this.mapConfig) return;
         this.root.style.display = 'block';
     }
 
@@ -98,23 +77,52 @@ export default class AircraftMinimap {
     }
 
     /**
+     * 背景グリッドを描画する
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {number} cx
+     * @param {number} cy
+     * @param {number} radiusM
+     */
+    _drawGrid(ctx, cx, cy, radiusM) {
+        ctx.fillStyle = 'rgba(26, 38, 52, 0.95)';
+        ctx.fillRect(0, 0, SIZE_PX, SIZE_PX);
+
+        const stepM = radiusM >= 2000 ? 500 : radiusM >= 800 ? 200 : 100;
+        const scale = RADIUS_PX / radiusM;
+        ctx.strokeStyle = 'rgba(120, 150, 190, 0.35)';
+        ctx.lineWidth = 1;
+        for (let m = -radiusM; m <= radiusM; m += stepM) {
+            const off = m * scale;
+            ctx.beginPath();
+            ctx.moveTo(cx + off, cy - RADIUS_PX);
+            ctx.lineTo(cx + off, cy + RADIUS_PX);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(cx - RADIUS_PX, cy + off);
+            ctx.lineTo(cx + RADIUS_PX, cy + off);
+            ctx.stroke();
+        }
+        ctx.strokeStyle = 'rgba(180, 200, 230, 0.5)';
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - RADIUS_PX);
+        ctx.lineTo(cx, cy + RADIUS_PX);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx - RADIUS_PX, cy);
+        ctx.lineTo(cx + RADIUS_PX, cy);
+        ctx.stroke();
+    }
+
+    /**
      * @param {{ worldX: number, worldZ: number, yawDeg: number }|null} state
      */
     update(state) {
-        if (!state || !this.ctx || !this.canvas || !this.mapImage || !this.mapConfig) return;
+        if (!state || !this.ctx || !this.canvas || !this.mapConfig) return;
         if (this.root?.style.display === 'none') return;
 
         const { worldX, worldZ, yawDeg } = state;
-        const bounds = this.mapConfig.worldBounds;
-        const uv = worldToMapUv(worldX, worldZ, bounds);
-        if (!uv) return;
-
+        const north = this.mapConfig.northDirection || { x: 0, z: -1 };
         const radiusM = this.mapConfig.minimapRadiusM || 800;
-        const spanX = bounds.eastX - bounds.westX;
-        const spanZ = bounds.southZ - bounds.northZ;
-        const viewU = radiusM / spanX;
-        const viewV = radiusM / spanZ;
-
         const cx = SIZE_PX / 2;
         const cy = SIZE_PX / 2;
         const ctx = this.ctx;
@@ -125,23 +133,22 @@ export default class AircraftMinimap {
         ctx.arc(cx, cy, RADIUS_PX, 0, Math.PI * 2);
         ctx.clip();
 
-        const img = this.mapImage;
-        const sx = Math.max(0, (uv.u - viewU) * img.width);
-        const sy = Math.max(0, (uv.v - viewV) * img.height);
-        const sw = Math.min(img.width - sx, 2 * viewU * img.width);
-        const sh = Math.min(img.height - sy, 2 * viewV * img.height);
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, SIZE_PX, SIZE_PX);
+        this._drawGrid(ctx, cx, cy, radiusM);
 
         const spots = this.mapConfig.spots || [];
         for (const spot of spots) {
-            const du = (spot.u - uv.u) / (2 * viewU);
-            const dv = (spot.v - uv.v) / (2 * viewV);
-            const dist = Math.hypot(du, dv);
-            if (dist > 1) continue;
-            const px = cx + du * RADIUS_PX;
-            const py = cy + dv * RADIUS_PX;
+            const { px, py } = worldDeltaToMinimapPx(
+                spot.x - worldX,
+                spot.z - worldZ,
+                north,
+                radiusM,
+                RADIUS_PX
+            );
+            if (Math.hypot(px, py) > RADIUS_PX - 4) continue;
+            const sx = cx + px;
+            const sy = cy + py;
             ctx.beginPath();
-            ctx.arc(px, py, 5, 0, Math.PI * 2);
+            ctx.arc(sx, sy, 5, 0, Math.PI * 2);
             ctx.fillStyle = '#f57c00';
             ctx.fill();
             ctx.strokeStyle = '#fff';
@@ -150,16 +157,20 @@ export default class AircraftMinimap {
             ctx.fillStyle = 'rgba(255,255,255,0.95)';
             ctx.font = '10px sans-serif';
             ctx.textAlign = 'left';
-            ctx.fillText(spot.name, px + 7, py + 3);
+            ctx.fillText(spot.name, sx + 7, sy + 3);
         }
 
         ctx.restore();
 
         ctx.save();
         ctx.translate(cx, cy);
-        const iconDeg =
-            (Number.isFinite(yawDeg) ? yawDeg : 0) + (this.mapConfig.aircraftIconOffsetDeg || 0);
-        ctx.rotate((iconDeg * Math.PI) / 180);
+        ctx.rotate(
+            aircraftIconRotationRad(
+                yawDeg,
+                north,
+                this.mapConfig.aircraftIconOffsetDeg || 0
+            )
+        );
         ctx.beginPath();
         ctx.moveTo(0, -14);
         ctx.lineTo(8, 10);

@@ -1,18 +1,46 @@
-// addons/aircraft/client/flight-map-coords.js — 地図 UV ↔ ワールド座標（クライアント用）
+// addons/aircraft/client/flight-map-coords.js — 北固定トップダウン用 XZ 座標変換
 
 /**
- * ワールド座標 → 地図 UV（北=画像上端 v=0）
- * @param {number} worldX
- * @param {number} worldZ
- * @param {{ westX: number, eastX: number, northZ: number, southZ: number }} bounds
- * @returns {{ u: number, v: number }|null}
+ * @param {{ x: number, z: number }} north
+ * @returns {{ x: number, z: number }}
  */
-export function worldToMapUv(worldX, worldZ, bounds) {
-    const spanX = bounds.eastX - bounds.westX;
-    const spanZ = bounds.southZ - bounds.northZ;
-    if (!(spanX > 0 && spanZ > 0)) return null;
+export function eastFromNorth(north) {
+    return { x: north.z, z: -north.x };
+}
+
+/**
+ * ワールド XZ 差分をミニマップピクセルオフセットへ（北=上）
+ * @param {number} dx
+ * @param {number} dz
+ * @param {{ x: number, z: number }} north
+ * @param {number} radiusM
+ * @param {number} radiusPx
+ * @returns {{ px: number, py: number }}
+ */
+export function worldDeltaToMinimapPx(dx, dz, north, radiusM, radiusPx) {
+    const east = eastFromNorth(north);
+    const northComp = dx * north.x + dz * north.z;
+    const eastComp = dx * east.x + dz * east.z;
+    const scale = radiusPx / Math.max(radiusM, 1);
     return {
-        u: (worldX - bounds.westX) / spanX,
-        v: (worldZ - bounds.northZ) / spanZ,
+        px: eastComp * scale,
+        py: -northComp * scale,
     };
+}
+
+/**
+ * 機体ヨー角からミニマップ上のアイコン回転（ラジアン、0=北向き）
+ * @param {number} yawDeg
+ * @param {{ x: number, z: number }} north
+ * @param {number} [offsetDeg]
+ * @returns {number}
+ */
+export function aircraftIconRotationRad(yawDeg, north, offsetDeg = 0) {
+    const yawRad = (Number.isFinite(yawDeg) ? yawDeg : 0) * (Math.PI / 180);
+    const fwdX = Math.sin(yawRad);
+    const fwdZ = -Math.cos(yawRad);
+    const east = eastFromNorth(north);
+    const northComp = fwdX * north.x + fwdZ * north.z;
+    const eastComp = fwdX * east.x + fwdZ * east.z;
+    return Math.atan2(eastComp, northComp) + ((offsetDeg || 0) * Math.PI) / 180;
 }

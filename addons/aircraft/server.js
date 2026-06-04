@@ -566,11 +566,16 @@ export default {
                     const body = req.body && typeof req.body === 'object' ? req.body : {};
                     const parsed = parseFlightMapConfig(body.config);
                     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
-                    const imagePath =
-                        typeof body.imagePath === 'string' ? body.imagePath.trim().slice(0, 512) : '';
-                    const exists = db
-                        .prepare('SELECT 1 FROM aircraft_world_flight_map WHERE world_id = ?')
+                    const existingRow = db
+                        .prepare('SELECT image_path FROM aircraft_world_flight_map WHERE world_id = ?')
                         .get(worldId);
+                    let imagePath = '';
+                    if (typeof body.imagePath === 'string') {
+                        imagePath = body.imagePath.trim().slice(0, 512);
+                    } else if (existingRow) {
+                        imagePath = String(existingRow.image_path || '');
+                    }
+                    const exists = !!existingRow;
                     if (exists) {
                         db.prepare(
                             `UPDATE aircraft_world_flight_map SET
@@ -627,7 +632,7 @@ export default {
                 try {
                     const db = ctx.openDatabase();
                     const row = rowToFlightMap(db, res.locals.worldId);
-                    if (!row || !row.imagePath) {
+                    if (!row) {
                         return res.status(404).json({ error: 'not_found' });
                     }
                     res.setHeader('Cache-Control', 'public, max-age=60');

@@ -5099,6 +5099,59 @@ body.admin-dark .ac-admin-mode-btn.is-active {
     }
 }
 
+.ac-map-admin-right-wide {
+    flex: 1;
+    min-width: 280px;
+}
+
+.ac-map-spot-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+}
+
+.ac-map-spot-modal[hidden] {
+    display: none !important;
+}
+
+.ac-map-spot-modal-inner {
+    width: min(96vw, 1200px);
+    height: min(88vh, 820px);
+    background: #fff;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+body.admin-dark .ac-map-spot-modal-inner {
+    background: #1e1e28;
+}
+
+.ac-map-spot-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.ac-map-spot-viewer-mount {
+    flex: 1;
+    min-height: 0;
+    background: #1a1a22;
+}
+
 /* データベース探索（D1 風） */
 .admin-panel-database {
     display: none;
