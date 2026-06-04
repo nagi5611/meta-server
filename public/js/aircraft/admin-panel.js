@@ -742,9 +742,9 @@ export function initAircraftAdminPanel() {
                         <input type="number" id="ac-mesh-rz" class="prop-input num" step="0.5" value="0" /></div>
                     <h3 class="section-subtitle">アニメーション（エンジンブレード）</h3>
                     <div class="field-row"><label class="prop-label" for="ac-anim-maxaccel">角加速度上限 (rad/s²)</label>
-                        <input type="number" id="ac-anim-maxaccel" class="prop-input num" step="0.5" min="0" /></div>
+                        <input type="number" id="ac-anim-maxaccel" class="prop-input num" step="any" /></div>
                     <div class="field-row"><label class="prop-label" for="ac-anim-maxomega">目標角速度上限 (rad/s)</label>
-                        <input type="number" id="ac-anim-maxomega" class="prop-input num" step="1" min="0" /></div>
+                        <input type="number" id="ac-anim-maxomega" class="prop-input num" step="any" /></div>
                     <div class="field-row"><label class="prop-label" for="ac-anim-spinaxis">回転軸（ローカル）</label>
                         <select id="ac-anim-spinaxis" class="prop-input full"><option value="x">x</option><option value="y">y</option><option value="z">z</option></select></div>
                 </div>

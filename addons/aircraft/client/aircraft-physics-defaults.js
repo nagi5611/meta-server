@@ -246,30 +246,16 @@ function applyLegacyPhysicsAliases(r) {
 }
 
 /**
- * @param {string} key
+ * @param {string} _key
  * @param {number} v
  * @returns {number}
  */
-function clipPhysicsValue(key, v) {
-    if (key === 'gravity') return Math.max(0.1, v);
-    if (key === 'maxThrustSpeed') return Math.max(1, v);
-    if (key.endsWith('Deg')) return Math.max(1, v);
-    if (key.endsWith('MaxRate')) return Math.max(0.005, v);
-    if (key.endsWith('MaxAccel')) return Math.max(0.01, v);
-    if (key.startsWith('flapLiftCoeff')) return Math.max(0, v);
-    if (key === 'tireStaticFriction' || key === 'tireKineticFriction') {
-        return Math.max(0.05, v);
-    }
-    if (key === 'engineMaxRpm') return Math.max(100, v);
-    if (key === 'throttleSpoolPerS') return Math.max(0.02, v);
-    if (key === 'engineRpmAccel') return Math.max(10, v);
-    if (key === 'thrustAccelPerEngineRpm') return Math.max(0.1, v);
-    if (key === 'tireBrakeAccel') return Math.max(0.5, v);
-    return Math.max(0.001, v);
+function clipPhysicsValue(_key, v) {
+    return v;
 }
 
 /**
- * worlds.json の aircraftPhysics を既定値でマージし、下限のみクランプする。
+ * worlds.json の aircraftPhysics を既定値でマージする（数値の上下限クランプなし）。
  * @param {Record<string, unknown>|null|undefined} raw
  */
 export function mergeAircraftPhysicsFromWorld(raw) {
@@ -301,7 +287,7 @@ export function mergeAircraftPhysicsForObject(worldRaw, objectOverrideRaw) {
 }
 
 /**
- * ユーザーが貼り付けた JSON から、既知キーのみを下限クランプした機体上書きオブジェクトを返す。
+ * ユーザーが貼り付けた JSON から、既知キーのみを取り込んだ機体上書きオブジェクトを返す。
  * @param {unknown} raw
  * @returns {Record<string, number>|null}
  */

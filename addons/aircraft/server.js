@@ -151,7 +151,7 @@ function parseCameraJson(raw) {
         /** @type {unknown[]} */
         const vps = [];
         for (const item of raw.viewpoints) {
-            if (!isPlainObject(item) || vps.length >= 24) break;
+            if (!isPlainObject(item)) continue;
             const id = typeof item.id === 'string' ? item.id.trim() : '';
             if (!VP_ID_RE.test(id)) continue;
             const roleRaw = typeof item.role === 'string' ? item.role.trim().toLowerCase() : 'free';

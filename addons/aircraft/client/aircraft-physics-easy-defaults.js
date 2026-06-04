@@ -26,36 +26,12 @@ export const DEFAULT_EASY_AIRCRAFT_PHYSICS = Object.freeze({
 });
 
 /**
- * @param {string} key
+ * @param {string} _key
  * @param {number} v
  * @returns {number}
  */
-function clipEasyPhysicsValue(key, v) {
-    if (key === 'drag') return Math.min(0.99999, Math.max(0.5, v));
-    if (key === 'maxSpeed') return Math.min(500, Math.max(1, v));
-    if (key === 'gravity') return Math.min(50, Math.max(0.1, v));
-    if (key === 'liftPerHorizontalSpeed') return Math.min(5, Math.max(0, v));
-    if (key === 'sideslipDamping' || key === 'excessClimbDamping') {
-        return Math.min(10, Math.max(0, v));
-    }
-    if (key === 'angularDecel' || key === 'yawGroundFrictionLeft' || key === 'yawGroundFrictionRight') {
-        return Math.min(30, Math.max(0, v));
-    }
-    if (key === 'wheelBrakeDecel') return Math.min(80, Math.max(0.5, v));
-    if (
-        key === 'pitchAccelGround' ||
-        key === 'pitchAccelAir' ||
-        key === 'yawAccelGround' ||
-        key === 'yawAccelAir'
-    ) {
-        return Math.min(40, Math.max(0.05, v));
-    }
-    if (key === 'pitchMaxRateGround' || key === 'pitchMaxRateAir') {
-        return Math.min(10, Math.max(0.02, v));
-    }
-    if (key.endsWith('Accel')) return Math.min(40, Math.max(0.05, v));
-    if (key.endsWith('MaxRate')) return Math.min(10, Math.max(0.02, v));
-    return Math.min(50, Math.max(0.01, v));
+function clipEasyPhysicsValue(_key, v) {
+    return v;
 }
 
 /**

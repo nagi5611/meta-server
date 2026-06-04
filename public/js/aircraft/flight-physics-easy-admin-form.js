@@ -39,7 +39,7 @@ export function mountEasyFlightPhysicsForm(container) {
     hint.className = 'hint';
     hint.style.margin = '0 0 8px';
     hint.textContent =
-        'Easy（アーケード）操縦用。W/S=推力、A/D=ヨー、矢印=ピッチ/ロール、Space=地上ブレーキ、バンク ±30°。';
+        'Easy（アーケード）操縦用。W/S=推力、A/D=ヨー、矢印=ピッチ/ロール、Space=地上ブレーキ。パラメータに上下限クランプはありません。';
     container.appendChild(hint);
     for (const key of Object.keys(DEFAULT_EASY_AIRCRAFT_PHYSICS)) {
         const def = /** @type {number} */ (
@@ -55,7 +55,7 @@ export function mountEasyFlightPhysicsForm(container) {
         inp.type = 'number';
         inp.id = `ac-flight-easy-${key}`;
         inp.className = 'prop-input num';
-        inp.step = key === 'drag' ? '0.001' : key === 'maxSpeed' ? '1' : '0.01';
+        inp.step = 'any';
         inp.value = String(def);
         row.appendChild(lab);
         row.appendChild(inp);
