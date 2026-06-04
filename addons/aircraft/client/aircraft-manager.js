@@ -134,12 +134,38 @@ export default class AircraftManager {
     }
 
     /**
+     * 操縦中の他機（ネットワーク同期済み）をミニマップ用に列挙する
+     * @returns {{ label: string, x: number, z: number }[]}
+     */
+    getMinimapOtherAircraft() {
+        /** @type {{ label: string, x: number, z: number }[]} */
+        const out = [];
+        const skipId = this.isPiloting && this.activeSlot ? this.activeSlot.id : null;
+        for (const [slotId] of this._slotPilotId) {
+            if (slotId === skipId) continue;
+            const slot = this.slotsById.get(slotId);
+            if (!slot?.root) continue;
+            slot.root.updateMatrixWorld(true);
+            slot.root.getWorldPosition(this._minimapPosScratch);
+            const libId = slot.aircraftLibraryId ? String(slot.aircraftLibraryId).trim() : '';
+            out.push({
+                label: libId || slotId,
+                x: this._minimapPosScratch.x,
+                z: this._minimapPosScratch.z,
+            });
+        }
+        return out;
+    }
+
+    /**
      * 毎フレームミニマップを更新する
      */
     updateMinimap() {
         if (!this.isPiloting) return;
         const state = this.getMinimapState();
-        if (state) this.minimap.update(state);
+        if (!state) return;
+        state.otherAircraft = this.getMinimapOtherAircraft();
+        this.minimap.update(state);
     }
 
     /**

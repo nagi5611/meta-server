@@ -30,6 +30,10 @@ export default class AircraftMinimap {
         this._orthoCam = null;
         /** @type {THREE.Scene|null} */
         this._scene = null;
+        /** @type {THREE.Object3D|null} */
+        this._skyDomeMesh = null;
+        /** @type {THREE.Color} */
+        this._minimapClearColor = new THREE.Color(0x2a3545);
         /** @type {object|null} */
         this.mapConfig = null;
     }
@@ -40,6 +44,12 @@ export default class AircraftMinimap {
     bindSceneManager(sceneManager) {
         if (!sceneManager || typeof sceneManager.getScene !== 'function') return;
         this._scene = sceneManager.getScene();
+        this._skyDomeMesh = null;
+        if (this._scene) {
+            this._scene.traverse((o) => {
+                if (o.name === 'SkyDome') this._skyDomeMesh = o;
+            });
+        }
         if (!this._orthoCam) {
             this._orthoCam = new THREE.OrthographicCamera(-500, 500, 500, -500, 1, 15000);
         }
@@ -119,8 +129,38 @@ export default class AircraftMinimap {
     }
 
     /**
-     * スポット・機体アイコンを 2D オーバーレイに描画する
-     * @param {{ worldX: number, worldZ: number, yawDeg: number }} state
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {number} cx
+     * @param {number} cy
+     * @param {number} dx
+     * @param {number} dz
+     * @param {{ x: number, z: number }} north
+     * @param {number} half
+     * @param {string} label
+     * @param {string} fillColor
+     * @param {number} radius
+     */
+    _drawMarkerAtDelta(ctx, cx, cy, dx, dz, north, half, label, fillColor, radius) {
+        const { px, py } = worldDeltaToMinimapPx(dx, dz, north, half, RADIUS_PX);
+        if (Math.hypot(px, py) > RADIUS_PX - 4) return;
+        const sx = cx + px;
+        const sy = cy + py;
+        ctx.beginPath();
+        ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(label, sx + radius + 2, sy + 3);
+    }
+
+    /**
+     * スポット・他機・自機アイコンを 2D オーバーレイに描画する
+     * @param {{ worldX: number, worldZ: number, yawDeg: number, otherAircraft?: { label: string, x: number, z: number }[] }} state
      */
     _drawOverlay(state) {
         if (!this.ctxOverlay || !this.mapConfig) return;
@@ -134,27 +174,34 @@ export default class AircraftMinimap {
 
         const spots = this.mapConfig.spots || [];
         for (const spot of spots) {
-            const { px, py } = worldDeltaToMinimapPx(
+            this._drawMarkerAtDelta(
+                ctx,
+                cx,
+                cy,
                 spot.x - worldX,
                 spot.z - worldZ,
                 north,
                 half,
-                RADIUS_PX
+                spot.name,
+                '#f57c00',
+                5
             );
-            if (Math.hypot(px, py) > RADIUS_PX - 4) continue;
-            const sx = cx + px;
-            const sy = cy + py;
-            ctx.beginPath();
-            ctx.arc(sx, sy, 5, 0, Math.PI * 2);
-            ctx.fillStyle = '#f57c00';
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.fillStyle = 'rgba(255,255,255,0.95)';
-            ctx.font = '10px sans-serif';
-            ctx.textAlign = 'left';
-            ctx.fillText(spot.name, sx + 7, sy + 3);
+        }
+
+        const others = state.otherAircraft || [];
+        for (const ac of others) {
+            this._drawMarkerAtDelta(
+                ctx,
+                cx,
+                cy,
+                ac.x - worldX,
+                ac.z - worldZ,
+                north,
+                half,
+                ac.label,
+                '#42a5f5',
+                4
+            );
         }
 
         ctx.save();
@@ -181,7 +228,7 @@ export default class AircraftMinimap {
     }
 
     /**
-     * @param {{ worldX: number, worldZ: number, yawDeg: number }|null} state
+     * @param {{ worldX: number, worldZ: number, yawDeg: number, otherAircraft?: { label: string, x: number, z: number }[] }|null} state
      */
     update(state) {
         if (!state || !this.mapConfig || this.root?.style.display === 'none') return;
@@ -202,12 +249,23 @@ export default class AircraftMinimap {
                 north,
                 half
             );
+            const prevBg = this._scene.background;
+            const prevFog = this._scene.fog;
+            const prevSkyVisible = this._skyDomeMesh ? this._skyDomeMesh.visible : null;
+            if (this._skyDomeMesh) this._skyDomeMesh.visible = false;
+            this._scene.fog = null;
+            this._scene.background = this._minimapClearColor;
             const prevAutoClear = this._renderer.autoClear;
             this._renderer.autoClear = true;
-            this._renderer.setClearColor(0x1a2634, 1);
+            this._renderer.setClearColor(this._minimapClearColor, 1);
             this._renderer.render(this._scene, this._orthoCam);
             this._renderer.autoClear = prevAutoClear;
-        } else if (this.ctxOverlay && this.canvas3d) {
+            if (this._skyDomeMesh && prevSkyVisible != null) {
+                this._skyDomeMesh.visible = prevSkyVisible;
+            }
+            this._scene.background = prevBg;
+            this._scene.fog = prevFog;
+        } else if (this.canvas3d) {
             const g = this.canvas3d.getContext('2d');
             if (g) {
                 g.fillStyle = '#1a2634';
