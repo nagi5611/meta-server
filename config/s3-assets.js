@@ -60,6 +60,18 @@ export function getCloudFrontSignExpiresSeconds() {
     return Number.isFinite(n) && n >= 60 && n <= 86400 ? n : 900;
 }
 
+/**
+ * 起動時 S3 同期で「ローカルに無いリモート」を Delete するか。
+ * 同一バケットを複数インスタンスで共有する場合は 0 / false にする（他インスタンス分を消さない）。
+ * 未設定時は 1（従来どおり削除あり）。管理画面からの明示削除はこの設定に関係なく S3 から消す。
+ * @returns {boolean}
+ */
+export function isS3ModelsSyncPruneEnabled() {
+    const raw = process.env.META_MODELS_S3_SYNC_PRUNE;
+    if (raw === undefined || String(raw).trim() === '') return true;
+    return isTruthyEnv(raw);
+}
+
 /** S3 への同時 PutObject 本数の上限（Prefab ZIP 等の一括アップロード用）。未設定時は 16。1〜128 にクランプ */
 export function getS3ModelsUploadConcurrency() {
     const raw = process.env.META_MODELS_S3_UPLOAD_CONCURRENCY;

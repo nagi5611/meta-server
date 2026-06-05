@@ -41,6 +41,7 @@ import { insertVersionBeforeExt, createModelVersionToken } from './lib/model-upl
 import {
     uploadLocalModelsPathsOrRollbackS3,
     syncLocalModelsToS3OnStartup,
+    syncLocalPlaneToS3OnStartup,
     tryUnlinkQuiet,
     publicAssetUrlCacheForModels,
     deleteS3ModelObjectsByRelativePosix,
@@ -7025,6 +7026,15 @@ function formatBytes(bytes) {
             console.log('[s3-sync] startup', r);
         } catch (e) {
             console.error('[s3-sync] startup failed:', e);
+        }
+    }
+
+    if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
+        try {
+            const rp = await syncLocalPlaneToS3OnStartup(PLANE_DIR);
+            console.log('[s3-sync-plane] startup', rp);
+        } catch (e) {
+            console.error('[s3-sync-plane] startup failed:', e);
         }
     }
 
