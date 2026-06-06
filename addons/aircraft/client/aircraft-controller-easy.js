@@ -702,7 +702,7 @@ export default class AircraftControllerEasy {
      * @returns {{
      *   controlMode: 'easy',
      *   worldX: number, worldY: number, worldZ: number,
-     *   speedMs: number, speedKms: number,
+     *   speedMs: number,
      *   pitchDeg: number, yawDeg: number, rollDeg: number,
      *   omegaYaw: number, omegaPitch: number, omegaRoll: number,
      *   axisX: { x: number, y: number, z: number },
@@ -732,7 +732,6 @@ export default class AircraftControllerEasy {
             worldY: this._worldPos.y,
             worldZ: this._worldPos.z,
             speedMs,
-            speedKms: speedMs / 1000,
             pitchDeg: this._eulerScratch.x * r2d,
             yawDeg: this._eulerScratch.y * r2d,
             rollDeg: this._eulerScratch.z * r2d,

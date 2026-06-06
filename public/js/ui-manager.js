@@ -703,7 +703,10 @@ class UIManager {
             const az = el('aircraft-hud-easy-axis-z');
             if (az) az.textContent = fmtAxis(snap.axisZ);
             const spd = el('aircraft-hud-easy-speed');
-            if (spd) spd.textContent = `${q(snap.speedKms, 3)} km/s`;
+            if (spd) {
+                const kmh = Number.isFinite(snap.speedMs) ? snap.speedMs * 3.6 : NaN;
+                spd.textContent = `${q(kmh, 0)} km/h`;
+            }
             const view = el('aircraft-hud-easy-view');
             if (view) view.textContent = snap.viewpointName ? String(snap.viewpointName) : '—';
             return;
