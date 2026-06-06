@@ -1,6 +1,7 @@
 // addons/aircraft/client/aircraft-controller-easy.js — easy 操縦（W/S 推力・A/D ヨー・矢印ピッチ/ロール）
 import * as THREE from 'three';
 import { mergeEasyAircraftPhysicsFromWorld } from './aircraft-physics-easy-defaults.js';
+import { highSpeedAngularRateScale } from './aircraft-physics-defaults.js';
 import { findObjectByNamePath, stepEngineBladeRotation } from './runtime-prefab-aircraft-anim.js';
 import {
     applyAircraftViewpointCamera,
@@ -556,12 +557,19 @@ export default class AircraftControllerEasy {
             if (this._omegaYaw > 0) yawDecel += ph.yawGroundFrictionRight;
             else if (this._omegaYaw < 0) yawDecel += ph.yawGroundFrictionLeft;
         }
+        const rateScale = highSpeedAngularRateScale(this.velocity.length(), ph.maxSpeed);
         const yawAccel = this._aircraftGrounded ? ph.yawAccelGround : ph.yawAccelAir;
-        this._omegaYaw = this._integrateOmega(yawIn, this._omegaYaw, yawAccel, ph.yawMaxRate, yawDecel, dt);
+        this._omegaYaw = this._integrateOmega(
+            yawIn, this._omegaYaw, yawAccel, ph.yawMaxRate * rateScale, yawDecel, dt
+        );
         const pitchAccel = this._aircraftGrounded ? ph.pitchAccelGround : ph.pitchAccelAir;
         const pitchMaxRate = this._aircraftGrounded ? ph.pitchMaxRateGround : ph.pitchMaxRateAir;
-        this._omegaPitch = this._integrateOmega(pitchIn, this._omegaPitch, pitchAccel, pitchMaxRate, dec, dt);
-        this._omegaRoll = this._integrateOmega(rollInEff, this._omegaRoll, ph.rollAccel, ph.rollMaxRate, dec, dt);
+        this._omegaPitch = this._integrateOmega(
+            pitchIn, this._omegaPitch, pitchAccel, pitchMaxRate * rateScale, dec, dt
+        );
+        this._omegaRoll = this._integrateOmega(
+            rollInEff, this._omegaRoll, ph.rollAccel, ph.rollMaxRate * rateScale, dec, dt
+        );
 
         root.rotateOnAxis(new THREE.Vector3(0, 1, 0), -this._omegaYaw * dt);
         root.rotateOnAxis(new THREE.Vector3(1, 0, 0), this._omegaPitch * dt);

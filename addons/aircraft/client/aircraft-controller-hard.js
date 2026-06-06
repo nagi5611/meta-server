@@ -11,6 +11,7 @@ import {
     flapLiftCoeff,
     flapVfeMs,
     thrustAccelFromEngineRpm,
+    highSpeedAngularRateScale,
     AIRCRAFT_FLAP_LABELS,
     AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
@@ -665,12 +666,13 @@ export default class AircraftControllerHard {
         const yawIn = (this.keys.yawR ? 1 : 0) - (this.keys.yawL ? 1 : 0);
         const pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
         const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
+        const rateScale = highSpeedAngularRateScale(this.velocity.length(), maxSpd);
 
         this._omegaYaw = this._integrateOmega(
             yawIn,
             this._omegaYaw,
             ph.yawMaxAccel,
-            ph.yawMaxRate,
+            ph.yawMaxRate * rateScale,
             dec,
             dt
         );
@@ -678,7 +680,7 @@ export default class AircraftControllerHard {
             pitchIn,
             this._omegaPitch,
             ph.pitchMaxAccel * fa.pitchMul,
-            ph.pitchMaxRate * fa.pitchMul,
+            ph.pitchMaxRate * fa.pitchMul * rateScale,
             dec,
             dt
         );
@@ -686,7 +688,7 @@ export default class AircraftControllerHard {
             rollIn,
             this._omegaRoll,
             ph.rollMaxAccel * fa.rollMul,
-            ph.rollMaxRate * fa.rollMul,
+            ph.rollMaxRate * fa.rollMul * rateScale,
             dec,
             dt
         );

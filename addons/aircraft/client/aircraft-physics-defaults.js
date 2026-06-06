@@ -97,6 +97,18 @@ const FLAP_LIFT_KEYS = Object.freeze([
 ]);
 
 /**
+ * 速度に応じた回転角速度上限の係数。速度 0 で 1、最高速度で 0.5（その間は線形）。
+ * @param {number} speed 現在速度（maxSpeed と同じ単位系）
+ * @param {number} maxSpeed 最高速度パラメータ
+ * @returns {number}
+ */
+export function highSpeedAngularRateScale(speed, maxSpeed) {
+    if (!Number.isFinite(maxSpeed) || maxSpeed <= 0) return 1;
+    const t = Math.max(0, Math.min(1, speed / maxSpeed));
+    return 1 - 0.5 * t;
+}
+
+/**
  * フラップ段階 i（0=UP … 6=30）のロール・ピッチ権限乗数
  * @param {number} flapIndex
  * @returns {{ rollMul: number, pitchMul: number }}

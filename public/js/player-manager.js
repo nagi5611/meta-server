@@ -30,6 +30,8 @@ class PlayerManager {
         this._remotePilotGhostObjRestore = new Map();
         /** @type {Map<THREE.Material, { transparent: boolean, opacity: number, depthWrite: boolean, visible?: boolean, colorWrite?: boolean }>} */
         this._remotePilotGhostMatRestore = new Map();
+        /** 操縦視点ゴーストの対象外（降機した同乗者など） */
+        this._pilotGhostExemptRemoteIds = new Set();
         /** @type {import('./visual-mode.js').VisualMode} */
         this._visualMode = 'standard';
     }
@@ -544,13 +546,16 @@ class PlayerManager {
         if (this._remotePilotViewGhostActive === v) return;
         this._remotePilotViewGhostActive = v;
         if (!v) {
+            this._pilotGhostExemptRemoteIds.clear();
             this._clearPilotGhostFromRestore(
                 this._remotePilotGhostObjRestore,
                 this._remotePilotGhostMatRestore,
             );
             return;
         }
-        for (const player of this.remotePlayers.values()) {
+        for (const [playerId, player] of this.remotePlayers) {
+            if (this._pilotGhostExemptRemoteIds.has(playerId)) continue;
+            if (player.userData.networkVisible === false) continue;
             this._applyPilotGhostToRoot(
                 player,
                 this._remotePilotGhostObjRestore,
@@ -624,15 +629,31 @@ class PlayerManager {
      * 他プレイヤー（リモート）の表示/非表示を切り替える（ネームタグ含む）。管理者の透明化で使用。
      * @param {string} playerId
      * @param {boolean} visible
+     * @param {{ exemptFromPilotGhost?: boolean }} [options]
      */
-    setRemotePlayerVisible(playerId, visible) {
+    setRemotePlayerVisible(playerId, visible, options = {}) {
         const player = this.remotePlayers.get(playerId);
         if (!player) return;
+        const exemptFromPilotGhost = !!options.exemptFromPilotGhost;
         player.userData.networkVisible = !!visible;
         const distOk = player.userData.distanceVisible !== false;
         const vis = !!visible && distOk;
         player.visible = vis;
-        if (vis && !this._remotePilotViewGhostActive) {
+        if (!vis) {
+            this._pilotGhostExemptRemoteIds.delete(playerId);
+            if (this._remotePilotViewGhostActive) {
+                this._applyPilotGhostToRoot(
+                    player,
+                    this._remotePilotGhostObjRestore,
+                    this._remotePilotGhostMatRestore,
+                );
+            }
+            return;
+        }
+        if (exemptFromPilotGhost) {
+            this._pilotGhostExemptRemoteIds.add(playerId);
+        }
+        if (exemptFromPilotGhost || !this._remotePilotViewGhostActive) {
             this._clearPilotGhostForRoot(
                 player,
                 this._remotePilotGhostObjRestore,
@@ -756,7 +777,11 @@ class PlayerManager {
         const playerObj = this.remotePlayers.get(playerId);
         if (playerObj) {
             applyVisualModeToObject3D(playerObj, this._visualMode, THREE);
-            if (this._remotePilotViewGhostActive) {
+            if (
+                this._remotePilotViewGhostActive
+                && !this._pilotGhostExemptRemoteIds.has(playerId)
+                && playerObj.userData.networkVisible !== false
+            ) {
                 this._applyPilotGhostToRoot(
                     playerObj,
                     this._remotePilotGhostObjRestore,
@@ -1189,9 +1214,13 @@ class PlayerManager {
             applyVisualModeToObject3D(this.localPlayer, m, THREE);
             if (this._localPilotGhostMode) this._applyLocalPilotGhost();
         }
-        for (const player of this.remotePlayers.values()) {
+        for (const [playerId, player] of this.remotePlayers) {
             applyVisualModeToObject3D(player, m, THREE);
-            if (this._remotePilotViewGhostActive) {
+            if (
+                this._remotePilotViewGhostActive
+                && !this._pilotGhostExemptRemoteIds.has(playerId)
+                && player.userData.networkVisible !== false
+            ) {
                 this._applyPilotGhostToRoot(
                     player,
                     this._remotePilotGhostObjRestore,

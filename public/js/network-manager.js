@@ -40,6 +40,30 @@ class NetworkManager {
         this._isLocalPlayerBlocked = null;
         /** player-update 操縦時カメラ姿勢用 */
         this._pilotSendQuatScratch = new THREE.Quaternion();
+        /** @type {Map<string, boolean>} 前 tick の飛行機搭乗状態（降機検知用） */
+        this._remoteAircraftOccupied = new Map();
+    }
+
+    /**
+     * @param {{ pilotingAircraftId?: string|null, passengeringAircraftId?: string|null }} player
+     * @returns {boolean}
+     */
+    _isPlayerAircraftOccupied(player) {
+        return !!(player.pilotingAircraftId || player.passengeringAircraftId);
+    }
+
+    /**
+     * 搭乗状態の変化を見てリモート可視性と操縦視点ゴースト免除を同期する
+     * @param {{ id: string, adminInvisible?: boolean, pilotingAircraftId?: string|null, passengeringAircraftId?: string|null }} player
+     */
+    _syncRemotePlayerVisible(player) {
+        const occupied = this._isPlayerAircraftOccupied(player);
+        const wasOccupied = !!this._remoteAircraftOccupied.get(player.id);
+        const visible = this._mergedRemoteVisibleForPlayer(player);
+        this.playerManager.setRemotePlayerVisible(player.id, visible, {
+            exemptFromPilotGhost: wasOccupied && !occupied && visible,
+        });
+        this._remoteAircraftOccupied.set(player.id, occupied);
     }
 
     /**
@@ -77,7 +101,10 @@ class NetworkManager {
         if (!this.playerManager.hasRemotePlayer(playerId)) return;
         p.pilotingAircraftId = null;
         p.passengeringAircraftId = null;
-        this.playerManager.setRemotePlayerVisible(playerId, this._mergedRemoteVisibleForPlayer(p));
+        this._remoteAircraftOccupied.set(playerId, false);
+        this.playerManager.setRemotePlayerVisible(playerId, this._mergedRemoteVisibleForPlayer(p), {
+            exemptFromPilotGhost: true,
+        });
     }
 
     /**
@@ -152,10 +179,7 @@ class NetworkManager {
                             name,
                             player.animState || 'idle'
                         );
-                        this.playerManager.setRemotePlayerVisible(
-                            player.id,
-                            this._mergedRemoteVisibleForPlayer(player)
-                        );
+                        this._syncRemotePlayerVisible(player);
                     } catch (error) {
                         console.error(`Failed to create remote player ${player.id}:`, error);
                     }
@@ -180,10 +204,7 @@ class NetworkManager {
                         name,
                         player.animState || 'idle'
                     );
-                    this.playerManager.setRemotePlayerVisible(
-                        player.id,
-                        this._mergedRemoteVisibleForPlayer(player)
-                    );
+                    this._syncRemotePlayerVisible(player);
                     this.updatePlayerCount();
                 } catch (error) {
                     console.error(`Failed to create joining player ${player.id}:`, error);
@@ -260,12 +281,10 @@ class NetworkManager {
                                 player.animState || 'idle'
                             );
                         }
-                        this.playerManager.setRemotePlayerVisible(
-                            player.id,
-                            this._mergedRemoteVisibleForPlayer(player)
-                        );
+                        this._syncRemotePlayerVisible(player);
                     } else {
                         // Hide players in different worlds
+                        this._remoteAircraftOccupied.delete(player.id);
                         this.playerManager.removeRemotePlayer(player.id);
                     }
                 }
@@ -296,6 +315,7 @@ class NetworkManager {
         // Handle player leaving
         this.socket.on('player-left', (playerId) => {
             console.log('Player left:', playerId);
+            this._remoteAircraftOccupied.delete(playerId);
             this.playerManager.removeRemotePlayer(playerId);
             this.updatePlayerCount();
         });
