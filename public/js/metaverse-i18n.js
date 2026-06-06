@@ -393,6 +393,7 @@ export const METAVERSE_STRINGS = {
     'ui.aircraftPilot': { ja: '操縦する', en: 'Pilot', zh: '驾驶' },
     'ui.aircraftPassenger': { ja: '同乗する', en: 'Ride along', zh: '同乘' },
     'ui.aircraftBoardSuffix': { ja: '（クリック / E）', en: '(click / E)', zh: '（点击 / E）' },
+    'ui.aircraftBoardHint': { ja: 'クリックでも搭乗できます', en: 'Or tap to board', zh: '也可点击进入' },
     'ui.aircraftExit': { ja: '降りる (F)', en: 'Exit (F)', zh: '下车 (F)' },
     'ui.aircraftCamera': { ja: '視点 (V)', en: 'View (V)', zh: '视角 (V)' },
     'ui.aircraftExitShort': { ja: 'F 降りる', en: 'F Exit', zh: 'F 下车' },

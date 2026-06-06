@@ -122,6 +122,8 @@ class UIManager {
             this.aircraftBoardPrompt.id = 'aircraft-board-prompt';
             this.aircraftBoardPrompt.style.display = 'none';
             document.body.appendChild(this.aircraftBoardPrompt);
+        } else if (this.aircraftBoardPrompt.parentElement !== document.body) {
+            document.body.appendChild(this.aircraftBoardPrompt);
         }
         if (!this.aircraftBoardPrompt.dataset.wiredBoard) {
             this.aircraftBoardPrompt.dataset.wiredBoard = '1';
@@ -138,18 +140,22 @@ class UIManager {
         if (!this.aircraftHud) {
             this.aircraftHud = document.createElement('div');
             this.aircraftHud.id = 'aircraft-hud';
-            this.aircraftHud.style.display = 'none';
+            this.aircraftHud.className = 'aircraft-hud';
+            this.aircraftHud.hidden = true;
+            document.body.appendChild(this.aircraftHud);
+        } else if (this.aircraftHud.parentElement !== document.body) {
             document.body.appendChild(this.aircraftHud);
         }
         if (!this.aircraftHud.dataset.wiredHud) {
             this.aircraftHud.dataset.wiredHud = '1';
             this.aircraftHud.addEventListener('click', (e) => {
-                const t = e.target;
-                if (t && t.id === 'aircraft-hud-exit' && this._aircraftHudExit) {
+                const exitBtn = e.target.closest('#aircraft-hud-exit');
+                const camBtn = e.target.closest('#aircraft-hud-camera');
+                if (exitBtn && this._aircraftHudExit) {
                     e.preventDefault();
                     this._aircraftHudExit();
                 }
-                if (t && t.id === 'aircraft-hud-camera' && this._aircraftHudCamera) {
+                if (camBtn && this._aircraftHudCamera) {
                     e.preventDefault();
                     this._aircraftHudCamera();
                 }
@@ -571,16 +577,27 @@ class UIManager {
     showAircraftBoardPrompt(label, mode = 'pilot') {
         if (!this.aircraftBoardPrompt) return;
         this.hideMobileInteractButton();
-        const name = (label || '').trim();
-        const verb = mode === 'passenger' ? t('ui.aircraftPassenger') : t('ui.aircraftPilot');
-        const head = name ? `${name} — ${verb}` : verb;
-        this.aircraftBoardPrompt.textContent = `${head}${t('ui.aircraftBoardSuffix')}`;
-        this.aircraftBoardPrompt.style.display = 'block';
+        const name = escapeHtmlForUi((label || '').trim());
+        const verb = escapeHtmlForUi(
+            mode === 'passenger' ? t('ui.aircraftPassenger') : t('ui.aircraftPilot')
+        );
+        const main = name ? `${name} — ${verb}` : verb;
+        this.aircraftBoardPrompt.innerHTML = `
+<span class="aircraft-board-key" aria-hidden="true">E</span>
+<span class="aircraft-board-text">
+<strong class="aircraft-board-label">${main}</strong>
+<span class="aircraft-board-hint">${escapeHtmlForUi(t('ui.aircraftBoardHint'))}</span>
+</span>`;
+        this.aircraftBoardPrompt.classList.toggle('is-passenger', mode === 'passenger');
+        this.aircraftBoardPrompt.setAttribute('aria-label', `${(label || '').trim() || verb} E`);
+        this.aircraftBoardPrompt.style.display = 'flex';
     }
 
     hideAircraftBoardPrompt() {
         if (!this.aircraftBoardPrompt) return;
         this.aircraftBoardPrompt.style.display = 'none';
+        this.aircraftBoardPrompt.classList.remove('is-passenger');
+        this.aircraftBoardPrompt.innerHTML = '';
     }
 
     showAircraftHud() {
@@ -593,14 +610,15 @@ class UIManager {
 </div>
 <div class="aircraft-hud-stats" aria-live="polite">
 <span class="aircraft-hud-speed"><strong id="aircraft-hud-speed">0</strong> km/h</span>
-<span class="aircraft-hud-stat" id="aircraft-hud-throttle-wrap"><span id="aircraft-hud-throttle">0</span>%</span>
-<span class="aircraft-hud-stat" id="aircraft-hud-flap-wrap"><span id="aircraft-hud-flap">UP</span></span>
+<span class="aircraft-hud-stat" id="aircraft-hud-throttle-wrap" hidden><span id="aircraft-hud-throttle">0</span>%</span>
+<span class="aircraft-hud-stat" id="aircraft-hud-flap-wrap" hidden><span id="aircraft-hud-flap">UP</span></span>
 <span class="aircraft-hud-stat" id="aircraft-hud-ground">—</span>
 <span class="aircraft-hud-warn" id="aircraft-hud-vfewarn"></span>
 </div>
 </div>
 <div class="aircraft-hud-viewpoint" id="aircraft-hud-viewpoint" aria-live="polite"></div>`;
-        this.aircraftHud.style.display = 'block';
+        this.aircraftHud.hidden = false;
+        this.aircraftHud.classList.add('is-active');
     }
 
     /**
@@ -637,7 +655,7 @@ class UIManager {
      * @param {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean, throttle?: number, engineRpm?: number, flapLabel?: string, vfeMs?: number, vfeWarn?: boolean }|null} snap
      */
     updateAircraftHudTelemetry(snap) {
-        if (!this.aircraftHud || !snap) return;
+        if (!this.aircraftHud || this.aircraftHud.hidden || !snap) return;
         const q = (n, d) => (Number.isFinite(n) ? n.toFixed(d) : '—');
         const el = (id) => document.getElementById(id);
         const s = el('aircraft-hud-speed');
@@ -664,7 +682,8 @@ class UIManager {
 
     hideAircraftHud() {
         if (!this.aircraftHud) return;
-        this.aircraftHud.style.display = 'none';
+        this.aircraftHud.hidden = true;
+        this.aircraftHud.classList.remove('is-active');
         this.aircraftHud.innerHTML = '';
         const flash = document.getElementById('aircraft-viewpoint-flash');
         if (flash) {

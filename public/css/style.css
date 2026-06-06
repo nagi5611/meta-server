@@ -452,29 +452,94 @@ body {
 
 #aircraft-board-prompt {
     position: fixed;
-    bottom: 88px;
+    bottom: 100px;
     left: 50%;
     transform: translateX(-50%);
-    padding: 8px 14px;
-    background: rgba(0, 0, 0, 0.55);
-    color: rgba(255, 255, 255, 0.92);
-    font-size: 13px;
-    font-weight: 500;
-    border-radius: 6px;
-    z-index: 99;
+    display: none;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 22px 14px 16px;
+    background: linear-gradient(135deg, #42a5f5 0%, #1e88e5 100%);
+    color: #fff;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.25;
+    border-radius: 12px;
+    z-index: 1050;
+    box-shadow: 0 6px 22px rgba(30, 136, 229, 0.5);
+    border: 2px solid rgba(255, 255, 255, 0.35);
     cursor: pointer;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
-    backdrop-filter: blur(6px);
+    pointer-events: auto;
+    animation: aircraft-board-pulse 1.6s ease-in-out infinite;
+}
+
+#aircraft-board-prompt.is-passenger {
+    background: linear-gradient(135deg, #66bb6a 0%, #43a047 100%);
+    box-shadow: 0 6px 22px rgba(67, 160, 71, 0.5);
+}
+
+#aircraft-board-prompt:hover {
+    filter: brightness(1.06);
+}
+
+#aircraft-board-prompt .aircraft-board-key {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: 48px;
+    height: 48px;
+    padding: 0 10px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 2px solid rgba(255, 255, 255, 0.55);
+    font-size: 24px;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.2);
+}
+
+#aircraft-board-prompt .aircraft-board-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    text-align: left;
+}
+
+#aircraft-board-prompt .aircraft-board-label {
+    font-size: 17px;
+    font-weight: 700;
+}
+
+#aircraft-board-prompt .aircraft-board-hint {
+    font-size: 13px;
+    font-weight: 500;
+    opacity: 0.9;
+}
+
+@keyframes aircraft-board-pulse {
+    0%,
+    100% {
+        transform: translateX(-50%) scale(1);
+    }
+    50% {
+        transform: translateX(-50%) scale(1.03);
+    }
 }
 
 #aircraft-hud {
     position: fixed;
     bottom: 16px;
     left: 16px;
-    z-index: 102;
+    z-index: 1100;
     display: none;
-    pointer-events: none;
+    pointer-events: auto;
+}
+
+#aircraft-hud.is-active {
+    display: block;
 }
 
 #aircraft-hud .aircraft-hud-bar {
@@ -487,7 +552,6 @@ body {
     background: rgba(0, 0, 0, 0.45);
     border-radius: 6px;
     backdrop-filter: blur(8px);
-    pointer-events: auto;
 }
 
 #aircraft-hud .aircraft-hud-actions {
@@ -2538,6 +2602,23 @@ a.admin-menu-link:hover {
         bottom: calc(220px + env(safe-area-inset-bottom, 0px));
         z-index: 1000;
         pointer-events: auto;
+    }
+
+    #aircraft-board-prompt {
+        bottom: calc(220px + env(safe-area-inset-bottom, 0px));
+        padding: 12px 18px 12px 14px;
+        gap: 12px;
+        z-index: 1050;
+    }
+
+    #aircraft-board-prompt .aircraft-board-key {
+        min-width: 44px;
+        height: 44px;
+        font-size: 22px;
+    }
+
+    #aircraft-board-prompt .aircraft-board-label {
+        font-size: 16px;
     }
 
     /* PDFビューワー: ツールを20%小さく・40px上へ */

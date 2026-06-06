@@ -75,8 +75,6 @@
     </div>
 
     <div id="teleport-prompt" style="display: none;" role="button" tabindex="0" aria-hidden="true"></div>
-    <div id="aircraft-board-prompt" style="display: none;" role="button" tabindex="0"></div>
-    <div id="aircraft-hud" style="display: none;" aria-live="polite"></div>
 
     <!-- ワールド切替時: モデル・PDF 読み込み完了まで -->
     <div id="world-load-overlay" class="world-load-overlay" style="display: none;" aria-hidden="true" role="status">
@@ -642,6 +640,8 @@
     <div id="google-maps-attribution" class="google-maps-attribution" hidden aria-hidden="true">© Google</div>
     </div>
 
+    <div id="aircraft-hud" class="aircraft-hud" hidden aria-live="polite"></div>
+    <div id="aircraft-board-prompt" style="display: none;" role="button" tabindex="0"></div>
     <canvas id="canvas"></canvas>
 
     <!-- Vite handles all module imports -->
