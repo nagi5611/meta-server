@@ -78,6 +78,9 @@ export default class AircraftControllerEasy {
         this._lastGroundMinY = null;
         this._libAnim = null;
         this._libAnimLoadingFor = null;
+        this._axisX = new THREE.Vector3();
+        this._axisY = new THREE.Vector3();
+        this._axisZ = new THREE.Vector3();
     }
 
     /**
@@ -696,23 +699,50 @@ export default class AircraftControllerEasy {
     }
 
     /**
-     * @returns {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean }|null}
+     * @returns {{
+     *   controlMode: 'easy',
+     *   worldX: number, worldY: number, worldZ: number,
+     *   speedMs: number, speedKms: number,
+     *   pitchDeg: number, yawDeg: number, rollDeg: number,
+     *   omegaYaw: number, omegaPitch: number, omegaRoll: number,
+     *   axisX: { x: number, y: number, z: number },
+     *   axisY: { x: number, y: number, z: number },
+     *   axisZ: { x: number, y: number, z: number },
+     *   viewpointName: string,
+     *   grounded: boolean
+     * }|null}
      */
     getHudSnapshot() {
         const root = this.slot?.root;
         if (!root) return null;
         root.updateMatrixWorld(true);
+        root.getWorldPosition(this._worldPos);
         root.getWorldQuaternion(this._worldQuat);
         this._eulerScratch.setFromQuaternion(this._worldQuat, 'YXZ');
         const r2d = 180 / Math.PI;
+        this._axisX.set(1, 0, 0).applyQuaternion(this._worldQuat);
+        this._axisY.set(0, 1, 0).applyQuaternion(this._worldQuat);
+        this._axisZ.set(0, 0, 1).applyQuaternion(this._worldQuat);
+        const vps = resolveSlotCameraViewpoints(this.slot);
+        const vp = viewpointAtIndex(vps, this.viewpointIndex);
+        const speedMs = this.velocity.length();
         return {
-            speedMs: this.velocity.length(),
+            controlMode: 'easy',
+            worldX: this._worldPos.x,
+            worldY: this._worldPos.y,
+            worldZ: this._worldPos.z,
+            speedMs,
+            speedKms: speedMs / 1000,
             pitchDeg: this._eulerScratch.x * r2d,
             yawDeg: this._eulerScratch.y * r2d,
             rollDeg: this._eulerScratch.z * r2d,
             omegaYaw: this._omegaYaw,
             omegaPitch: this._omegaPitch,
             omegaRoll: this._omegaRoll,
+            axisX: { x: this._axisX.x, y: this._axisX.y, z: this._axisX.z },
+            axisY: { x: this._axisY.x, y: this._axisY.y, z: this._axisY.z },
+            axisZ: { x: this._axisZ.x, y: this._axisZ.y, z: this._axisZ.z },
+            viewpointName: vp?.name || vp?.id || '',
             grounded: this._aircraftGrounded,
         };
     }

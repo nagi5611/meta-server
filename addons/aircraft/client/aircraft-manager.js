@@ -462,7 +462,7 @@ export default class AircraftManager {
         this.aircraftController.bindSlot(slot);
         this._applyStoredViewpointForSlot(slot);
         this.aircraftController.snapPilotCamera();
-        this.uiManager.showAircraftHud();
+        this.uiManager.showAircraftHud(slot.controlMode === 'easy' ? 'easy' : 'hard');
         void this.loadFlightMapForWorld().then(() => {
             if (this.isPiloting) {
                 this.minimap.show();

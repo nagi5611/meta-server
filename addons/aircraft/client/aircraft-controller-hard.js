@@ -906,6 +906,7 @@ export default class AircraftControllerHard {
         const airF = Math.max(0, this.velocity.dot(this._fwd)) / ls;
         const vfeWarn = this._flapIndex > 0 && Number.isFinite(vfe) && airF > vfe * 0.92;
         return {
+            controlMode: 'hard',
             speedMs: this.velocity.length() / ls,
             pitchDeg: this._eulerScratch.x * r2d,
             yawDeg: this._eulerScratch.y * r2d,
