@@ -48,6 +48,8 @@ export const CLOUDFRONT_BASE_URL_RAW = getEnvTrim('META_CDN_PUBLIC_BASE') || get
 
 /** CloudFront 署名用キーペア ID */
 export const CLOUDFRONT_KEY_PAIR_ID = getEnvTrim('CLOUDFRONT_KEY_PAIR_ID');
+/** （任意）メタデータ JSON 更新時の CreateInvalidation 用ディストリビューション ID */
+export const CLOUDFRONT_DISTRIBUTION_ID = getEnvTrim('CLOUDFRONT_DISTRIBUTION_ID');
 /** PEM またはファイルパス */
 const CLOUDFRONT_PRIVATE_KEY_PEM = getEnvTrim('CLOUDFRONT_PRIVATE_KEY');
 const CLOUDFRONT_PRIVATE_KEY_PATH = getEnvTrim('CLOUDFRONT_PRIVATE_KEY_PATH');

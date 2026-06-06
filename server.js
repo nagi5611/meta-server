@@ -61,7 +61,7 @@ import {
 import {
     ensureAvatarRegistry,
     readAvatarRegistry,
-    writeAvatarRegistry,
+    writeAvatarRegistryAndSync,
     listAnimationClipsFromGlbBuffer,
     hasCompleteAnimationMap,
     AVATAR_REGISTRY_REL_POSIX,
@@ -74,6 +74,7 @@ import {
 } from './lib/avatar-registry.js';
 import { syncLocalEnvToS3OnStartup, uploadLocalEnvFile, canonicalCdnUrlForEnvRelative } from './lib/s3-env-assets.js';
 import { signCloudFrontGetUrl } from './lib/cloudfront-signed-urls.js';
+import { invalidateCloudFrontPathsFromUrls } from './lib/cloudfront-cache-invalidation.js';
 import {
     loadAddonsAtStartup,
     registerAddonShutdownHooks,
@@ -668,6 +669,29 @@ function avatarPublicUrlForCache(relUnderAvatars) {
     const rel = String(relUnderAvatars || '').replace(/^\/+/, '').replace(/\\/g, '/');
     if (!rel) return publicAssetUrlForCache('avatars', AVATAR_ACTIVE_META_REL_POSIX);
     return publicAssetUrlForCache('avatars', rel);
+}
+
+/**
+ * アバターレジストリ・active.json 等のメタ更新後に SW と CloudFront キャッシュを無効化する
+ * @param {string[]} [extraUrls]
+ * @returns {Promise<void>}
+ */
+async function notifyAvatarMetaAssetInvalidate(extraUrls = []) {
+    /** @type {string[]} */
+    const urls = [
+        avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
+        canonicalCdnUrlForAvatarRelative(AVATAR_ACTIVE_META_REL_POSIX),
+        ...extraUrls.filter((u) => typeof u === 'string' && u.length > 0),
+    ];
+    const unique = [...new Set(urls)];
+    io.emit('asset-invalidate', { urls: unique });
+    if (USE_S3_MODELS) {
+        try {
+            await invalidateCloudFrontPathsFromUrls(unique);
+        } catch (e) {
+            console.warn('[avatar-meta] CloudFront invalidation failed:', e);
+        }
+    }
 }
 /**
  * multipart 由来の文字化けを避けるため、クライアント送信の UTF-8(base64) ファイル名を優先して正規化する。
@@ -5845,7 +5869,7 @@ async function addAvatarToRegistry(req, res, makeDefault) {
         }
         reg.avatars.push(entry);
         bumpRegistryVersion(reg);
-        writeAvatarRegistry(AVATARS_DIR, reg);
+        await writeAvatarRegistryAndSync(AVATARS_DIR, reg);
 
         try {
             await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
@@ -5861,13 +5885,7 @@ async function addAvatarToRegistry(req, res, makeDefault) {
             });
         }
 
-        /** @type {string[]} */
-        const invUrls = [
-            canonicalCdnUrlForAvatarRelative(versionedName),
-            canonicalCdnUrlForAvatarRelative(AVATAR_ACTIVE_META_REL_POSIX),
-            avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
-        ];
-        io.emit('asset-invalidate', { urls: invUrls });
+        await notifyAvatarMetaAssetInvalidate([canonicalCdnUrlForAvatarRelative(versionedName)]);
 
         const payload = {
             success: true,
@@ -5931,14 +5949,11 @@ app.patch('/admin/avatars/:id', express.json(), async (req, res) => {
             if (typeof rawScaleIn === 'number' && Number.isFinite(rawScaleIn)) {
                 entry.displayScale = normalizeDisplayScale(rawScaleIn);
                 bumpRegistryVersion(reg);
-                writeAvatarRegistry(AVATARS_DIR, reg);
+                await writeAvatarRegistryAndSync(AVATARS_DIR, reg);
                 await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
-                io.emit('asset-invalidate', {
-                    urls: [
-                        avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
-                        canonicalCdnUrlForAvatarRelative(path.basename(entry.glbFilename)),
-                    ],
-                });
+                await notifyAvatarMetaAssetInvalidate([
+                    canonicalCdnUrlForAvatarRelative(path.basename(entry.glbFilename)),
+                ]);
                 res.json({ success: true, registryVersion: reg.registryVersion, entry });
                 return;
             }
@@ -5989,14 +6004,11 @@ app.patch('/admin/avatars/:id', express.json(), async (req, res) => {
             entry.displayScale = normalizeDisplayScale(rawScaleIn);
         }
         bumpRegistryVersion(reg);
-        writeAvatarRegistry(AVATARS_DIR, reg);
+        await writeAvatarRegistryAndSync(AVATARS_DIR, reg);
         await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
-        io.emit('asset-invalidate', {
-            urls: [
-                avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
-                canonicalCdnUrlForAvatarRelative(path.basename(entry.glbFilename)),
-            ],
-        });
+        await notifyAvatarMetaAssetInvalidate([
+            canonicalCdnUrlForAvatarRelative(path.basename(entry.glbFilename)),
+        ]);
         res.json({ success: true, registryVersion: reg.registryVersion, entry });
     } catch (e) {
         console.error('PATCH /admin/avatars/:id:', e);
@@ -6016,15 +6028,11 @@ app.post('/admin/avatars/:id/default', async (req, res) => {
         }
         for (const a of reg.avatars) a.isDefault = String(a.id) === avatarId;
         bumpRegistryVersion(reg);
-        writeAvatarRegistry(AVATARS_DIR, reg);
+        await writeAvatarRegistryAndSync(AVATARS_DIR, reg);
         await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
-        io.emit('asset-invalidate', {
-            urls: [
-                avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
-                canonicalCdnUrlForAvatarRelative(path.basename(entry.glbFilename)),
-                canonicalCdnUrlForAvatarRelative(AVATAR_ACTIVE_META_REL_POSIX),
-            ],
-        });
+        await notifyAvatarMetaAssetInvalidate([
+            canonicalCdnUrlForAvatarRelative(path.basename(entry.glbFilename)),
+        ]);
         res.json({ success: true, registryVersion: reg.registryVersion });
     } catch (e) {
         console.error('POST /admin/avatars/:id/default:', e);
@@ -6050,20 +6058,14 @@ app.delete('/admin/avatars/:id', async (req, res) => {
             reg.avatars[0].isDefault = true;
         }
         bumpRegistryVersion(reg);
-        writeAvatarRegistry(AVATARS_DIR, reg);
+        await writeAvatarRegistryAndSync(AVATARS_DIR, reg);
         await deleteAvatarFile(glbBase, AVATARS_DIR);
         if (reg.avatars.length === 0) {
             await clearActiveAvatarMeta(AVATARS_DIR);
         } else {
             await syncActiveAvatarFromDefault(reg, AVATARS_DIR);
         }
-        io.emit('asset-invalidate', {
-            urls: [
-                avatarPublicUrlForCache(AVATAR_REGISTRY_REL_POSIX),
-                canonicalCdnUrlForAvatarRelative(glbBase),
-                canonicalCdnUrlForAvatarRelative(AVATAR_ACTIVE_META_REL_POSIX),
-            ],
-        });
+        await notifyAvatarMetaAssetInvalidate([canonicalCdnUrlForAvatarRelative(glbBase)]);
         res.json({ success: true, registryVersion: reg.registryVersion });
     } catch (e) {
         console.error('DELETE /admin/avatars/:id:', e);
