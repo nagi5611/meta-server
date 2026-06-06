@@ -30,6 +30,8 @@ class NetworkManager {
         this._getAircraftPoseForNetwork = null;
         /** @type {(() => { position: object, quaternion: object }|null)|null} 操縦中のメインカメラ姿勢（player-update の位置・姿勢） */
         this._getPilotCameraWorldPose = null;
+        /** @type {(() => string|null)|null} 同乗中のスロット ID（他クライアントで非表示） */
+        this._getPassengeringAircraftId = null;
         /** @type {((list: object[]) => void)|null} */
         this._onAircraftSnapshot = null;
         /** @type {((slotId: string) => void)|null} */
@@ -50,12 +52,14 @@ class NetworkManager {
 
     /**
      * サーバー条件とローカルブロックをマージしたリモート可視フラグ
-     * （pilotingAircraftId 時は他クライアントでアバター非表示。位置は操縦者のカメラ付近に同期される）
-     * @param {{ id: string, adminInvisible?: boolean, pilotingAircraftId?: string|null }} player
+     * （操縦・同乗中は他クライアントでアバター非表示）
+     * @param {{ id: string, adminInvisible?: boolean, pilotingAircraftId?: string|null, passengeringAircraftId?: string|null }} player
      * @returns {boolean}
      */
     _mergedRemoteVisibleForPlayer(player) {
-        const serverOk = !player.adminInvisible && !player.pilotingAircraftId;
+        const serverOk = !player.adminInvisible
+            && !player.pilotingAircraftId
+            && !player.passengeringAircraftId;
         const blocked =
             typeof this._isLocalPlayerBlocked === 'function' &&
             this._isLocalPlayerBlocked(player.id);
@@ -71,6 +75,8 @@ class NetworkManager {
         const p = this.lastPlayersSnapshot?.find((x) => x.id === playerId);
         if (!p || p.world !== this.currentWorld) return;
         if (!this.playerManager.hasRemotePlayer(playerId)) return;
+        p.pilotingAircraftId = null;
+        p.passengeringAircraftId = null;
         this.playerManager.setRemotePlayerVisible(playerId, this._mergedRemoteVisibleForPlayer(p));
     }
 
@@ -82,6 +88,8 @@ class NetworkManager {
         this._getAircraftPoseForNetwork = typeof b.getPose === 'function' ? b.getPose : null;
         this._getPilotCameraWorldPose =
             typeof b.getPilotCameraWorldPose === 'function' ? b.getPilotCameraWorldPose : null;
+        this._getPassengeringAircraftId =
+            typeof b.getPassengeringAircraftId === 'function' ? b.getPassengeringAircraftId : null;
         this._onAircraftSnapshot = typeof b.onSnapshot === 'function' ? b.onSnapshot : null;
         this._onAircraftReleased = typeof b.onReleased === 'function' ? b.onReleased : null;
     }
@@ -275,6 +283,10 @@ class NetworkManager {
         });
 
         this.socket.on('aircraft-released', (data) => {
+            const pilotId = data && data.pilotId;
+            if (pilotId) {
+                this.reapplyRemoteVisibilityForPlayer(String(pilotId));
+            }
             const sid = data && data.slotId;
             if (sid && this._onAircraftReleased) {
                 this._onAircraftReleased(String(sid));
@@ -348,55 +360,78 @@ class NetworkManager {
         });
     }
 
+    /**
+     * player-update 送信用ペイロードを組み立てる
+     * @param {import('./character-controller.js').default} characterController
+     * @returns {object|null}
+     */
+    _buildPlayerUpdatePayload(characterController) {
+        if (!characterController) return null;
+
+        const camPose = this._getPilotCameraWorldPose?.();
+        const position = camPose?.position
+            ? { x: camPose.position.x, y: camPose.position.y, z: camPose.position.z }
+            : characterController.getPosition();
+        const rotation = camPose?.quaternion
+            ? this._pilotSendQuatScratch.set(
+                  camPose.quaternion.x,
+                  camPose.quaternion.y,
+                  camPose.quaternion.z,
+                  camPose.quaternion.w
+              )
+            : characterController.getRotation();
+
+        const euler = new THREE.Euler().setFromQuaternion(rotation);
+
+        const updateData = {
+            position: {
+                x: position.x,
+                y: position.y,
+                z: position.z
+            },
+            rotation: {
+                x: euler.x,
+                y: euler.y,
+                z: euler.z
+            },
+            quaternion: {
+                x: rotation.x,
+                y: rotation.y,
+                z: rotation.z,
+                w: rotation.w
+            },
+            animState: characterController.getAnimationState(),
+            timestamp: Date.now(),
+            world: this.currentWorld,
+            adminInvisible: this.adminInvisible,
+            passengeringAircraftId: this._getPassengeringAircraftId?.() || null,
+        };
+
+        const aircraftPose = this._getAircraftPoseForNetwork?.();
+        if (aircraftPose) {
+            updateData.aircraftPose = aircraftPose;
+        }
+
+        return updateData;
+    }
+
+    /**
+     * 降機直後などに即座に player-update を送る
+     * @param {import('./character-controller.js').default} characterController
+     */
+    flushPlayerUpdate(characterController) {
+        if (!this.socket?.connected) return;
+        const updateData = this._buildPlayerUpdatePayload(characterController);
+        if (!updateData) return;
+        this.socket.emit('player-update', updateData);
+    }
+
     startSendingUpdates(characterController) {
         // Send position/rotation updates at 30fps
         this.updateInterval = setInterval(() => {
             if (!this.socket || !characterController) return;
-
-            const camPose = this._getPilotCameraWorldPose?.();
-            const position = camPose?.position
-                ? { x: camPose.position.x, y: camPose.position.y, z: camPose.position.z }
-                : characterController.getPosition();
-            const rotation = camPose?.quaternion
-                ? this._pilotSendQuatScratch.set(
-                      camPose.quaternion.x,
-                      camPose.quaternion.y,
-                      camPose.quaternion.z,
-                      camPose.quaternion.w
-                  )
-                : characterController.getRotation();
-
-            // Get Euler angles from quaternion for rotation
-            const euler = new THREE.Euler().setFromQuaternion(rotation);
-
-            const updateData = {
-                position: {
-                    x: position.x,
-                    y: position.y,
-                    z: position.z
-                },
-                rotation: {
-                    x: euler.x,
-                    y: euler.y,
-                    z: euler.z
-                },
-                quaternion: {
-                    x: rotation.x,
-                    y: rotation.y,
-                    z: rotation.z,
-                    w: rotation.w
-                },
-                animState: characterController.getAnimationState(),
-                timestamp: Date.now(), // Add timestamp for server validation
-                world: this.currentWorld,
-                adminInvisible: this.adminInvisible
-            };
-
-            const aircraftPose = this._getAircraftPoseForNetwork?.();
-            if (aircraftPose) {
-                updateData.aircraftPose = aircraftPose;
-            }
-
+            const updateData = this._buildPlayerUpdatePayload(characterController);
+            if (!updateData) return;
             this.socket.emit('player-update', updateData);
         }, 33); // 33ms = ~30fps
     }

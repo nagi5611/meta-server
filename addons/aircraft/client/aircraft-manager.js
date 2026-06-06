@@ -196,6 +196,17 @@ export default class AircraftManager {
         } catch (_) { /* ignore */ }
     }
 
+    /**
+     * 降機直後にサーバーへ搭乗状態解除を即送信する
+     */
+    _flushNetworkOccupancy() {
+        try {
+            this.networkManager?.flushPlayerUpdate?.(this.characterController);
+        } catch (_) {
+            /* ignore */
+        }
+    }
+
     setMobileMode(mobile) {
         this.isMobileMode = !!mobile;
     }
@@ -421,6 +432,7 @@ export default class AircraftManager {
         };
         document.addEventListener('keydown', this._pilotKeyHandler);
         this._notifyPilotingChange();
+        this._flushNetworkOccupancy();
     }
 
     /**
@@ -444,6 +456,7 @@ export default class AircraftManager {
         this.passengerSlot = null;
         this.uiManager.hideAircraftBoardPrompt();
         this._notifyPilotingChange();
+        this._flushNetworkOccupancy();
     }
 
     /**
@@ -484,6 +497,7 @@ export default class AircraftManager {
         };
         document.addEventListener('keydown', this._pilotKeyHandler);
         this._notifyPilotingChange();
+        this._flushNetworkOccupancy();
     }
 
     /**
@@ -521,6 +535,7 @@ export default class AircraftManager {
         this.minimap.hide();
         this.uiManager.hideAircraftHud();
         this._notifyPilotingChange();
+        this._flushNetworkOccupancy();
     }
 
     /**
@@ -644,6 +659,7 @@ export default class AircraftManager {
         this.uiManager.hideAircraftBoardPrompt();
         if (sid) this.resetSlotToParked(sid);
         this._notifyPilotingChange();
+        this._flushNetworkOccupancy();
     }
 
     /**

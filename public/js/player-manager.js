@@ -440,6 +440,60 @@ class PlayerManager {
     }
 
     /**
+     * @param {THREE.Object3D} obj
+     * @param {THREE.Object3D} root
+     * @returns {boolean}
+     */
+    _isDescendantOfObject(obj, root) {
+        let o = obj;
+        while (o) {
+            if (o === root) return true;
+            o = o.parent;
+        }
+        return false;
+    }
+
+    /**
+     * 単一アバターにかかった操縦視点ゴーストを解除（降機後の他プレイヤー表示復帰用）
+     * @param {THREE.Object3D} root
+     * @param {Map<THREE.Object3D, boolean>} objRestore
+     * @param {Map<THREE.Material, object>} matRestore
+     */
+    _clearPilotGhostForRoot(root, objRestore, matRestore) {
+        if (!root) return;
+        for (const [ch, vis] of [...objRestore]) {
+            if (!this._isDescendantOfObject(ch, root)) continue;
+            try {
+                ch.visible = vis;
+            } catch (_) {
+                /* ignore */
+            }
+            objRestore.delete(ch);
+        }
+        root.traverse((ch) => {
+            if (!this._isPilotGhostRenderable(ch)) return;
+            const mats = ch.material ? (Array.isArray(ch.material) ? ch.material : [ch.material]) : [];
+            for (const m of mats) {
+                if (!m || !matRestore.has(m)) continue;
+                const s = matRestore.get(m);
+                try {
+                    if ('opacity' in m) {
+                        m.transparent = s.transparent;
+                        m.opacity = s.opacity;
+                        m.depthWrite = s.depthWrite;
+                    }
+                    if (s.visible !== undefined && 'visible' in m) m.visible = s.visible;
+                    if (s.colorWrite !== undefined && 'colorWrite' in m) m.colorWrite = s.colorWrite;
+                    m.needsUpdate = true;
+                } catch (_) {
+                    /* ignore */
+                }
+                matRestore.delete(m);
+            }
+        });
+    }
+
+    /**
      * @param {Map<THREE.Object3D, boolean>} objRestore
      * @param {Map<THREE.Material, object>} matRestore
      */
@@ -576,7 +630,15 @@ class PlayerManager {
         if (!player) return;
         player.userData.networkVisible = !!visible;
         const distOk = player.userData.distanceVisible !== false;
-        player.visible = !!visible && distOk;
+        const vis = !!visible && distOk;
+        player.visible = vis;
+        if (vis && !this._remotePilotViewGhostActive) {
+            this._clearPilotGhostForRoot(
+                player,
+                this._remotePilotGhostObjRestore,
+                this._remotePilotGhostMatRestore,
+            );
+        }
     }
 
     /**

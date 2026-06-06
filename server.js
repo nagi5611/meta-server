@@ -93,6 +93,7 @@ import {
     buildAircraftSnapshotList,
     ensureRoomAircraftState,
     applyAircraftPoseFromPlayerUpdate,
+    worldContainsAircraftSlot,
 } from './lib/aircraft-server/room-aircraft.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2888,7 +2889,8 @@ io.on('connection', (socket) => {
         avatarId: null,
         serverLowAssistPrev: null,
         serverLowAssistAt: Date.now(),
-        pilotingAircraftId: null
+        pilotingAircraftId: null,
+        passengeringAircraftId: null
     };
     roomState.players.set(socket.id, initialPlayerState);
     setPhysicsAssistGrace(socket);
@@ -3367,7 +3369,7 @@ io.on('connection', (socket) => {
                 const wcfg = worldsData[currentRoom];
                 const effTier = socket.data.effectivePerfTier || 'high';
 
-                const skipAssist = !!player.pilotingAircraftId;
+                const skipAssist = !!player.pilotingAircraftId || !!player.passengeringAircraftId;
 
                 if (!player.isAdmin && !inGrace && effTier === 'low' && !skipAssist) {
                     const low = applyLowTierPositionChecks(
@@ -3408,6 +3410,19 @@ io.on('connection', (socket) => {
         }
         if (data.adminInvisible !== undefined && socket.data.isAdmin) {
             player.adminInvisible = !!data.adminInvisible;
+        }
+        if (data.passengeringAircraftId !== undefined) {
+            const raw = data.passengeringAircraftId;
+            if (raw == null || raw === '') {
+                player.passengeringAircraftId = null;
+            } else if (!player.pilotingAircraftId) {
+                const slotId = String(raw).trim();
+                player.passengeringAircraftId = slotId && worldContainsAircraftSlot(currentRoom, slotId)
+                    ? slotId
+                    : null;
+            } else {
+                player.passengeringAircraftId = null;
+            }
         }
         if (data.animState !== undefined && data.animState !== null) {
             player.animState = normalizePlayerAnimState(data.animState);
@@ -3485,7 +3500,8 @@ io.on('connection', (socket) => {
             avatarId: oldPlayerState?.avatarId || null,
             serverLowAssistPrev: null,
             serverLowAssistAt: Date.now(),
-            pilotingAircraftId: null
+            pilotingAircraftId: null,
+            passengeringAircraftId: null
         };
         newRoomState.players.set(socket.id, playerState);
         setPhysicsAssistGrace(socket);
@@ -4739,6 +4755,7 @@ setInterval(() => {
                 world: player.world,
                 adminInvisible: !!player.adminInvisible,
                 pilotingAircraftId: player.pilotingAircraftId || null,
+                passengeringAircraftId: player.passengeringAircraftId || null,
                 animState: normalizePlayerAnimState(player.animState),
                 avatarId: player.avatarId || null,
                 vcMicOn,
@@ -6745,6 +6762,7 @@ app.post('/admin/command', async (req, res) => {
                     animState: normalizePlayerAnimState(oldPlayer?.animState) || 'idle',
                     avatarId: oldPlayer?.avatarId || null,
                     pilotingAircraftId: null,
+                    passengeringAircraftId: null,
                     serverLowAssistPrev: null,
                     serverLowAssistAt: Date.now()
                 };
@@ -6761,6 +6779,7 @@ app.post('/admin/command', async (req, res) => {
                 if (player) {
                     player.position = position;
                     player.pilotingAircraftId = null;
+                    player.passengeringAircraftId = null;
                 }
             }
             setPhysicsAssistGrace(targetSocket);

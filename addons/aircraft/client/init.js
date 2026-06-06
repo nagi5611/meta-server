@@ -59,6 +59,11 @@ export async function initAircraftSubsystem(app) {
             app.aircraftManager?.isPiloting && app.aircraftController
                 ? app.aircraftController.getNetworkCameraPose()
                 : null,
+        getPassengeringAircraftId: () => {
+            const m = app.aircraftManager;
+            if (!m?.isPassenger || !m.passengerSlot?.id) return null;
+            return String(m.passengerSlot.id);
+        },
         onSnapshot: (list) => app.aircraftManager.applyNetworkAircraftSnapshot(
             list,
             app.networkManager.myPlayerId
