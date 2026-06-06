@@ -152,10 +152,10 @@ async function resolveAvatarUrlForPreview(pathRel) {
  * @returns {Promise<string>}
  */
 async function resolveAvatarModelUrl(entry) {
-    const su = typeof entry.signedUrl === 'string' ? entry.signedUrl.trim() : '';
-    if (su) return su;
     const gp = typeof entry.glbPath === 'string' ? entry.glbPath.trim() : '';
     if (gp) return resolveAvatarUrlForPreview(gp);
+    const su = typeof entry.signedUrl === 'string' ? entry.signedUrl.trim() : '';
+    if (su) return su;
     return '';
 }
 

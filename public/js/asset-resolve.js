@@ -26,6 +26,22 @@ export async function getAssetModelsConfig() {
 }
 
 /**
+ * CDN 論理パスを同一オリジン配信パスへ（avatars は /avatars/ 直下、tenant/avatars はファイル名のみ）
+ * @param {string} pathStr
+ * @returns {string}
+ */
+export function sameOriginPathForAssetLogicalPath(pathStr) {
+    const posix = String(pathStr || '').replace(/^\/+/, '').replace(/\\/g, '/');
+    const av = posix.match(/^(?:[^/]+\/)?avatars\/(.+)$/i);
+    if (av) {
+        const tail = av[1].split('/').map((seg) => encodeURIComponent(seg)).join('/');
+        return `/avatars/${tail}`;
+    }
+    const encodedPath = posix.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+    return `/${encodedPath}`;
+}
+
+/**
  * CDN 絶対 URL から同一パスをオリジンへ写す（フォールバック GET 用）
  * @param {string} cdnUrl
  * @returns {string}
@@ -91,7 +107,7 @@ export async function resolveModelAssetHref(pathOrUrl) {
 
     const pathStr = raw.startsWith('/') ? raw.slice(1) : raw;
     const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
-    const sameOriginPath = '/' + encodedPath;
+    const sameOriginPath = sameOriginPathForAssetLogicalPath(pathStr);
 
     if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) {
         return sameOriginPath;

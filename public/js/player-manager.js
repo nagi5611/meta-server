@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { AnimationMixer } from 'three';
 import { createGLTFLoaderWithDraco } from './gltf-loader-draco.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { resolveModelAssetHref } from './asset-resolve.js';
+import { resolveModelAssetHref, sameOriginPathForAssetLogicalPath } from './asset-resolve.js';
 import { applyVisualModeToObject3D, normalizeVisualMode } from './visual-mode.js';
 
 class PlayerManager {
@@ -38,17 +38,74 @@ class PlayerManager {
      * フォールバック: active-avatar API（Registry 未選択時）
      * @returns {Promise<string>}
      */
+    /**
+     * /api/avatar/:id の JSON からロード URL とオリジンフォールバックを組み立てる
+     * @param {object} j
+     * @returns {Promise<{ url: string, originPath: string }>}
+     */
+    async resolveAvatarLoadUrlsFromPayload(j) {
+        const originPath =
+            typeof j.originPath === 'string' && j.originPath.length > 0
+                ? j.originPath
+                : typeof j.path === 'string' && j.path.length > 0
+                  ? sameOriginPathForAssetLogicalPath(j.path)
+                  : '';
+        let url = '';
+        if (typeof j.path === 'string' && j.path.length > 0) {
+            url = await resolveModelAssetHref(j.path);
+        } else if (typeof j.signedUrl === 'string' && j.signedUrl.length > 0) {
+            url = j.signedUrl;
+        } else if (originPath) {
+            url = originPath;
+        }
+        return { url, originPath };
+    }
+
+    /**
+     * デフォルト（または先頭）アバターの /api/avatar 応答を取得する
+     * @returns {Promise<object|null>}
+     */
+    async fetchDefaultAvatarApiPayload() {
+        try {
+            const r = await fetch('/api/avatars', { credentials: 'include' });
+            if (!r.ok) return null;
+            const body = await r.json();
+            const list = body && Array.isArray(body.avatars) ? body.avatars : [];
+            const pick = list.find((a) => a && a.isDefault) || list[0];
+            if (!pick || !pick.id) return null;
+            const r2 = await fetch(`/api/avatar/${encodeURIComponent(pick.id)}`, {
+                credentials: 'include',
+            });
+            if (!r2.ok) return null;
+            return r2.json();
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * @param {string} avatarId
+     * @returns {Promise<object|null>}
+     */
+    async fetchAvatarApiPayloadById(avatarId) {
+        try {
+            const r = await fetch(`/api/avatar/${encodeURIComponent(avatarId)}`, {
+                credentials: 'include',
+            });
+            if (!r.ok) return null;
+            return r.json();
+        } catch {
+            return null;
+        }
+    }
+
     async resolveFallbackActiveAvatarUrl() {
         try {
             const r = await fetch('/api/active-avatar', { credentials: 'include' });
             if (r.ok) {
                 const j = await r.json();
-                if (typeof j.signedUrl === 'string' && j.signedUrl.length > 0) {
-                    return j.signedUrl;
-                }
-                if (typeof j.path === 'string' && j.path.length > 0) {
-                    return resolveModelAssetHref(j.path);
-                }
+                const { url } = await this.resolveAvatarLoadUrlsFromPayload(j);
+                if (url) return url;
             }
         } catch {
             /* fall through */
@@ -59,12 +116,13 @@ class PlayerManager {
     /**
      * 明示 avatarId または localStorage の選択に基づき GLB URL・マップ・表示倍率を解決する
      * @param {string|null} [explicitAvatarId]
-     * @returns {Promise<{ url: string, animationMap: Record<string, number>|null, displayScale: number }>}
+     * @returns {Promise<{ url: string, originPath: string, animationMap: Record<string, number>|null, displayScale: number }>}
      */
     async resolveAvatarSessionUrlAndMap(explicitAvatarId = null) {
         /** @type {string|null} */
         let avatarId = null;
-        if (typeof explicitAvatarId === 'string' && explicitAvatarId.trim() !== '') {
+        const isRemote = typeof explicitAvatarId === 'string' && explicitAvatarId.trim() !== '';
+        if (isRemote) {
             avatarId = explicitAvatarId.trim();
         } else {
             try {
@@ -74,38 +132,49 @@ class PlayerManager {
                 avatarId = null;
             }
         }
+
+        /** @param {object} j
+         * @returns {Promise<{ url: string, originPath: string, animationMap: Record<string, number>|null, displayScale: number }|null>}
+         */
+        const pack = async (j) => {
+            const { url, originPath } = await this.resolveAvatarLoadUrlsFromPayload(j);
+            if (!url) return null;
+            /** @type {Record<string, number>|null} */
+            let animationMap = null;
+            if (j.animationMap && typeof j.animationMap === 'object') {
+                animationMap = /** @type {Record<string, number>} */ (j.animationMap);
+            }
+            let displayScale = 1;
+            if (typeof j.displayScale === 'number' && Number.isFinite(j.displayScale)) {
+                displayScale = j.displayScale;
+            }
+            return { url, originPath, animationMap, displayScale };
+        };
+
         if (avatarId) {
-            try {
-                const r = await fetch(`/api/avatar/${encodeURIComponent(avatarId)}`, {
-                    credentials: 'include',
-                });
-                if (r.ok) {
-                    const j = await r.json();
-                    let url = '';
-                    if (typeof j.signedUrl === 'string' && j.signedUrl.length > 0) {
-                        url = j.signedUrl;
-                    } else if (typeof j.path === 'string' && j.path.length > 0) {
-                        url = resolveModelAssetHref(j.path);
-                    }
-                    /** @type {Record<string, number>|null} */
-                    let animationMap = null;
-                    if (j.animationMap && typeof j.animationMap === 'object') {
-                        animationMap = /** @type {Record<string, number>} */ (j.animationMap);
-                    }
-                    let displayScale = 1;
-                    if (typeof j.displayScale === 'number' && Number.isFinite(j.displayScale)) {
-                        displayScale = j.displayScale;
-                    }
-                    if (url) {
-                        return { url, animationMap, displayScale };
-                    }
+            let j = await this.fetchAvatarApiPayloadById(avatarId);
+            if (!j && !isRemote) {
+                try {
+                    localStorage.removeItem('metaverseAvatarId');
+                } catch (_) {
+                    /* ignore */
                 }
-            } catch {
-                /* fallback */
+                j = await this.fetchDefaultAvatarApiPayload();
+            }
+            if (j) {
+                const packed = await pack(j);
+                if (packed) return packed;
+            }
+        } else {
+            const j = await this.fetchDefaultAvatarApiPayload();
+            if (j) {
+                const packed = await pack(j);
+                if (packed) return packed;
             }
         }
+
         const url = await this.resolveFallbackActiveAvatarUrl();
-        return { url, animationMap: null, displayScale: 1 };
+        return { url, originPath: '', animationMap: null, displayScale: 1 };
     }
 
     /**
@@ -122,30 +191,34 @@ class PlayerManager {
      * @param {string|null} [remoteAvatarId] 他プレイヤー用 avatarId（未指定時は自プレイヤーの localStorage 選択）
      * @returns {Promise<{ scene: THREE.Group, animations: THREE.AnimationClip[], animationMap: Record<string, number>|null, displayScale: number }>}
      */
-    async loadAvatarModel(remoteAvatarId = null) {
-        const { url, animationMap, displayScale } =
-            typeof remoteAvatarId === 'string' && remoteAvatarId.trim() !== ''
-                ? await this.resolveAvatarSessionUrlAndMap(remoteAvatarId.trim())
-                : await this.resolveAvatarSessionUrlAndMap(null);
-        const scaleMul =
-            typeof displayScale === 'number' && Number.isFinite(displayScale) ? displayScale : 1;
-
-        const cached = this._avatarUrlModelCache.get(url);
+    /**
+     * @param {string} loadUrl
+     * @param {Record<string, number>|null} animationMap
+     * @param {number} scaleMul
+     * @returns {Promise<{ scene: THREE.Group, animations: THREE.AnimationClip[], animationMap: Record<string, number>|null, displayScale: number }>}
+     */
+    _loadAvatarGltfOnce(loadUrl, animationMap, scaleMul) {
+        const cached = this._avatarUrlModelCache.get(loadUrl);
         if (cached) {
             const { scene, animations } = cached;
             const clonedScene = animations.length > 0
                 ? SkeletonUtils.clone(scene)
                 : scene.clone();
-            return { scene: clonedScene, animations, animationMap, displayScale: scaleMul };
+            return Promise.resolve({
+                scene: clonedScene,
+                animations,
+                animationMap,
+                displayScale: scaleMul,
+            });
         }
 
         return new Promise((resolve, reject) => {
             this.gltfLoader.load(
-                url,
+                loadUrl,
                 (gltf) => {
                     const animations = gltf.animations || [];
-                    this._avatarUrlModelCache.set(url, { scene: gltf.scene, animations });
-                    console.log('Avatar model loaded:', url, 'animations:', animations.length);
+                    this._avatarUrlModelCache.set(loadUrl, { scene: gltf.scene, animations });
+                    console.log('Avatar model loaded:', loadUrl, 'animations:', animations.length);
 
                     const clonedScene = animations.length > 0
                         ? SkeletonUtils.clone(gltf.scene)
@@ -159,11 +232,35 @@ class PlayerManager {
                     }
                 },
                 (error) => {
-                    console.error('Error loading avatar model:', error);
                     reject(error);
                 }
             );
         });
+    }
+
+    async loadAvatarModel(remoteAvatarId = null) {
+        const { url, originPath, animationMap, displayScale } =
+            typeof remoteAvatarId === 'string' && remoteAvatarId.trim() !== ''
+                ? await this.resolveAvatarSessionUrlAndMap(remoteAvatarId.trim())
+                : await this.resolveAvatarSessionUrlAndMap(null);
+        const scaleMul =
+            typeof displayScale === 'number' && Number.isFinite(displayScale) ? displayScale : 1;
+
+        try {
+            return await this._loadAvatarGltfOnce(url, animationMap, scaleMul);
+        } catch (error) {
+            if (originPath && originPath !== url) {
+                console.warn('Avatar CDN load failed, retrying same-origin:', originPath, error);
+                try {
+                    return await this._loadAvatarGltfOnce(originPath, animationMap, scaleMul);
+                } catch (originErr) {
+                    console.error('Error loading avatar model (origin fallback):', originErr);
+                    throw originErr;
+                }
+            }
+            console.error('Error loading avatar model:', error);
+            throw error;
+        }
     }
 
     /**

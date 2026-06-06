@@ -57,6 +57,8 @@ import {
     syncLocalAvatarsToS3OnStartup,
     AVATAR_ACTIVE_META_REL_POSIX,
     publicAssetUrlCacheForAvatars,
+    ensureAvatarGlbOnS3,
+    originAvatarPathForLogicalAsset,
 } from './lib/s3-avatar-assets.js';
 import {
     ensureAvatarRegistry,
@@ -6288,7 +6290,11 @@ app.get('/api/avatars', async (req, res) => {
                 isDefault: !!a.isDefault,
                 displayScale: normalizeDisplayScale(a.displayScale),
             };
+            item.originPath = originAvatarPathForLogicalAsset(fn);
             if (USE_S3_MODELS) {
+                if (isS3ModelsBucketConfigured()) {
+                    await ensureAvatarGlbOnS3(AVATARS_DIR, fn);
+                }
                 item.canonicalUrl = canonicalCdnUrlForAvatarRelative(fn);
                 if (isS3ModelsConfigComplete()) {
                     try {
@@ -6325,9 +6331,13 @@ app.get('/api/avatar/:id', async (req, res) => {
         if (!fn) return res.status(404).json({ error: 'not_found' });
         const pref = normalizedAvatarsS3KeyPrefix();
         const pathRel = pref ? `${pref}/${fn}` : `avatars/${fn}`;
+        const originPath = originAvatarPathForLogicalAsset(fn);
         let canonicalUrl = null;
         let signedUrl = null;
         if (USE_S3_MODELS) {
+            if (isS3ModelsBucketConfigured()) {
+                await ensureAvatarGlbOnS3(AVATARS_DIR, fn);
+            }
             canonicalUrl = canonicalCdnUrlForAvatarRelative(fn);
             if (isS3ModelsConfigComplete()) {
                 try {
@@ -6341,6 +6351,7 @@ app.get('/api/avatar/:id', async (req, res) => {
         res.json({
             id: entry.id,
             path: pathRel,
+            originPath,
             canonicalUrl,
             signedUrl,
             animationMap: entry.animationMap || {},
@@ -6380,9 +6391,13 @@ app.get('/api/active-avatar', async (req, res) => {
             });
         }
         const pathRel = getActiveAvatarRelativePathForClient(AVATARS_DIR);
+        const originPath = originAvatarPathForLogicalAsset(fn);
         let canonicalUrl = null;
         let signedUrl = null;
         if (USE_S3_MODELS) {
+            if (isS3ModelsBucketConfigured()) {
+                await ensureAvatarGlbOnS3(AVATARS_DIR, fn);
+            }
             canonicalUrl = canonicalCdnUrlForAvatarRelative(fn);
             if (isS3ModelsConfigComplete()) {
                 try {
@@ -6395,6 +6410,7 @@ app.get('/api/active-avatar', async (req, res) => {
         }
         res.json({
             path: pathRel,
+            originPath,
             canonicalUrl,
             signedUrl,
             fallbackPath,
