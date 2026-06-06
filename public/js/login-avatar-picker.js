@@ -127,35 +127,23 @@ function ensureCarouselStyles() {
     document.head.appendChild(st);
 }
 
-/**
- * メタバース共通のモデル URL 解決
- * @param {string} pathRel
- * @returns {Promise<string>}
- */
-async function resolveAvatarUrlForPreview(pathRel) {
-    try {
-        const { resolveModelAssetHref } = await import('./asset-resolve.js');
-        return resolveModelAssetHref(pathRel);
-    } catch {
-        const p = String(pathRel || '').replace(/^\/+/, '');
-        return p.startsWith('http') ? p : `/${p}`;
-    }
-}
+import { sameOriginPathForAssetLogicalPath } from './asset-resolve.js';
 
-/** @typedef {{ id: string, glbPath?: string, signedUrl?: string|null, canonicalUrl?: string|null, isDefault?: boolean, displayScale?: number }} LoginAvatarDto */
+/** @typedef {{ id: string, glbPath?: string, originPath?: string, signedUrl?: string|null, canonicalUrl?: string|null, isDefault?: boolean, displayScale?: number }} LoginAvatarDto */
 /** @typedef {{ animationMap?: Record<string, string>, displayScale?: number }} LoginAvatarDetailDto */
 
 /** @typedef {{ dispose: () => void }} LoginAvatarPickerHandle */
 
 /**
+ * ログイン画面プレビュー用 URL（同一オリジン /avatars/*。ゲスト Cookie で取得可能）
  * @param {LoginAvatarDto} entry
- * @returns {Promise<string>}
+ * @returns {string}
  */
-async function resolveAvatarModelUrl(entry) {
+function resolveAvatarModelUrlForLoginPreview(entry) {
+    const op = typeof entry.originPath === 'string' ? entry.originPath.trim() : '';
+    if (op) return op;
     const gp = typeof entry.glbPath === 'string' ? entry.glbPath.trim() : '';
-    if (gp) return resolveAvatarUrlForPreview(gp);
-    const su = typeof entry.signedUrl === 'string' ? entry.signedUrl.trim() : '';
-    if (su) return su;
+    if (gp) return sameOriginPathForAssetLogicalPath(gp);
     return '';
 }
 
@@ -462,7 +450,7 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
         wrap.appendChild(canvas);
 
         const [url, avatarDetail] = await Promise.all([
-            resolveAvatarModelUrl(entry),
+            Promise.resolve(resolveAvatarModelUrlForLoginPreview(entry)),
             fetchAvatarDetail(entry.id),
         ]);
         if (!url || disposed) {
@@ -499,9 +487,14 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
             raf: null,
             disposeExtra: null,
         };
-        loader.load(
-            url,
-            (gltf) => {
+        /**
+         * @param {string} loadUrl
+         * @param {() => void} [onGiveUp]
+         */
+        const loadPreviewGlb = (loadUrl, onGiveUp) => {
+            loader.load(
+                loadUrl,
+                (gltf) => {
                 const st = previewStates[idx];
                 if (disposed || !st || st.avatarId !== entry.id) return;
                 const root = new THREE.Group();
@@ -551,14 +544,24 @@ export async function mountLoginAvatarPicker(mount, opts = {}) {
                     st.mixer = mixer;
                 }
                 hint.style.display = 'none';
-            },
-            undefined,
-            () => {
-                if (!disposed) {
-                    hint.textContent = '読み込み失敗';
+                },
+                undefined,
+                () => {
+                    if (disposed) return;
+                    if (loadUrl.startsWith('https://')) {
+                        const origin = resolveAvatarModelUrlForLoginPreview(entry);
+                        if (origin && origin !== loadUrl) {
+                            loadPreviewGlb(origin, onGiveUp);
+                            return;
+                        }
+                    }
+                    if (onGiveUp) onGiveUp();
                 }
-            }
-        );
+            );
+        };
+        loadPreviewGlb(url, () => {
+            if (!disposed) hint.textContent = '読み込み失敗';
+        });
 
         const tick = () => {
             const st = previewStates[idx];
