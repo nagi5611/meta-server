@@ -610,14 +610,9 @@ class UIManager {
 <button type="button" class="aircraft-hud-btn" id="aircraft-hud-camera">${escapeHtmlForUi(t('ui.aircraftCameraShort'))}</button>
 </div>
 <div class="aircraft-hud-easy-grid" aria-live="polite">
-<div class="aircraft-hud-easy-row"><span class="aircraft-hud-easy-lbl">${escapeHtmlForUi(t('ui.aircraftEasyHudPos'))}</span><span id="aircraft-hud-easy-pos">—</span></div>
-<div class="aircraft-hud-easy-row"><span class="aircraft-hud-easy-lbl">${escapeHtmlForUi(t('ui.aircraftEasyHudOmega'))}</span><span id="aircraft-hud-easy-omega">—</span></div>
-<div class="aircraft-hud-easy-row"><span class="aircraft-hud-easy-lbl">${escapeHtmlForUi(t('ui.aircraftEasyHudAtt'))}</span><span id="aircraft-hud-easy-att">—</span></div>
-<div class="aircraft-hud-easy-row"><span class="aircraft-hud-easy-lbl">+X</span><span id="aircraft-hud-easy-axis-x">—</span></div>
-<div class="aircraft-hud-easy-row"><span class="aircraft-hud-easy-lbl">+Y</span><span id="aircraft-hud-easy-axis-y">—</span></div>
-<div class="aircraft-hud-easy-row"><span class="aircraft-hud-easy-lbl">+Z</span><span id="aircraft-hud-easy-axis-z">—</span></div>
-<div class="aircraft-hud-easy-row"><span class="aircraft-hud-easy-lbl">${escapeHtmlForUi(t('ui.aircraftEasyHudSpeed'))}</span><span id="aircraft-hud-easy-speed">—</span></div>
-<div class="aircraft-hud-easy-row"><span class="aircraft-hud-easy-lbl">${escapeHtmlForUi(t('ui.aircraftEasyHudView'))}</span><span id="aircraft-hud-easy-view">—</span></div>
+<div class="aircraft-hud-easy-view" id="aircraft-hud-easy-view">—</div>
+<div class="aircraft-hud-easy-row" id="aircraft-hud-easy-pos-att">—</div>
+<div class="aircraft-hud-easy-row" id="aircraft-hud-easy-omega-speed">—</div>
 </div>
 </div>`;
         } else {
@@ -680,32 +675,17 @@ class UIManager {
         const el = (id) => document.getElementById(id);
 
         if (snap.controlMode === 'easy') {
-            const pos = el('aircraft-hud-easy-pos');
-            if (pos) {
-                pos.textContent = `X ${q(snap.worldX, 1)}  Y ${q(snap.worldY, 1)}  Z ${q(snap.worldZ, 1)}`;
+            const posAtt = el('aircraft-hud-easy-pos-att');
+            if (posAtt) {
+                const pos = `X ${q(snap.worldX, 1)}  Y ${q(snap.worldY, 1)}  Z ${q(snap.worldZ, 1)}`;
+                const att = `P ${q(snap.pitchDeg, 1)}°  Y ${q(snap.yawDeg, 1)}°  R ${q(snap.rollDeg, 1)}°`;
+                posAtt.textContent = `${pos} / ${att}`;
             }
-            const omega = el('aircraft-hud-easy-omega');
-            if (omega) {
-                omega.textContent = `R ${q(snap.omegaRoll, 2)}  Y ${q(snap.omegaYaw, 2)}  P ${q(snap.omegaPitch, 2)} rad/s`;
-            }
-            const att = el('aircraft-hud-easy-att');
-            if (att) {
-                att.textContent = `P ${q(snap.pitchDeg, 1)}°  Y ${q(snap.yawDeg, 1)}°  R ${q(snap.rollDeg, 1)}°`;
-            }
-            const fmtAxis = (a) =>
-                a && typeof a === 'object'
-                    ? `${q(a.x, 2)}, ${q(a.y, 2)}, ${q(a.z, 2)}`
-                    : '—';
-            const ax = el('aircraft-hud-easy-axis-x');
-            if (ax) ax.textContent = fmtAxis(snap.axisX);
-            const ay = el('aircraft-hud-easy-axis-y');
-            if (ay) ay.textContent = fmtAxis(snap.axisY);
-            const az = el('aircraft-hud-easy-axis-z');
-            if (az) az.textContent = fmtAxis(snap.axisZ);
-            const spd = el('aircraft-hud-easy-speed');
-            if (spd) {
+            const omegaSpeed = el('aircraft-hud-easy-omega-speed');
+            if (omegaSpeed) {
+                const omega = `R ${q(snap.omegaRoll, 2)}  Y ${q(snap.omegaYaw, 2)}  P ${q(snap.omegaPitch, 2)} rad/s`;
                 const kmh = Number.isFinite(snap.speedMs) ? snap.speedMs * 3.6 : NaN;
-                spd.textContent = `${q(kmh, 0)} km/h`;
+                omegaSpeed.textContent = `${omega} / ${q(kmh, 0)} km/h`;
             }
             const view = el('aircraft-hud-easy-view');
             if (view) view.textContent = snap.viewpointName ? String(snap.viewpointName) : '—';
