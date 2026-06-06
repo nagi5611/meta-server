@@ -610,7 +610,7 @@ class UIManager {
 <button type="button" class="aircraft-hud-btn" id="aircraft-hud-camera">${escapeHtmlForUi(t('ui.aircraftCameraShort'))}</button>
 </div>
 <div class="aircraft-hud-easy-grid" aria-live="polite">
-<div class="aircraft-hud-easy-view" id="aircraft-hud-easy-view">—</div>
+<div class="aircraft-hud-easy-view"><span id="aircraft-hud-easy-view">—</span><span class="aircraft-hud-easy-ground" id="aircraft-hud-easy-ground">—</span></div>
 <div class="aircraft-hud-easy-row" id="aircraft-hud-easy-pos-att">—</div>
 <div class="aircraft-hud-easy-row" id="aircraft-hud-easy-omega-speed">—</div>
 </div>
@@ -683,12 +683,17 @@ class UIManager {
             }
             const omegaSpeed = el('aircraft-hud-easy-omega-speed');
             if (omegaSpeed) {
-                const omega = `R ${q(snap.omegaRoll, 2)}  Y ${q(snap.omegaYaw, 2)}  P ${q(snap.omegaPitch, 2)} rad/s`;
+                const omega = `${t('ui.aircraftOmegaPitch')} ${q(snap.omegaPitch, 2)}  ${t('ui.aircraftOmegaRoll')} ${q(snap.omegaRoll, 2)}  ${t('ui.aircraftOmegaYaw')} ${q(snap.omegaYaw, 2)} rad/s`;
                 const kmh = Number.isFinite(snap.speedMs) ? snap.speedMs * 3.6 : NaN;
-                omegaSpeed.textContent = `${omega} / ${q(kmh, 0)} km/h`;
+                const knots = Number.isFinite(snap.speedMs) ? snap.speedMs * 1.94384 : NaN;
+                omegaSpeed.textContent = `${omega} / ${q(kmh, 0)} km/h - ${q(knots, 0)} ${t('ui.aircraftKnots')}`;
             }
             const view = el('aircraft-hud-easy-view');
             if (view) view.textContent = snap.viewpointName ? String(snap.viewpointName) : '—';
+            const ground = el('aircraft-hud-easy-ground');
+            if (ground) {
+                ground.textContent = snap.grounded ? t('ui.aircraftGrounded') : t('ui.aircraftAirborne');
+            }
             return;
         }
 

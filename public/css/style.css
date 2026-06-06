@@ -519,7 +519,7 @@ body {
 #aircraft-hud.is-easy {
     left: 50%;
     right: auto;
-    bottom: 16px;
+    bottom: 46px;
     transform: translateX(-50%);
 }
 
@@ -560,10 +560,21 @@ body {
 }
 
 #aircraft-hud .aircraft-hud-easy-view {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
     font-size: 15px;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.95);
     margin-bottom: 2px;
+}
+
+#aircraft-hud .aircraft-hud-easy-ground {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.62);
 }
 
 #aircraft-hud .aircraft-hud-easy-row {
@@ -733,7 +744,7 @@ body {
 
     #aircraft-hud.is-easy {
         left: 50%;
-        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(42px + env(safe-area-inset-bottom, 0px));
         top: auto;
         transform: translateX(-50%);
         max-width: calc(100vw - 20px);
