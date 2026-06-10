@@ -12,6 +12,8 @@ import {
     flapVfeMs,
     thrustAccelFromEngineRpm,
     highSpeedAngularRateScale,
+    clampVelocityHorizontal,
+    applyGravityDiveAcceleration,
     AIRCRAFT_FLAP_LABELS,
     AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
@@ -717,10 +719,14 @@ export default class AircraftControllerHard {
         const liftMag = flapLiftCoeff(this._flapIndex, ph) * vH * ls;
         this.velocity.addScaledVector(this._bodyUp, liftMag * dt);
         this.velocity.y -= g * dt;
-        let sp = this.velocity.length();
-        if (sp > vfeCap) this.velocity.multiplyScalar(vfeCap / sp);
-        sp = this.velocity.length();
-        if (sp > maxSpd) this.velocity.multiplyScalar(maxSpd / sp);
+        if (!this._aircraftGrounded) {
+            applyGravityDiveAcceleration(this.velocity, this._fwd, g, dt);
+        }
+        const airFwd = this.velocity.dot(this._fwd);
+        if (airFwd > vfeCap) {
+            this.velocity.addScaledVector(this._fwd, vfeCap - airFwd);
+        }
+        clampVelocityHorizontal(this.velocity, maxSpd);
 
         root.getWorldPosition(this._worldPos);
         this._worldPos.addScaledVector(this.velocity, dt);

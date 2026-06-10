@@ -3,6 +3,8 @@
  * Worlds are loaded from GET /api/worlds (data/worlds.json). No hardcoded fallback.
  */
 
+import ViewDistanceStreaming from './view-distance-streaming.js';
+
 class WorldManager {
     constructor(sceneManager) {
         this.sceneManager = sceneManager;
@@ -11,6 +13,15 @@ class WorldManager {
         this.worlds = null; // Set by init() from API
         /** @type {{ begin?: (o: { totalBytes: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }) => void, end?: () => void } | null} */
         this._worldLoadUi = null;
+        /** @type {ViewDistanceStreaming | null} */
+        this._viewDistanceStreaming = null;
+    }
+
+    /**
+     * @returns {ViewDistanceStreaming | null}
+     */
+    getViewDistanceStreaming() {
+        return this._viewDistanceStreaming;
     }
 
     /**
@@ -94,6 +105,8 @@ class WorldManager {
 
         // Clear current world if any
         if (this.currentWorld) {
+            this._viewDistanceStreaming?.reset();
+            this._viewDistanceStreaming = null;
             this.sceneManager.clearWorld();
         }
 
@@ -130,10 +143,20 @@ class WorldManager {
             this._worldLoadUi?.begin?.({ totalBytes: bytePlan.totalBytes, preparing: false });
         }
 
+        const vas = new ViewDistanceStreaming(this.sceneManager);
+        await vas.buildRegistry(modelList);
+        this._viewDistanceStreaming = vas;
+
         try {
             await this.sceneManager.loadWorldModels(
                 world.models,
                 async () => {
+                    const spawn = world.spawnPoint || { x: 0, y: 10, z: 0 };
+                    await vas.runInitialNearSpawn(
+                        spawn,
+                        this.sceneManager.graphicsOptions.viewDistanceM
+                    );
+
                     await this.sceneManager.loadWorldPdfs(world.pdfs || [], {
                         bytePlan,
                         loadState,
@@ -157,7 +180,8 @@ class WorldManager {
                     loadState,
                     onByteProgress,
                     worldAircraftPhysics: world.aircraftPhysics,
-                    worldLodSystem: world.lodSystem && typeof world.lodSystem === 'object' ? world.lodSystem : null
+                    worldLodSystem: world.lodSystem && typeof world.lodSystem === 'object' ? world.lodSystem : null,
+                    modelIndexFilter: (idx) => vas.isLegacyIndex(idx),
                 }
             );
         } finally {

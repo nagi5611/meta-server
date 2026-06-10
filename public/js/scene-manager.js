@@ -199,6 +199,10 @@ class SceneManager {
         /** @type {import('three').Object3D[]} LOD 対象 prefab ルート */
         this._prefabLodRoots = [];
         this._lodTempWorldPos = new THREE.Vector3();
+        /** @type {{ modelConfigs: Array, loadOne: (config: object, idx: number) => Promise<void> } | null} */
+        this._modelLoadSession = null;
+        /** @type {ReturnType<typeof setTimeout> | null} */
+        this._bvhRegenTimer = null;
         /** ワールド設定の床表示希望（距離カリングと AND） */
         this._floorWantedVisible = true;
         /** WebXR セッション中は true（FPS 優先のティア上書きに使用） */
@@ -902,13 +906,45 @@ class SceneManager {
     }
 
     /**
+     * ストリーミング追加分の BVH 再生成を debounce する
+     * @param {number} [delayMs]
+     */
+    scheduleBVHRegeneration(delayMs = 400) {
+        if (this._bvhRegenTimer) {
+            clearTimeout(this._bvhRegenTimer);
+        }
+        this._bvhRegenTimer = setTimeout(() => {
+            this._bvhRegenTimer = null;
+            try {
+                this.generateBVH();
+            } catch (e) {
+                console.warn('[SceneManager] BVH regeneration failed:', e);
+            }
+        }, delayMs);
+    }
+
+    /**
+     * VAS から単一 models[] エントリをロードする（_modelLoadSession 必須）
+     * @param {number} idx
+     */
+    async loadSingleWorldModelEntry(idx) {
+        const session = this._modelLoadSession;
+        if (!session) {
+            throw new Error('Model load session is not active');
+        }
+        if (idx < 0 || idx >= session.modelConfigs.length) return;
+        await session.loadOne(session.modelConfigs[idx], idx);
+    }
+
+    /**
      * Load multiple world models
      * @param {Array<Object|string>} modelConfigs - Array of model configs or paths
      * @param {function} onComplete - Callback when all models are loaded
-     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }) => void, worldAircraftPhysics?: Record<string, unknown>|null }} [loadOptions]
+     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }) => void, worldAircraftPhysics?: Record<string, unknown>|null, modelIndexFilter?: (idx: number) => boolean }} [loadOptions]
      */
     async loadWorldModels(modelConfigs, onComplete, loadOptions = {}) {
-        const { bytePlan, loadState, onByteProgress, worldAircraftPhysics, worldLodSystem } = loadOptions;
+        const { bytePlan, loadState, onByteProgress, worldAircraftPhysics, worldLodSystem, modelIndexFilter } =
+            loadOptions;
 
         this._worldLodSystem =
             worldLodSystem && typeof worldLodSystem === 'object' ? worldLodSystem : null;
@@ -1343,28 +1379,37 @@ class SceneManager {
             }
         };
 
+        this._modelLoadSession = { modelConfigs, loadOne };
+
         try {
-            let nextModelIndex = 0;
+            const indicesToLoad = [];
+            for (let i = 0; i < modelConfigs.length; i++) {
+                if (typeof modelIndexFilter === 'function' && !modelIndexFilter(i)) {
+                    continue;
+                }
+                indicesToLoad.push(i);
+            }
+
+            let nextWorkerSlot = 0;
             /**
              * 共有インデックスから次のモデルを読み込む（最大 concurrency 本まで同時実行）
              */
             const modelWorker = async () => {
                 while (true) {
-                    const mi = nextModelIndex++;
-                    if (mi >= modelConfigs.length) break;
+                    const slot = nextWorkerSlot++;
+                    if (slot >= indicesToLoad.length) break;
+                    const mi = indicesToLoad[slot];
                     await loadOne(modelConfigs[mi], mi);
                 }
             };
-            const workerCount = Math.min(concurrency, modelConfigs.length);
-            await Promise.all(Array.from({ length: workerCount }, () => modelWorker()));
-            this.environmentGroup.updateMatrixWorld(true);
-            console.log('All models loaded, generating BVH...');
-
-            try {
-                this.generateBVH();
-            } catch (e) {
-                console.warn('[SceneManager] Initial BVH generation failed:', e);
+            const workerCount = Math.min(concurrency, Math.max(1, indicesToLoad.length));
+            if (indicesToLoad.length > 0) {
+                await Promise.all(Array.from({ length: workerCount }, () => modelWorker()));
             }
+            this.environmentGroup.updateMatrixWorld(true);
+            console.log(`Batch model load done (${indicesToLoad.length}/${modelConfigs.length} entries)`);
+
+            this.scheduleBVHRegeneration(0);
 
             if (onComplete) {
                 const result = onComplete();
@@ -1841,6 +1886,11 @@ class SceneManager {
         this._drawCullTargets = [];
         this._worldLodSystem = null;
         this._prefabLodRoots = [];
+        this._modelLoadSession = null;
+        if (this._bvhRegenTimer) {
+            clearTimeout(this._bvhRegenTimer);
+            this._bvhRegenTimer = null;
+        }
 
         // Remove all children from environment group except ground plane
         const ground = this.environmentGroup.children[0]; // Ground is first child

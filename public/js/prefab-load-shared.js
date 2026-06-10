@@ -52,8 +52,53 @@ export function buildEncodedModelUrlFromPath(assetPath) {
 }
 
 /**
+ * @typedef {{ min: [number, number, number], max: [number, number, number], center: [number, number, number], radius: number }} PrefabBounds
+ */
+
+/**
+ * @param {unknown} raw
+ * @returns {PrefabBounds | null}
+ */
+export function parsePrefabBounds(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const o = /** @type {Record<string, unknown>} */ (raw);
+    const min = o.min;
+    const max = o.max;
+    const center = o.center;
+    const radius = o.radius;
+    if (!Array.isArray(center) || center.length < 3) return null;
+    const cx = Number(center[0]);
+    const cy = Number(center[1]);
+    const cz = Number(center[2]);
+    if (![cx, cy, cz].every(Number.isFinite)) return null;
+    const mn = Array.isArray(min) && min.length >= 3
+        ? [Number(min[0]), Number(min[1]), Number(min[2])]
+        : [cx, cy, cz];
+    const mx = Array.isArray(max) && max.length >= 3
+        ? [Number(max[0]), Number(max[1]), Number(max[2])]
+        : [cx, cy, cz];
+    if (![...mn, ...mx].every(Number.isFinite)) return null;
+    const r = Number(radius);
+    return {
+        min: /** @type {[number, number, number]} */ (mn),
+        max: /** @type {[number, number, number]} */ (mx),
+        center: [cx, cy, cz],
+        radius: Number.isFinite(r) && r > 0 ? r : 0.05,
+    };
+}
+
+/**
+ * VAS 用: マニフェストにストリーミング判定用 bounds があるか
+ * @param {ReturnType<typeof normalizePrefabManifest>} manifest
+ * @returns {boolean}
+ */
+export function prefabManifestHasStreamingBounds(manifest) {
+    return !!(manifest && manifest.bounds);
+}
+
+/**
  * @param {object} manifest
- * @returns {{ version: number, prefabGroupId: string, displayName: string, parts: { file: string }[] }}
+ * @returns {{ version: number, prefabGroupId: string, displayName: string, bounds: PrefabBounds | null, parts: { file: string, bounds: PrefabBounds | null }[] }}
  */
 export function normalizePrefabManifest(manifest) {
     const v = manifest && typeof manifest === 'object' ? manifest : {};
@@ -62,9 +107,13 @@ export function normalizePrefabManifest(manifest) {
         version: typeof v.version === 'number' ? v.version : 1,
         prefabGroupId: String(v.prefabGroupId || '').trim(),
         displayName: String(v.displayName || '').trim() || 'prefab',
+        bounds: parsePrefabBounds(v.bounds),
         parts: parts
-            .map((p) => ({ file: String(p?.file || '').replace(/^\//, '').trim() }))
-            .filter((p) => p.file.toLowerCase().endsWith('.glb'))
+            .map((p) => ({
+                file: String(p?.file || '').replace(/^\//, '').trim(),
+                bounds: parsePrefabBounds(p?.bounds),
+            }))
+            .filter((p) => p.file.toLowerCase().endsWith('.glb')),
     };
 }
 

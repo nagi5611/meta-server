@@ -1,8 +1,11 @@
 // addons/aircraft/client/aircraft-physics-easy-defaults.js — easy 操縦の数値デフォルト（Git 9239d93 由来）
 
+import { DEFAULT_MAX_THRUST_SPEED_MS } from './aircraft-physics-defaults.js';
+
 /** @type {Readonly<Record<string, number>>} */
 export const DEFAULT_EASY_AIRCRAFT_PHYSICS = Object.freeze({
-    maxSpeed: 45,
+    /** 水平エンジン出力の最高速度 (m/s)。既定 400 km/h */
+    maxSpeed: DEFAULT_MAX_THRUST_SPEED_MS,
     thrustAccel: 18,
     drag: 0.985,
     yawAccelGround: 5,

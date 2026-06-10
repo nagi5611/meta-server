@@ -1,7 +1,11 @@
 // addons/aircraft/client/aircraft-controller-easy.js — easy 操縦（W/S 推力・A/D ヨー・矢印ピッチ/ロール）
 import * as THREE from 'three';
 import { mergeEasyAircraftPhysicsFromWorld } from './aircraft-physics-easy-defaults.js';
-import { highSpeedAngularRateScale } from './aircraft-physics-defaults.js';
+import {
+    highSpeedAngularRateScale,
+    clampVelocityHorizontal,
+    applyGravityDiveAcceleration,
+} from './aircraft-physics-defaults.js';
 import { findObjectByNamePath, stepEngineBladeRotation } from './runtime-prefab-aircraft-anim.js';
 import {
     applyAircraftViewpointCamera,
@@ -598,10 +602,12 @@ export default class AircraftControllerEasy {
             if (netVertAccel > 0) this.velocity.y += netVertAccel * dt;
         } else {
             this.velocity.y += netVertAccel * dt;
+            if (this._fwd.lengthSq() > 1e-12) {
+                applyGravityDiveAcceleration(this.velocity, this._fwd, ph.gravity, dt);
+            }
         }
 
-        const sp = this.velocity.length();
-        if (sp > ph.maxSpeed) this.velocity.multiplyScalar(ph.maxSpeed / sp);
+        clampVelocityHorizontal(this.velocity, ph.maxSpeed);
 
         const climbK = ph.excessClimbDamping;
         if (climbK > 0 && !this._aircraftGrounded && this.velocity.y > 0) {

@@ -1049,13 +1049,18 @@ class MetaverseApp {
             }
             this.playerManager.updateLocalPlayer(position, rotation, movementState);
 
+            const viewDistanceM = this.sceneManager.graphicsOptions.viewDistanceM;
+            const vas = this.worldManager.getViewDistanceStreaming();
+            if (vas) {
+                void vas.tick(position, viewDistanceM).catch((err) => {
+                    console.warn('[VAS] tick error:', err);
+                });
+            }
+
             this.sceneManager.updatePrefabLodVisibility(position);
             this.sceneManager.updateDrawDistanceCulling(position);
             this.sceneManager.updateViewRangeDebugSpheres(position);
-            this.playerManager.updateRemoteDrawDistance(
-                position,
-                this.sceneManager.graphicsOptions.viewDistanceM
-            );
+            this.playerManager.updateRemoteDrawDistance(position, viewDistanceM);
 
             // Check teleport and PDF proximity
             if (this.teleportManager) {

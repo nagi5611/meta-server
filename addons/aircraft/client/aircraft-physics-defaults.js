@@ -3,6 +3,15 @@
 /** ノット→m/s（ICAO 標準換算） */
 export const KNOTS_TO_MS = 0.514444;
 
+/** km/h → m/s */
+export const KM_H_TO_MS = 1000 / 3600;
+
+/** 水平エンジン出力の既定最高速度 (km/h) */
+export const DEFAULT_MAX_THRUST_SPEED_KMH = 400;
+
+/** 水平エンジン出力の既定最高速度 (m/s) */
+export const DEFAULT_MAX_THRUST_SPEED_MS = DEFAULT_MAX_THRUST_SPEED_KMH * KM_H_TO_MS;
+
 /** シミュレーション内部のみ（管理 UI には出さない） */
 export const AIRCRAFT_PHYSICS_INTERNAL = Object.freeze({
     /**
@@ -42,8 +51,8 @@ export const FLAP_VFE_KNOTS = Object.freeze([250, 230, 215, 210, 190, 180]);
 export const DEFAULT_AIRCRAFT_PHYSICS = Object.freeze({
     /** 機体に働く重力加速度 (m/s²)。地球標準 9.81 */
     gravity: 9.81,
-    /** 最大推進速度 (m/s)。ユーザー指定 default 254 */
-    maxThrustSpeed: 254,
+    /** 水平エンジン出力の最高速度 (m/s)。既定 400 km/h */
+    maxThrustSpeed: DEFAULT_MAX_THRUST_SPEED_MS,
     /** ヨー: 最大姿勢角 (°)。ラダー・側滑の粗い上限（推論） */
     yawMaxDeg: 12,
     /** ヨー: 最大角速度 (rad/s)。巡航ターン約3°/s ≈ 0.052 */
@@ -106,6 +115,34 @@ export function highSpeedAngularRateScale(speed, maxSpeed) {
     if (!Number.isFinite(maxSpeed) || maxSpeed <= 0) return 1;
     const t = Math.max(0, Math.min(1, speed / maxSpeed));
     return 1 - 0.5 * t;
+}
+
+/**
+ * 水平速度 (XZ) をエンジン最高速度でクリップする（落下・急降下の垂直成分は制限しない）
+ * @param {{ x: number, y: number, z: number }} velocity
+ * @param {number} maxHorizontal
+ */
+export function clampVelocityHorizontal(velocity, maxHorizontal) {
+    if (!(maxHorizontal > 0) || !Number.isFinite(maxHorizontal)) return;
+    const vh = Math.hypot(velocity.x, velocity.z);
+    if (vh <= maxHorizontal) return;
+    const s = maxHorizontal / vh;
+    velocity.x *= s;
+    velocity.z *= s;
+}
+
+/**
+ * 機首俯角に応じた重力沿線加速（水平エンジン上限に加えて追い込み速度を与える）
+ * @param {{ addScaledVector: (v: { x: number, y: number, z: number }, s: number) => void }} velocity
+ * @param {{ x: number, y: number, z: number }} fwd 正規化済み機首（ワールド）
+ * @param {number} gravityAccel ワールドスケール済み重力加速度 (m/s²)
+ * @param {number} dt
+ */
+export function applyGravityDiveAcceleration(velocity, fwd, gravityAccel, dt) {
+    if (!(gravityAccel > 0) || !(dt > 0)) return;
+    const alongFwd = -fwd.y * gravityAccel;
+    if (alongFwd <= 0) return;
+    velocity.addScaledVector(fwd, alongFwd * dt);
 }
 
 /**
