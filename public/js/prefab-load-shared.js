@@ -97,6 +97,15 @@ export function prefabManifestHasStreamingBounds(manifest) {
 }
 
 /**
+ * VAS パーツ単位: parts[].bounds が1つ以上あるか
+ * @param {ReturnType<typeof normalizePrefabManifest>} manifest
+ * @returns {boolean}
+ */
+export function prefabManifestHasPartStreamingBounds(manifest) {
+    return !!(manifest?.parts?.length && manifest.parts.some((p) => p.bounds));
+}
+
+/**
  * @param {object} manifest
  * @returns {{ version: number, prefabGroupId: string, displayName: string, bounds: PrefabBounds | null, parts: { file: string, bounds: PrefabBounds | null }[] }}
  */
@@ -187,6 +196,64 @@ export function gltfLoaderPathAndFile(fullUrl) {
 }
 
 /**
+ * マニフェストの単一パーツ GLB を読み込む
+ * @param {object} options
+ * @param {ReturnType<typeof normalizePrefabManifest>} options.manifest
+ * @param {number} options.partIndex
+ * @param {() => import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader} options.createGLTFLoader
+ * @param {(name: string, xhr: ProgressEvent) => void} [options.onXhrProgress]
+ * @param {string} [options.adminPlaneProxyBase]
+ * @returns {Promise<import('three').Object3D>}
+ */
+export async function loadSinglePrefabPartGlb({
+    manifest,
+    partIndex,
+    createGLTFLoader,
+    onXhrProgress,
+    adminPlaneProxyBase,
+}) {
+    const part = manifest.parts[partIndex];
+    if (!part) {
+        throw new Error(`prefab パーツ index ${partIndex} が存在しません`);
+    }
+    const filePath = resolvePrefabPartAssetPath(part.file);
+    let resolved;
+    if (adminPlaneProxyBase && filePath.startsWith('plane/')) {
+        const proxied = adminPlaneProxyUrl(filePath, adminPlaneProxyBase);
+        resolved = proxied || (await resolveModelAssetHref(filePath));
+    } else if (filePath.startsWith('plane/') && typeof window !== 'undefined') {
+        resolved = buildEncodedModelUrlFromPath(filePath);
+    } else {
+        resolved = await resolveModelAssetHref(filePath);
+    }
+
+    return new Promise((resolve, reject) => {
+        const loader = createGLTFLoader();
+        const isHttpsAbs = /^https:\/\//i.test(resolved);
+        const onProg = /** @type {import('three').LoadingManager['onProgress']} */ ((xhr) => {
+            const label = resolved.split(/[/]/).pop() || resolved;
+            onXhrProgress?.(label, xhr);
+        });
+        const onLoaded = (gltf) => {
+            const root = gltf.scene;
+            const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
+            if (anims.length) root.userData.gltfClips = anims;
+            root.userData.prefabGroupId = manifest.prefabGroupId;
+            root.userData.prefabPartPath = filePath;
+            root.userData.isPrefabPart = true;
+            resolve(root);
+        };
+        if (isHttpsAbs) {
+            loader.load(resolved, onLoaded, onProg, reject);
+            return;
+        }
+        const { dirUrl, fileName } = gltfLoaderPathAndFile(resolved);
+        loader.setPath(dirUrl);
+        loader.load(fileName, onLoaded, onProg, reject);
+    });
+}
+
+/**
  * マニフェストに従い子 GLB を読み、同一 Group にまとめる。各パーツ GLB のネットワーク取得は最大 16 本まで並行（GLTFLoader はパーツごとに生成）。
  * @param {object} options
  * @param {typeof import('three')} options.THREE
@@ -195,6 +262,8 @@ export function gltfLoaderPathAndFile(fullUrl) {
  * @param {() => import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader} options.createGLTFLoader
  * @param {(name: string, xhr: ProgressEvent, partIndex: number, partCount: number) => void} [options.onXhrProgress]
  * @param {string} [options.adminPlaneProxyBase] 指定時、plane/ で始まるマニフェスト・パーツは /admin/plane-asset 経由で取得（管理画面 Basic）
+ * @param {number[]} [options.partIndices] 指定時はそのインデックスのパーツのみ読込
+ * @param {ReturnType<typeof normalizePrefabManifest>} [options.cachedManifest] manifestPath の fetch を省略
  * @returns {Promise<{ group: import('three').Group, manifest: ReturnType<typeof normalizePrefabManifest>, totalTris: number }>}
  */
 export async function loadPrefabGroupFromManifest({
@@ -204,9 +273,12 @@ export async function loadPrefabGroupFromManifest({
     createGLTFLoader,
     onXhrProgress,
     adminPlaneProxyBase,
+    partIndices,
+    cachedManifest,
 }) {
-    const raw = await fetchPrefabManifestJson(manifestPath, { adminPlaneProxyBase });
-    const man = normalizePrefabManifest(raw);
+    const man = cachedManifest
+        ? cachedManifest
+        : normalizePrefabManifest(await fetchPrefabManifestJson(manifestPath, { adminPlaneProxyBase }));
     if (!man.parts.length) {
         throw new Error('prefab マニフェストに .glb パーツがありません');
     }
@@ -217,58 +289,22 @@ export async function loadPrefabGroupFromManifest({
     }
     group.userData.prefabDisplayName = man.displayName;
     group.userData.prefabGroupId = man.prefabGroupId;
-    const partCount = man.parts.length;
-    const factories = man.parts.map((p, i) => async () => {
-        const filePath = resolvePrefabPartAssetPath(p.file);
-        let resolved;
-        if (adminPlaneProxyBase && filePath.startsWith('plane/')) {
-            const proxied = adminPlaneProxyUrl(filePath, adminPlaneProxyBase);
-            resolved = proxied || (await resolveModelAssetHref(filePath));
-        } else if (filePath.startsWith('plane/') && typeof window !== 'undefined') {
-            resolved = buildEncodedModelUrlFromPath(filePath);
-        } else {
-            resolved = await resolveModelAssetHref(filePath);
-        }
-        return new Promise((resolve, reject) => {
-            const loader = createGLTFLoader();
-            const isHttpsAbs = /^https:\/\//i.test(resolved);
-            const onProg = /** @type {import('three').LoadingManager['onProgress']} */ ((xhr) => {
-                const label = resolved.split(/[/]/).pop() || resolved;
-                onXhrProgress?.(label, xhr, i, partCount);
-            });
-            if (isHttpsAbs) {
-                loader.load(
-                    resolved,
-                    (gltf) => {
-                        const root = gltf.scene;
-                        const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
-                        if (anims.length) root.userData.gltfClips = anims;
-                        root.userData.prefabGroupId = man.prefabGroupId;
-                        root.userData.prefabPartPath = filePath;
-                        root.userData.isPrefabPart = true;
-                        resolve(root);
-                    },
-                    onProg,
-                    reject
-                );
-                return;
-            }
-            const { dirUrl, fileName } = gltfLoaderPathAndFile(resolved);
-            loader.setPath(dirUrl);
-            loader.load(
-                fileName,
-                (gltf) => {
-                    const root = gltf.scene;
-                    const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
-                    if (anims.length) root.userData.gltfClips = anims;
-                    root.userData.prefabGroupId = man.prefabGroupId;
-                    root.userData.prefabPartPath = filePath;
-                    root.userData.isPrefabPart = true;
-                    resolve(root);
-                },
-                onProg,
-                reject
-            );
+
+    const indices =
+        Array.isArray(partIndices) && partIndices.length > 0
+            ? partIndices.filter((i) => i >= 0 && i < man.parts.length)
+            : man.parts.map((_, i) => i);
+    const partCount = indices.length;
+
+    const factories = indices.map((partIdx, loadOrder) => async () => {
+        return loadSinglePrefabPartGlb({
+            manifest: man,
+            partIndex: partIdx,
+            createGLTFLoader,
+            adminPlaneProxyBase,
+            onXhrProgress: (name, xhr) => {
+                onXhrProgress?.(name, xhr, loadOrder, partCount);
+            },
         });
     });
     const partRoots = await runWithConcurrency(PREFAB_PART_LOAD_CONCURRENCY, factories);

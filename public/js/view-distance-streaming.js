@@ -6,6 +6,7 @@ import {
     fetchPrefabManifestJson,
     normalizePrefabManifest,
     prefabManifestHasStreamingBounds,
+    prefabManifestHasPartStreamingBounds,
 } from './prefab-load-shared.js';
 
 /** 同時ストリーミング DL 上限 */
@@ -69,6 +70,14 @@ export function isWithinViewDistanceLoadRange(feetWorld, worldCenter, worldRadiu
 }
 
 /**
+ * @param {import('./view-distance-streaming.js').ViewDistanceEntry} entry
+ * @returns {boolean}
+ */
+function isDistanceGatedStreamingEntry(entry) {
+    return entry.mode === 'streaming' || entry.mode === 'streaming_part';
+}
+
+/**
  * View-Distance Asset Streaming コントローラ
  */
 export default class ViewDistanceStreaming {
@@ -77,15 +86,7 @@ export default class ViewDistanceStreaming {
      */
     constructor(sceneManager) {
         this.sceneManager = sceneManager;
-        /** @type {Array<{
-         *   idx: number,
-         *   mode: 'streaming' | 'legacy',
-         *   state: 'idle' | 'loading' | 'loaded' | 'failed',
-         *   config: object,
-         *   prefabManifest?: string,
-         *   worldCenter?: THREE.Vector3,
-         *   worldRadius?: number
-         * }>} */
+        /** @type {ViewDistanceEntry[]} */
         this.entries = [];
         this._loadingCount = 0;
         this._tickRunning = false;
@@ -125,7 +126,37 @@ export default class ViewDistanceStreaming {
             try {
                 const raw = await fetchPrefabManifestJson(pfm);
                 const man = normalizePrefabManifest(raw);
-                if (prefabManifestHasStreamingBounds(man) && man.bounds) {
+
+                if (prefabManifestHasPartStreamingBounds(man)) {
+                    for (let pi = 0; pi < man.parts.length; pi++) {
+                        const part = man.parts[pi];
+                        if (part.bounds) {
+                            const sphere = computeWorldLoadSphere(config, part.bounds);
+                            this.entries.push({
+                                idx: i,
+                                partIndex: pi,
+                                mode: 'streaming_part',
+                                state: 'idle',
+                                config,
+                                prefabManifest: pfm,
+                                manifest: man,
+                                worldCenter: sphere.center,
+                                worldRadius: sphere.radius,
+                            });
+                        } else {
+                            this.entries.push({
+                                idx: i,
+                                partIndex: pi,
+                                mode: 'streaming_part_piggyback',
+                                state: 'idle',
+                                config,
+                                prefabManifest: pfm,
+                                manifest: man,
+                                piggyback: true,
+                            });
+                        }
+                    }
+                } else if (prefabManifestHasStreamingBounds(man) && man.bounds) {
                     const sphere = computeWorldLoadSphere(config, man.bounds);
                     this.entries.push({
                         idx: i,
@@ -133,6 +164,7 @@ export default class ViewDistanceStreaming {
                         state: 'idle',
                         config,
                         prefabManifest: pfm,
+                        manifest: man,
                         worldCenter: sphere.center,
                         worldRadius: sphere.radius,
                     });
@@ -163,8 +195,9 @@ export default class ViewDistanceStreaming {
      * @returns {boolean}
      */
     isLegacyIndex(idx) {
-        const entry = this.entries.find((e) => e.idx === idx);
-        return !entry || entry.mode === 'legacy';
+        const forIdx = this.entries.filter((e) => e.idx === idx);
+        if (!forIdx.length) return true;
+        return forIdx.every((e) => e.mode === 'legacy');
     }
 
     /**
@@ -174,7 +207,7 @@ export default class ViewDistanceStreaming {
      */
     async runInitialNearSpawn(spawnPoint, viewDistanceM) {
         const feet = new THREE.Vector3(spawnPoint.x, spawnPoint.y, spawnPoint.z);
-        for (let pass = 0; pass < 64; pass++) {
+        for (let pass = 0; pass < 256; pass++) {
             if (!this._hasIdleStreamingInRange(feet, viewDistanceM)) break;
             await this._drainInRangeLoads(feet, viewDistanceM);
         }
@@ -188,7 +221,7 @@ export default class ViewDistanceStreaming {
     _hasIdleStreamingInRange(feetWorld, viewDistanceM) {
         return this.entries.some(
             (entry) =>
-                entry.mode === 'streaming'
+                isDistanceGatedStreamingEntry(entry)
                 && entry.state === 'idle'
                 && entry.worldCenter
                 && Number.isFinite(entry.worldRadius)
@@ -202,7 +235,7 @@ export default class ViewDistanceStreaming {
     }
 
     /**
-     * 毎フレーム: 描画距離内の未ロード prefab を順次 DL
+     * 毎フレーム: 描画距離内の未ロード prefab / パーツを順次 DL
      * @param {THREE.Vector3 | { x: number, y: number, z: number }} feetWorld
      * @param {number} viewDistanceM
      */
@@ -217,6 +250,58 @@ export default class ViewDistanceStreaming {
     }
 
     /**
+     * @param {number} modelIdx
+     */
+    async _loadPiggybackPartsForModel(modelIdx) {
+        const piggybacks = this.entries.filter(
+            (e) =>
+                e.idx === modelIdx
+                && e.mode === 'streaming_part_piggyback'
+                && e.state === 'idle'
+        );
+        for (const entry of piggybacks) {
+            if (entry.partIndex === undefined || !entry.manifest || !entry.prefabManifest) continue;
+            entry.state = 'loading';
+            try {
+                await this.sceneManager.loadStreamingPrefabPart(
+                    entry.idx,
+                    entry.partIndex,
+                    entry.manifest,
+                    entry.prefabManifest
+                );
+                entry.state = 'loaded';
+            } catch (err) {
+                console.error('[VAS] piggyback part load failed', entry.idx, entry.partIndex, err);
+                entry.state = 'failed';
+            }
+        }
+    }
+
+    /**
+     * @param {ViewDistanceEntry} entry
+     */
+    async _loadEntry(entry) {
+        if (entry.mode === 'streaming') {
+            await this.sceneManager.loadSingleWorldModelEntry(entry.idx);
+            return;
+        }
+        if (entry.mode === 'streaming_part') {
+            if (entry.partIndex === undefined || !entry.manifest || !entry.prefabManifest) {
+                throw new Error('streaming_part entry missing manifest or partIndex');
+            }
+            await this.sceneManager.loadStreamingPrefabPart(
+                entry.idx,
+                entry.partIndex,
+                entry.manifest,
+                entry.prefabManifest
+            );
+            await this._loadPiggybackPartsForModel(entry.idx);
+            return;
+        }
+        throw new Error(`unsupported VAS load mode: ${entry.mode}`);
+    }
+
+    /**
      * @param {THREE.Vector3 | { x: number, y: number, z: number }} feetWorld
      * @param {number} viewDistanceM
      */
@@ -225,7 +310,7 @@ export default class ViewDistanceStreaming {
         const jobs = [];
 
         for (const entry of this.entries) {
-            if (entry.mode !== 'streaming') continue;
+            if (!isDistanceGatedStreamingEntry(entry)) continue;
             if (entry.state !== 'idle') continue;
             if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) continue;
             if (!isWithinViewDistanceLoadRange(feetWorld, entry.worldCenter, entry.worldRadius, viewDistanceM)) {
@@ -240,11 +325,11 @@ export default class ViewDistanceStreaming {
             jobs.push(
                 (async () => {
                     try {
-                        await this.sceneManager.loadSingleWorldModelEntry(entry.idx);
+                        await this._loadEntry(entry);
                         entry.state = 'loaded';
                         this.sceneManager.scheduleBVHRegeneration();
                     } catch (err) {
-                        console.error('[VAS] load failed for model index', entry.idx, err);
+                        console.error('[VAS] load failed for entry', entry.idx, entry.partIndex, err);
                         entry.state = 'failed';
                     } finally {
                         this._loadingCount--;
@@ -258,3 +343,17 @@ export default class ViewDistanceStreaming {
         }
     }
 }
+
+/**
+ * @typedef {object} ViewDistanceEntry
+ * @property {number} idx models[] インデックス
+ * @property {number} [partIndex] prefab パーツ index（パーツ単位ストリーミング時）
+ * @property {'streaming' | 'streaming_part' | 'streaming_part_piggyback' | 'legacy'} mode
+ * @property {'idle' | 'loading' | 'loaded' | 'failed'} state
+ * @property {object} config
+ * @property {string} [prefabManifest]
+ * @property {ReturnType<typeof normalizePrefabManifest>} [manifest]
+ * @property {THREE.Vector3} [worldCenter]
+ * @property {number} [worldRadius]
+ * @property {boolean} [piggyback] bounds 無しパーツ（同プレハブの近傍パーツロード時に追随）
+ */

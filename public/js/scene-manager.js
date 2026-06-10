@@ -47,6 +47,7 @@ import { applyMeshVisualEulerDegToModel } from './aircraft/mesh-visual-pivot.js'
 import {
     buildEncodedModelUrlFromPath,
     loadPrefabGroupFromManifest,
+    loadSinglePrefabPartGlb,
     normalizePrefabManifest,
     resolvePrefabPartAssetPath
 } from './prefab-load-shared.js';
@@ -199,8 +200,13 @@ class SceneManager {
         /** @type {import('three').Object3D[]} LOD 対象 prefab ルート */
         this._prefabLodRoots = [];
         this._lodTempWorldPos = new THREE.Vector3();
-        /** @type {{ modelConfigs: Array, loadOne: (config: object, idx: number) => Promise<void> } | null} */
+        /** @type {{ modelConfigs: Array, loadOne: (config: object, idx: number) => Promise<void>, finishAddModel?: Function } | null} */
         this._modelLoadSession = null;
+        /**
+         * VAS パーツ単位ストリーミング: modelIdx → { group, finishedSetup, totalTris, loadedPartIndices }
+         * @type {Map<number, { group: import('three').Group, finishedSetup: boolean, totalTris: number, loadedPartIndices: Set<number> }>}
+         */
+        this._streamingPrefabSlots = new Map();
         /** @type {ReturnType<typeof setTimeout> | null} */
         this._bvhRegenTimer = null;
         /** ワールド設定の床表示希望（距離カリングと AND） */
@@ -609,6 +615,35 @@ class SceneManager {
     }
 
     /**
+     * ストリーミング追加分の単一 prefab パーツに LOD rank を付与する
+     * @param {import('three').Object3D} model prefab ルート Group
+     * @param {object} config
+     * @param {import('three').Object3D} partRoot
+     * @param {number} partIndex マニフェスト parts[] の index
+     */
+    _applyPrefabPartLodRankForPart(model, config, partRoot, partIndex) {
+        const defRank = Number.isFinite(config.lodRank) ? Math.max(1, Math.floor(config.lodRank)) : 1;
+        const map =
+            config.lodPartRanks && typeof config.lodPartRanks === 'object' && !Array.isArray(config.lodPartRanks)
+                ? config.lodPartRanks
+                : {};
+        const byOrder = Array.isArray(config.lodRanks) && config.lodRanks.length > 0;
+        let r = defRank;
+        if (byOrder) {
+            const arr = config.lodRanks;
+            r = partIndex < arr.length ? Number(arr[partIndex]) : Number(arr[arr.length - 1]);
+        } else {
+            const path = partRoot.userData.prefabPartPath || '';
+            r = map[path];
+        }
+        if (!Number.isFinite(r) || r < 1) r = defRank;
+        partRoot.userData.prefabLodRank = Math.max(1, Math.floor(r));
+        if (!model.userData.prefabLodRootMeta && String(config.lodId || '').trim()) {
+            model.userData.prefabLodRootMeta = { lodId: String(config.lodId).trim() };
+        }
+    }
+
+    /**
      * プレイヤー足元と描画距離に応じて prefab パーツの LOD 可視を更新する（毎フレーム）
      * @param {import('three').Vector3} feetWorld
      */
@@ -937,6 +972,114 @@ class SceneManager {
     }
 
     /**
+     * VAS パーツ単位: 単一 prefab パーツ GLB を既存 Group に追加（初回は Group をシーンへ登録）
+     * @param {number} modelIdx
+     * @param {number} partIndex
+     * @param {ReturnType<typeof normalizePrefabManifest>} manifest
+     * @param {string} manifestPath
+     */
+    async loadStreamingPrefabPart(modelIdx, partIndex, manifest, manifestPath) {
+        const session = this._modelLoadSession;
+        if (!session) {
+            throw new Error('Model load session is not active');
+        }
+        if (modelIdx < 0 || modelIdx >= session.modelConfigs.length) return;
+
+        const config = session.modelConfigs[modelIdx];
+        const fullConfig = typeof config === 'string' ? { path: config } : config;
+
+        let slot = this._streamingPrefabSlots.get(modelIdx);
+        if (!slot) {
+            const group = new THREE.Group();
+            group.userData.prefabDisplayName = manifest.displayName;
+            group.userData.prefabGroupId = manifest.prefabGroupId;
+            group.userData.prefabManifest = manifestPath;
+            group.userData.streamingPrefab = true;
+            slot = {
+                group,
+                finishedSetup: false,
+                totalTris: 0,
+                loadedPartIndices: new Set(),
+            };
+            this._streamingPrefabSlots.set(modelIdx, slot);
+        }
+
+        if (slot.loadedPartIndices.has(partIndex)) return;
+
+        const partRoot = await loadSinglePrefabPartGlb({
+            manifest,
+            partIndex,
+            createGLTFLoader: createGLTFLoaderWithDraco,
+        });
+
+        const tris = countTrianglesInObject(partRoot);
+        if (tris > MODEL_MAX_TRIANGLES_TOTAL) {
+            this._disposeModelObject(partRoot);
+            window.dispatchEvent(
+                new CustomEvent('metaverse-model-load-guard', {
+                    detail: {
+                        path: manifestPath,
+                        reason: 'too_many_triangles',
+                        triangles: tris,
+                        maxTriangles: MODEL_MAX_TRIANGLES_TOTAL,
+                    },
+                })
+            );
+            throw new Error(`prefab part too many triangles: ${tris}`);
+        }
+        if (slot.totalTris + tris > MODEL_MAX_TRIANGLES_TOTAL) {
+            this._disposeModelObject(partRoot);
+            window.dispatchEvent(
+                new CustomEvent('metaverse-model-load-guard', {
+                    detail: {
+                        path: manifestPath,
+                        reason: 'too_many_triangles',
+                        triangles: slot.totalTris + tris,
+                        maxTriangles: MODEL_MAX_TRIANGLES_TOTAL,
+                    },
+                })
+            );
+            throw new Error(`prefab cumulative triangles exceeded: ${slot.totalTris + tris}`);
+        }
+
+        slot.group.add(partRoot);
+        slot.totalTris += tris;
+        slot.loadedPartIndices.add(partIndex);
+
+        const disableSh = tris > MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD;
+        partRoot.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = !disableSh;
+                child.receiveShadow = !disableSh;
+            }
+        });
+
+        const pathForLog = String(fullConfig.path || '').trim() || manifestPath;
+        const cfgForAdd = { ...fullConfig, prefabManifest: manifestPath };
+
+        if (!slot.finishedSetup) {
+            if (typeof session.finishAddModel !== 'function') {
+                throw new Error('Model load session missing finishAddModel');
+            }
+            session.finishAddModel(slot.group, cfgForAdd, pathForLog, slot.totalTris);
+            slot.finishedSetup = true;
+        } else {
+            partRoot.userData.drawCullStyle = 'aabb';
+            this._registerDrawCullTarget(partRoot);
+            const lodId = String(fullConfig.lodId || '').trim();
+            if (lodId) {
+                if (!slot.group.userData.prefabLodRootMeta) {
+                    slot.group.userData.prefabLodRootMeta = { lodId };
+                }
+                if (!this._prefabLodRoots.includes(slot.group)) {
+                    this._prefabLodRoots.push(slot.group);
+                }
+                this._applyPrefabPartLodRankForPart(slot.group, fullConfig, partRoot, partIndex);
+            }
+        }
+    }
+
+    /**
      * Load multiple world models
      * @param {Array<Object|string>} modelConfigs - Array of model configs or paths
      * @param {function} onComplete - Callback when all models are loaded
@@ -949,6 +1092,7 @@ class SceneManager {
         this._worldLodSystem =
             worldLodSystem && typeof worldLodSystem === 'object' ? worldLodSystem : null;
         this._prefabLodRoots = [];
+        this._streamingPrefabSlots.clear();
 
         if (!modelConfigs || modelConfigs.length === 0) {
             console.warn('No models to load');
@@ -1379,7 +1523,7 @@ class SceneManager {
             }
         };
 
-        this._modelLoadSession = { modelConfigs, loadOne };
+        this._modelLoadSession = { modelConfigs, loadOne, finishAddModel };
 
         try {
             const indicesToLoad = [];
@@ -1887,6 +2031,7 @@ class SceneManager {
         this._worldLodSystem = null;
         this._prefabLodRoots = [];
         this._modelLoadSession = null;
+        this._streamingPrefabSlots.clear();
         if (this._bvhRegenTimer) {
             clearTimeout(this._bvhRegenTimer);
             this._bvhRegenTimer = null;
