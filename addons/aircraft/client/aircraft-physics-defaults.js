@@ -117,8 +117,20 @@ export function highSpeedAngularRateScale(speed, maxSpeed) {
     return 1 - 0.5 * t;
 }
 
+/** 接地判定: この高さ以下で接地へ遷移 (m) */
+export const AIRCRAFT_GROUNDED_ENTER_HEADROOM = 0.22;
+
+/** 接地判定: 接地中はこの高さを超えるまで空中扱い (m) */
+export const AIRCRAFT_GROUNDED_EXIT_HEADROOM = 0.58;
+
+/** 地上摩擦を掛ける最小の機首水平成分（急ピッチ時に速度をゼロ化しない） */
+export const AIRCRAFT_GROUND_FRICTION_MIN_FORWARD_HORIZ = 0.12;
+
+/** 水平エンジン速度キャップを掛ける最大俯仰角 (°) */
+export const AIRCRAFT_LEVEL_PITCH_DEG_FOR_HORIZ_CAP = 22;
+
 /**
- * 水平速度 (XZ) をエンジン最高速度でクリップする（落下・急降下の垂直成分は制限しない）
+ * 水平速度 (XZ) をエンジン最高速度でクリップする
  * @param {{ x: number, y: number, z: number }} velocity
  * @param {number} maxHorizontal
  */
@@ -132,17 +144,59 @@ export function clampVelocityHorizontal(velocity, maxHorizontal) {
 }
 
 /**
- * 機首俯角に応じた重力沿線加速（水平エンジン上限に加えて追い込み速度を与える）
- * @param {{ addScaledVector: (v: { x: number, y: number, z: number }, s: number) => void }} velocity
- * @param {{ x: number, y: number, z: number }} fwd 正規化済み機首（ワールド）
- * @param {number} gravityAccel ワールドスケール済み重力加速度 (m/s²)
+ * 機首方向から水平面に対する俯仰角 (°)。正=機首下げ。
+ * @param {{ y: number }} fwd 正規化済み機首
+ * @returns {number}
+ */
+export function pitchFromHorizonDeg(fwd) {
+    return Math.asin(Math.max(-1, Math.min(1, -fwd.y))) * (180 / Math.PI);
+}
+
+/**
+ * ほぼ水平飛行時のみ水平速度をエンジン上限でクリップ（急降下・急上昇では全速度は重力に任せる）
+ * @param {{ x: number, y: number, z: number }} velocity
+ * @param {number} maxHorizontal
+ * @param {{ y: number }} fwd
+ * @param {number} [maxPitchDeg]
+ */
+export function clampEngineHorizontalSpeedIfLevel(
+    velocity,
+    maxHorizontal,
+    fwd,
+    maxPitchDeg = AIRCRAFT_LEVEL_PITCH_DEG_FOR_HORIZ_CAP,
+) {
+    if (Math.abs(pitchFromHorizonDeg(fwd)) > maxPitchDeg) return;
+    clampVelocityHorizontal(velocity, maxHorizontal);
+}
+
+/**
+ * 揚力をワールド Y 成分のみに適用（機首上げ時の謎の加速を防ぐ）
+ * @param {{ y: number }} velocity
+ * @param {{ y: number }} bodyUp
+ * @param {number} liftMag
  * @param {number} dt
  */
-export function applyGravityDiveAcceleration(velocity, fwd, gravityAccel, dt) {
-    if (!(gravityAccel > 0) || !(dt > 0)) return;
-    const alongFwd = -fwd.y * gravityAccel;
-    if (alongFwd <= 0) return;
-    velocity.addScaledVector(fwd, alongFwd * dt);
+export function applyLiftVerticalOnly(velocity, bodyUp, liftMag, dt) {
+    if (!(liftMag > 0) || !(dt > 0)) return;
+    const liftY = liftMag * Math.max(0, bodyUp.y);
+    if (liftY > 0) velocity.y += liftY * dt;
+}
+
+/**
+ * 接地ヒステリシス（空中で接地表示が点滅するのを抑える）
+ * @param {boolean} wasGrounded
+ * @param {number} headroom 足元〜地面の余裕 (m)
+ * @returns {boolean}
+ */
+export function updateGroundedHysteresis(
+    wasGrounded,
+    headroom,
+    enter = AIRCRAFT_GROUNDED_ENTER_HEADROOM,
+    exit = AIRCRAFT_GROUNDED_EXIT_HEADROOM,
+) {
+    if (!Number.isFinite(headroom)) return false;
+    if (wasGrounded) return headroom <= exit;
+    return headroom <= enter;
 }
 
 /**

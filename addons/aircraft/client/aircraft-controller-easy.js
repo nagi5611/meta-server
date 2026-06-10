@@ -3,8 +3,9 @@ import * as THREE from 'three';
 import { mergeEasyAircraftPhysicsFromWorld } from './aircraft-physics-easy-defaults.js';
 import {
     highSpeedAngularRateScale,
-    clampVelocityHorizontal,
-    applyGravityDiveAcceleration,
+    clampEngineHorizontalSpeedIfLevel,
+    updateGroundedHysteresis,
+    AIRCRAFT_GROUND_FRICTION_MIN_FORWARD_HORIZ,
 } from './aircraft-physics-defaults.js';
 import { findObjectByNamePath, stepEngineBladeRotation } from './runtime-prefab-aircraft-anim.js';
 import {
@@ -589,10 +590,8 @@ export default class AircraftControllerEasy {
 
         root.getWorldPosition(this._worldPos);
         const groundBeforeMove = this._sampleGroundBelow(this._worldPos);
-        const onGroundNow =
-            this._aircraftGrounded ||
-            (groundBeforeMove != null &&
-                groundBeforeMove.headroom <= GROUNDED_Y_TOLERANCE + VERTICAL_MOVE_MARGIN);
+        const headroomBefore = groundBeforeMove?.headroom ?? Infinity;
+        const onGroundNow = updateGroundedHysteresis(this._aircraftGrounded, headroomBefore);
 
         const vH = Math.hypot(this.velocity.x, this.velocity.z);
         const liftAccel = ph.liftPerHorizontalSpeed * vH;
@@ -602,12 +601,12 @@ export default class AircraftControllerEasy {
             if (netVertAccel > 0) this.velocity.y += netVertAccel * dt;
         } else {
             this.velocity.y += netVertAccel * dt;
-            if (this._fwd.lengthSq() > 1e-12) {
-                applyGravityDiveAcceleration(this.velocity, this._fwd, ph.gravity, dt);
-            }
         }
 
-        clampVelocityHorizontal(this.velocity, ph.maxSpeed);
+        if (this._fwd.lengthSq() > 1e-12) {
+            this._fwd.normalize();
+        }
+        clampEngineHorizontalSpeedIfLevel(this.velocity, ph.maxSpeed, this._fwd);
 
         const climbK = ph.excessClimbDamping;
         if (climbK > 0 && !this._aircraftGrounded && this.velocity.y > 0) {
@@ -653,7 +652,8 @@ export default class AircraftControllerEasy {
                 this.velocity.y *= 0.3;
             }
             root.getWorldPosition(this._worldPos);
-            const onGround = this._worldPos.y <= minY + GROUNDED_Y_TOLERANCE;
+            const headroom = this._worldPos.y - minY;
+            const onGround = updateGroundedHysteresis(this._aircraftGrounded, headroom);
             this._aircraftGrounded = onGround;
             if (onGround) {
                 root.getWorldQuaternion(this._worldQuat);
@@ -661,7 +661,7 @@ export default class AircraftControllerEasy {
                 let hx = this._fwd.x;
                 let hz = this._fwd.z;
                 const lenH = Math.hypot(hx, hz);
-                if (lenH > 1e-6) {
+                if (lenH > AIRCRAFT_GROUND_FRICTION_MIN_FORWARD_HORIZ) {
                     hx /= lenH;
                     hz /= lenH;
                     let fwdSpeed = this.velocity.x * hx + this.velocity.z * hz;
@@ -675,9 +675,6 @@ export default class AircraftControllerEasy {
                     }
                     this.velocity.x = hx * fwdSpeed;
                     this.velocity.z = hz * fwdSpeed;
-                } else {
-                    this.velocity.x = 0;
-                    this.velocity.z = 0;
                 }
             }
         } else {

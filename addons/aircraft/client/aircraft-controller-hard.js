@@ -12,8 +12,10 @@ import {
     flapVfeMs,
     thrustAccelFromEngineRpm,
     highSpeedAngularRateScale,
-    clampVelocityHorizontal,
-    applyGravityDiveAcceleration,
+    clampEngineHorizontalSpeedIfLevel,
+    applyLiftVerticalOnly,
+    updateGroundedHysteresis,
+    AIRCRAFT_GROUND_FRICTION_MIN_FORWARD_HORIZ,
     AIRCRAFT_FLAP_LABELS,
     AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
@@ -27,7 +29,7 @@ import { viewpointIndexFromLegacyMode } from '../../../public/js/aircraft/camera
 
 const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
-/** 地上判定の Y 余裕（この範囲なら接地扱いで横スリップのみ除去） */
+/** @deprecated 接地は updateGroundedHysteresis の headroom で判定 */
 const GROUNDED_Y_TOLERANCE = 0.15;
 /** 前後速度がこの値未満なら静止摩擦（横滑り抑制に tireStaticFriction を使用） */
 const FWD_SPEED_STATIC_FRICTION_EPS = 0.05;
@@ -717,16 +719,17 @@ export default class AircraftControllerHard {
             Math.max(0, this.velocity.lengthSq() - vAlongBodyUp * vAlongBodyUp)
         );
         const liftMag = flapLiftCoeff(this._flapIndex, ph) * vH * ls;
-        this.velocity.addScaledVector(this._bodyUp, liftMag * dt);
         this.velocity.y -= g * dt;
         if (!this._aircraftGrounded) {
-            applyGravityDiveAcceleration(this.velocity, this._fwd, g, dt);
+            applyLiftVerticalOnly(this.velocity, this._bodyUp, liftMag, dt);
         }
-        const airFwd = this.velocity.dot(this._fwd);
-        if (airFwd > vfeCap) {
-            this.velocity.addScaledVector(this._fwd, vfeCap - airFwd);
+        if (this._flapIndex > 0) {
+            const airFwd = this.velocity.dot(this._fwd);
+            if (airFwd > vfeCap) {
+                this.velocity.addScaledVector(this._fwd, vfeCap - airFwd);
+            }
         }
-        clampVelocityHorizontal(this.velocity, maxSpd);
+        clampEngineHorizontalSpeedIfLevel(this.velocity, maxSpd, this._fwd);
 
         root.getWorldPosition(this._worldPos);
         this._worldPos.addScaledVector(this.velocity, dt);
@@ -762,7 +765,8 @@ export default class AircraftControllerHard {
                     root.updateMatrixWorld(true);
                 }
                 root.getWorldPosition(this._worldPos);
-                const onGround = this._worldPos.y <= minY + GROUNDED_Y_TOLERANCE;
+                const headroom = this._worldPos.y - minY;
+                const onGround = updateGroundedHysteresis(this._aircraftGrounded, headroom);
                 this._aircraftGrounded = onGround;
                 if (onGround) {
                     root.getWorldQuaternion(this._worldQuat);
@@ -770,7 +774,7 @@ export default class AircraftControllerHard {
                     let hx = this._fwd.x;
                     let hz = this._fwd.z;
                     const lenH = Math.hypot(hx, hz);
-                    if (lenH > 1e-6) {
+                    if (lenH > AIRCRAFT_GROUND_FRICTION_MIN_FORWARD_HORIZ) {
                         hx /= lenH;
                         hz /= lenH;
                         let fwdSpeed = this.velocity.x * hx + this.velocity.z * hz;
@@ -808,9 +812,6 @@ export default class AircraftControllerHard {
                             this.velocity.x = hx * fwdSpeed;
                             this.velocity.z = hz * fwdSpeed;
                         }
-                    } else {
-                        this.velocity.x = 0;
-                        this.velocity.z = 0;
                     }
                 }
             } else {
