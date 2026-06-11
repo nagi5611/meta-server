@@ -1580,7 +1580,11 @@ class SceneManager {
             this.environmentGroup.updateMatrixWorld(true);
             console.log(`Batch model load done (${indicesToLoad.length}/${modelConfigs.length} entries)`);
 
-            this.scheduleBVHRegeneration(0);
+            try {
+                await this._requestBVHRegeneration();
+            } catch (e) {
+                console.warn('[SceneManager] Initial BVH regeneration failed:', e);
+            }
 
             if (onComplete) {
                 const result = onComplete();
@@ -2022,9 +2026,15 @@ class SceneManager {
         staticGenerator.attributes = ['position'];
 
         const mergedGeometry = staticGenerator.generate();
-        console.log('Merged geometry created (all objects), triangle count:', mergedGeometry.index.count / 3);
+        const triCount = mergedGeometry.index?.count
+            ? mergedGeometry.index.count / 3
+            : (mergedGeometry.attributes.position?.count || 0) / 3;
+        console.log('Merged geometry created (all objects), triangle count:', triCount);
 
-        await buildMeshBVHAsync(mergedGeometry, MESH_BVH_BUILD_OPTIONS);
+        const bvh = await buildMeshBVHAsync(mergedGeometry, MESH_BVH_BUILD_OPTIONS);
+        if (!mergedGeometry.boundsTree) {
+            mergedGeometry.boundsTree = bvh;
+        }
 
         if (serial !== this._bvhGenSerial) {
             mergedGeometry.dispose();
@@ -2099,6 +2109,9 @@ class SceneManager {
                 this.collider.geometry.dispose();
             }
             this.collider = null;
+        }
+        if (this.physicsManager) {
+            this.physicsManager.setCollider(null);
         }
 
         // Clear teleporters, taikos, aircraft, and animations for this world

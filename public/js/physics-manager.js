@@ -3,6 +3,8 @@ import * as THREE from 'three';
 class PhysicsManager {
     constructor() {
         this.collider = null; // BVH collider mesh
+        /** No collider 警告の連打防止 */
+        this._warnedNoCollider = false;
         this.gravity = -30;
         /** 現在ワールドのスポーン地点を返す関数（{ x, y, z }） */
         this.getSpawnPoint = null;
@@ -79,7 +81,14 @@ class PhysicsManager {
 
     setCollider(collider) {
         this.collider = collider;
-        console.log('BVH collider set, triangle count:', collider.geometry.index.count / 3);
+        if (!collider) {
+            this._warnedNoCollider = false;
+            return;
+        }
+        this._warnedNoCollider = false;
+        const idx = collider.geometry?.index;
+        const triCount = idx?.count ? idx.count / 3 : (collider.geometry?.attributes?.position?.count || 0) / 3;
+        console.log('BVH collider set, triangle count:', triCount);
     }
 
     /**
@@ -149,9 +158,13 @@ class PhysicsManager {
 
     updatePlayer(delta, moveDirection) {
         if (!this.collider || !this.collider.geometry.boundsTree) {
-            console.warn('No collider or BVH available');
+            if (!this._warnedNoCollider) {
+                console.warn('No collider or BVH available');
+                this._warnedNoCollider = true;
+            }
             return;
         }
+        this._warnedNoCollider = false;
 
         const wasGroundedAtStart = this.playerIsOnGround;
 
