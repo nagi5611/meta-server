@@ -4,6 +4,7 @@ import { mergeEasyAircraftPhysicsFromWorld } from './aircraft-physics-easy-defau
 import {
     highSpeedAngularRateScale,
     clampEngineHorizontalSpeedIfLevel,
+    pitchFromHorizonDeg,
     updateGroundedHysteresis,
     AIRCRAFT_GROUND_FRICTION_MIN_FORWARD_HORIZ,
 } from './aircraft-physics-defaults.js';
@@ -23,6 +24,8 @@ const GROUND_PROBE_ORIGIN_LIFT = 2;
 /** 1 フレームで下げられる余裕（m）— 連続衝突の代わりに垂直移動だけ制限 */
 const VERTICAL_MOVE_MARGIN = 0.02;
 const MAX_BANK_RAD = Math.PI / 6;
+/** この角度以上の機首上げで推力減衰・対気速度キャップ・上昇減速を適用 (°) */
+const EASY_STEEP_CLIMB_PITCH_DEG = 22;
 
 /**
  * easy 操縦: 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -585,7 +588,16 @@ export default class AircraftControllerEasy {
         const thrust = (this.keys.forward ? 1 : 0) - (this.keys.back ? 1 : 0);
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
-        this.velocity.addScaledVector(this._fwd, thrust * ph.thrustAccel * dt);
+        if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
+        let thrustDelta = thrust * ph.thrustAccel * dt;
+        if (thrustDelta > 0) {
+            const pitchH = pitchFromHorizonDeg(this._fwd);
+            if (pitchH < -EASY_STEEP_CLIMB_PITCH_DEG) {
+                const pitchUpRad = (-pitchH) * (Math.PI / 180);
+                thrustDelta *= Math.max(0, Math.cos(pitchUpRad));
+            }
+        }
+        this.velocity.addScaledVector(this._fwd, thrustDelta);
         this.velocity.multiplyScalar(ph.drag);
 
         root.getWorldPosition(this._worldPos);
@@ -603,10 +615,22 @@ export default class AircraftControllerEasy {
             this.velocity.y += netVertAccel * dt;
         }
 
-        if (this._fwd.lengthSq() > 1e-12) {
-            this._fwd.normalize();
+        const pitchH = pitchFromHorizonDeg(this._fwd);
+        if (pitchH >= -EASY_STEEP_CLIMB_PITCH_DEG) {
+            clampEngineHorizontalSpeedIfLevel(this.velocity, ph.maxSpeed, this._fwd);
+        } else if (!onGroundNow) {
+            const airFwd = this.velocity.dot(this._fwd);
+            if (airFwd > ph.maxSpeed) {
+                this.velocity.addScaledVector(this._fwd, ph.maxSpeed - airFwd);
+            }
+            const pitchUpRad = (-pitchH) * (Math.PI / 180);
+            const speed = this.velocity.length();
+            if (speed > 1e-6) {
+                const bleed = ph.gravity * Math.sin(pitchUpRad) * dt;
+                const newSpeed = Math.max(0, speed - bleed);
+                this.velocity.multiplyScalar(newSpeed / speed);
+            }
         }
-        clampEngineHorizontalSpeedIfLevel(this.velocity, ph.maxSpeed, this._fwd);
 
         const climbK = ph.excessClimbDamping;
         if (climbK > 0 && !this._aircraftGrounded && this.velocity.y > 0) {
@@ -727,7 +751,9 @@ export default class AircraftControllerEasy {
         const r2d = 180 / Math.PI;
         const vps = resolveSlotCameraViewpoints(this.slot);
         const vp = viewpointAtIndex(vps, this.viewpointIndex);
-        const speedMs = this.velocity.length();
+        this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
+        if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
+        const speedMs = Math.max(0, this.velocity.dot(this._fwd));
         return {
             controlMode: 'easy',
             worldX: this._worldPos.x,
