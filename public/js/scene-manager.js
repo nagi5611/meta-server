@@ -4,7 +4,8 @@ import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { createGLTFLoaderWithDraco } from './gltf-loader-draco.js';
 import { resolveModelAssetHref, resolveEnvAssetHref, loadClientConfigOnce } from './asset-resolve.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
-import { MeshBVH, StaticGeometryGenerator } from 'three-mesh-bvh';
+import { StaticGeometryGenerator } from 'three-mesh-bvh';
+import { buildMeshBVHAsync, MESH_BVH_BUILD_OPTIONS } from './mesh-bvh-worker-client.js';
 import {
     migrateLegacyGraphicsKeys,
     clampViewDistanceM,
@@ -209,6 +210,12 @@ class SceneManager {
         this._streamingPrefabSlots = new Map();
         /** @type {ReturnType<typeof setTimeout> | null} */
         this._bvhRegenTimer = null;
+        /** BVH 再生成の世代 ID（clearWorld / 新規 regen で無効化） */
+        this._bvhGenSerial = 0;
+        /** Worker ジョブ実行中 */
+        this._bvhRegenInFlight = false;
+        /** 実行中に追加 regen が来たら完了後に 1 回追いかけ */
+        this._bvhRegenCoalesced = false;
         /** ワールド設定の床表示希望（距離カリングと AND） */
         this._floorWantedVisible = true;
         /** WebXR セッション中は true（FPS 優先のティア上書きに使用） */
@@ -950,12 +957,32 @@ class SceneManager {
         }
         this._bvhRegenTimer = setTimeout(() => {
             this._bvhRegenTimer = null;
-            try {
-                this.generateBVH();
-            } catch (e) {
+            void this._requestBVHRegeneration().catch((e) => {
                 console.warn('[SceneManager] BVH regeneration failed:', e);
-            }
+            });
         }, delayMs);
+    }
+
+    /**
+     * BVH 再生成を Worker で実行（同時 1 本・coalesce 付き）
+     * @returns {Promise<void>}
+     */
+    async _requestBVHRegeneration() {
+        if (this._bvhRegenInFlight) {
+            this._bvhRegenCoalesced = true;
+            return;
+        }
+        this._bvhRegenInFlight = true;
+        const serial = ++this._bvhGenSerial;
+        try {
+            await this._generateBVHAsync(serial);
+        } finally {
+            this._bvhRegenInFlight = false;
+            if (this._bvhRegenCoalesced) {
+                this._bvhRegenCoalesced = false;
+                await this._requestBVHRegeneration();
+            }
+        }
     }
 
     /**
@@ -1984,21 +2011,25 @@ class SceneManager {
     }
 
     /**
-     * Generate BVH collision mesh from environment group
+     * Generate BVH collision mesh from environment group (Web Worker で boundsTree 構築)
+     * @param {number} serial 開始時の _bvhGenSerial（ワールド切替後は結果を破棄）
+     * @returns {Promise<void>}
      */
-    generateBVH() {
+    async _generateBVHAsync(serial) {
+        this.environmentGroup.updateMatrixWorld(true);
+
         const staticGenerator = new StaticGeometryGenerator(this.environmentGroup);
         staticGenerator.attributes = ['position'];
 
         const mergedGeometry = staticGenerator.generate();
         console.log('Merged geometry created (all objects), triangle count:', mergedGeometry.index.count / 3);
 
-        mergedGeometry.boundsTree = new MeshBVH(mergedGeometry, {
-            strategy: 0,
-            maxDepth: 40,
-            maxLeafTris: 10,
-            verbose: false
-        });
+        await buildMeshBVHAsync(mergedGeometry, MESH_BVH_BUILD_OPTIONS);
+
+        if (serial !== this._bvhGenSerial) {
+            mergedGeometry.dispose();
+            return;
+        }
 
         if (this.collider) {
             this.scene.remove(this.collider);
@@ -2036,6 +2067,8 @@ class SceneManager {
             clearTimeout(this._bvhRegenTimer);
             this._bvhRegenTimer = null;
         }
+        this._bvhGenSerial++;
+        this._bvhRegenCoalesced = false;
 
         // Remove all children from environment group except ground plane
         const ground = this.environmentGroup.children[0]; // Ground is first child
