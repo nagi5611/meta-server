@@ -12,6 +12,12 @@ import {
 /** 同時ストリーミング DL 上限 */
 const VAS_MAX_CONCURRENT_LOADS = 3;
 
+/** 描画距離の何倍以上離れたらメモリからアンロードするか */
+const VAS_UNLOAD_DISTANCE_MULTIPLIER = 2;
+
+/** 1 tick あたりの最大アンロード数 */
+const VAS_MAX_UNLOADS_PER_TICK = 4;
+
 /**
  * マニフェスト bounds.center を models[].TRS でワールド空間へ変換し、判定用の球を返す
  * @param {object} config models[] の1要素
@@ -67,6 +73,24 @@ export function isWithinViewDistanceLoadRange(feetWorld, worldCenter, worldRadiu
             ? feetWorld
             : new THREE.Vector3(feetWorld.x, feetWorld.y, feetWorld.z);
     return p.distanceTo(worldCenter) <= R + worldRadius;
+}
+
+/**
+ * 描画距離の2倍以上離れているか（アンロード判定）
+ * @param {THREE.Vector3 | { x: number, y: number, z: number }} feetWorld
+ * @param {THREE.Vector3} worldCenter
+ * @param {number} worldRadius
+ * @param {number} viewDistanceM
+ * @returns {boolean}
+ */
+export function isBeyondViewDistanceUnloadRange(feetWorld, worldCenter, worldRadius, viewDistanceM) {
+    const R = clampViewDistanceM(viewDistanceM);
+    const unloadR = R * VAS_UNLOAD_DISTANCE_MULTIPLIER;
+    const p =
+        feetWorld instanceof THREE.Vector3
+            ? feetWorld
+            : new THREE.Vector3(feetWorld.x, feetWorld.y, feetWorld.z);
+    return p.distanceTo(worldCenter) > unloadR + worldRadius;
 }
 
 /**
@@ -243,6 +267,10 @@ export default class ViewDistanceStreaming {
         if (this._tickRunning) return;
         this._tickRunning = true;
         try {
+            const bvhDirty = this._drainOutOfRangeUnloads(feetWorld, viewDistanceM);
+            if (bvhDirty) {
+                this.sceneManager.scheduleBVHRegeneration();
+            }
             await this._drainInRangeLoads(feetWorld, viewDistanceM);
         } finally {
             this._tickRunning = false;
@@ -275,6 +303,98 @@ export default class ViewDistanceStreaming {
                 entry.state = 'failed';
             }
         }
+    }
+
+    /**
+     * 描画距離の2倍より外のロード済みパーツ / prefab をメモリから解放
+     * @param {THREE.Vector3 | { x: number, y: number, z: number }} feetWorld
+     * @param {number} viewDistanceM
+     * @returns {boolean} BVH 再生成が必要なら true
+     */
+    _drainOutOfRangeUnloads(feetWorld, viewDistanceM) {
+        let bvhDirty = false;
+        let unloadCount = 0;
+
+        for (const entry of this.entries) {
+            if (unloadCount >= VAS_MAX_UNLOADS_PER_TICK) break;
+
+            if (entry.mode === 'streaming_part' && entry.state === 'loaded') {
+                if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) continue;
+                if (entry.partIndex === undefined) continue;
+                if (!isBeyondViewDistanceUnloadRange(
+                    feetWorld,
+                    entry.worldCenter,
+                    entry.worldRadius,
+                    viewDistanceM
+                )) {
+                    continue;
+                }
+                if (this.sceneManager.unloadStreamingPrefabPart(entry.idx, entry.partIndex)) {
+                    entry.state = 'idle';
+                    bvhDirty = true;
+                    unloadCount++;
+                }
+                continue;
+            }
+
+            if (entry.mode === 'streaming' && entry.state === 'loaded') {
+                if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) continue;
+                if (!isBeyondViewDistanceUnloadRange(
+                    feetWorld,
+                    entry.worldCenter,
+                    entry.worldRadius,
+                    viewDistanceM
+                )) {
+                    continue;
+                }
+                if (this.sceneManager.unloadSingleWorldModelEntry(entry.idx)) {
+                    entry.state = 'idle';
+                    bvhDirty = true;
+                    unloadCount++;
+                }
+            }
+        }
+
+        for (const entry of this.entries) {
+            if (unloadCount >= VAS_MAX_UNLOADS_PER_TICK) break;
+            if (entry.mode !== 'streaming_part_piggyback' || entry.state !== 'loaded') continue;
+            if (entry.partIndex === undefined) continue;
+            if (!this._shouldUnloadPiggybackPart(entry.idx, feetWorld, viewDistanceM)) continue;
+            if (this.sceneManager.unloadStreamingPrefabPart(entry.idx, entry.partIndex)) {
+                entry.state = 'idle';
+                bvhDirty = true;
+                unloadCount++;
+            }
+        }
+
+        return bvhDirty;
+    }
+
+    /**
+     * bounds 無し piggyback: 同 idx の bounded パーツがメモリに無ければアンロード可
+     * @param {number} modelIdx
+     * @param {THREE.Vector3 | { x: number, y: number, z: number }} feetWorld
+     * @param {number} viewDistanceM
+     * @returns {boolean}
+     */
+    _shouldUnloadPiggybackPart(modelIdx, feetWorld, viewDistanceM) {
+        const bounded = this.entries.filter(
+            (e) => e.idx === modelIdx && e.mode === 'streaming_part'
+        );
+        const anyBoundedLoaded = bounded.some((e) => e.state === 'loaded');
+        if (anyBoundedLoaded) return false;
+        const anyBoundedInLoadRange = bounded.some(
+            (e) =>
+                e.worldCenter
+                && Number.isFinite(e.worldRadius)
+                && isWithinViewDistanceLoadRange(
+                    feetWorld,
+                    e.worldCenter,
+                    e.worldRadius,
+                    viewDistanceM
+                )
+        );
+        return !anyBoundedInLoadRange;
     }
 
     /**

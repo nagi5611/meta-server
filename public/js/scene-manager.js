@@ -497,6 +497,16 @@ class SceneManager {
     }
 
     /**
+     * 描画距離カリング対象から外す
+     * @param {import('three').Object3D} obj
+     */
+    _unregisterDrawCullTarget(obj) {
+        if (!obj) return;
+        const i = this._drawCullTargets.indexOf(obj);
+        if (i >= 0) this._drawCullTargets.splice(i, 1);
+    }
+
+    /**
      * 設定がオンなら足元に描画距離 R（青系）と 2R（黄系）の半透明球を合わせる
      * @param {import('three').Vector3} feetWorld
      */
@@ -1069,6 +1079,9 @@ class SceneManager {
             throw new Error(`prefab cumulative triangles exceeded: ${slot.totalTris + tris}`);
         }
 
+        partRoot.userData.prefabPartIndex = partIndex;
+        slot.group.userData.worldModelIndex = modelIdx;
+
         slot.group.add(partRoot);
         slot.totalTris += tris;
         slot.loadedPartIndices.add(partIndex);
@@ -1104,6 +1117,96 @@ class SceneManager {
                 this._applyPrefabPartLodRankForPart(slot.group, fullConfig, partRoot, partIndex);
             }
         }
+    }
+
+    /**
+     * VAS: ストリーミング済み prefab パーツをメモリから解放（GLB は SW/ブラウザキャッシュに残る）
+     * @param {number} modelIdx
+     * @param {number} partIndex
+     * @returns {boolean} 解放したら true
+     */
+    unloadStreamingPrefabPart(modelIdx, partIndex) {
+        const slot = this._streamingPrefabSlots.get(modelIdx);
+        if (!slot || !slot.loadedPartIndices.has(partIndex)) {
+            return false;
+        }
+
+        let partRoot = null;
+        for (const child of slot.group.children) {
+            if (child.userData?.prefabPartIndex === partIndex) {
+                partRoot = child;
+                break;
+            }
+        }
+        if (!partRoot) {
+            slot.loadedPartIndices.delete(partIndex);
+            return false;
+        }
+
+        const tris = countTrianglesInObject(partRoot);
+        this._unregisterDrawCullTarget(partRoot);
+        slot.group.remove(partRoot);
+        this._disposeModelObject(partRoot);
+        slot.loadedPartIndices.delete(partIndex);
+        slot.totalTris = Math.max(0, slot.totalTris - tris);
+
+        if (slot.loadedPartIndices.size === 0) {
+            this._prefabLodRoots = this._prefabLodRoots.filter((r) => r !== slot.group);
+            if (slot.finishedSetup && slot.group.parent) {
+                this.environmentGroup.remove(slot.group);
+            }
+            this._streamingPrefabSlots.delete(modelIdx);
+        }
+
+        return true;
+    }
+
+    /**
+     * VAS: 距離外になった models[] エントリ全体をメモリから解放
+     * @param {number} idx
+     * @returns {boolean}
+     */
+    unloadSingleWorldModelEntry(idx) {
+        const slot = this._streamingPrefabSlots.get(idx);
+        if (slot) {
+            let changed = false;
+            for (const partIndex of [...slot.loadedPartIndices]) {
+                if (this.unloadStreamingPrefabPart(idx, partIndex)) {
+                    changed = true;
+                }
+            }
+            if (changed) return true;
+        }
+
+        let target = null;
+        for (const child of this.environmentGroup.children) {
+            if (child.userData?.worldModelIndex === idx && !child.userData?.streamingPrefab) {
+                target = child;
+                break;
+            }
+        }
+        if (!target) return false;
+
+        this._prefabLodRoots = this._prefabLodRoots.filter((r) => r !== target);
+        target.traverse((ch) => {
+            if (ch.userData?.isPrefabPart) {
+                this._unregisterDrawCullTarget(ch);
+            }
+        });
+        if (!target.userData?.streamingPrefab) {
+            this._unregisterDrawCullTarget(target);
+        }
+
+        this.environmentGroup.remove(target);
+        this._disposeModelObject(target);
+
+        this.teleporters = this.teleporters.filter((t) => t.model !== target);
+        this.taikos = this.taikos.filter((t) => t.model !== target);
+        this.aircraftSlots = this.aircraftSlots.filter((s) => s.model !== target);
+        this.animatedModels = this.animatedModels.filter((a) => a.model !== target);
+        this._gltfMixers = this._gltfMixers.filter(({ model }) => model !== target);
+
+        return true;
     }
 
     /**
@@ -1390,6 +1493,7 @@ class SceneManager {
                     }
                     const cfgForAdd = { ...fullConfig, prefabManifest: pfm };
                     const pathForLog = String(modelPath || '').trim() || pfm;
+                    group.userData.worldModelIndex = idx;
                     finishAddModel(group, cfgForAdd, pathForLog, totalTris);
                     if (loadState) {
                         if (useAggregatedProgress && modelProgressFrac) {
@@ -1535,6 +1639,7 @@ class SceneManager {
                     snapBudgetDone();
                     return;
                 }
+                model.userData.worldModelIndex = idx;
                 finishAddModel(model, fullConfig, modelPath, tris);
                 if (loadState) {
                     if (useAggregatedProgress && modelProgressFrac) {
