@@ -237,6 +237,17 @@ export const METAVERSE_STRINGS = {
     },
     'restart.confirm': { ja: '初期地点へ移動', en: 'Go to spawn', zh: '前往出生点' },
     'restart.cancel': { ja: 'キャンセル', en: 'Cancel', zh: '取消' },
+    'qualityLod.modalTitle': {
+        ja: '品質を選択',
+        en: 'Choose quality',
+        zh: '选择画质',
+    },
+    'qualityLod.modalBody': {
+        ja: 'このワールドには複数の品質設定があります。利用する品質を選んでください。',
+        en: 'This world is available in multiple quality settings. Choose which one to use.',
+        zh: '此世界有多种画质设置，请选择要使用的画质。',
+    },
+    'qualityLod.cancel': { ja: 'キャンセル', en: 'Cancel', zh: '取消' },
 
     'settings.title': { ja: '設定', en: 'Settings', zh: '设置' },
     'settings.close': { ja: '×', en: '×', zh: '×' },

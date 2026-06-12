@@ -6536,6 +6536,17 @@ async function openEnterMetaverseWorldModal() {
         }
 
         for (const { id, name } of entries) {
+            const w = worlds[id];
+            const ql = w && w.qualityLods && typeof w.qualityLods === 'object' ? w.qualityLods : null;
+            const qlKeys = ql
+                ? Object.keys(ql)
+                      .filter((k) => Array.isArray(ql[k]?.models) && ql[k].models.length > 0)
+                      .sort((a, b) => Number(a) - Number(b))
+                : [];
+            const badgeHtml = qlKeys
+                .map((k) => `<span class="world-quality-lod-badge">LOD${escapeHtml(k)}</span>`)
+                .join('');
+
             const li = document.createElement('li');
             const btn = document.createElement('button');
             btn.type = 'button';
@@ -6544,6 +6555,7 @@ async function openEnterMetaverseWorldModal() {
             btn.setAttribute('role', 'option');
             btn.innerHTML =
                 `<span class="enter-metaverse-world-item-name">${escapeHtml(name)}</span>` +
+                (badgeHtml ? `<span class="world-quality-lod-badges">${badgeHtml}</span>` : '') +
                 `<span class="enter-metaverse-world-item-id">${escapeHtml(id)}</span>`;
             btn.addEventListener('click', () => {
                 void enterMetaverseAsAdmin(id, btn);

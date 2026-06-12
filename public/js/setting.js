@@ -47,6 +47,12 @@ import {
     resolvePrefabPartAssetPath
 } from './prefab-load-shared.js';
 import { normalizeWorldsLod } from './world-lod-normalize.js';
+import { normalizeWorldsQualityLods } from './world-quality-lod-normalize.js';
+import {
+    getQualityLodKeys,
+    resolveWorldForQualityLod,
+    ensureQualityLodEntry,
+} from './world-quality-lod.js';
 import {
     MODEL_MAX_BYTES_OBJ,
     MODEL_MAX_BYTES_GLTF,
@@ -119,6 +125,8 @@ let scene, camera, renderer, controls, transformControls;
 let editGroup;
 let worlds = {};
 let selectedWorldId = null;
+/** @type {string} 編集中の品質 LOD キー（"1", "2", …） */
+let selectedQualityLodKey = '1';
 let selectedObject = null;
 let modelList = [];
 let mtlList = []; // MTL ファイル名（models/ 配下、ファイル名のみ）
@@ -2276,6 +2284,136 @@ function bindWorldLodEditorEvents() {
     document.addEventListener('mouseup', onWorldLodMouseUp);
 }
 
+let qualityLodEditorInitialized = false;
+
+/**
+ * 品質 LOD 編集モードか（qualityLods が1件以上）
+ * @param {Record<string, unknown>|null|undefined} w
+ * @returns {boolean}
+ */
+function worldUsesQualityLodsEditor(w) {
+    if (!w || typeof w !== 'object') return false;
+    const ql = w.qualityLods;
+    return !!(ql && typeof ql === 'object' && !Array.isArray(ql) && Object.keys(ql).length > 0);
+}
+
+/**
+ * 品質 LOD タブとラベル入力を更新
+ * @param {Record<string, unknown>|null|undefined} w
+ */
+function renderQualityLodPanel(w) {
+    const tabsEl = document.getElementById('quality-lod-tabs');
+    const labelRow = document.getElementById('quality-lod-label-row');
+    const labelInput = document.getElementById('quality-lod-label');
+    if (!tabsEl) return;
+
+    tabsEl.innerHTML = '';
+    if (!w || !worldUsesQualityLodsEditor(w)) {
+        if (labelRow) labelRow.style.display = 'none';
+        return;
+    }
+
+    const keys = getQualityLodKeys(w);
+    if (!keys.length) {
+        const rawKeys = Object.keys(w.qualityLods).sort((a, b) => Number(a) - Number(b));
+        for (const k of rawKeys) keys.push(k);
+    }
+    if (!keys.includes(selectedQualityLodKey)) {
+        selectedQualityLodKey = keys[0] || '1';
+    }
+
+    for (const key of keys) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'quality-lod-tab' + (key === selectedQualityLodKey ? ' selected' : '');
+        btn.setAttribute('role', 'tab');
+        btn.setAttribute('aria-selected', key === selectedQualityLodKey ? 'true' : 'false');
+        btn.textContent = `LOD${key}`;
+        btn.dataset.lodKey = key;
+        btn.addEventListener('click', () => {
+            if (key === selectedQualityLodKey || !selectedWorldId) return;
+            void switchQualityLodTab(key);
+        });
+        tabsEl.appendChild(btn);
+    }
+
+    if (labelRow) labelRow.style.display = '';
+    if (labelInput) {
+        const entry = w.qualityLods[selectedQualityLodKey];
+        labelInput.value =
+            entry && typeof entry === 'object' && typeof entry.label === 'string' ? entry.label : '';
+    }
+}
+
+/**
+ * 品質 LOD タブ切替（現在のシーンをメモリへ反映してから再読込）
+ * @param {string} newKey
+ */
+async function switchQualityLodTab(newKey) {
+    if (!selectedWorldId || !worlds[selectedWorldId]) return;
+    const built = buildWorldsFromScene();
+    worlds = built;
+    selectedQualityLodKey = newKey;
+    renderQualityLodPanel(worlds[selectedWorldId]);
+    const gen = ++worldSelectLoadGen;
+    setWorldEditLoader(true, '品質 LOD を切り替えています…');
+    try {
+        await loadWorldIntoScene(worlds[selectedWorldId]);
+    } finally {
+        if (gen === worldSelectLoadGen) setWorldEditLoader(false);
+    }
+    writeWorldEditCache();
+}
+
+/**
+ * 品質 LOD を追加（初回はルート models を LOD1 へ移行）
+ */
+async function addQualityLodToSelectedWorld() {
+    if (!selectedWorldId || !worlds[selectedWorldId]) return;
+    const w = worlds[selectedWorldId];
+    if (!worldUsesQualityLodsEditor(w)) {
+        w.qualityLods = {};
+        ensureQualityLodEntry(w, '1');
+        w.qualityLods['1'].models = Array.isArray(w.models) ? w.models.map((m) => ({ ...m })) : [];
+        w.qualityLods['1'].label = '';
+        selectedQualityLodKey = '1';
+    }
+    const existing = Object.keys(w.qualityLods).map((k) => Number(k)).filter(Number.isFinite);
+    const nextNum = existing.length ? Math.max(...existing) + 1 : 1;
+    const newKey = String(nextNum);
+    ensureQualityLodEntry(w, newKey);
+    selectedQualityLodKey = newKey;
+    renderQualityLodPanel(w);
+    const gen = ++worldSelectLoadGen;
+    setWorldEditLoader(true, '新しい LOD を準備しています…');
+    try {
+        await loadWorldIntoScene(w);
+    } finally {
+        if (gen === worldSelectLoadGen) setWorldEditLoader(false);
+    }
+    writeWorldEditCache();
+}
+
+/**
+ * 品質 LOD パネルのイベント（1 回だけ）
+ */
+function bindQualityLodEditorEvents() {
+    if (qualityLodEditorInitialized) return;
+    qualityLodEditorInitialized = true;
+    document.getElementById('btn-quality-lod-add')?.addEventListener('click', () => {
+        void addQualityLodToSelectedWorld();
+    });
+    document.getElementById('quality-lod-label')?.addEventListener('change', () => {
+        if (!selectedWorldId || !worlds[selectedWorldId]) return;
+        const w = worlds[selectedWorldId];
+        if (!worldUsesQualityLodsEditor(w)) return;
+        ensureQualityLodEntry(w, selectedQualityLodKey);
+        const el = document.getElementById('quality-lod-label');
+        w.qualityLods[selectedQualityLodKey].label = el ? el.value.trim() : '';
+        writeWorldEditCache();
+    });
+}
+
 /**
  * Prefab 用 LOD オブジェクトパネルを埋める
  * @param {import('three').Object3D} obj
@@ -2383,11 +2521,15 @@ function buildWorldsFromScene() {
                         : {}
             };
         }
+        if (wid !== selectedWorldId && w.qualityLods && typeof w.qualityLods === 'object') {
+            out[wid].qualityLods = JSON.parse(JSON.stringify(w.qualityLods));
+        }
     }
     if (selectedWorldId) {
         const w = out[selectedWorldId];
         if (w) {
-            w.models = [];
+            /** @type {Record<string, unknown>[]} */
+            const sceneModels = [];
             w.lights = [];
             w.pdfs = [];
             w.flightBoards = [];
@@ -2439,7 +2581,7 @@ function buildWorldsFromScene() {
                             delete c.lodRanks;
                         }
                     }
-                    w.models.push(c);
+                    sceneModels.push(c);
                 }
                 if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
                     const cfg = { ...child.userData.lightConfig };
@@ -2495,6 +2637,31 @@ function buildWorldsFromScene() {
             } else {
                 delete w.physicsAssist;
             }
+            const srcWorld = worlds[selectedWorldId];
+            if (srcWorld && worldUsesQualityLodsEditor(srcWorld)) {
+                const qKey = selectedQualityLodKey || '1';
+                if (!w.qualityLods || typeof w.qualityLods !== 'object') {
+                    w.qualityLods = {};
+                }
+                const labelEl = document.getElementById('quality-lod-label');
+                const labelVal = labelEl ? labelEl.value.trim() : '';
+                ensureQualityLodEntry(w, qKey);
+                w.qualityLods[qKey].label = labelVal;
+                w.qualityLods[qKey].models = sceneModels;
+                if (srcWorld.qualityLods && typeof srcWorld.qualityLods === 'object') {
+                    for (const [k, entry] of Object.entries(srcWorld.qualityLods)) {
+                        if (k === qKey) continue;
+                        w.qualityLods[k] = JSON.parse(JSON.stringify(entry));
+                    }
+                }
+                const lod1 = w.qualityLods['1'];
+                w.models =
+                    lod1 && typeof lod1 === 'object' && Array.isArray(lod1.models)
+                        ? lod1.models.map((m) => (m && typeof m === 'object' ? { ...m } : m))
+                        : sceneModels.map((m) => (m && typeof m === 'object' ? { ...m } : m));
+            } else {
+                w.models = sceneModels;
+            }
             const srcLod = worlds[selectedWorldId] && worlds[selectedWorldId].lodSystem;
             if (srcLod && typeof srcLod === 'object') {
                 w.lodSystem = {
@@ -2508,6 +2675,7 @@ function buildWorldsFromScene() {
         }
     }
     normalizeWorldsLod(out);
+    normalizeWorldsQualityLods(out);
     return out;
 }
 
@@ -2556,8 +2724,14 @@ function syncSelectWorldChrome(id) {
     if (w) {
         document.getElementById('world-name-row').style.display = '';
         document.getElementById('world-name').value = w.name || id;
+        const qlKeys = getQualityLodKeys(w);
+        if (qlKeys.length && !qlKeys.includes(selectedQualityLodKey)) {
+            selectedQualityLodKey = qlKeys[0];
+        }
+        renderQualityLodPanel(w);
     } else {
         document.getElementById('world-name-row').style.display = 'none';
+        renderQualityLodPanel(null);
     }
     document.getElementById('btn-delete-world').disabled = !id;
     populateDestWorldSelect();
@@ -2744,6 +2918,13 @@ async function loadWorldModelEntryForEditor(config, idx) {
  */
 async function loadWorldIntoScene(world) {
     ensureWorldLodShape(world);
+    renderQualityLodPanel(world);
+    const qlKeys = getQualityLodKeys(world);
+    const lodKey =
+        qlKeys.length > 0
+            ? (qlKeys.includes(selectedQualityLodKey) ? selectedQualityLodKey : qlKeys[0])
+            : null;
+    const sceneWorld = resolveWorldForQualityLod(world, lodKey) || world;
     stopFlightBoardEditorPolling();
     while (editGroup.children.length) {
         const c = editGroup.children[0];
@@ -2840,7 +3021,7 @@ async function loadWorldIntoScene(world) {
     }
     updatePhysicsAssistSpawnHint();
 
-    const models = world.models || [];
+    const models = sceneWorld.models || [];
     const factories = models.map((config, idx) => () => loadWorldModelEntryForEditor(config, idx));
     const slots = await runWithConcurrency(ADMIN_WORLD_MODEL_LOAD_CONCURRENCY, factories);
     const errs = [];
@@ -3358,8 +3539,26 @@ function renderWorldList() {
         const w = worlds[id];
         const div = document.createElement('div');
         div.className = 'item' + (id === selectedWorldId ? ' selected' : '');
-        div.textContent = w.name || id;
         div.dataset.id = id;
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'world-list-name';
+        nameSpan.textContent = w.name || id;
+        div.appendChild(nameSpan);
+
+        const qlKeys = getQualityLodKeys(w);
+        if (qlKeys.length > 0) {
+            const badges = document.createElement('span');
+            badges.className = 'world-quality-lod-badges';
+            for (const key of qlKeys) {
+                const badge = document.createElement('span');
+                badge.className = 'world-quality-lod-badge';
+                badge.textContent = `LOD${key}`;
+                badges.appendChild(badge);
+            }
+            div.appendChild(badges);
+        }
+
         div.addEventListener('click', () => void selectWorld(id));
         el.appendChild(div);
     });
@@ -4065,6 +4264,7 @@ function bindEvents() {
     // 右パネル: モデル/ライト/設定 カテゴリ切り替え、クリックで展開
     const rightCategoryNav = document.querySelector('.we-right-category-nav');
     bindWorldLodEditorEvents();
+    bindQualityLodEditorEvents();
 
     if (rightCategoryNav) {
         rightCategoryNav.addEventListener('click', (e) => {

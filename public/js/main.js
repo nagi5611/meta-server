@@ -28,6 +28,9 @@ import { initAvatorScalableAnimations } from '../../addons/avator-scalable-anima
 import { initMatsuyamaFlightsSubsystem } from '../../addons/matsuyama-flights/client/init.js';
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 import { loadClientConfigOnce } from './asset-resolve.js';
+import { hasMultipleQualityLods } from './world-quality-lod.js';
+import { resolveQualityLodKeyForEntry } from './world-quality-lod-modal.js';
+import { enterLogicalWorld } from './world-entry-flow.js';
 
 const DEFAULT_ROOM = 'lobby';
 
@@ -211,15 +214,17 @@ class MetaverseApp {
         this.teleportManager = new TeleportManager(this.worldManager, this.uiManager);
         this.userRole = isAdminMetaverseEntryPath() ? 'admin' : (localStorage.getItem('userRole') || 'guest');
         this.teleportManager.setUserRole(this.userRole);
-        this.teleportManager.setTeleportCallback((destinationWorld, teleporterId) => {
+        this.teleportManager.setTeleportCallback(async (destinationWorld, teleporterId) => {
             if (this.aircraftManager) this.aircraftManager.forceLocalPilotingReset();
-            this.networkManager.changeWorld(destinationWorld, { teleporterId }, (err) => {
-                if (err) {
-                    alert(err.message || t('main.teleporterError'));
-                    return;
+            try {
+                const result = await enterLogicalWorld(this, destinationWorld, { teleporterId });
+                if (!result.ok) {
+                    if (result.reason === 'cancelled') return;
+                    alert(result.message || t('main.teleporterError'));
                 }
-                this.worldManager.switchWorld(destinationWorld);
-            });
+            } catch (_) {
+                alert(t('main.teleporterError'));
+            }
         });
 
         // Initialize PDF Viewer (E key near PDF object)
@@ -270,14 +275,28 @@ class MetaverseApp {
         // Load initial world: URL ?world= / #world= が有効なら優先、なければ lobby または先頭
         const defaultWorldId = this.worldManager.getWorld('lobby') ? 'lobby' : (this.worldManager.getAllWorlds()[0]?.id || 'lobby');
         const urlWorldId = getWorldIdFromUrl();
-        const initialWorldId =
+        let initialWorldId =
             urlWorldId && this.worldManager.getWorld(urlWorldId) ? urlWorldId : defaultWorldId;
         if (urlWorldId && urlWorldId !== initialWorldId) {
             console.warn(`Unknown world in URL, using default: ${urlWorldId}`);
         }
+
+        let initialQualityLodKey = null;
+        const rawInitialWorld = this.worldManager.getWorld(initialWorldId);
+        if (rawInitialWorld) {
+            initialQualityLodKey = await resolveQualityLodKeyForEntry(rawInitialWorld);
+            if (initialQualityLodKey === null && hasMultipleQualityLods(rawInitialWorld)) {
+                console.log('Quality LOD selection cancelled; falling back to default world');
+                initialWorldId = defaultWorldId;
+                initialQualityLodKey = null;
+            }
+        }
+
         console.log('Loading world:', initialWorldId);
         await new Promise((resolve) => {
-            this.worldManager.loadWorld(initialWorldId, () => {
+            this.worldManager.loadWorld(
+                initialWorldId,
+                () => {
                 console.log('World loaded:', initialWorldId);
                 // onWorldChange は後で登録するため、初回ロード時も帰属表示を反映する
                 this.updateGoogleMapsCopyrightVisibility(this.worldManager.getCurrentWorld());
@@ -286,7 +305,9 @@ class MetaverseApp {
                 this.updateTaikoZones();
                 this.updateGlbInteractZones();
                 resolve();
-            });
+            },
+                { qualityLodKey: initialQualityLodKey }
+            );
         });
 
         // Get spawn point for current world
@@ -893,19 +914,15 @@ class MetaverseApp {
         const currentWorldId = this.worldManager.getCurrentWorldId();
 
         if (worldId !== currentWorldId) {
-            const world = this.worldManager.getWorld(worldId);
-            if (!world) {
-                console.error(`[Admin TP] World not found: ${worldId}`);
+            const result = await enterLogicalWorld(this, worldId);
+            if (!result.ok) {
+                if (result.reason === 'cancelled') return;
+                console.error(`[Admin TP] Failed to enter world: ${worldId}`, result.message);
                 return;
             }
-            await new Promise((resolve) => {
-                this.worldManager.loadWorld(worldId, () => resolve());
-            });
             this.updateTeleportZones();
             this.updateTaikoZones();
             this.updateGlbInteractZones();
-            this.networkManager.changeWorld(worldId);
-            // VC room change is handled by vc-room-changed from server
         }
 
         this.characterController.setPosition(x, y, z);

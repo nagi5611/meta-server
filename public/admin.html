@@ -888,6 +888,20 @@
                                             <p class="hint" id="physics-assist-spawn-hint" hidden>スポーンYと下限が大きく離れています。意図を確認してください。</p>
                                         </div>
                                     </details>
+                                    <details class="block" id="world-quality-lod-details">
+                                        <summary class="block-header">品質 LOD（モデル）</summary>
+                                        <div class="block-content">
+                                            <p class="hint">同一ワールドの論理ルームは1つです。LOD ごとに <strong>models</strong> のみ別保存します。プレイヤー入室時に品質を選ばせます（Prefab LOD（距離）とは別機能）。</p>
+                                            <div class="btn-row" style="margin-bottom:8px;">
+                                                <button type="button" id="btn-quality-lod-add" class="btn btn-sm btn-outline-secondary">LOD を追加</button>
+                                            </div>
+                                            <div id="quality-lod-tabs" class="quality-lod-tabs" role="tablist" aria-label="品質 LOD"></div>
+                                            <div id="quality-lod-label-row" class="field-row" style="margin-top:10px;display:none;">
+                                                <label class="prop-label" for="quality-lod-label">プレイヤー向け表示ラベル</label>
+                                                <input type="text" id="quality-lod-label" class="prop-input full" placeholder="例: パソコン向け（高品質）" maxlength="120">
+                                            </div>
+                                        </div>
+                                    </details>
                                     <details class="block" id="world-lod-details">
                                         <summary class="block-header">Prefab LOD（距離）</summary>
                                         <div class="block-content">

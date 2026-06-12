@@ -1482,7 +1482,8 @@ a.admin-menu-link:hover {
 
 /* Logout / Restart Modal */
 #logout-modal,
-#restart-modal {
+#restart-modal,
+#quality-lod-modal {
     display: none;
     position: fixed;
     top: 0;
@@ -1497,12 +1498,14 @@ a.admin-menu-link:hover {
 }
 
 #logout-modal.visible,
-#restart-modal.visible {
+#restart-modal.visible,
+#quality-lod-modal.visible {
     display: flex;
 }
 
 #logout-modal-content,
-#restart-modal-content {
+#restart-modal-content,
+#quality-lod-modal-content {
     background: rgba(255, 255, 255, 0.98);
     padding: 32px;
     border-radius: 20px;
@@ -1525,14 +1528,16 @@ a.admin-menu-link:hover {
 }
 
 #logout-modal-content h3,
-#restart-modal-content h3 {
+#restart-modal-content h3,
+#quality-lod-modal-content h3 {
     color: #333;
     font-size: 24px;
     margin-bottom: 16px;
 }
 
 #logout-modal-content p,
-#restart-modal-content p {
+#restart-modal-content p,
+#quality-lod-modal-content p {
     color: #666;
     font-size: 16px;
     line-height: 1.6;
@@ -1543,6 +1548,17 @@ a.admin-menu-link:hover {
     display: flex;
     gap: 12px;
     justify-content: center;
+}
+
+.quality-lod-modal-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+.quality-lod-option-btn {
+    width: 100%;
 }
 
 .logout-btn {
