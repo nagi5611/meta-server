@@ -238,6 +238,7 @@ function readWorldsFromFile() {
 function readWorlds() {
     if (worldsRuntimeCache == null) {
         worldsRuntimeCache = readWorldsFromFile();
+        normalizeWorldsQualityLods(worldsRuntimeCache);
     }
     return worldsRuntimeCache;
 }

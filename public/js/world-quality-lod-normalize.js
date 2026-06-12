@@ -1,19 +1,18 @@
 // public/js/world-quality-lod-normalize.js — worlds.json の品質 LOD 正規化（Admin / server 共用）
 
-import { getQualityLodKeys } from './world-quality-lod.js';
+import { ensureWorldQualityLod1 } from './world-quality-lod.js';
 
 /**
- * 1 ワールドの qualityLods を正規化する
+ * 1 ワールドの qualityLods を正規化する（LOD1 必須）
  * @param {Record<string, unknown>} world
  */
 export function normalizeWorldQualityLods(world) {
     if (!world || typeof world !== 'object') return;
 
+    ensureWorldQualityLod1(world);
+
     const ql = world.qualityLods;
-    if (!ql || typeof ql !== 'object' || Array.isArray(ql)) {
-        delete world.qualityLods;
-        return;
-    }
+    if (!ql || typeof ql !== 'object' || Array.isArray(ql)) return;
 
     /** @type {Record<string, { label: string, models: unknown[], pdfs?: unknown[] }>} */
     const out = {};
@@ -44,24 +43,12 @@ export function normalizeWorldQualityLods(world) {
         out[k] = normalized;
     }
 
-    const keys = Object.keys(out);
-    if (keys.length === 0) {
-        delete world.qualityLods;
-        return;
+    if (!out['1']) {
+        out['1'] = { label: '', models: [] };
     }
 
     world.qualityLods = out;
-
-    // 有効 LOD が 1 件のみでルート models が空の場合、ルートへコピー（後方互換）
-    const validKeys = getQualityLodKeys(world);
-    if (validKeys.length === 1 && (!Array.isArray(world.models) || world.models.length === 0)) {
-        const onlyKey = validKeys[0];
-        if (onlyKey && out[onlyKey]?.models?.length) {
-            world.models = out[onlyKey].models.map((m) =>
-                m && typeof m === 'object' ? { ...m } : m
-            );
-        }
-    }
+    ensureWorldQualityLod1(world);
 }
 
 /**

@@ -13,19 +13,17 @@ export function getQualityLodsObject(world) {
 }
 
 /**
- * 有効な品質 LOD キー一覧（数値順ソート）
+ * qualityLods に定義されたキー一覧（数値順。models の有無は問わない）
  * @param {Record<string, unknown>|null|undefined} world
  * @returns {string[]}
  */
-export function getQualityLodKeys(world) {
+export function getQualityLodEditorKeys(world) {
     const ql = getQualityLodsObject(world);
     if (!ql) return [];
     return Object.keys(ql)
         .filter((k) => {
             const entry = ql[k];
-            if (!entry || typeof entry !== 'object') return false;
-            const models = entry.models;
-            return Array.isArray(models) && models.length > 0;
+            return entry && typeof entry === 'object';
         })
         .sort((a, b) => {
             const na = Number(a);
@@ -35,13 +33,18 @@ export function getQualityLodKeys(world) {
         });
 }
 
+/** @deprecated エイリアス — 定義済み LOD キー一覧 */
+export function getQualityLodKeys(world) {
+    return getQualityLodEditorKeys(world);
+}
+
 /**
- * 入室時ポップアップが必要か（2 件以上の有効 LOD）
+ * 入室時ポップアップが必要か（2 件以上の LOD 定義）
  * @param {Record<string, unknown>|null|undefined} world
  * @returns {boolean}
  */
 export function hasMultipleQualityLods(world) {
-    return getQualityLodKeys(world).length >= 2;
+    return getQualityLodEditorKeys(world).length >= 2;
 }
 
 /**
@@ -123,6 +126,39 @@ export function resolveWorldForQualityLod(world, lodKey) {
         pdfs: Array.isArray(pdfs) ? pdfs.map((p) => (p && typeof p === 'object' ? { ...p } : p)) : [],
         _qualityLodKey: key || null,
     };
+}
+
+/**
+ * 全ワールドに LOD1 を保証し、ルート models と同期する
+ * @param {Record<string, unknown>} world
+ */
+export function ensureWorldQualityLod1(world) {
+    if (!world || typeof world !== 'object') return;
+    const rootModels = Array.isArray(world.models) ? world.models : [];
+
+    if (!world.qualityLods || typeof world.qualityLods !== 'object' || Array.isArray(world.qualityLods)) {
+        world.qualityLods = {};
+    }
+    const ql = /** @type {Record<string, { label?: string, models?: unknown[] }>} */ (world.qualityLods);
+
+    if (!ql['1'] || typeof ql['1'] !== 'object') {
+        ql['1'] = {
+            label: '',
+            models: rootModels.map((m) => (m && typeof m === 'object' ? { ...m } : m)),
+        };
+    } else {
+        const entry = ql['1'];
+        if (typeof entry.label !== 'string') entry.label = '';
+        if (!Array.isArray(entry.models)) entry.models = [];
+        if (entry.models.length === 0 && rootModels.length > 0) {
+            entry.models = rootModels.map((m) => (m && typeof m === 'object' ? { ...m } : m));
+        }
+    }
+
+    const lod1Models = ql['1'].models;
+    if (Array.isArray(lod1Models) && lod1Models.length > 0) {
+        world.models = lod1Models.map((m) => (m && typeof m === 'object' ? { ...m } : m));
+    }
 }
 
 /**

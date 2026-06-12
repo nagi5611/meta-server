@@ -6540,9 +6540,9 @@ async function openEnterMetaverseWorldModal() {
             const ql = w && w.qualityLods && typeof w.qualityLods === 'object' ? w.qualityLods : null;
             const qlKeys = ql
                 ? Object.keys(ql)
-                      .filter((k) => Array.isArray(ql[k]?.models) && ql[k].models.length > 0)
+                      .filter((k) => ql[k] && typeof ql[k] === 'object')
                       .sort((a, b) => Number(a) - Number(b))
-                : [];
+                : ['1'];
             const badgeHtml = qlKeys
                 .map((k) => `<span class="world-quality-lod-badge">LOD${escapeHtml(k)}</span>`)
                 .join('');

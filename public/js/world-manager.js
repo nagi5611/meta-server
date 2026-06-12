@@ -6,6 +6,7 @@
 import ViewDistanceStreaming from './view-distance-streaming.js';
 import { prefetchSignedAssetHrefs } from './asset-resolve.js';
 import { resolveWorldForQualityLod } from './world-quality-lod.js';
+import { normalizeWorldsQualityLods } from './world-quality-lod-normalize.js';
 
 class WorldManager {
     constructor(sceneManager) {
@@ -61,6 +62,7 @@ class WorldManager {
                 const data = await res.json();
                 if (data && typeof data === 'object') {
                     this.worlds = data;
+                    normalizeWorldsQualityLods(this.worlds);
                     console.log('Worlds loaded from API');
                     return;
                 }

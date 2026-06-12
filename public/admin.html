@@ -891,13 +891,13 @@
                                     <details class="block" id="world-quality-lod-details">
                                         <summary class="block-header">品質 LOD（モデル）</summary>
                                         <div class="block-content">
-                                            <p class="hint">同一ワールドの論理ルームは1つです。LOD ごとに <strong>models</strong> のみ別保存します。プレイヤー入室時に品質を選ばせます（Prefab LOD（距離）とは別機能）。</p>
+                                            <p class="hint">左のワールド一覧で LOD を選択して編集します。全ワールドに LOD1 があります。追加 LOD は models のみ別保存（spawn・lights 等は共通）。プレイヤー入室時に LOD が2つ以上あれば品質選択が表示されます。</p>
                                             <div class="btn-row" style="margin-bottom:8px;">
                                                 <button type="button" id="btn-quality-lod-add" class="btn btn-sm btn-outline-secondary">LOD を追加</button>
                                             </div>
-                                            <div id="quality-lod-tabs" class="quality-lod-tabs" role="tablist" aria-label="品質 LOD"></div>
-                                            <div id="quality-lod-label-row" class="field-row" style="margin-top:10px;display:none;">
-                                                <label class="prop-label" for="quality-lod-label">プレイヤー向け表示ラベル</label>
+                                            <p class="hint" id="quality-lod-selected-hint" style="margin-bottom:8px;"></p>
+                                            <div id="quality-lod-label-row" class="field-row">
+                                                <label class="prop-label" for="quality-lod-label">プレイヤー向け説明（選択中 LOD）</label>
                                                 <input type="text" id="quality-lod-label" class="prop-input full" placeholder="例: パソコン向け（高品質）" maxlength="120">
                                             </div>
                                         </div>

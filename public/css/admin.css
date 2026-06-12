@@ -1216,6 +1216,52 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     gap: 6px;
 }
 
+.world-list-entry {
+    border-bottom: 1px solid var(--we-border);
+}
+
+.world-list-entry:last-child {
+    border-bottom: none;
+}
+
+.world-list-header {
+    width: 100%;
+    font-weight: 600;
+}
+
+.world-list-header.selected-world {
+    background: var(--we-accent-light);
+    color: #1565c0;
+}
+
+.world-list-lod-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 8px 8px 12px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.world-list-lod-btn {
+    cursor: pointer;
+    border: 1px solid rgba(21, 101, 192, 0.35);
+    background: rgba(21, 101, 192, 0.08);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.world-list-lod-btn:hover {
+    background: rgba(21, 101, 192, 0.18);
+}
+
+.world-list-lod-btn.selected {
+    background: var(--we-accent);
+    color: #fff;
+    border-color: var(--we-accent);
+}
+
 .world-list-name {
     flex: 1 1 auto;
     min-width: 0;
