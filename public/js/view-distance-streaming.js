@@ -7,6 +7,7 @@ import {
     normalizePrefabManifest,
     prefabManifestHasStreamingBounds,
     prefabManifestHasPartStreamingBounds,
+    resolvePrefabPartAssetPath,
 } from './prefab-load-shared.js';
 
 /** 同時ストリーミング DL 上限 */
@@ -199,6 +200,7 @@ export default class ViewDistanceStreaming {
                         state: 'idle',
                         config,
                         prefabManifest: pfm,
+                        manifest: man,
                     });
                 }
             } catch (err) {
@@ -222,6 +224,167 @@ export default class ViewDistanceStreaming {
         const forIdx = this.entries.filter((e) => e.idx === idx);
         if (!forIdx.length) return true;
         return forIdx.every((e) => e.mode === 'legacy');
+    }
+
+    /**
+     * legacy モデルのキャッシュ済みマニフェスト（buildRegistry 後）
+     * @param {number} modelIdx
+     * @returns {ReturnType<typeof normalizePrefabManifest>|null}
+     */
+    getLegacyManifest(modelIdx) {
+        const entry = this.entries.find((e) => e.idx === modelIdx && e.mode === 'legacy');
+        return entry?.manifest ?? null;
+    }
+
+    /**
+     * 初回ロードバー用: spawn 周辺で実際に DL するオブジェクト数 + legacy 全パーツ + PDF
+     * @param {{ x: number, y: number, z: number }} spawnPoint
+     * @param {number} viewDistanceM
+     * @param {number} pdfCount
+     * @returns {number}
+     */
+    countInitialLoadUnits(spawnPoint, viewDistanceM, pdfCount) {
+        const feet = new THREE.Vector3(spawnPoint.x, spawnPoint.y, spawnPoint.z);
+        let total = Math.max(0, Math.floor(Number(pdfCount)) || 0);
+        const legacyCounted = new Set();
+
+        for (const entry of this.entries) {
+            if (entry.mode !== 'legacy') continue;
+            if (legacyCounted.has(entry.idx)) continue;
+            legacyCounted.add(entry.idx);
+            const nParts = entry.manifest?.parts?.length ?? 0;
+            total += nParts > 0 ? nParts : 1;
+        }
+
+        const inRangeModelIdx = new Set();
+        for (const entry of this.entries) {
+            if (entry.mode === 'streaming_part') {
+                if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) continue;
+                if (
+                    isWithinViewDistanceLoadRange(
+                        feet,
+                        entry.worldCenter,
+                        entry.worldRadius,
+                        viewDistanceM
+                    )
+                ) {
+                    total += 1;
+                    inRangeModelIdx.add(entry.idx);
+                }
+                continue;
+            }
+            if (entry.mode === 'streaming') {
+                if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) continue;
+                if (
+                    isWithinViewDistanceLoadRange(
+                        feet,
+                        entry.worldCenter,
+                        entry.worldRadius,
+                        viewDistanceM
+                    )
+                ) {
+                    total += 1;
+                }
+            }
+        }
+
+        for (const entry of this.entries) {
+            if (entry.mode === 'streaming_part_piggyback' && inRangeModelIdx.has(entry.idx)) {
+                total += 1;
+            }
+        }
+
+        return total;
+    }
+
+    /**
+     * 初回ロード前に CDN 署名をまとめるための論理パス一覧
+     * @param {{ x: number, y: number, z: number }} spawnPoint
+     * @param {number} viewDistanceM
+     * @returns {string[]}
+     */
+    collectInitialPrefetchPaths(spawnPoint, viewDistanceM) {
+        const feet = new THREE.Vector3(spawnPoint.x, spawnPoint.y, spawnPoint.z);
+        /** @type {Set<string>} */
+        const paths = new Set();
+
+        const addPartPath = (manifest, partIndex) => {
+            const part = manifest?.parts?.[partIndex];
+            if (!part?.file) return;
+            paths.add(resolvePrefabPartAssetPath(part.file));
+        };
+
+        for (const entry of this.entries) {
+            if (entry.mode === 'legacy' && entry.manifest) {
+                for (let pi = 0; pi < entry.manifest.parts.length; pi++) {
+                    addPartPath(entry.manifest, pi);
+                }
+                continue;
+            }
+            if (entry.mode === 'streaming_part') {
+                if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) continue;
+                if (
+                    !isWithinViewDistanceLoadRange(
+                        feet,
+                        entry.worldCenter,
+                        entry.worldRadius,
+                        viewDistanceM
+                    )
+                ) {
+                    continue;
+                }
+                if (entry.manifest && entry.partIndex !== undefined) {
+                    addPartPath(entry.manifest, entry.partIndex);
+                }
+                continue;
+            }
+            if (entry.mode === 'streaming_part_piggyback') {
+                continue;
+            }
+            if (entry.mode === 'streaming') {
+                if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) continue;
+                if (
+                    !isWithinViewDistanceLoadRange(
+                        feet,
+                        entry.worldCenter,
+                        entry.worldRadius,
+                        viewDistanceM
+                    )
+                ) {
+                    continue;
+                }
+                if (entry.manifest) {
+                    for (let pi = 0; pi < entry.manifest.parts.length; pi++) {
+                        addPartPath(entry.manifest, pi);
+                    }
+                }
+            }
+        }
+
+        const inRangeModelIdx = new Set();
+        for (const entry of this.entries) {
+            if (entry.mode !== 'streaming_part') continue;
+            if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) continue;
+            if (
+                isWithinViewDistanceLoadRange(
+                    feet,
+                    entry.worldCenter,
+                    entry.worldRadius,
+                    viewDistanceM
+                )
+            ) {
+                inRangeModelIdx.add(entry.idx);
+            }
+        }
+        for (const entry of this.entries) {
+            if (entry.mode !== 'streaming_part_piggyback') continue;
+            if (!inRangeModelIdx.has(entry.idx)) continue;
+            if (entry.manifest && entry.partIndex !== undefined) {
+                addPartPath(entry.manifest, entry.partIndex);
+            }
+        }
+
+        return [...paths];
     }
 
     /**

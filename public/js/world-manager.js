@@ -4,6 +4,7 @@
  */
 
 import ViewDistanceStreaming from './view-distance-streaming.js';
+import { prefetchSignedAssetHrefs } from './asset-resolve.js';
 
 class WorldManager {
     constructor(sceneManager) {
@@ -11,7 +12,7 @@ class WorldManager {
         this.currentWorld = null;
         this.onWorldChangeCallback = null;
         this.worlds = null; // Set by init() from API
-        /** @type {{ begin?: (o: { totalBytes: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }) => void, end?: () => void } | null} */
+        /** @type {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string, prefabTitle?: string }) => void, end?: () => void } | null} */
         this._worldLoadUi = null;
         /** @type {ViewDistanceStreaming | null} */
         this._viewDistanceStreaming = null;
@@ -26,7 +27,7 @@ class WorldManager {
 
     /**
      * ワールド読み込み中のロードバー等（メインクライアントから登録）
-     * @param {{ begin?: (o: { totalBytes: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }) => void, end?: () => void } | null} handlers
+     * @param {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string, prefabTitle?: string }) => void, end?: () => void } | null} handlers
      */
     setWorldLoadUiHandlers(handlers) {
         this._worldLoadUi = handlers || null;
@@ -123,44 +124,45 @@ class WorldManager {
         const pdfList = Array.isArray(world.pdfs) ? world.pdfs : [];
         const totalAssets = this._countModelsWithPath(modelList) + pdfList.length;
 
-        /** @type {{ completedBytes: number, totalBytes: number }} */
-        const loadState = { completedBytes: 0, totalBytes: 0 };
+        /** @type {{ completedCount: number, totalCount: number }} */
+        const loadState = { completedCount: 0, totalCount: 0 };
         if (totalAssets > 0) {
-            this._worldLoadUi?.begin?.({ totalBytes: 0, preparing: true });
-        }
-        const bytePlan = totalAssets > 0
-            ? await this.sceneManager.planWorldLoadBytes(world.models, world.pdfs || [])
-            : null;
-        if (bytePlan) {
-            loadState.totalBytes = bytePlan.totalBytes;
-        }
-
-        const onByteProgress = (detail) => {
-            this._worldLoadUi?.progress?.(detail);
-        };
-
-        if (totalAssets > 0 && bytePlan) {
-            this._worldLoadUi?.begin?.({ totalBytes: bytePlan.totalBytes, preparing: false });
+            this._worldLoadUi?.begin?.({ totalCount: 0, preparing: true });
         }
 
         const vas = new ViewDistanceStreaming(this.sceneManager);
         await vas.buildRegistry(modelList);
         this._viewDistanceStreaming = vas;
 
+        const spawn = world.spawnPoint || { x: 0, y: 10, z: 0 };
+        const viewDistanceM = this.sceneManager.graphicsOptions.viewDistanceM;
+        loadState.totalCount = vas.countInitialLoadUnits(spawn, viewDistanceM, pdfList.length);
+
+        const prefetchPaths = vas.collectInitialPrefetchPaths(spawn, viewDistanceM);
+        if (prefetchPaths.length > 0) {
+            await prefetchSignedAssetHrefs(prefetchPaths);
+        }
+
+        const onLoadProgress = (detail) => {
+            this._worldLoadUi?.progress?.(detail);
+        };
+
+        if (totalAssets > 0 && loadState.totalCount > 0) {
+            this._worldLoadUi?.begin?.({ totalCount: loadState.totalCount, preparing: false });
+        } else if (totalAssets > 0) {
+            this._worldLoadUi?.begin?.({ totalCount: 1, preparing: false });
+            loadState.totalCount = 1;
+        }
+
         try {
             await this.sceneManager.loadWorldModels(
                 world.models,
                 async () => {
-                    const spawn = world.spawnPoint || { x: 0, y: 10, z: 0 };
-                    await vas.runInitialNearSpawn(
-                        spawn,
-                        this.sceneManager.graphicsOptions.viewDistanceM
-                    );
+                    await vas.runInitialNearSpawn(spawn, viewDistanceM);
 
                     await this.sceneManager.loadWorldPdfs(world.pdfs || [], {
-                        bytePlan,
                         loadState,
-                        onByteProgress
+                        onLoadProgress,
                     });
                     if (typeof this._loadWorldFlightBoards === 'function') {
                         await this._loadWorldFlightBoards(world);
@@ -176,9 +178,9 @@ class WorldManager {
                     }
                 },
                 {
-                    bytePlan,
                     loadState,
-                    onByteProgress,
+                    onLoadProgress,
+                    getLegacyManifest: (idx) => vas.getLegacyManifest(idx),
                     worldAircraftPhysics: world.aircraftPhysics,
                     worldLodSystem: world.lodSystem && typeof world.lodSystem === 'object' ? world.lodSystem : null,
                     modelIndexFilter: (idx) => vas.isLegacyIndex(idx),

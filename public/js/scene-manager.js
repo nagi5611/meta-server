@@ -50,7 +50,6 @@ import {
     loadPrefabGroupFromManifest,
     loadSinglePrefabPartGlb,
     normalizePrefabManifest,
-    resolvePrefabPartAssetPath
 } from './prefab-load-shared.js';
 
 /**
@@ -117,29 +116,6 @@ function lodDistanceFeetToPrefabBounds(feetWorld, box, centerOut) {
 
 /** Prefab LOD 境界のヒステリシス（±5%） */
 const PREFAB_LOD_HYSTERESIS = 0.05;
-
-/**
- * 工場関数配列を最大 concurrency 本で同時実行し、結果を入力順の配列で返す
- * @template T
- * @param {number} concurrency
- * @param {Array<() => Promise<T>>} factories
- * @returns {Promise<T[]>}
- */
-async function runWithConcurrency(concurrency, factories) {
-    const n = factories.length;
-    const results = new Array(n);
-    let cursor = 0;
-    async function worker() {
-        while (true) {
-            const i = cursor++;
-            if (i >= n) break;
-            results[i] = await factories[i]();
-        }
-    }
-    const workers = Math.min(Math.max(1, concurrency), Math.max(1, n));
-    await Promise.all(Array.from({ length: workers }, () => worker()));
-    return results;
-}
 
 /**
  * /api/client-config の planLoadConcurrency（サーバー .env METAVERSE_PLAN_LOAD_CONCURRENCY）。1..128。
@@ -753,211 +729,6 @@ class SceneManager {
     }
 
     /**
-     * planWorldLoadBytes 用: モデル配列の 1 要素分のバイト見積
-     * @param {Object|string} config
-     * @param {number} idx
-     * @param {number} FALLBACK
-     * @param {number} concurrency - プレハブパーツ見積の同時実行上限（/api/client-config planLoadConcurrency）
-     * @returns {Promise<{ idx: number, entry: object, bytes: number }|null>}
-     */
-    async _planWorldLoadBytesForModel(config, idx, FALLBACK, concurrency) {
-        const fullConfig = typeof config === 'string' ? { path: config } : config;
-        const pfm = String(fullConfig.prefabManifest || '').trim();
-        if (pfm) {
-            const fileLabel = pfm.split(/[/\\]/).pop() || pfm;
-            try {
-                const mUrl = await this._resolveModelHref(pfm);
-                const cred =
-                    typeof window !== 'undefined' && mUrl.startsWith(window.location.origin) ? 'include' : 'omit';
-                const mRes = await fetch(mUrl, { credentials: cred });
-                if (!mRes.ok) {
-                    console.warn('[SceneManager] prefab manifest not found for byte plan:', pfm);
-                    return {
-                        idx,
-                        entry: {
-                            fileLabel,
-                            totalFileBytes: FALLBACK,
-                            wMtl: 0,
-                            wObj: FALLBACK,
-                            contentLenObj: null,
-                            prefabManifestPath: pfm,
-                            prefabManifestPlan: null,
-                            prefabDisplayName: ''
-                        },
-                        bytes: FALLBACK
-                    };
-                }
-                const raw = await mRes.json();
-                const man = normalizePrefabManifest(raw);
-                if (!man.parts.length) {
-                    return {
-                        idx,
-                        entry: {
-                            fileLabel,
-                            totalFileBytes: FALLBACK,
-                            wMtl: 0,
-                            wObj: FALLBACK,
-                            contentLenObj: null,
-                            prefabManifestPath: pfm,
-                            prefabManifestPlan: null,
-                            prefabDisplayName: String(man.displayName || '').trim()
-                        },
-                        bytes: FALLBACK
-                    };
-                }
-                const nP = man.parts.length;
-                const partFactories = man.parts.map(
-                    (part) => async () => {
-                        const fp = resolvePrefabPartAssetPath(part.file);
-                        const u = await this._resolveModelHref(fp);
-                        const len = await fetchModelContentLength(u);
-                        const w = len != null && len > 0 ? len : Math.max(1, Math.floor(FALLBACK / nP));
-                        return w;
-                    }
-                );
-                const partWidths = await runWithConcurrency(concurrency, partFactories);
-                let sum = 0;
-                for (const w of partWidths) sum += w;
-                const mLen = await fetchModelContentLength(mUrl);
-                if (mLen != null && mLen > 0) {
-                    sum += mLen;
-                }
-                return {
-                    idx,
-                    entry: {
-                        fileLabel,
-                        totalFileBytes: Math.max(1, sum),
-                        wMtl: 0,
-                        wObj: Math.max(1, sum),
-                        contentLenObj: null,
-                        prefabManifestPath: pfm,
-                        prefabManifestPlan: { parts: man.parts },
-                        prefabDisplayName: String(man.displayName || '').trim()
-                    },
-                    bytes: Math.max(1, sum)
-                };
-            } catch (e) {
-                console.warn('[SceneManager] prefab byte plan error:', e);
-                return {
-                    idx,
-                    entry: {
-                        fileLabel: pfm.split(/[/\\]/).pop() || pfm,
-                        totalFileBytes: FALLBACK,
-                        wMtl: 0,
-                        wObj: FALLBACK,
-                        contentLenObj: null,
-                        prefabManifestPath: pfm,
-                        prefabManifestPlan: null,
-                        prefabDisplayName: ''
-                    },
-                    bytes: FALLBACK
-                };
-            }
-        }
-        const modelPath = fullConfig.path;
-        if (!modelPath) return null;
-
-        const url = await this._resolveModelHref(modelPath);
-        const fileLabel = modelPath.split(/[/\\]/).pop() || modelPath;
-        if (this._isObjPath(modelPath)) {
-            const mtlPath = String(fullConfig.mtlPath || '').trim();
-            let objLen;
-            let mtlLen = 0;
-            if (mtlPath) {
-                const mtlUrl = await this._resolveModelHref(mtlPath);
-                const pair = await Promise.all([
-                    fetchModelContentLength(url),
-                    fetchModelContentLength(mtlUrl)
-                ]);
-                objLen = pair[0];
-                const fetched = pair[1];
-                mtlLen = fetched != null && fetched > 0 ? fetched : 0;
-            } else {
-                objLen = await fetchModelContentLength(url);
-            }
-            let wMtl = 0;
-            let wObj = 0;
-            if (mtlPath) {
-                wMtl = mtlLen > 0 ? mtlLen : Math.min(FALLBACK, Math.max(4096, Math.floor(FALLBACK * 0.05)));
-                wObj = objLen != null && objLen > 0 ? objLen : Math.max(1, FALLBACK - wMtl);
-            } else {
-                wObj = objLen != null && objLen > 0 ? objLen : FALLBACK;
-            }
-            const totalFile = wMtl + wObj;
-            return {
-                idx,
-                entry: {
-                    fileLabel,
-                    totalFileBytes: totalFile,
-                    wMtl,
-                    wObj,
-                    contentLenObj: objLen
-                },
-                bytes: totalFile
-            };
-        }
-
-        const glbLen = await fetchModelContentLength(url);
-        const totalFile = glbLen != null && glbLen > 0 ? glbLen : FALLBACK;
-        return {
-            idx,
-            entry: {
-                fileLabel,
-                totalFileBytes: totalFile,
-                wMtl: 0,
-                wObj: totalFile,
-                contentLenObj: glbLen
-            },
-            bytes: totalFile
-        };
-    }
-
-    /**
-     * 各アセットの Content-Length を集計し、進捗バー用の総バイト数を返す（HEAD 不可時は仮定値を混ぜる）
-     * @param {Array<Object|string>} modelConfigs
-     * @param {Array<Object>} [pdfConfigs]
-     * @returns {Promise<{ totalBytes: number, modelByIndex: Map<number, { fileLabel: string, totalFileBytes: number, wMtl: number, wObj: number, contentLenObj: number|null }>, pdfByIndex: Map<number, { fileLabel: string, totalFileBytes: number }> }>}
-     */
-    async planWorldLoadBytes(modelConfigs, pdfConfigs) {
-        const FALLBACK = 5 * 1024 * 1024;
-        const conc = await getClientPlanLoadConcurrency();
-        const list = Array.isArray(modelConfigs) ? modelConfigs : [];
-        const modelFactories = list.map(
-            (config, idx) => () => this._planWorldLoadBytesForModel(config, idx, FALLBACK, conc)
-        );
-        const modelSlots = await runWithConcurrency(conc, modelFactories);
-
-        const modelByIndex = new Map();
-        let totalBytes = 0;
-        for (const slot of modelSlots) {
-            if (!slot) continue;
-            modelByIndex.set(slot.idx, slot.entry);
-            totalBytes += slot.bytes;
-        }
-
-        const pdfs = Array.isArray(pdfConfigs) ? pdfConfigs : [];
-        const pdfFactories = pdfs.map((pdfCfg, idx) => {
-            return async () => {
-                const path = pdfCfg.path || '';
-                const pdfPath = path || 'pdfs/placeholder.pdf';
-                const pdfUrl = pdfPath.startsWith('/') ? pdfPath : '/' + pdfPath;
-                const len = await fetchModelContentLength(pdfUrl);
-                const fileLabel = pdfPath.split(/[/\\]/).pop() || pdfPath;
-                const totalFile = len != null && len > 0 ? len : FALLBACK;
-                return { idx, entry: { fileLabel, totalFileBytes: totalFile }, bytes: totalFile };
-            };
-        });
-        const pdfSlots = await runWithConcurrency(conc, pdfFactories);
-        const pdfByIndex = new Map();
-        for (const slot of pdfSlots) {
-            pdfByIndex.set(slot.idx, slot.entry);
-            totalBytes += slot.bytes;
-        }
-
-        return { totalBytes, modelByIndex, pdfByIndex };
-    }
-
-    /**
      * ストリーミング追加分の BVH 再生成を debounce する
      * @param {number} [delayMs]
      */
@@ -1043,79 +814,98 @@ class SceneManager {
 
         if (slot.loadedPartIndices.has(partIndex)) return;
 
-        const partRoot = await loadSinglePrefabPartGlb({
-            manifest,
-            partIndex,
-            createGLTFLoader: createGLTFLoaderWithDraco,
-        });
+        const partFile = manifest.parts[partIndex]?.file;
+        const partLabel =
+            (partFile && String(partFile).split(/[/\\]/).pop())
+            || manifestPath.split(/[/\\]/).pop()
+            || manifestPath;
+        const prefabTitle = String(manifest.displayName || '').trim()
+            || manifestPath.replace(/-prefab-manifest\.json$/i, '').replace(/\.json$/i, '')
+            || partLabel;
+        const progressExtra = {
+            loadKind: 'prefab',
+            prefabTitle,
+        };
 
-        const tris = countTrianglesInObject(partRoot);
-        if (tris > MODEL_MAX_TRIANGLES_TOTAL) {
-            this._disposeModelObject(partRoot);
-            window.dispatchEvent(
-                new CustomEvent('metaverse-model-load-guard', {
-                    detail: {
-                        path: manifestPath,
-                        reason: 'too_many_triangles',
-                        triangles: tris,
-                        maxTriangles: MODEL_MAX_TRIANGLES_TOTAL,
-                    },
-                })
-            );
-            throw new Error(`prefab part too many triangles: ${tris}`);
-        }
-        if (slot.totalTris + tris > MODEL_MAX_TRIANGLES_TOTAL) {
-            this._disposeModelObject(partRoot);
-            window.dispatchEvent(
-                new CustomEvent('metaverse-model-load-guard', {
-                    detail: {
-                        path: manifestPath,
-                        reason: 'too_many_triangles',
-                        triangles: slot.totalTris + tris,
-                        maxTriangles: MODEL_MAX_TRIANGLES_TOTAL,
-                    },
-                })
-            );
-            throw new Error(`prefab cumulative triangles exceeded: ${slot.totalTris + tris}`);
-        }
+        try {
+            const partRoot = await loadSinglePrefabPartGlb({
+                manifest,
+                partIndex,
+                createGLTFLoader: createGLTFLoaderWithDraco,
+            });
 
-        partRoot.userData.prefabPartIndex = partIndex;
-        slot.group.userData.worldModelIndex = modelIdx;
-
-        slot.group.add(partRoot);
-        slot.totalTris += tris;
-        slot.loadedPartIndices.add(partIndex);
-
-        const disableSh = tris > MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD;
-        partRoot.traverse((child) => {
-            if (child.isMesh) {
-                child.castShadow = !disableSh;
-                child.receiveShadow = !disableSh;
+            const tris = countTrianglesInObject(partRoot);
+            if (tris > MODEL_MAX_TRIANGLES_TOTAL) {
+                this._disposeModelObject(partRoot);
+                window.dispatchEvent(
+                    new CustomEvent('metaverse-model-load-guard', {
+                        detail: {
+                            path: manifestPath,
+                            reason: 'too_many_triangles',
+                            triangles: tris,
+                            maxTriangles: MODEL_MAX_TRIANGLES_TOTAL,
+                        },
+                    })
+                );
+                throw new Error(`prefab part too many triangles: ${tris}`);
             }
-        });
-
-        const pathForLog = String(fullConfig.path || '').trim() || manifestPath;
-        const cfgForAdd = { ...fullConfig, prefabManifest: manifestPath };
-
-        if (!slot.finishedSetup) {
-            if (typeof session.finishAddModel !== 'function') {
-                throw new Error('Model load session missing finishAddModel');
+            if (slot.totalTris + tris > MODEL_MAX_TRIANGLES_TOTAL) {
+                this._disposeModelObject(partRoot);
+                window.dispatchEvent(
+                    new CustomEvent('metaverse-model-load-guard', {
+                        detail: {
+                            path: manifestPath,
+                            reason: 'too_many_triangles',
+                            triangles: slot.totalTris + tris,
+                            maxTriangles: MODEL_MAX_TRIANGLES_TOTAL,
+                        },
+                    })
+                );
+                throw new Error(`prefab cumulative triangles exceeded: ${slot.totalTris + tris}`);
             }
-            session.finishAddModel(slot.group, cfgForAdd, pathForLog, slot.totalTris);
-            slot.finishedSetup = true;
-        } else {
-            partRoot.userData.drawCullStyle = 'aabb';
-            this._registerDrawCullTarget(partRoot);
-            const lodId = String(fullConfig.lodId || '').trim();
-            if (lodId) {
-                if (!slot.group.userData.prefabLodRootMeta) {
-                    slot.group.userData.prefabLodRootMeta = { lodId };
+
+            partRoot.userData.prefabPartIndex = partIndex;
+            slot.group.userData.worldModelIndex = modelIdx;
+
+            slot.group.add(partRoot);
+            slot.totalTris += tris;
+            slot.loadedPartIndices.add(partIndex);
+
+            const disableSh = tris > MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD;
+            partRoot.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = !disableSh;
+                    child.receiveShadow = !disableSh;
                 }
-                if (!this._prefabLodRoots.includes(slot.group)) {
-                    this._prefabLodRoots.push(slot.group);
+            });
+
+            const pathForLog = String(fullConfig.path || '').trim() || manifestPath;
+            const cfgForAdd = { ...fullConfig, prefabManifest: manifestPath };
+
+            if (!slot.finishedSetup) {
+                if (typeof session.finishAddModel !== 'function') {
+                    throw new Error('Model load session missing finishAddModel');
                 }
-                this._applyPrefabPartLodRankForPart(slot.group, fullConfig, partRoot, partIndex);
+                session.finishAddModel(slot.group, cfgForAdd, pathForLog, slot.totalTris);
+                slot.finishedSetup = true;
+            } else {
+                partRoot.userData.drawCullStyle = 'aabb';
+                this._registerDrawCullTarget(partRoot);
+                const lodId = String(fullConfig.lodId || '').trim();
+                if (lodId) {
+                    if (!slot.group.userData.prefabLodRootMeta) {
+                        slot.group.userData.prefabLodRootMeta = { lodId };
+                    }
+                    if (!this._prefabLodRoots.includes(slot.group)) {
+                        this._prefabLodRoots.push(slot.group);
+                    }
+                    this._applyPrefabPartLodRankForPart(slot.group, fullConfig, partRoot, partIndex);
+                }
             }
+            session.completeUnit?.(partLabel, progressExtra);
+        } catch (err) {
+            session.completeUnit?.(partLabel, progressExtra);
+            throw err;
         }
     }
 
@@ -1213,11 +1003,17 @@ class SceneManager {
      * Load multiple world models
      * @param {Array<Object|string>} modelConfigs - Array of model configs or paths
      * @param {function} onComplete - Callback when all models are loaded
-     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }) => void, worldAircraftPhysics?: Record<string, unknown>|null, modelIndexFilter?: (idx: number) => boolean }} [loadOptions]
+     * @param {{ loadState?: { completedCount: number, totalCount: number }, onLoadProgress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string, prefabTitle?: string }) => void, getLegacyManifest?: (idx: number) => ReturnType<typeof normalizePrefabManifest>|null, worldAircraftPhysics?: Record<string, unknown>|null, modelIndexFilter?: (idx: number) => boolean }} [loadOptions]
      */
     async loadWorldModels(modelConfigs, onComplete, loadOptions = {}) {
-        const { bytePlan, loadState, onByteProgress, worldAircraftPhysics, worldLodSystem, modelIndexFilter } =
-            loadOptions;
+        const {
+            loadState,
+            onLoadProgress,
+            getLegacyManifest,
+            worldAircraftPhysics,
+            worldLodSystem,
+            modelIndexFilter,
+        } = loadOptions;
 
         this._worldLodSystem =
             worldLodSystem && typeof worldLodSystem === 'object' ? worldLodSystem : null;
@@ -1233,61 +1029,28 @@ class SceneManager {
         console.log(`Loading ${modelConfigs.length} models...`);
         let loadedCount = 0;
 
-        const tb = loadState?.totalBytes ?? 0;
-        const modelCount = modelConfigs.length;
-        /** bytePlan+loadState が無い場合は進捗の都合で並列度1 */
-        const useAggregatedProgress = !!(bytePlan && loadState);
+        const totalCount = loadState?.totalCount ?? 0;
+        const useCountProgress = !!(loadState && totalCount > 0);
         const planConc = await getClientPlanLoadConcurrency();
-        const concurrency = useAggregatedProgress ? planConc : 1;
-        /** @type {Float64Array|null} */
-        const modelProgressFrac = useAggregatedProgress ? new Float64Array(modelCount) : null;
+        const concurrency = useCountProgress ? planConc : 1;
 
         /**
-         * モデルごとの進捗率から loadState / コールバックを更新（複数モデル同時読込用）
+         * ロードユニット1件完了時に進捗を更新する
          * @param {string} fileName
          * @param {Record<string, string>} [extra]
          */
-        const aggregateProgress = (fileName, extra = {}) => {
-            if (!useAggregatedProgress || !loadState || !bytePlan || !modelProgressFrac) return;
-            let sum = 0;
-            for (let i = 0; i < modelCount; i++) {
-                const p = bytePlan.modelByIndex.get(i);
-                if (p) sum += modelProgressFrac[i] * p.totalFileBytes;
-            }
-            loadState.completedBytes = Math.min(tb, sum);
-            onByteProgress?.({ fileName, loadedBytes: loadState.completedBytes, totalBytes: tb, ...extra });
-        };
-
-        /**
-         * インデックス idx のモデルについて、モデル内バイト進捗を反映する
-         * @param {number} idx
-         * @param {string} fileName
-         * @param {number} bytesDoneInModel
-         * @param {number} fileBudget
-         * @param {Record<string, string>} [extra]
-         */
-        const setModelBytesProgress = (idx, fileName, bytesDoneInModel, fileBudget, extra = {}) => {
-            if (!modelProgressFrac) return;
-            const denom = fileBudget > 0 ? fileBudget : 1;
-            modelProgressFrac[idx] = Math.min(1, bytesDoneInModel / denom);
-            aggregateProgress(fileName, extra);
-        };
-
-        /**
-         * このアセット開始時点の completedBytes を base とし、ファイル内 xhr 進捗を反映する（直列・非集約時）
-         * @param {string} fileName
-         * @param {number} loadedInFile
-         * @param {number} totalInFile
-         * @param {number} fileBudget
-         * @param {number} baseBytes
-         * @param {Record<string, string>} [extra]
-         */
-        const emitFromBase = (fileName, loadedInFile, totalInFile, fileBudget, baseBytes, extra = {}) => {
-            if (useAggregatedProgress || !onByteProgress || !bytePlan || !loadState) return;
-            const denom = totalInFile > 0 ? totalInFile : fileBudget;
-            const frac = denom > 0 ? Math.min(1, loadedInFile / denom) : 0;
-            const loadedBytes = Math.min(tb, baseBytes + frac * fileBudget);
-            onByteProgress({ fileName, loadedBytes, totalBytes: tb, ...extra });
+        const completeUnit = (fileName, extra = {}) => {
+            if (!useCountProgress || !loadState) return;
+            loadState.completedCount = Math.min(
+                totalCount,
+                (loadState.completedCount ?? 0) + 1
+            );
+            onLoadProgress?.({
+                fileName: fileName || '—',
+                completedCount: loadState.completedCount,
+                totalCount,
+                ...extra,
+            });
         };
 
         /**
@@ -1398,47 +1161,42 @@ class SceneManager {
 
         const loadOne = async (config, idx) => {
             const fullConfig = typeof config === 'string' ? { path: config } : config;
-            const plan = bytePlan?.modelByIndex?.get(idx);
             const modelPath = fullConfig.path;
             const pfm = String(fullConfig.prefabManifest || '').trim();
+            const countAsLegacyParts =
+                typeof modelIndexFilter !== 'function' || modelIndexFilter(idx);
 
-            const fileLabel = plan?.fileLabel
-                || (modelPath
-                    ? (modelPath.split(/[/\\]/).pop() || modelPath)
-                    : pfm
-                    ? (pfm.split(/[/\\]/).pop() || pfm)
-                    : 'model');
-            const fileBudget = plan?.totalFileBytes ?? (5 * 1024 * 1024);
-            const fileStart = useAggregatedProgress ? 0 : (loadState?.completedBytes ?? 0);
-            const progressExtraPrefab =
-                pfm
-                    ? {
-                        loadKind: 'prefab',
-                        prefabTitle:
-                            (plan?.prefabDisplayName && String(plan.prefabDisplayName).trim())
-                            || fileLabel.replace(/-prefab-manifest\.json$/i, '').replace(/\.json$/i, '')
-                            || fileLabel
-                    }
-                    : {};
+            const fileLabel = modelPath
+                ? (modelPath.split(/[/\\]/).pop() || modelPath)
+                : pfm
+                ? (pfm.split(/[/\\]/).pop() || pfm)
+                : 'model';
+            const cachedManifest =
+                typeof getLegacyManifest === 'function' ? getLegacyManifest(idx) : null;
+            const prefabTitle =
+                (cachedManifest?.displayName && String(cachedManifest.displayName).trim())
+                || fileLabel.replace(/-prefab-manifest\.json$/i, '').replace(/\.json$/i, '')
+                || fileLabel;
+            const progressExtraPrefab = pfm
+                ? { loadKind: 'prefab', prefabTitle }
+                : {};
+
+            let partsCompleted = 0;
+            const nLegacyParts = cachedManifest?.parts?.length ?? 0;
 
             /**
-             * 読み込み失敗・棄却時でもバーが止まらないよう、このアセット分の見積バイトを進捗に反映する
+             * 失敗・棄却時でもバーが止まらないよう未カウント分を進捗に反映する
              */
             const snapBudgetDone = () => {
-                const extra = pfm ? progressExtraPrefab : {};
-                if (useAggregatedProgress && modelProgressFrac && loadState && bytePlan) {
-                    modelProgressFrac[idx] = 1;
-                    aggregateProgress(plan?.fileLabel || fileLabel, extra);
+                if (pfm && countAsLegacyParts) {
+                    const nParts = nLegacyParts > 0 ? nLegacyParts : 1;
+                    while (partsCompleted < nParts) {
+                        completeUnit(fileLabel, progressExtraPrefab);
+                        partsCompleted++;
+                    }
                     return;
                 }
-                if (!loadState || !bytePlan || !plan) return;
-                loadState.completedBytes = Math.min(tb, fileStart + plan.totalFileBytes);
-                onByteProgress?.({
-                    fileName: plan.fileLabel,
-                    loadedBytes: loadState.completedBytes,
-                    totalBytes: tb,
-                    ...extra
-                });
+                completeUnit(fileLabel, pfm ? progressExtraPrefab : {});
             };
 
             if (!pfm && !modelPath) {
@@ -1448,32 +1206,21 @@ class SceneManager {
 
             if (pfm) {
                 try {
-                    const nPlanParts = plan?.prefabManifestPlan?.parts?.length;
-                    const nPart = nPlanParts && nPlanParts > 0 ? nPlanParts : 1;
-                    const partW = fileBudget / nPart;
                     const { group, totalTris } = await loadPrefabGroupFromManifest({
                         THREE,
                         manifestPath: pfm,
+                        cachedManifest: cachedManifest ?? undefined,
                         createGLTFLoader: createGLTFLoaderWithDraco,
                         onXhrProgress: (name, xhr, partIndex) => {
-                            const denom = xhr.total > 0 ? xhr.total : partW;
-                            const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
-                            const doneInModel = (partIndex + f) * partW;
-                            if (useAggregatedProgress) {
-                                setModelBytesProgress(idx, name || fileLabel, doneInModel, fileBudget, progressExtraPrefab);
-                            } else {
-                                const effIdx = partIndex;
-                                const basePart = fileStart + effIdx * partW;
-                                emitFromBase(
-                                    name || fileLabel,
-                                    xhr.loaded,
-                                    xhr.total || 0,
-                                    partW,
-                                    basePart,
-                                    progressExtraPrefab
-                                );
+                            if (!countAsLegacyParts) return;
+                            if (xhr.total > 0 && xhr.loaded >= xhr.total) {
+                                const target = partIndex + 1;
+                                while (partsCompleted < target) {
+                                    completeUnit(name || fileLabel, progressExtraPrefab);
+                                    partsCompleted++;
+                                }
                             }
-                        }
+                        },
                     });
                     if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
                         this._disposeModelObject(group);
@@ -1484,8 +1231,8 @@ class SceneManager {
                                     path: pfm,
                                     reason: 'too_many_triangles',
                                     triangles: totalTris,
-                                    maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
-                                }
+                                    maxTriangles: MODEL_MAX_TRIANGLES_TOTAL,
+                                },
                             })
                         );
                         snapBudgetDone();
@@ -1495,13 +1242,14 @@ class SceneManager {
                     const pathForLog = String(modelPath || '').trim() || pfm;
                     group.userData.worldModelIndex = idx;
                     finishAddModel(group, cfgForAdd, pathForLog, totalTris);
-                    if (loadState) {
-                        if (useAggregatedProgress && modelProgressFrac) {
-                            modelProgressFrac[idx] = 1;
-                            aggregateProgress(plan?.fileLabel || fileLabel, progressExtraPrefab);
-                        } else {
-                            loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
+                    if (countAsLegacyParts) {
+                        const nParts = group.children.length || nLegacyParts || 1;
+                        while (partsCompleted < nParts) {
+                            completeUnit(fileLabel, progressExtraPrefab);
+                            partsCompleted++;
                         }
+                    } else if (partsCompleted < 1) {
+                        completeUnit(fileLabel, progressExtraPrefab);
                     }
                 } catch (error) {
                     console.error(`[SceneManager] prefab 読み込み失敗 ${pfm}:`, error);
@@ -1520,16 +1268,13 @@ class SceneManager {
                 }
             }
             const maxBytes = this._isObjPath(modelPath) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
-            let contentLen = plan?.contentLenObj;
-            if (contentLen === undefined) {
-                contentLen = await fetchModelContentLength(url);
-            }
+            const contentLen = await fetchModelContentLength(url);
             if (contentLen != null && contentLen > maxBytes) {
                 const mb = Math.round(contentLen / 1024 / 1024);
                 const maxMb = Math.round(maxBytes / 1024 / 1024);
                 console.error(`[SceneManager] モデルが大きすぎます (${mb}MB, 上限約 ${maxMb}MB): ${modelPath}`);
                 window.dispatchEvent(new CustomEvent('metaverse-model-load-guard', {
-                    detail: { path: modelPath, reason: 'file_too_large', bytes: contentLen, maxBytes }
+                    detail: { path: modelPath, reason: 'file_too_large', bytes: contentLen, maxBytes },
                 }));
                 snapBudgetDone();
                 return;
@@ -1540,23 +1285,8 @@ class SceneManager {
                     if (this._isObjPath(modelPath)) {
                         const mtlPath = String(fullConfig.mtlPath || '').trim();
                         const objLoader = new OBJLoader();
-                        const wMtl = plan?.wMtl ?? 0;
-                        const wObj = plan?.wObj ?? fileBudget;
                         if (!mtlPath) {
-                            objLoader.load(
-                                url,
-                                (object) => resolve(object),
-                                (xhr) => {
-                                    const denom = xhr.total > 0 ? xhr.total : fileBudget;
-                                    const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
-                                    if (useAggregatedProgress) {
-                                        setModelBytesProgress(idx, fileLabel, f * fileBudget, fileBudget);
-                                    } else {
-                                        emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, fileBudget, fileStart);
-                                    }
-                                },
-                                reject
-                            );
+                            objLoader.load(url, (object) => resolve(object), undefined, reject);
                             return;
                         }
                         const mtlEncoded = resolvedObjMtlHref;
@@ -1566,37 +1296,15 @@ class SceneManager {
                         const objFile = modelPath.split('/').pop();
                         const mtlLoader = new MTLLoader();
                         mtlLoader.setPath(mtlDirUrl);
-                        const baseAfterMtl = fileStart + wMtl;
                         mtlLoader.load(
                             mtlFile,
                             (materials) => {
                                 materials.preload();
                                 objLoader.setMaterials(materials);
                                 objLoader.setPath(objDirUrl);
-                                objLoader.load(
-                                    objFile,
-                                    (object) => resolve(object),
-                                    (xhr) => {
-                                        const denom = xhr.total > 0 ? xhr.total : wObj;
-                                        const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
-                                        if (useAggregatedProgress) {
-                                            setModelBytesProgress(idx, fileLabel, wMtl + f * wObj, fileBudget);
-                                        } else {
-                                            emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, wObj, baseAfterMtl);
-                                        }
-                                    },
-                                    reject
-                                );
+                                objLoader.load(objFile, (object) => resolve(object), undefined, reject);
                             },
-                            (xhr) => {
-                                const denom = xhr.total > 0 ? xhr.total : wMtl;
-                                const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
-                                if (useAggregatedProgress) {
-                                    setModelBytesProgress(idx, mtlFile || fileLabel, f * wMtl, fileBudget);
-                                } else {
-                                    emitFromBase(mtlFile || fileLabel, xhr.loaded, xhr.total || 0, wMtl, fileStart);
-                                }
-                            },
+                            undefined,
                             reject
                         );
                         return;
@@ -1611,15 +1319,7 @@ class SceneManager {
                             if (anims.length) root.userData.gltfClips = anims;
                             resolve(root);
                         },
-                        (xhr) => {
-                            const denom = xhr.total > 0 ? xhr.total : fileBudget;
-                            const f = denom > 0 ? Math.min(1, xhr.loaded / denom) : 0;
-                            if (useAggregatedProgress) {
-                                setModelBytesProgress(idx, fileLabel, f * fileBudget, fileBudget);
-                            } else {
-                                emitFromBase(fileLabel, xhr.loaded, xhr.total || 0, fileBudget, fileStart);
-                            }
-                        },
+                        undefined,
                         reject
                     );
                 });
@@ -1633,29 +1333,22 @@ class SceneManager {
                             path: modelPath,
                             reason: 'too_many_triangles',
                             triangles: tris,
-                            maxTriangles: MODEL_MAX_TRIANGLES_TOTAL
-                        }
+                            maxTriangles: MODEL_MAX_TRIANGLES_TOTAL,
+                        },
                     }));
                     snapBudgetDone();
                     return;
                 }
                 model.userData.worldModelIndex = idx;
                 finishAddModel(model, fullConfig, modelPath, tris);
-                if (loadState) {
-                    if (useAggregatedProgress && modelProgressFrac) {
-                        modelProgressFrac[idx] = 1;
-                        aggregateProgress(plan?.fileLabel || fileLabel, {});
-                    } else {
-                        loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
-                    }
-                }
+                completeUnit(fileLabel, {});
             } catch (error) {
                 console.error(`Error loading model ${modelPath}:`, error);
                 snapBudgetDone();
             }
         };
 
-        this._modelLoadSession = { modelConfigs, loadOne, finishAddModel };
+        this._modelLoadSession = { modelConfigs, loadOne, finishAddModel, completeUnit, modelIndexFilter };
 
         try {
             const indicesToLoad = [];
@@ -1703,18 +1396,37 @@ class SceneManager {
     /**
      * Load PDF posters (2D planes) for the current world. Renders first page via PDF.js.
      * @param {Array<Object>} [pdfConfigs] - Each item: { path, position?, rotation?, scale? }
-     * @param {{ bytePlan?: object, loadState?: { completedBytes: number, totalBytes: number }, onByteProgress?: (o: { fileName: string, loadedBytes: number, totalBytes: number }) => void }} [options]
+     * @param {{ loadState?: { completedCount: number, totalCount: number }, onLoadProgress?: (o: { fileName: string, completedCount: number, totalCount: number }) => void }} [options]
      */
     async loadWorldPdfs(pdfConfigs, options = {}) {
         if (!pdfConfigs || pdfConfigs.length === 0) return;
-        const { bytePlan, loadState, onByteProgress } = options;
-        const tb = loadState?.totalBytes ?? 0;
+        const { loadState, onLoadProgress } = options;
+        const totalCount = loadState?.totalCount ?? 0;
+        const useCountProgress = !!(loadState && totalCount > 0);
+
+        const completePdfUnit = (pdfLabel) => {
+            if (!useCountProgress || !loadState) return;
+            loadState.completedCount = Math.min(
+                totalCount,
+                (loadState.completedCount ?? 0) + 1
+            );
+            onLoadProgress?.({
+                fileName: pdfLabel,
+                completedCount: loadState.completedCount,
+                totalCount,
+            });
+        };
         let pdfjsLib;
         try {
             pdfjsLib = await import('pdfjs-dist');
         } catch (e) {
             console.error('Failed to load pdfjs-dist:', e);
             this._addPdfPlaceholderMeshes(pdfConfigs);
+            for (const config of pdfConfigs) {
+                const path = config.path || 'pdfs/placeholder.pdf';
+                const pdfLabel = path.split(/[/\\]/).pop() || path;
+                completePdfUnit(pdfLabel);
+            }
             return;
         }
         if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
@@ -1730,24 +1442,11 @@ class SceneManager {
             const path = config.path || 'pdfs/placeholder.pdf';
             const pdfLabel = path.split(/[/\\]/).pop() || path;
             const url = path.startsWith('/') ? path : '/' + path;
-            const pdfEntry = bytePlan?.pdfByIndex?.get(pi);
-            const fileBudget = pdfEntry?.totalFileBytes ?? (5 * 1024 * 1024);
-            const fileStart = loadState?.completedBytes ?? 0;
-            const emitPdf = (loadedInFile, totalInFile) => {
-                if (!onByteProgress || !bytePlan || !loadState) return;
-                const denom = totalInFile > 0 ? totalInFile : fileBudget;
-                const frac = denom > 0 ? Math.min(1, loadedInFile / denom) : 0;
-                const loadedBytes = Math.min(tb, fileStart + frac * fileBudget);
-                onByteProgress({ fileName: pdfLabel, loadedBytes, totalBytes: tb });
-            };
             const position = config.position || { x: 0, y: 2, z: -5 };
             const rotation = config.rotation || { x: 0, y: 0, z: 0 };
             const scale = config.scale || { x: 2, y: 2.8, z: 1 };
             try {
                 const loadingTask = pdfjsLib.getDocument(url);
-                loadingTask.onProgress = ({ loaded, total }) => {
-                    emitPdf(loaded, total || 0);
-                };
                 const pdf = await loadingTask.promise;
                 const page = await pdf.getPage(1);
                 // 720p相当に制限してテクスチャを軽くする（最長辺 1280px）
@@ -1790,20 +1489,11 @@ class SceneManager {
                     applyVisualModeToObject3D(mesh, VISUAL_MODE_HIGH_CONTRAST, THREE);
                     updatePdfOutline(mesh, VISUAL_MODE_HIGH_CONTRAST, THREE);
                 }
-                if (loadState) {
-                    loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
-                }
+                completePdfUnit(pdfLabel);
             } catch (err) {
                 console.error('Failed to load PDF:', path, err);
                 this._addPdfPlaceholderMesh(position, rotation, scale, path, config.teleporter);
-                if (loadState && bytePlan) {
-                    loadState.completedBytes = Math.min(tb, fileStart + fileBudget);
-                    onByteProgress?.({
-                        fileName: pdfLabel,
-                        loadedBytes: loadState.completedBytes,
-                        totalBytes: tb
-                    });
-                }
+                completePdfUnit(pdfLabel);
             }
         }
         console.log(`Loaded ${pdfConfigs.length} PDF poster(s)`);

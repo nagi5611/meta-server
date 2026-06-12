@@ -37,9 +37,9 @@ export const METAVERSE_STRINGS = {
         zh: '正在加载世界',
     },
     'worldLoad.preparingAsset': {
-        ja: '接続・署名・容量を確認しています…',
-        en: 'Checking connection, signature, and size…',
-        zh: '正在检查连接、签名与大小…',
+        ja: 'マニフェストを読み込んでいます…',
+        en: 'Loading manifests…',
+        zh: '正在加载清单…',
     },
     'worldLoad.prefabLine': {
         ja: 'プレハブ「{title}」 — {name}',

@@ -267,10 +267,10 @@ class UIManager {
 
     /**
      * ワールドアセット読み込み開始時にオーバーを表示する
-     * @param {number} totalBytes - 読み込み予定の総バイト数（準備フェーズでは 0）
-     * @param {{ preparing?: boolean }} [opts] - preparing: planWorldLoadBytes 前（署名・HEAD 等）
+     * @param {number} totalCount - 読み込み予定のオブジェクト数（準備フェーズでは 0）
+     * @param {{ preparing?: boolean }} [opts] - preparing: マニフェスト読込フェーズ
      */
-    showWorldLoadProgress(totalBytes, opts = {}) {
+    showWorldLoadProgress(totalCount, opts = {}) {
         if (!this.worldLoadOverlay || !this.worldLoadLabel || !this.worldLoadBarFill) return;
         const preparing = !!opts.preparing;
         this.worldLoadOverlay.style.display = 'flex';
@@ -291,7 +291,7 @@ class UIManager {
         if (this.worldLoadAsset) {
             this.worldLoadAsset.textContent = '';
         }
-        const initialPct = totalBytes > 0 ? 0 : 100;
+        const initialPct = totalCount > 0 ? 0 : 100;
         this.worldLoadBarFill.style.width = `${initialPct}%`;
         if (this.worldLoadPct) {
             this.worldLoadPct.textContent = `${initialPct}%`;
@@ -299,12 +299,12 @@ class UIManager {
     }
 
     /**
-     * 読み込み中ファイル名とプログレスバーを更新する（総バイトベース）
-     * @param {{ fileName: string, loadedBytes: number, totalBytes: number, loadKind?: string, prefabTitle?: string }} detail
+     * 読み込み中ファイル名とプログレスバーを更新する（オブジェクト数ベース）
+     * @param {{ fileName: string, completedCount: number, totalCount: number, loadKind?: string, prefabTitle?: string }} detail
      */
     updateWorldLoadProgress(detail) {
         if (!this.worldLoadLabel || !this.worldLoadBarFill) return;
-        const { fileName, loadedBytes, totalBytes, loadKind, prefabTitle } = detail || {};
+        const { fileName, completedCount, totalCount, loadKind, prefabTitle } = detail || {};
         const name = (fileName && String(fileName).trim()) || '—';
         this.worldLoadLabel.textContent = t('worldLoad.loading');
         if (this.worldLoadAsset) {
@@ -318,8 +318,8 @@ class UIManager {
                 this.worldLoadAsset.textContent = name;
             }
         }
-        const totalB = Math.max(1, Math.floor(Number(totalBytes)) || 1);
-        const c = Math.min(Math.max(0, Number(loadedBytes) || 0), totalB);
+        const totalB = Math.max(1, Math.floor(Number(totalCount)) || 1);
+        const c = Math.min(Math.max(0, Number(completedCount) || 0), totalB);
         const pct = Math.round((c / totalB) * 100);
         this.worldLoadBarFill.style.width = `${pct}%`;
         if (this.worldLoadPct) {

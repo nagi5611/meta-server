@@ -27,6 +27,7 @@ import { initAircraftSubsystem } from '../../addons/aircraft/client/init.js';
 import { initAvatorScalableAnimations } from '../../addons/avator-scalable-animations/client/init.js';
 import { initMatsuyamaFlightsSubsystem } from '../../addons/matsuyama-flights/client/init.js';
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
+import { loadClientConfigOnce } from './asset-resolve.js';
 
 const DEFAULT_ROOM = 'lobby';
 
@@ -144,12 +145,9 @@ class MetaverseApp {
 
         let chartFeaturesEnabled = true;
         try {
-            const cfgRes = await fetch('/api/client-config', { credentials: 'include' });
-            if (cfgRes.ok) {
-                const cfg = await cfgRes.json();
-                if (typeof cfg.chartFeaturesEnabled === 'boolean') {
-                    chartFeaturesEnabled = cfg.chartFeaturesEnabled;
-                }
+            const cfg = await loadClientConfigOnce();
+            if (cfg && typeof cfg === 'object' && typeof cfg.chartFeaturesEnabled === 'boolean') {
+                chartFeaturesEnabled = cfg.chartFeaturesEnabled;
             }
         } catch (_) {
             /* 既定の true のまま */
@@ -191,7 +189,7 @@ class MetaverseApp {
         await this.worldManager.init();
 
         this.worldManager.setWorldLoadUiHandlers({
-            begin: (opts) => this.uiManager.showWorldLoadProgress(opts.totalBytes, opts),
+            begin: (opts) => this.uiManager.showWorldLoadProgress(opts.totalCount, opts),
             progress: (detail) => this.uiManager.updateWorldLoadProgress(detail),
             end: () => this.uiManager.hideWorldLoadProgress()
         });

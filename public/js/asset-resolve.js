@@ -5,6 +5,12 @@
 /** @type {Promise<unknown> | null} */
 let configPromise = null;
 
+/** @type {Map<string, string>} CDN 署名済み URL キャッシュ（キー = 正規 CDN URL） */
+const signedHrefCache = new Map();
+
+/** サーバー sign-asset-urls の1リクエスト上限 */
+const SIGN_BATCH_SIZE = 64;
+
 /**
  * /api/client-config を一度だけ取得
  * @returns {Promise<unknown>}
@@ -23,6 +29,93 @@ export async function getAssetModelsConfig() {
     const j = await loadClientConfigOnce();
     const a = j && typeof j === 'object' && 'assetModels' in j ? j.assetModels : null;
     return a && typeof a === 'object' ? /** @type {AssetModelsCfg} */ (a) : { mode: 'local' };
+}
+
+/**
+ * CDN モード時の署名用正規 URL を論理パスから構築。CDN 無効時は null。
+ * @param {string} pathOrUrl
+ * @param {AssetModelsCfg} cfg
+ * @returns {string|null}
+ */
+function canonicalModelCdnSignKey(pathOrUrl, cfg) {
+    if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) return null;
+    const raw = String(pathOrUrl || '').trim();
+    if (!raw) return null;
+
+    if (raw.startsWith('https://') || raw.startsWith('http://')) {
+        try {
+            if (typeof window !== 'undefined') {
+                const abs = new URL(raw);
+                if (abs.origin === window.location.origin) {
+                    const pathAndQuery = `${abs.pathname.replace(/^\//, '')}${abs.search}`;
+                    if (pathAndQuery.length > 0) {
+                        return canonicalModelCdnSignKey(pathAndQuery, cfg);
+                    }
+                }
+            }
+        } catch {
+            /* fall through */
+        }
+        return raw.split('#')[0];
+    }
+
+    const pathStr = raw.startsWith('/') ? raw.slice(1) : raw;
+    const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+    let base = String(cfg.cdnBaseUrl).replace(/\/+$/, '');
+    if (pathStr.startsWith('avatars/') || /^[^/]+\/avatars\//.test(pathStr) || pathStr.startsWith('plane/')) {
+        base = base.replace(/\/models\/?$/i, '');
+    }
+    return `${base}/${encodedPath.replace(/^\/+/, '')}`.split('#')[0];
+}
+
+/**
+ * 署名 API をバッチ呼び出ししキャッシュへ格納する
+ * @param {string[]} urlKeys
+ * @returns {Promise<void>}
+ */
+async function signAndCacheUrlKeys(urlKeys) {
+    const unique = [...new Set(urlKeys.filter(Boolean))].filter((k) => !signedHrefCache.has(k));
+    if (!unique.length) return;
+
+    for (let i = 0; i < unique.length; i += SIGN_BATCH_SIZE) {
+        const batch = unique.slice(i, i + SIGN_BATCH_SIZE);
+        try {
+            const res = await fetch('/api/metaverse/sign-asset-urls', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ urls: batch }),
+            });
+            if (!res.ok) continue;
+            const j = await res.json();
+            const signed = j.signed && typeof j.signed === 'object' ? j.signed : null;
+            if (!signed) continue;
+            for (const key of batch) {
+                const href = signed[key];
+                if (typeof href === 'string' && href.length > 0) {
+                    signedHrefCache.set(key, href);
+                }
+            }
+        } catch {
+            /* 個別 resolve 時にフォールバック */
+        }
+    }
+}
+
+/**
+ * 初回ワールドロード前に論理パス群の CDN 署名をまとめて取得する
+ * @param {string[]} paths
+ * @returns {Promise<void>}
+ */
+export async function prefetchSignedAssetHrefs(paths) {
+    const cfg = await getAssetModelsConfig();
+    if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) return;
+    const keys = [];
+    for (const p of paths) {
+        const key = canonicalModelCdnSignKey(p, cfg);
+        if (key) keys.push(key);
+    }
+    await signAndCacheUrlKeys(keys);
 }
 
 /**
@@ -84,59 +177,29 @@ export async function resolveModelAssetHref(pathOrUrl) {
         if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) {
             return raw;
         }
-        try {
-            const uKey = raw.split('#')[0];
-            const res = await fetch('/api/metaverse/sign-asset-urls', {
-                method: 'POST',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ urls: [uKey] }),
-            });
-            if (res.ok) {
-                const j = await res.json();
-                const signed = j.signed && typeof j.signed === 'object' ? j.signed[uKey] : null;
-                if (typeof signed === 'string' && signed.length > 0) {
-                    return signed;
-                }
-            }
-        } catch {
-            /* fall through */
-        }
+        const uKey = raw.split('#')[0];
+        const cached = signedHrefCache.get(uKey);
+        if (cached) return cached;
+        await signAndCacheUrlKeys([uKey]);
+        const signed = signedHrefCache.get(uKey);
+        if (signed) return signed;
         return originUrlFromCdnUrl(raw);
     }
 
     const pathStr = raw.startsWith('/') ? raw.slice(1) : raw;
-    const encodedPath = pathStr.split('/').map((seg) => encodeURIComponent(seg)).join('/');
     const sameOriginPath = sameOriginPathForAssetLogicalPath(pathStr);
 
     if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) {
         return sameOriginPath;
     }
 
-    let base = String(cfg.cdnBaseUrl).replace(/\/+$/, '');
-    // META_CDN_PUBLIC_BASE が .../models で終わる構成でも、兄弟フォルダ avatars は CDN 上で並ぶ想定のため末尾 models を落として署名 URL と整合させる
-    if (pathStr.startsWith('avatars/') || /^[^/]+\/avatars\//.test(pathStr) || pathStr.startsWith('plane/')) {
-        base = base.replace(/\/models\/?$/i, '');
-    }
-    const canonical = `${base}/${encodedPath.replace(/^\/+/, '')}`;
-    const uKey = canonical.split('#')[0];
-    try {
-        const res = await fetch('/api/metaverse/sign-asset-urls', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ urls: [uKey] }),
-        });
-        if (res.ok) {
-            const j = await res.json();
-            const signed = j.signed && typeof j.signed === 'object' ? j.signed[uKey] : null;
-            if (typeof signed === 'string' && signed.length > 0) {
-                return signed;
-            }
-        }
-    } catch {
-        /* use origin */
-    }
+    const uKey = canonicalModelCdnSignKey(pathStr, cfg);
+    if (!uKey) return sameOriginPath;
+    const cached = signedHrefCache.get(uKey);
+    if (cached) return cached;
+    await signAndCacheUrlKeys([uKey]);
+    const signed = signedHrefCache.get(uKey);
+    if (signed) return signed;
     return sameOriginPath;
 }
 
