@@ -1209,42 +1209,31 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     color: #fff;
 }
 
-.admin-panel-world-edit .world-list .item {
+.admin-panel-world-edit .world-list .item,
+.admin-panel-world-edit .world-list .world-list-row {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
 }
 
-.world-list-entry {
-    border-bottom: 1px solid var(--we-border);
-}
-
-.world-list-entry:last-child {
-    border-bottom: none;
-}
-
-.world-list-header {
-    width: 100%;
+.world-list-row .world-list-name {
+    flex: 0 1 auto;
+    min-width: 0;
     font-weight: 600;
+    cursor: pointer;
 }
 
-.world-list-header.selected-world {
-    background: var(--we-accent-light);
-    color: #1565c0;
-}
-
-.world-list-lod-row {
-    display: flex;
+.world-list-row .world-quality-lod-badges {
+    display: inline-flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 4px;
-    padding: 4px 8px 8px 12px;
-    width: 100%;
-    box-sizing: border-box;
 }
 
 .world-list-lod-btn {
     cursor: pointer;
+    flex-shrink: 0;
     border: 1px solid rgba(21, 101, 192, 0.35);
     background: rgba(21, 101, 192, 0.08);
     font-size: 11px;
@@ -1260,11 +1249,6 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     background: var(--we-accent);
     color: #fff;
     border-color: var(--we-accent);
-}
-
-.world-list-name {
-    flex: 1 1 auto;
-    min-width: 0;
 }
 
 .world-quality-lod-badges {
@@ -1285,7 +1269,8 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
     border: 1px solid rgba(21, 101, 192, 0.35);
 }
 
-.admin-panel-world-edit .world-list .item.selected .world-quality-lod-badge {
+.admin-panel-world-edit .world-list .item.selected .world-quality-lod-badge,
+.admin-panel-world-edit .world-list .world-list-row.selected .world-quality-lod-badge {
     background: rgba(255, 255, 255, 0.2);
     color: #fff;
     border-color: rgba(255, 255, 255, 0.45);

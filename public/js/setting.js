@@ -2325,6 +2325,11 @@ function renderQualityLodPanel(w) {
         labelInput.value =
             entry && typeof entry === 'object' && typeof entry.label === 'string' ? entry.label : '';
     }
+    const deleteBtn = document.getElementById('btn-quality-lod-delete');
+    if (deleteBtn) {
+        const keys = getQualityLodEditorKeys(w);
+        deleteBtn.disabled = selectedQualityLodKey === '1' || keys.length <= 1;
+    }
 }
 
 /**
@@ -2387,6 +2392,42 @@ async function addQualityLodToSelectedWorld() {
 }
 
 /**
+ * 選択中の品質 LOD を削除（LOD1 は不可）
+ */
+async function deleteQualityLodFromSelectedWorld() {
+    if (!selectedWorldId || !worlds[selectedWorldId]) return;
+    if (selectedQualityLodKey === '1') {
+        alert('LOD1 は削除できません。');
+        return;
+    }
+    const keys = getQualityLodEditorKeys(worlds[selectedWorldId]);
+    if (keys.length <= 1) return;
+
+    const keyToDelete = selectedQualityLodKey;
+    if (!confirm(`LOD${keyToDelete} を削除しますか？この LOD の models 設定も失われます。`)) return;
+
+    worlds = buildWorldsFromScene();
+    const w = worlds[selectedWorldId];
+    if (!w || !w.qualityLods || typeof w.qualityLods !== 'object') return;
+
+    delete w.qualityLods[keyToDelete];
+    ensureWorldQualityLod1(w);
+
+    selectedQualityLodKey = '1';
+    renderWorldList();
+    renderQualityLodPanel(w);
+
+    const gen = ++worldSelectLoadGen;
+    setWorldEditLoader(true, 'LOD を削除しています…');
+    try {
+        await loadWorldIntoScene(w);
+    } finally {
+        if (gen === worldSelectLoadGen) setWorldEditLoader(false);
+    }
+    writeWorldEditCache();
+}
+
+/**
  * 品質 LOD パネルのイベント（1 回だけ）
  */
 function bindQualityLodEditorEvents() {
@@ -2394,6 +2435,9 @@ function bindQualityLodEditorEvents() {
     qualityLodEditorInitialized = true;
     document.getElementById('btn-quality-lod-add')?.addEventListener('click', () => {
         void addQualityLodToSelectedWorld();
+    });
+    document.getElementById('btn-quality-lod-delete')?.addEventListener('click', () => {
+        void deleteQualityLodFromSelectedWorld();
     });
     document.getElementById('quality-lod-label')?.addEventListener('change', () => {
         if (!selectedWorldId || !worlds[selectedWorldId]) return;
@@ -3546,20 +3590,20 @@ function renderWorldList() {
         const w = worlds[id];
         ensureWorldQualityLod1(w);
 
-        const entry = document.createElement('div');
-        entry.className = 'world-list-entry';
+        const row = document.createElement('div');
+        row.className = 'item world-list-row' + (id === selectedWorldId ? ' selected' : '');
+        row.dataset.id = id;
 
-        const header = document.createElement('div');
-        header.className =
-            'item world-list-header' + (id === selectedWorldId ? ' selected-world' : '');
-        header.textContent = w.name || id;
-        header.addEventListener('click', () => {
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'world-list-name';
+        nameSpan.textContent = w.name || id;
+        nameSpan.addEventListener('click', () => {
             void selectWorld(id, id === selectedWorldId ? selectedQualityLodKey : '1');
         });
-        entry.appendChild(header);
+        row.appendChild(nameSpan);
 
-        const lodRow = document.createElement('div');
-        lodRow.className = 'world-list-lod-row';
+        const lodWrap = document.createElement('span');
+        lodWrap.className = 'world-quality-lod-badges';
         const qlKeys = getQualityLodEditorKeys(w);
         for (const key of qlKeys) {
             const lodBtn = document.createElement('button');
@@ -3574,10 +3618,10 @@ function renderWorldList() {
                 e.stopPropagation();
                 void selectWorld(id, key);
             });
-            lodRow.appendChild(lodBtn);
+            lodWrap.appendChild(lodBtn);
         }
-        entry.appendChild(lodRow);
-        el.appendChild(entry);
+        row.appendChild(lodWrap);
+        el.appendChild(row);
     });
 }
 
