@@ -80,8 +80,6 @@ class PhysicsManager {
         this.feetClearanceAboveGround = 0.038;
         /** 床レイ原点をカプセル中心より上にずらす（m）— メッシュ内での取りこぼし緩和 */
         this.groundProbeOriginLift = 2;
-        /** 1 フレームで下げられる余裕（m）— 連続衝突の代わりに垂直移動だけ制限 */
-        this.verticalMoveMargin = 0.02;
         /** レイが一時的に外れたときの直近カプセル中心の最低 Y */
         this._lastKnownMinCapsuleY = null;
     }
@@ -188,15 +186,8 @@ class PhysicsManager {
             this.playerVelocity.y += delta * this.gravity;
         }
 
-        // 垂直移動（落下時は床までの余裕で 1 フレーム落下量をクランプ）
-        this.playerPosition.copy(this._tunnelStart);
-        let dy = this.playerVelocity.y * delta;
-        const groundBeforeMove = this._sampleGroundBelow(this._tunnelStart);
-        if (groundBeforeMove && dy < 0 && this.playerVelocity.y <= 0.12) {
-            const maxDrop = Math.max(0, groundBeforeMove.headroom - this.verticalMoveMargin);
-            dy = -Math.min(-dy, maxDrop);
-        }
-        this.playerPosition.y += dy;
+        // Apply gravity to position（元のフル速度積分）
+        this.playerPosition.addScaledVector(this.playerVelocity, delta);
 
         // Apply horizontal movement
         this.playerPosition.add(moveDirection);
@@ -588,9 +579,6 @@ class PhysicsManager {
         if (minCapsuleY == null || this.playerPosition.y >= minCapsuleY) return false;
 
         this.playerPosition.y = minCapsuleY;
-        if (this.playerVelocity.y < 0) {
-            this.playerVelocity.y *= 0.3;
-        }
         if (this.playerVelocity.y <= 0.12) {
             this.playerIsOnGround = true;
         }
