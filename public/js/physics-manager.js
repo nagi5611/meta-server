@@ -80,14 +80,13 @@ class PhysicsManager {
         this.feetClearanceAboveGround = 0.038;
         /** 床レイ原点をカプセル中心より上にずらす（m）— メッシュ内での取りこぼし緩和 */
         this.groundProbeOriginLift = 2;
-        /** レイが一時的に外れたときの直近カプセル中心の最低 Y */
-        this._lastKnownMinCapsuleY = null;
-        /** 床スナップ: このめり込み未満は無視（ジッター防止） */
-        this.floorSnapMinPenetration = 0.02;
-        /** 床スナップ: 高速落下時はこのめり込み以上だけ復帰（床抜け復帰用） */
-        this.floorSnapDeepPenetration = 0.12;
-        /** 床スナップ: |vy| がこの値以下なら通常着地としてスナップ可 (m/s) */
-        this.floorSnapMaxFallSpeed = 2.0;
+        /** 床スナップ: このめり込み以上のみ復帰（通常落下には干渉しない） */
+        this.floorSnapDeepPenetration = 0.35;
+        /**
+         * BVH 接地: これより速く落下中は床への擦過で接地扱いにしない (m/s)
+         * 誤接地 → 次フレームで vy=0・重力停止 → 落下が遅く見えるのを防ぐ
+         */
+        this.groundMaxFallSpeedForGrounded = 1.25;
     }
 
     async init() {
@@ -278,9 +277,12 @@ class PhysicsManager {
         // Check if player is on ground（上向き速度があるときは誤接地扱いにしない → ジャンプが即座に潰れるのを防ぐ）
         const vyPushback = Math.abs(delta * this.playerVelocity.y * 0.25);
         const cappedVyPushback = Math.min(vyPushback, this.groundDeltaVyPushbackCap);
-        this.playerIsOnGround = deltaVector.y > cappedVyPushback;
+        const bvhPushesUp = deltaVector.y > cappedVyPushback;
         if (this.playerVelocity.y > 0.12) {
             this.playerIsOnGround = false;
+        } else {
+            this.playerIsOnGround =
+                bvhPushesUp && this.playerVelocity.y > -this.groundMaxFallSpeedForGrounded;
         }
 
         const offset = Math.max(0.0, deltaVector.length() - 1e-5);
@@ -371,10 +373,6 @@ class PhysicsManager {
         const feetY = this.playerPosition.y - this.capsuleInfo.radius;
         const gap = hit.point.y - feetY;
         this.playerIsOnGround = gap > this.groundProbeGapMin && gap < this.groundProbeGapMax;
-        if (this.playerIsOnGround) {
-            this._lastKnownMinCapsuleY =
-                hit.point.y + this.feetClearanceAboveGround + this.capsuleInfo.radius;
-        }
     }
 
     /**
@@ -393,14 +391,12 @@ class PhysicsManager {
     /** Set character position from feet position (bottom of capsule). */
     setCharacterPosition(x, y, z) {
         this.playerPosition.set(x, y + this.capsuleInfo.radius, z);
-        this._lastKnownMinCapsuleY = null;
     }
 
     resetVelocity() {
         this.playerVelocity.set(0, 0, 0);
         this.playerIsOnGround = false;
         this._coyoteJumpUntilMs = 0;
-        this._lastKnownMinCapsuleY = null;
     }
 
     isGrounded() {
@@ -408,7 +404,6 @@ class PhysicsManager {
     }
 
     reset() {
-        this._lastKnownMinCapsuleY = null;
         this._stuckResolveTimestamps.length = 0;
         if (typeof this.getSpawnPoint === 'function') {
             const spawn = this.getSpawnPoint();
@@ -563,33 +558,18 @@ class PhysicsManager {
     }
 
     /**
-     * 移動後に床レイでカプセル中心 Y を強制スナップ（床抜け復帰のみ・速度・接地フラグは触らない）
-     * @returns {boolean} 位置を補正したか
+     * 深い床抜け時のみ Y をレイで復帰（速度・接地フラグは変更しない）
+     * @returns {boolean}
      */
     _enforceFloorFromRaycast() {
         if (this.playerVelocity.y > 0.12) return false;
 
-        let ground = this._sampleGroundBelow(this.playerPosition);
-        let minCapsuleY = ground?.minCapsuleY ?? null;
-
-        if (minCapsuleY != null) {
-            this._lastKnownMinCapsuleY = minCapsuleY;
-        } else if (
-            this._lastKnownMinCapsuleY != null &&
-            this.playerVelocity.y < 0 &&
-            this.playerPosition.y < this._lastKnownMinCapsuleY
-        ) {
-            minCapsuleY = this._lastKnownMinCapsuleY;
-        }
-
+        const ground = this._sampleGroundBelow(this.playerPosition);
+        const minCapsuleY = ground?.minCapsuleY ?? null;
         if (minCapsuleY == null || this.playerPosition.y >= minCapsuleY) return false;
 
         const penetration = minCapsuleY - this.playerPosition.y;
-        if (penetration < this.floorSnapMinPenetration) return false;
-
-        const slowFall = this.playerVelocity.y >= -this.floorSnapMaxFallSpeed;
-        const deepClip = penetration >= this.floorSnapDeepPenetration;
-        if (!slowFall && !deepClip) return false;
+        if (penetration < this.floorSnapDeepPenetration) return false;
 
         this.playerPosition.y = minCapsuleY;
         return true;
