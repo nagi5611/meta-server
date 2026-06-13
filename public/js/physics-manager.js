@@ -73,6 +73,17 @@ class PhysicsManager {
         this.groundDeltaVyPushbackCap = 0.06;
         /** コヨーテ終了時刻（performance.now） */
         this._coyoteJumpUntilMs = 0;
+
+        /** 床レイの最大距離（m）— 飛行機と同様に長めで取りこぼしを減らす */
+        this.groundRayMax = 500;
+        /** 足元と床面のクリアランス（m） */
+        this.feetClearanceAboveGround = 0.038;
+        /** 床レイ原点をカプセル中心より上にずらす（m）— メッシュ内での取りこぼし緩和 */
+        this.groundProbeOriginLift = 2;
+        /** 1 フレームで下げられる余裕（m）— 連続衝突の代わりに垂直移動だけ制限 */
+        this.verticalMoveMargin = 0.02;
+        /** レイが一時的に外れたときの直近カプセル中心の最低 Y */
+        this._lastKnownMinCapsuleY = null;
     }
 
     async init() {
@@ -177,8 +188,15 @@ class PhysicsManager {
             this.playerVelocity.y += delta * this.gravity;
         }
 
-        // Apply gravity to position
-        this.playerPosition.addScaledVector(this.playerVelocity, delta);
+        // 垂直移動（落下時は床までの余裕で 1 フレーム落下量をクランプ）
+        this.playerPosition.copy(this._tunnelStart);
+        let dy = this.playerVelocity.y * delta;
+        const groundBeforeMove = this._sampleGroundBelow(this._tunnelStart);
+        if (groundBeforeMove && dy < 0 && this.playerVelocity.y <= 0.12) {
+            const maxDrop = Math.max(0, groundBeforeMove.headroom - this.verticalMoveMargin);
+            dy = -Math.min(-dy, maxDrop);
+        }
+        this.playerPosition.y += dy;
 
         // Apply horizontal movement
         this.playerPosition.add(moveDirection);
@@ -278,6 +296,8 @@ class PhysicsManager {
             this.unburyFeetFromFloor();
         }
 
+        this._enforceFloorFromRaycast();
+
         // 床・メッシュ挟み込み: 大きな補正が短時間に繰り返されたら Y を持ち上げて抜ける（スポーン TP はしない）
         if (offset >= this.STUCK_MIN_OFFSET) {
             const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -354,6 +374,10 @@ class PhysicsManager {
         const feetY = this.playerPosition.y - this.capsuleInfo.radius;
         const gap = hit.point.y - feetY;
         this.playerIsOnGround = gap > this.groundProbeGapMin && gap < this.groundProbeGapMax;
+        if (this.playerIsOnGround) {
+            this._lastKnownMinCapsuleY =
+                hit.point.y + this.feetClearanceAboveGround + this.capsuleInfo.radius;
+        }
     }
 
     /**
@@ -372,12 +396,14 @@ class PhysicsManager {
     /** Set character position from feet position (bottom of capsule). */
     setCharacterPosition(x, y, z) {
         this.playerPosition.set(x, y + this.capsuleInfo.radius, z);
+        this._lastKnownMinCapsuleY = null;
     }
 
     resetVelocity() {
         this.playerVelocity.set(0, 0, 0);
         this.playerIsOnGround = false;
         this._coyoteJumpUntilMs = 0;
+        this._lastKnownMinCapsuleY = null;
     }
 
     isGrounded() {
@@ -385,6 +411,7 @@ class PhysicsManager {
     }
 
     reset() {
+        this._lastKnownMinCapsuleY = null;
         this._stuckResolveTimestamps.length = 0;
         if (typeof this.getSpawnPoint === 'function') {
             const spawn = this.getSpawnPoint();
@@ -507,6 +534,66 @@ class PhysicsManager {
         this._triangleNormalWorld(hit.faceIndex, this._hitNormalWorld);
         if (Math.abs(this._hitNormalWorld.y) >= 0.52) return false;
 
+        return true;
+    }
+
+    /**
+     * カプセル中心位置から直下の床をレイでサンプル（飛行機 _sampleGroundBelow と同系）
+     * @param {THREE.Vector3} capsuleCenterWorld カプセル下端球の中心（playerPosition）
+     * @returns {{ minCapsuleY: number, headroom: number } | null}
+     */
+    _sampleGroundBelow(capsuleCenterWorld) {
+        if (!this.collider?.geometry?.boundsTree) return null;
+
+        const lift = this.groundProbeOriginLift;
+        const origin = this._segFrom.set(
+            capsuleCenterWorld.x,
+            capsuleCenterWorld.y + lift,
+            capsuleCenterWorld.z
+        );
+        const hit = this.raycastStaticWorld(
+            origin,
+            this._rayDown,
+            this.groundRayMax + lift
+        );
+        if (!hit?.point) return null;
+
+        const minCapsuleY = hit.point.y + this.feetClearanceAboveGround + this.capsuleInfo.radius;
+        return {
+            minCapsuleY,
+            headroom: capsuleCenterWorld.y - minCapsuleY,
+        };
+    }
+
+    /**
+     * 移動後に床レイでカプセル中心 Y を強制スナップ（床抜け復帰・飛行機と同系）
+     * @returns {boolean} 位置を補正したか
+     */
+    _enforceFloorFromRaycast() {
+        if (this.playerVelocity.y > 0.12) return false;
+
+        let ground = this._sampleGroundBelow(this.playerPosition);
+        let minCapsuleY = ground?.minCapsuleY ?? null;
+
+        if (minCapsuleY != null) {
+            this._lastKnownMinCapsuleY = minCapsuleY;
+        } else if (
+            this._lastKnownMinCapsuleY != null &&
+            this.playerVelocity.y < 0 &&
+            this.playerPosition.y < this._lastKnownMinCapsuleY
+        ) {
+            minCapsuleY = this._lastKnownMinCapsuleY;
+        }
+
+        if (minCapsuleY == null || this.playerPosition.y >= minCapsuleY) return false;
+
+        this.playerPosition.y = minCapsuleY;
+        if (this.playerVelocity.y < 0) {
+            this.playerVelocity.y *= 0.3;
+        }
+        if (this.playerVelocity.y <= 0.12) {
+            this.playerIsOnGround = true;
+        }
         return true;
     }
 

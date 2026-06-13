@@ -16,6 +16,12 @@ class NetworkManager {
         this.updateInterval = null;
         this.pingInterval = null;
         this.disconnectCheckInterval = null;
+        /** @type {ReturnType<typeof setInterval>|null} 応答なし・切断時の再接続試行 */
+        this._reconnectInterval = null;
+        /** @type {boolean} logout 等の意図的切断 */
+        this._intentionalDisconnect = false;
+        /** @type {boolean} 再接続試行の同時実行防止 */
+        this._reconnectInFlight = false;
         this.currentWorld = 'lobby'; // Track current world
         this.username = localStorage.getItem('username') || 'Guest';
         /** 管理者の透明化状態。他プレイヤーに送り、相手側で非表示にする */
@@ -27,7 +33,8 @@ class NetworkManager {
         this.pingMs = null;
         this.lastPongTime = 0;
         this.NO_RESPONSE_THRESHOLD_MS = 10000;  // 10秒で応答なし表示
-        this.DISCONNECT_THRESHOLD_MS = 30000;   // 30秒で切断
+        this.DISCONNECT_THRESHOLD_MS = 30000;   // 30秒で強制切断
+        this.RECONNECT_TRY_INTERVAL_MS = 3000;  // 応答なし時は3秒ごとに再接続
         /** @type {(() => object)|null} report-ping に載せる性能ペイロード */
         this._perfPayloadGetter = null;
 
@@ -154,6 +161,7 @@ class NetworkManager {
      * @returns {Promise<boolean>} 接続開始できたら true（管理者認証失敗時は false）
      */
     async connect() {
+        this._intentionalDisconnect = false;
         // window.location.origin に統一（Vite プロキシ経由で httpOnly Cookie が Socket に届く）
         const socketUrl = window.location.origin;
 
@@ -173,6 +181,9 @@ class NetworkManager {
             transports: ['websocket', 'polling'],
             auth: () => this._resolveSocketAuth(),
             withCredentials: true,
+            reconnection: true,
+            reconnectionDelay: this.RECONNECT_TRY_INTERVAL_MS,
+            reconnectionDelayMax: this.RECONNECT_TRY_INTERVAL_MS,
         });
 
         this.socket.io.on('reconnect_attempt', async () => {
@@ -188,6 +199,7 @@ class NetworkManager {
         });
 
         this.socket.on('connect', () => {
+            this.stopReconnectAttempts();
             this.myPlayerId = this.socket.id;
             this.lastPongTime = Date.now();
             console.log(`Connected to server. My ID: ${this.myPlayerId}`);
@@ -368,6 +380,9 @@ class NetworkManager {
             this.stopDisconnectCheck();
             this.pingMs = null;
             console.log('Disconnected from server');
+            if (!this._intentionalDisconnect) {
+                this.startReconnectAttempts();
+            }
         });
 
         // Handle admin alert
@@ -559,11 +574,78 @@ class NetworkManager {
     }
 
     disconnect() {
+        this._intentionalDisconnect = true;
         this.stopSendingUpdates();
         this.stopPing();
         this.stopDisconnectCheck();
+        this.stopReconnectAttempts();
         if (this.socket) {
             this.socket.disconnect();
+        }
+    }
+
+    /**
+     * ping 応答が一定時間無いか
+     * @returns {boolean}
+     */
+    _isUnresponsive() {
+        if (!this.socket?.connected) return false;
+        return Date.now() - this.lastPongTime >= this.NO_RESPONSE_THRESHOLD_MS;
+    }
+
+    /** 応答なし・切断中に3秒ごと再接続を試みる */
+    startReconnectAttempts() {
+        if (this._intentionalDisconnect || this._reconnectInterval) return;
+        this._reconnectInterval = setInterval(() => {
+            void this._tryReconnect();
+        }, this.RECONNECT_TRY_INTERVAL_MS);
+        void this._tryReconnect();
+    }
+
+    stopReconnectAttempts() {
+        if (this._reconnectInterval) {
+            clearInterval(this._reconnectInterval);
+            this._reconnectInterval = null;
+        }
+        this._reconnectInFlight = false;
+    }
+
+    /**
+     * ゾンビ接続の切断または socket.connect() で復旧を試みる
+     */
+    async _tryReconnect() {
+        if (this._intentionalDisconnect || !this.socket || this._reconnectInFlight) return;
+
+        if (this.socket.connected && !this._isUnresponsive()) {
+            this.stopReconnectAttempts();
+            return;
+        }
+
+        this._reconnectInFlight = true;
+        try {
+            if (this.socket.connected && this._isUnresponsive()) {
+                console.warn('[Net] No server response — forcing disconnect before reconnect');
+                this.socket.disconnect();
+            }
+
+            if (!this.socket.connected) {
+                if (isAdminMetaverseEntryPath()) {
+                    const entry = await fetchAdminMetaverseEntry();
+                    if (entry?.token) {
+                        this.socket.auth = { adminToken: entry.token };
+                        if (entry.username) {
+                            localStorage.setItem('username', entry.username);
+                            this.username = entry.username;
+                        }
+                    }
+                }
+                console.log('[Net] Attempting reconnect…');
+                this.socket.connect();
+            }
+        } catch (err) {
+            console.warn('[Net] Reconnect attempt failed:', err);
+        } finally {
+            this._reconnectInFlight = false;
         }
     }
 
@@ -596,8 +678,16 @@ class NetworkManager {
     startDisconnectCheck() {
         this.stopDisconnectCheck();
         this.disconnectCheckInterval = setInterval(() => {
-            if (!this.socket?.connected) return;
+            if (!this.socket?.connected) {
+                if (!this._intentionalDisconnect) {
+                    this.startReconnectAttempts();
+                }
+                return;
+            }
             const elapsed = Date.now() - this.lastPongTime;
+            if (elapsed >= this.NO_RESPONSE_THRESHOLD_MS && !this._intentionalDisconnect) {
+                this.startReconnectAttempts();
+            }
             if (elapsed >= this.DISCONNECT_THRESHOLD_MS) {
                 console.warn('[Ping] No response for 30s - disconnecting');
                 this.socket.disconnect();
