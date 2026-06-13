@@ -286,6 +286,7 @@ function buildModelPrefabEntries(fileNames, manifestFileNames) {
         out.push({
             displayLabel: `${base}（Prefab）`,
             path: 'models/' + name.replace(/^\//, ''),
+            prefabManifest: 'models/' + name.replace(/^\//, ''),
             isPrefab: true
         });
     }
@@ -312,6 +313,7 @@ function buildEditorModelPaletteEntries() {
         out.push({
             displayLabel: `${baseName}（飛行機 Prefab）`,
             path: 'plane/' + String(name).replace(/^\//, ''),
+            prefabManifest: 'plane/' + String(name).replace(/^\//, ''),
             isPrefab: true,
             kind: 'prefab-plane',
         });
@@ -2253,22 +2255,43 @@ function bindWorldRodEditorEvents() {
 }
 
 /**
+ * パレットエントリから prefab manifest パスを得る
+ * @param {{ path?: string, prefabManifest?: string, isPrefab?: boolean }} entry
+ * @returns {string}
+ */
+function paletteEntryPrefabManifest(entry) {
+    if (!entry || typeof entry !== 'object') return '';
+    const pm = String(entry.prefabManifest || '').trim();
+    if (pm) return pm;
+    if (entry.isPrefab) {
+        const path = String(entry.path || '').trim();
+        if (path && !path.startsWith('__aircraft__')) return path;
+    }
+    return '';
+}
+
+/**
  * プレファブ選択用 option を select に追加する
  * @param {HTMLSelectElement} sel
  * @param {string} [selectedValue]
+ * @param {{ allowEmptyFallback?: boolean }} [opts]
  */
-function populatePrefabManifestSelectOptions(sel, selectedValue) {
+function populatePrefabManifestSelectOptions(sel, selectedValue, opts) {
     if (!sel) return;
+    const allowEmptyFallback = !opts || opts.allowEmptyFallback !== false;
     sel.innerHTML = '';
-    const empty = document.createElement('option');
-    empty.value = '';
-    empty.textContent = '（未設定・ロッド1と同じ）';
-    sel.appendChild(empty);
 
-    const pal = buildEditorModelPaletteEntries().filter((e) => e.isPrefab && e.prefabManifest);
+    if (allowEmptyFallback) {
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = '（未設定・ロッド1と同じ）';
+        sel.appendChild(empty);
+    }
+
+    const pal = buildEditorModelPaletteEntries().filter((e) => paletteEntryPrefabManifest(e));
     const seen = new Set();
     for (const e of pal) {
-        const pm = String(e.prefabManifest || '').trim();
+        const pm = paletteEntryPrefabManifest(e);
         if (!pm || seen.has(pm)) continue;
         seen.add(pm);
         const opt = document.createElement('option');
@@ -2334,7 +2357,7 @@ function fillObjectRodPanel(obj, c) {
         }
     }
 
-    populatePrefabManifestSelectOptions(sel, manifestValue);
+    populatePrefabManifestSelectOptions(sel, manifestValue, { allowEmptyFallback: !isRod1 });
     if (hint) {
         hint.hidden = isRod1 || !!manifestValue;
     }
