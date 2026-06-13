@@ -333,6 +333,7 @@ class PhysicsManager {
         }
 
         const offset = Math.max(0.0, deltaVector.length() - 1e-5);
+        const pushDirY = offset > 1e-5 ? deltaVector.y / offset : 0;
         deltaVector.normalize().multiplyScalar(offset);
 
         // Apply position adjustment
@@ -369,19 +370,26 @@ class PhysicsManager {
         }
 
         if (!this.playerIsOnGround) {
-            this._velLogBefore.copy(this.playerVelocity);
-            const nx = deltaVector.x;
-            const ny = deltaVector.y;
-            const nz = deltaVector.z;
-            deltaVector.normalize();
-            this.playerVelocity.addScaledVector(deltaVector, -deltaVector.dot(this.playerVelocity));
-            this._logVelocityChange(
-                'damp',
-                'bvh-collision-projection',
-                this._velLogBefore,
-                this.playerVelocity,
-                { pushNormal: { x: nx, y: ny, z: nz }, offset }
-            );
+            // 高速落下中の床めり込み押し出しは位置補正のみ。速度投影すると毎フレーム vy が削られて落下が遅くなる
+            const floorLikePush = Math.abs(pushDirY) >= 0.52;
+            const falling = this.playerVelocity.y < 0;
+            const skipFloorProjection = floorLikePush && falling;
+
+            if (!skipFloorProjection) {
+                this._velLogBefore.copy(this.playerVelocity);
+                const nx = deltaVector.x;
+                const ny = deltaVector.y;
+                const nz = deltaVector.z;
+                deltaVector.normalize();
+                this.playerVelocity.addScaledVector(deltaVector, -deltaVector.dot(this.playerVelocity));
+                this._logVelocityChange(
+                    'damp',
+                    'bvh-collision-projection',
+                    this._velLogBefore,
+                    this.playerVelocity,
+                    { pushNormal: { x: nx, y: ny, z: nz }, pushDirY, offset }
+                );
+            }
         } else {
             // 接地でも上昇中は vy を残す（誤接地のフレームでジャンプ初速を消さない）
             if (this.playerVelocity.y <= 0) {
