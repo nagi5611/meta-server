@@ -5,8 +5,8 @@
 
 import ViewDistanceStreaming from './view-distance-streaming.js';
 import { prefetchSignedAssetHrefs } from './asset-resolve.js';
-import { resolveWorldForQualityLod } from './world-quality-lod.js';
-import { normalizeWorldsQualityLods } from './world-quality-lod-normalize.js';
+import { promptRodSelection } from './rod-selection.js';
+import { resolveWorldModelsForRod, DEFAULT_ROD_ID } from './world-rod-resolve.js';
 
 class WorldManager {
     constructor(sceneManager) {
@@ -18,8 +18,16 @@ class WorldManager {
         this._worldLoadUi = null;
         /** @type {ViewDistanceStreaming | null} */
         this._viewDistanceStreaming = null;
-        /** @type {string|null} 現在ロード中の品質 LOD キー */
-        this._activeQualityLodKey = null;
+        /** @type {string} 現在の品質ロッド（クライアントローカルのみ） */
+        this._activeRodId = DEFAULT_ROD_ID;
+    }
+
+    /**
+     * 現在選択中の品質ロッド ID（他プレイヤーには送信しない）
+     * @returns {string}
+     */
+    getActiveRodId() {
+        return this._activeRodId || DEFAULT_ROD_ID;
     }
 
     /**
@@ -62,7 +70,6 @@ class WorldManager {
                 const data = await res.json();
                 if (data && typeof data === 'object') {
                     this.worlds = data;
-                    normalizeWorldsQualityLods(this.worlds);
                     console.log('Worlds loaded from API');
                     return;
                 }
@@ -96,34 +103,25 @@ class WorldManager {
     }
 
     /**
-     * 現在の品質 LOD キー（未使用時 null）
-     * @returns {string|null}
-     */
-    getActiveQualityLodKey() {
-        return this._activeQualityLodKey;
-    }
-
-    /**
      * Load a world by ID
      * @param {string} worldId - World ID to load
-     * @param {function} [onComplete] - Callback when world is loaded
-     * @param {{ qualityLodKey?: string|null }} [options]
+     * @param {function} onComplete - Callback when world is loaded
      */
-    async loadWorld(worldId, onComplete, options = {}) {
-        const rawWorld = this.getWorld(worldId);
-        if (!rawWorld) {
+    async loadWorld(worldId, onComplete) {
+        const world = this.getWorld(worldId);
+        if (!world) {
             console.error(`World not found: ${worldId}`);
             return;
         }
 
-        const qualityLodKey =
-            options.qualityLodKey != null && String(options.qualityLodKey).trim()
-                ? String(options.qualityLodKey).trim()
-                : null;
-        const world = resolveWorldForQualityLod(rawWorld, qualityLodKey) || rawWorld;
-        this._activeQualityLodKey = qualityLodKey;
+        console.log(`Loading world: ${worldId}`);
 
-        console.log(`Loading world: ${worldId}${qualityLodKey ? ` (quality LOD ${qualityLodKey})` : ''}`);
+        const rodId = await promptRodSelection(world);
+        this._activeRodId = rodId;
+        const modelsForRod = resolveWorldModelsForRod(
+            Array.isArray(world.models) ? world.models : [],
+            rodId
+        );
 
         // Clear current world if any
         if (this.currentWorld) {
@@ -141,7 +139,7 @@ class WorldManager {
         // Add world-specific lights (position, type, intensity)
         this.sceneManager.addWorldLights(world.lights);
 
-        const modelList = Array.isArray(world.models) ? world.models : [];
+        const modelList = modelsForRod;
         const pdfList = Array.isArray(world.pdfs) ? world.pdfs : [];
         const totalAssets = this._countModelsWithPath(modelList) + pdfList.length;
 
@@ -177,7 +175,7 @@ class WorldManager {
 
         try {
             await this.sceneManager.loadWorldModels(
-                world.models,
+                modelsForRod,
                 async () => {
                     await vas.runInitialNearSpawn(spawn, viewDistanceM);
 
@@ -217,12 +215,11 @@ class WorldManager {
     /**
      * Switch to a different world
      * @param {string} worldId - Target world ID
-     * @param {function} [onComplete] - Callback when switch is complete
-     * @param {{ qualityLodKey?: string|null }} [options]
+     * @param {function} onComplete - Callback when switch is complete
      */
-    async switchWorld(worldId, onComplete, options = {}) {
+    async switchWorld(worldId, onComplete) {
         console.log(`Switching to world: ${worldId}`);
-        await this.loadWorld(worldId, onComplete, options);
+        await this.loadWorld(worldId, onComplete);
     }
 
     /**

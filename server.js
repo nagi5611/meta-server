@@ -36,7 +36,7 @@ import {
 } from './lib/prefab-bundle-upload.js';
 import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } from './lib/chart-bgm-transcode.js';
 import { normalizeWorldsLod } from './public/js/world-lod-normalize.js';
-import { normalizeWorldsQualityLods } from './public/js/world-quality-lod-normalize.js';
+import { normalizeWorldsRod } from './public/js/world-rod-resolve.js';
 import { USE_S3_MODELS, isS3ModelsConfigComplete, isS3ModelsBucketConfigured, normalizedCdnBaseUrl, normalizedAvatarsS3KeyPrefix } from './config/s3-assets.js';
 import { insertVersionBeforeExt, createModelVersionToken } from './lib/model-upload-version.js';
 import {
@@ -238,7 +238,6 @@ function readWorldsFromFile() {
 function readWorlds() {
     if (worldsRuntimeCache == null) {
         worldsRuntimeCache = readWorldsFromFile();
-        normalizeWorldsQualityLods(worldsRuntimeCache);
     }
     return worldsRuntimeCache;
 }
@@ -4834,7 +4833,7 @@ app.post('/admin/worlds', (req, res) => {
         return res.status(400).json({ error: floorDimErrs.join(' ') });
     }
     normalizeWorldsLod(worlds);
-    normalizeWorldsQualityLods(worlds);
+    normalizeWorldsRod(worlds);
     try {
         writeWorlds(worlds);
         res.json({ success: true });

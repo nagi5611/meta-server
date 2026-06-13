@@ -525,6 +525,54 @@ body.admin-dark .chart-edit-loading-message {
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
+.admin-panel-world-edit .world-rod-item {
+    border: 1px solid var(--we-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: #f8fafc;
+}
+
+.admin-panel-world-edit .world-rod-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.admin-panel-world-edit .world-rod-item-header .prop-label {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+.admin-panel-world-edit .world-rod-item-id {
+    font-size: 12px;
+    color: #64748b;
+    flex: 1;
+}
+
+.admin-panel-world-edit .obj-rod-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.admin-panel-world-edit .obj-rod-tab {
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 1px solid var(--we-border);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+}
+
+.admin-panel-world-edit .obj-rod-tab.active {
+    background: #2563eb;
+    color: #fff;
+    border-color: #2563eb;
+}
+
 .admin-panel-world-edit .world-lod-track-wrap {
     margin: 12px 0 6px;
     padding: 0 2px;
@@ -1207,99 +1255,6 @@ body.admin-dark .storage-files-list li.storage-files-row-checked .storage-files-
 .admin-panel-world-edit .object-list-slider .item.selected {
     background: var(--we-accent);
     color: #fff;
-}
-
-.admin-panel-world-edit .world-list .item,
-.admin-panel-world-edit .world-list .world-list-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.world-list-row .world-list-name {
-    flex: 0 1 auto;
-    min-width: 0;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.world-list-row .world-quality-lod-badges {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px;
-}
-
-.world-list-lod-btn {
-    cursor: pointer;
-    flex-shrink: 0;
-    border: 1px solid rgba(21, 101, 192, 0.35);
-    background: rgba(21, 101, 192, 0.08);
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 4px;
-}
-
-.world-list-lod-btn:hover {
-    background: rgba(21, 101, 192, 0.18);
-}
-
-.world-list-lod-btn.selected {
-    background: var(--we-accent);
-    color: #fff;
-    border-color: var(--we-accent);
-}
-
-.world-quality-lod-badges {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 4px;
-}
-
-.world-quality-lod-badge {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 1.4;
-    background: rgba(21, 101, 192, 0.12);
-    color: #1565c0;
-    border: 1px solid rgba(21, 101, 192, 0.35);
-}
-
-.admin-panel-world-edit .world-list .item.selected .world-quality-lod-badge,
-.admin-panel-world-edit .world-list .world-list-row.selected .world-quality-lod-badge {
-    background: rgba(255, 255, 255, 0.2);
-    color: #fff;
-    border-color: rgba(255, 255, 255, 0.45);
-}
-
-.quality-lod-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.quality-lod-tab {
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-    background: #f5f5f5;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.quality-lod-tab.selected {
-    background: #1565c0;
-    color: #fff;
-    border-color: #1565c0;
-}
-
-.enter-metaverse-world-item .world-quality-lod-badges {
-    margin-left: 6px;
 }
 
 .admin-panel-world-edit .model-list .model-prefab-item.item {
@@ -4039,6 +3994,27 @@ body.admin-dark .admin-panel-world-edit .world-lod-item {
     background: #25231d;
     border-color: var(--we-border);
     box-shadow: none;
+}
+
+body.admin-dark .admin-panel-world-edit .world-rod-item {
+    background: #25231d;
+    border-color: var(--we-border);
+}
+
+body.admin-dark .admin-panel-world-edit .world-rod-item-id {
+    color: #9c9992;
+}
+
+body.admin-dark .admin-panel-world-edit .obj-rod-tab {
+    background: #2a2822;
+    border-color: var(--we-border);
+    color: #e8e6e1;
+}
+
+body.admin-dark .admin-panel-world-edit .obj-rod-tab.active {
+    background: #3b6fd9;
+    border-color: #3b6fd9;
+    color: #fff;
 }
 
 body.admin-dark .admin-panel-world-edit .world-lod-track-label {

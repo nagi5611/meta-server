@@ -1480,10 +1480,10 @@ a.admin-menu-link:hover {
     box-shadow: 0 6px 20px rgba(198, 40, 40, 0.4);
 }
 
-/* Logout / Restart Modal */
+/* Logout / Restart / Rod selection Modal */
 #logout-modal,
 #restart-modal,
-#quality-lod-modal {
+#rod-selection-modal {
     display: none;
     position: fixed;
     top: 0;
@@ -1499,13 +1499,13 @@ a.admin-menu-link:hover {
 
 #logout-modal.visible,
 #restart-modal.visible,
-#quality-lod-modal.visible {
+#rod-selection-modal.visible {
     display: flex;
 }
 
 #logout-modal-content,
 #restart-modal-content,
-#quality-lod-modal-content {
+#rod-selection-modal-content {
     background: rgba(255, 255, 255, 0.98);
     padding: 32px;
     border-radius: 20px;
@@ -1514,6 +1514,64 @@ a.admin-menu-link:hover {
     max-width: 400px;
     width: 90%;
     animation: modalSlideDown 0.3s ease;
+}
+
+#rod-selection-modal-content {
+    max-width: 480px;
+    text-align: left;
+}
+
+#rod-selection-modal-content h3 {
+    text-align: center;
+    margin: 0 0 12px;
+}
+
+.rod-selection-hint {
+    font-size: 14px;
+    color: #555;
+    margin: 0 0 16px;
+    text-align: center;
+}
+
+.rod-selection-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.rod-selection-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    background: #fff;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.rod-selection-item:hover {
+    border-color: #2563eb;
+    background: #f0f7ff;
+}
+
+.rod-selection-item-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a2e;
+}
+
+.rod-selection-item-desc {
+    font-size: 13px;
+    color: #666;
+    line-height: 1.4;
 }
 
 @keyframes modalSlideDown {
@@ -1528,16 +1586,14 @@ a.admin-menu-link:hover {
 }
 
 #logout-modal-content h3,
-#restart-modal-content h3,
-#quality-lod-modal-content h3 {
+#restart-modal-content h3 {
     color: #333;
     font-size: 24px;
     margin-bottom: 16px;
 }
 
 #logout-modal-content p,
-#restart-modal-content p,
-#quality-lod-modal-content p {
+#restart-modal-content p {
     color: #666;
     font-size: 16px;
     line-height: 1.6;
@@ -1548,17 +1604,6 @@ a.admin-menu-link:hover {
     display: flex;
     gap: 12px;
     justify-content: center;
-}
-
-.quality-lod-modal-options {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    width: 100%;
-}
-
-.quality-lod-option-btn {
-    width: 100%;
 }
 
 .logout-btn {

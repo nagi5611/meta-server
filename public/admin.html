@@ -426,6 +426,14 @@
                                         <button type="button" id="btn-add-world">ワールドを追加</button>
                                         <button type="button" id="btn-delete-world" disabled>削除</button>
                                     </div>
+                                    <section class="section world-rod-section" id="world-rod-section" style="display:none;margin-top:12px;">
+                                        <h2 class="section-title">品質ロッド</h2>
+                                        <p class="hint">全ワールドはロッド1を持ちます。追加でロッド2以降を定義すると、入室時に品質を選べます（距離LODとは別）。</p>
+                                        <div id="world-rod-list" class="world-rod-list"></div>
+                                        <div class="btn-row" style="margin-top:8px;">
+                                            <button type="button" id="btn-world-rod-add" class="btn btn-sm btn-outline-secondary">ロッドを追加</button>
+                                        </div>
+                                    </section>
                                 </section>
                             </div>
                             <div id="we-cat-model" class="we-category-pane">
@@ -641,8 +649,20 @@
                                                 </div>
                                             </div>
                                         </details>
+                                        <details class="block" id="object-props-prefab-rod" style="display:none;margin-top:10px;">
+                                            <summary class="block-header">品質ロッド（プレファブ）</summary>
+                                            <div class="block-content">
+                                                <p class="hint">ロッド1は既定モデル（prefabManifest）。ロッド2以降は別プレファブを割り当てできます。タブで編集画面の表示を切り替えます。</p>
+                                                <div id="obj-rod-tabs" class="obj-rod-tabs" role="tablist" aria-label="編集プレビューロッド"></div>
+                                                <div class="prop-row" id="obj-rod-manifest-row">
+                                                    <label class="prop-label" for="obj-rod-manifest">プレファブ</label>
+                                                    <select id="obj-rod-manifest" class="prop-input full" aria-label="ロッド別プレファブ"></select>
+                                                </div>
+                                                <p class="hint" id="obj-rod-fallback-hint" hidden>未設定のためロッド1と同じモデルを使用します。</p>
+                                            </div>
+                                        </details>
                                         <details class="block" id="object-props-prefab-lod" style="display:none;margin-top:10px;">
-                                            <summary class="block-header">Prefab LOD</summary>
+                                            <summary class="block-header">Prefab LOD（距離）</summary>
                                             <div class="block-content">
                                                 <p class="hint">距離境界は右ペイン「Prefab LOD（距離）」で LOD ID ごとに設定します。</p>
                                                 <div class="prop-row">
@@ -886,21 +906,6 @@
                                                 <input type="number" id="physics-assist-max-y" class="prop-input num" step="0.1" placeholder="任意">
                                             </div>
                                             <p class="hint" id="physics-assist-spawn-hint" hidden>スポーンYと下限が大きく離れています。意図を確認してください。</p>
-                                        </div>
-                                    </details>
-                                    <details class="block" id="world-quality-lod-details">
-                                        <summary class="block-header">品質 LOD（モデル）</summary>
-                                        <div class="block-content">
-                                            <p class="hint">左のワールド一覧で LOD を選択して編集します。全ワールドに LOD1 があります。追加 LOD は models のみ別保存（spawn・lights 等は共通）。プレイヤー入室時に LOD が2つ以上あれば品質選択が表示されます。</p>
-                                            <div class="btn-row" style="margin-bottom:8px;">
-                                                <button type="button" id="btn-quality-lod-add" class="btn btn-sm btn-outline-secondary">LOD を追加</button>
-                                                <button type="button" id="btn-quality-lod-delete" class="btn btn-sm btn-outline-danger" disabled>選択中 LOD を削除</button>
-                                            </div>
-                                            <p class="hint" id="quality-lod-selected-hint" style="margin-bottom:8px;"></p>
-                                            <div id="quality-lod-label-row" class="field-row">
-                                                <label class="prop-label" for="quality-lod-label">プレイヤー向け説明（選択中 LOD）</label>
-                                                <input type="text" id="quality-lod-label" class="prop-input full" placeholder="例: パソコン向け（高品質）" maxlength="120">
-                                            </div>
                                         </div>
                                     </details>
                                     <details class="block" id="world-lod-details">

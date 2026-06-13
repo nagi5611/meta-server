@@ -47,14 +47,13 @@ import {
     resolvePrefabPartAssetPath
 } from './prefab-load-shared.js';
 import { normalizeWorldsLod } from './world-lod-normalize.js';
-import { normalizeWorldsQualityLods } from './world-quality-lod-normalize.js';
 import {
-    getQualityLodEditorKeys,
-    getQualityLodLabel,
-    resolveWorldForQualityLod,
-    ensureQualityLodEntry,
-    ensureWorldQualityLod1,
-} from './world-quality-lod.js';
+    DEFAULT_ROD_ID,
+    ensureWorldRodsShape,
+    generateUniqueRodId,
+    normalizeWorldsRod,
+    resolvePrefabManifestForRod,
+} from './world-rod-resolve.js';
 import {
     MODEL_MAX_BYTES_OBJ,
     MODEL_MAX_BYTES_GLTF,
@@ -127,8 +126,8 @@ let scene, camera, renderer, controls, transformControls;
 let editGroup;
 let worlds = {};
 let selectedWorldId = null;
-/** @type {string} 編集中の品質 LOD キー（"1", "2", …） */
-let selectedQualityLodKey = '1';
+/** ワールド編集プレビューで表示中の品質ロッド ID */
+let editorPreviewRodId = DEFAULT_ROD_ID;
 let selectedObject = null;
 let modelList = [];
 let mtlList = []; // MTL ファイル名（models/ 配下、ファイル名のみ）
@@ -1637,6 +1636,7 @@ function updateObjectPanel(obj) {
         updateVehicleAircraftFieldsVisibility();
         updateGlbAnimInteractPanel(obj);
         const lodDet = document.getElementById('object-props-prefab-lod');
+        const rodDet = document.getElementById('object-props-prefab-rod');
         const pfm = String(c.prefabManifest || '').trim();
         if (lodDet) {
             if (pfm) {
@@ -1644,6 +1644,14 @@ function updateObjectPanel(obj) {
                 fillObjectLodPanel(obj, c);
             } else {
                 lodDet.style.display = 'none';
+            }
+        }
+        if (rodDet) {
+            if (pfm) {
+                rodDet.style.display = '';
+                fillObjectRodPanel(obj, c);
+            } else {
+                rodDet.style.display = 'none';
             }
         }
     } else if (obj.userData.pdfConfig) {
@@ -1660,11 +1668,15 @@ function updateObjectPanel(obj) {
         if (gb) gb.style.display = 'none';
         const lodDet = document.getElementById('object-props-prefab-lod');
         if (lodDet) lodDet.style.display = 'none';
+        const rodDet0 = document.getElementById('object-props-prefab-rod');
+        if (rodDet0) rodDet0.style.display = 'none';
     } else if (obj.userData.flightBoardConfig) {
         const gb = document.getElementById('object-props-glb-anim');
         if (gb) gb.style.display = 'none';
         const lodDet = document.getElementById('object-props-prefab-lod');
         if (lodDet) lodDet.style.display = 'none';
+        const rodDet1 = document.getElementById('object-props-prefab-rod');
+        if (rodDet1) rodDet1.style.display = 'none';
     }
 }
 
@@ -1889,6 +1901,33 @@ function syncObjectFromPanel(opts) {
             }
             renderWorldLodPanel();
         }
+        const pfmRod = String(c.prefabManifest || '').trim();
+        if (pfmRod) {
+            const manifestSel = document.getElementById('obj-rod-manifest');
+            const panelRodId = editorPreviewRodId;
+            const manifestVal = manifestSel && manifestSel.value ? String(manifestSel.value).trim() : '';
+            if (panelRodId === DEFAULT_ROD_ID) {
+                if (manifestVal) {
+                    c.prefabManifest = manifestVal;
+                    if (!String(c.path || '').trim() || String(c.path).trim() === String(c.prefabManifest || '')) {
+                        c.path = manifestVal;
+                    }
+                }
+                delete c._editorDisplayedRodManifest;
+            } else {
+                if (!c.rodOverrides || typeof c.rodOverrides !== 'object' || Array.isArray(c.rodOverrides)) {
+                    c.rodOverrides = {};
+                }
+                if (manifestVal) {
+                    /** @type {Record<string, { prefabManifest: string }>} */ (c.rodOverrides)[panelRodId] = {
+                        prefabManifest: manifestVal,
+                    };
+                } else {
+                    delete /** @type {Record<string, unknown>} */ (c.rodOverrides)[panelRodId];
+                    if (Object.keys(c.rodOverrides).length === 0) delete c.rodOverrides;
+                }
+            }
+        }
     } else if (selectedObject.userData.pdfConfig) {
         if (document.getElementById('obj-teleporter').checked) {
             const accessEl = document.getElementById('obj-tp-access');
@@ -2022,6 +2061,370 @@ function deleteLodIdFromWorld(w, id) {
             delete cfg.lodRanks;
         }
     });
+}
+
+/** @type {boolean} */
+let worldRodEditorInitialized = false;
+
+/**
+ * 選択中ワールドを返す（品質ロッド UI 用）
+ * @returns {Record<string, unknown>|null}
+ */
+function getSelectedWorldForRod() {
+    return selectedWorldId && worlds[selectedWorldId] ? worlds[selectedWorldId] : null;
+}
+
+/**
+ * ワールドにロッドを1件追加する
+ * @param {Record<string, unknown>} w
+ */
+function addRodToWorld(w) {
+    ensureWorldRodsShape(w);
+    const id = generateUniqueRodId(w);
+    const n = String(id).replace(/^rod-/, '');
+    /** @type {{ id: string, label: string, description: string }[]} */ (w.rods).push({
+        id,
+        label: `ロッド${n}`,
+        description: '',
+    });
+}
+
+/**
+ * ロッドを削除する（rod-1 不可）
+ * @param {Record<string, unknown>} w
+ * @param {string} rodId
+ */
+function deleteRodFromWorld(w, rodId) {
+    if (rodId === DEFAULT_ROD_ID) return;
+    ensureWorldRodsShape(w);
+    /** @type {{ id: string, label: string, description: string }[]} */ (w.rods) = /** @type {{ id: string, label: string, description: string }[]} */ (
+        w.rods
+    ).filter((r) => r && r.id !== rodId);
+
+    const stripOverride = (cfg) => {
+        if (!cfg || typeof cfg !== 'object') return;
+        const overrides = cfg.rodOverrides;
+        if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) return;
+        delete /** @type {Record<string, unknown>} */ (overrides)[rodId];
+        if (Object.keys(overrides).length === 0) delete cfg.rodOverrides;
+    };
+
+    editGroup.children.forEach((ch) => {
+        const cfg = ch.userData && ch.userData.config;
+        stripOverride(cfg);
+    });
+    (w.models || []).forEach((m) => stripOverride(m));
+
+    if (editorPreviewRodId === rodId) {
+        editorPreviewRodId = DEFAULT_ROD_ID;
+    }
+}
+
+/**
+ * 左欄の品質ロッド管理 UI を描画する
+ */
+function renderWorldRodPanel() {
+    const w = getSelectedWorldForRod();
+    const section = document.getElementById('world-rod-section');
+    const container = document.getElementById('world-rod-list');
+    if (!section || !container) return;
+
+    if (!w) {
+        section.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    section.style.display = '';
+    ensureWorldRodsShape(w);
+    container.innerHTML = '';
+
+    const rods = /** @type {{ id: string, label: string, description: string }[]} */ (w.rods);
+    for (const rod of rods) {
+        const item = document.createElement('div');
+        item.className = 'world-rod-item';
+        item.dataset.rodId = rod.id;
+
+        const header = document.createElement('div');
+        header.className = 'world-rod-item-header';
+        const idSpan = document.createElement('span');
+        idSpan.className = 'world-rod-item-id';
+        idSpan.textContent = rod.id;
+        header.appendChild(idSpan);
+
+        if (rod.id !== DEFAULT_ROD_ID) {
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.textContent = '削除';
+            delBtn.className = 'btn btn-sm btn-outline-secondary';
+            delBtn.setAttribute('data-role', 'rod-delete');
+            header.appendChild(delBtn);
+        }
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'field-row';
+        const labelLab = document.createElement('label');
+        labelLab.className = 'prop-label';
+        labelLab.textContent = '表示名';
+        const labelInp = document.createElement('input');
+        labelInp.type = 'text';
+        labelInp.className = 'prop-input full';
+        labelInp.value = rod.label || rod.id;
+        labelInp.setAttribute('data-role', 'rod-label');
+        labelRow.appendChild(labelLab);
+        labelRow.appendChild(labelInp);
+
+        const descRow = document.createElement('div');
+        descRow.className = 'field-row';
+        const descLab = document.createElement('label');
+        descLab.className = 'prop-label';
+        descLab.textContent = '説明';
+        const descInp = document.createElement('textarea');
+        descInp.className = 'prop-input full';
+        descInp.rows = 2;
+        descInp.value = rod.description || '';
+        descInp.setAttribute('data-role', 'rod-description');
+        descRow.appendChild(descLab);
+        descRow.appendChild(descInp);
+
+        item.appendChild(header);
+        item.appendChild(labelRow);
+        item.appendChild(descRow);
+        container.appendChild(item);
+    }
+}
+
+/**
+ * 品質ロッド管理 UI のイベント委譲を1回だけ登録する
+ */
+function bindWorldRodEditorEvents() {
+    if (worldRodEditorInitialized) return;
+    worldRodEditorInitialized = true;
+
+    const btnAdd = document.getElementById('btn-world-rod-add');
+    btnAdd?.addEventListener('click', () => {
+        const w = getSelectedWorldForRod();
+        if (!w) return;
+        pushUndo();
+        addRodToWorld(w);
+        renderWorldRodPanel();
+        if (selectedObject?.userData?.config && String(selectedObject.userData.config.prefabManifest || '').trim()) {
+            fillObjectRodPanel(selectedObject, selectedObject.userData.config);
+        }
+    });
+
+    const list = document.getElementById('world-rod-list');
+    list?.addEventListener('click', (ev) => {
+        const t = /** @type {HTMLElement} */ (ev.target);
+        const delBtn = t.closest('[data-role="rod-delete"]');
+        if (!delBtn) return;
+        const item = delBtn.closest('.world-rod-item');
+        const rodId = item && item.dataset.rodId;
+        const w = getSelectedWorldForRod();
+        if (!rodId || !w || rodId === DEFAULT_ROD_ID) return;
+        if (!confirm(`${rodId} を削除しますか？`)) return;
+        pushUndo();
+        deleteRodFromWorld(w, rodId);
+        renderWorldRodPanel();
+        if (selectedObject?.userData?.config && String(selectedObject.userData.config.prefabManifest || '').trim()) {
+            fillObjectRodPanel(selectedObject, selectedObject.userData.config);
+        }
+    });
+
+    list?.addEventListener('change', (ev) => {
+        const t = /** @type {HTMLElement} */ (ev.target);
+        const item = t.closest('.world-rod-item');
+        if (!item) return;
+        const rodId = item.dataset.rodId;
+        const w = getSelectedWorldForRod();
+        if (!rodId || !w) return;
+        const rods = /** @type {{ id: string, label: string, description: string }[]} */ (w.rods);
+        const rod = rods.find((r) => r.id === rodId);
+        if (!rod) return;
+
+        if (t.matches('[data-role="rod-label"]')) {
+            pushUndo();
+            rod.label = /** @type {HTMLInputElement} */ (t).value.trim() || rodId;
+        } else if (t.matches('[data-role="rod-description"]')) {
+            pushUndo();
+            rod.description = /** @type {HTMLTextAreaElement} */ (t).value;
+        }
+    });
+}
+
+/**
+ * プレファブ選択用 option を select に追加する
+ * @param {HTMLSelectElement} sel
+ * @param {string} [selectedValue]
+ */
+function populatePrefabManifestSelectOptions(sel, selectedValue) {
+    if (!sel) return;
+    sel.innerHTML = '';
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = '（未設定・ロッド1と同じ）';
+    sel.appendChild(empty);
+
+    const pal = buildEditorModelPaletteEntries().filter((e) => e.isPrefab && e.prefabManifest);
+    const seen = new Set();
+    for (const e of pal) {
+        const pm = String(e.prefabManifest || '').trim();
+        if (!pm || seen.has(pm)) continue;
+        seen.add(pm);
+        const opt = document.createElement('option');
+        opt.value = pm;
+        opt.textContent = e.displayLabel || pm.split('/').pop() || pm;
+        sel.appendChild(opt);
+    }
+
+    const cur = String(selectedValue || '').trim();
+    if (cur && !seen.has(cur)) {
+        const opt = document.createElement('option');
+        opt.value = cur;
+        opt.textContent = cur.split('/').pop() || cur;
+        sel.appendChild(opt);
+    }
+    sel.value = cur;
+}
+
+/**
+ * オブジェクトの品質ロッド設定パネルを更新する
+ * @param {import('three').Object3D} obj
+ * @param {Record<string, unknown>} c
+ */
+function fillObjectRodPanel(obj, c) {
+    const rodDet = document.getElementById('object-props-prefab-rod');
+    const tabsEl = document.getElementById('obj-rod-tabs');
+    const sel = document.getElementById('obj-rod-manifest');
+    const hint = document.getElementById('obj-rod-fallback-hint');
+    if (!rodDet || !tabsEl || !sel) return;
+
+    const w = getSelectedWorldForRod();
+    if (!w) {
+        rodDet.style.display = 'none';
+        return;
+    }
+    ensureWorldRodsShape(w);
+    const rods = /** @type {{ id: string, label: string, description: string }[]} */ (w.rods);
+
+    tabsEl.innerHTML = '';
+    for (const rod of rods) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'obj-rod-tab' + (editorPreviewRodId === rod.id ? ' active' : '');
+        btn.textContent = rod.label || rod.id;
+        btn.dataset.rodId = rod.id;
+        btn.setAttribute('role', 'tab');
+        btn.setAttribute('aria-selected', editorPreviewRodId === rod.id ? 'true' : 'false');
+        tabsEl.appendChild(btn);
+    }
+
+    const panelRodId = editorPreviewRodId;
+    const isRod1 = panelRodId === DEFAULT_ROD_ID;
+    let manifestValue = '';
+    if (isRod1) {
+        manifestValue = String(c.prefabManifest || '').trim();
+    } else {
+        const overrides = c.rodOverrides;
+        if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
+            const entry = /** @type {Record<string, unknown>} */ (overrides)[panelRodId];
+            if (entry && typeof entry === 'object') {
+                manifestValue = String(/** @type {Record<string, unknown>} */ (entry).prefabManifest || '').trim();
+            }
+        }
+    }
+
+    populatePrefabManifestSelectOptions(sel, manifestValue);
+    if (hint) {
+        hint.hidden = isRod1 || !!manifestValue;
+    }
+}
+
+/**
+ * 編集プレビューの品質ロッドを切り替え、プレファブ表示を更新する
+ * @param {string} rodId
+ */
+async function setEditorPreviewRod(rodId) {
+    const rid = String(rodId || DEFAULT_ROD_ID).trim() || DEFAULT_ROD_ID;
+    if (rid === editorPreviewRodId) return;
+    editorPreviewRodId = rid;
+    if (selectedObject?.userData?.config && String(selectedObject.userData.config.prefabManifest || '').trim()) {
+        fillObjectRodPanel(selectedObject, selectedObject.userData.config);
+    }
+    await reloadAllPrefabsForEditorRodPreview();
+}
+
+/**
+ * editGroup 内の全プレファブを現在の editorPreviewRodId で再読み込みする
+ */
+async function reloadAllPrefabsForEditorRodPreview() {
+    const targets = editGroup.children.filter(
+        (ch) => ch.userData?.config && String(ch.userData.config.prefabManifest || '').trim()
+    );
+    for (const obj of targets) {
+        await reloadPrefabObjectForRodPreview(obj);
+    }
+    applyEditorVisualMode();
+}
+
+/**
+ * 1 オブジェクトのプレファブメッシュを editorPreviewRodId 用に差し替える
+ * @param {import('three').Object3D} obj
+ */
+async function reloadPrefabObjectForRodPreview(obj) {
+    const c = obj.userData?.config;
+    if (!c || !String(c.prefabManifest || '').trim()) return;
+
+    const pos = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+    const rot = {
+        x: obj.rotation.x * 180 / Math.PI,
+        y: obj.rotation.y * 180 / Math.PI,
+        z: obj.rotation.z * 180 / Math.PI,
+    };
+    const scale = { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z };
+    const editId = obj.userData.editId;
+    const wasSelected = selectedObject === obj;
+
+    const resolvedManifest = resolvePrefabManifestForRod(c, editorPreviewRodId);
+    if (!resolvedManifest) return;
+
+    const currentResolved = resolvePrefabManifestForRod(c, editorPreviewRodId);
+    const displayedManifest = String(c._editorDisplayedRodManifest || c.prefabManifest || '').trim();
+    if (displayedManifest === currentResolved && obj.children.length > 0) return;
+
+    try {
+        const res = await loadModelFromConfig({
+            prefabManifest: resolvedManifest,
+            path: resolvedManifest,
+        });
+        const newModel = res.model;
+        newModel.position.copy(obj.position);
+        newModel.rotation.copy(obj.rotation);
+        newModel.scale.copy(obj.scale);
+        newModel.userData.config = c;
+        newModel.userData.editId = editId;
+        newModel.userData._editorDisplayedRodManifest = resolvedManifest;
+        if (obj.userData.prefabDisplayName) {
+            newModel.userData.prefabDisplayName = obj.userData.prefabDisplayName;
+        }
+
+        editGroup.remove(obj);
+        disposeObjectTree(obj);
+        editGroup.add(newModel);
+        applyModelShadowByTriangleCount(newModel, res.triangleCount);
+
+        c.position = pos;
+        c.rotation = rot;
+        c.scale = scale;
+
+        if (wasSelected) {
+            selectedObject = newModel;
+            transformControls.attach(newModel);
+            updateObjectPanel(newModel);
+        }
+    } catch (err) {
+        console.error('[Editor] prefab rod preview reload failed:', err);
+    }
 }
 
 /**
@@ -2286,180 +2689,6 @@ function bindWorldLodEditorEvents() {
     document.addEventListener('mouseup', onWorldLodMouseUp);
 }
 
-let qualityLodEditorInitialized = false;
-
-/**
- * 全ワールドに LOD1 を保証する
- */
-function ensureAllWorldsQualityLod1() {
-    for (const w of Object.values(worlds)) {
-        if (w && typeof w === 'object') {
-            ensureWorldQualityLod1(/** @type {Record<string, unknown>} */ (w));
-        }
-    }
-}
-
-/**
- * 品質 LOD タブとラベル入力を更新
- * @param {Record<string, unknown>|null|undefined} w
- */
-function renderQualityLodPanel(w) {
-    const labelRow = document.getElementById('quality-lod-label-row');
-    const labelInput = document.getElementById('quality-lod-label');
-    const hintEl = document.getElementById('quality-lod-selected-hint');
-    if (!labelRow) return;
-
-    if (!w) {
-        labelRow.style.display = 'none';
-        if (hintEl) hintEl.textContent = '';
-        return;
-    }
-
-    ensureWorldQualityLod1(w);
-    labelRow.style.display = '';
-    if (hintEl) {
-        hintEl.textContent = `編集中: LOD${selectedQualityLodKey}`;
-    }
-    if (labelInput) {
-        const entry = w.qualityLods && w.qualityLods[selectedQualityLodKey];
-        labelInput.value =
-            entry && typeof entry === 'object' && typeof entry.label === 'string' ? entry.label : '';
-    }
-    const deleteBtn = document.getElementById('btn-quality-lod-delete');
-    if (deleteBtn) {
-        const keys = getQualityLodEditorKeys(w);
-        deleteBtn.disabled = selectedQualityLodKey === '1' || keys.length <= 1;
-    }
-}
-
-/**
- * 品質 LOD タブ切替（現在のシーンをメモリへ反映してから再読込）
- * @param {string} newKey
- */
-async function switchQualityLodTab(newKey) {
-    if (!selectedWorldId || !worlds[selectedWorldId]) return;
-    worlds = buildWorldsFromScene();
-    selectedQualityLodKey = newKey;
-    renderWorldList();
-    renderQualityLodPanel(worlds[selectedWorldId]);
-    const gen = ++worldSelectLoadGen;
-    setWorldEditLoader(true, '品質 LOD を切り替えています…');
-    try {
-        await loadWorldIntoScene(worlds[selectedWorldId]);
-    } finally {
-        if (gen === worldSelectLoadGen) setWorldEditLoader(false);
-    }
-    writeWorldEditCache();
-}
-
-/**
- * 品質 LOD を追加（LOD1 から models をコピーして新規 LOD を作成）
- */
-async function addQualityLodToSelectedWorld() {
-    if (!selectedWorldId || !worlds[selectedWorldId]) return;
-    const w = worlds[selectedWorldId];
-    worlds = buildWorldsFromScene();
-    const synced = worlds[selectedWorldId];
-    if (!synced) return;
-    ensureWorldQualityLod1(synced);
-
-    const existing = Object.keys(synced.qualityLods)
-        .map((k) => Number(k))
-        .filter(Number.isFinite);
-    const nextNum = existing.length ? Math.max(...existing) + 1 : 2;
-    const newKey = String(nextNum);
-    ensureQualityLodEntry(synced, newKey);
-
-    const lod1 = synced.qualityLods['1'];
-    if (lod1 && Array.isArray(lod1.models)) {
-        synced.qualityLods[newKey].models = lod1.models.map((m) =>
-            m && typeof m === 'object' ? { ...m } : m
-        );
-    }
-    synced.qualityLods[newKey].label = '';
-
-    selectedQualityLodKey = newKey;
-    renderWorldList();
-    renderQualityLodPanel(synced);
-    const gen = ++worldSelectLoadGen;
-    setWorldEditLoader(true, '新しい LOD を準備しています…');
-    try {
-        await loadWorldIntoScene(synced);
-    } finally {
-        if (gen === worldSelectLoadGen) setWorldEditLoader(false);
-    }
-    writeWorldEditCache();
-}
-
-/**
- * 選択中の品質 LOD を削除（LOD1 は不可）
- */
-async function deleteQualityLodFromSelectedWorld() {
-    if (!selectedWorldId || !worlds[selectedWorldId]) return;
-    if (selectedQualityLodKey === '1') {
-        alert('LOD1 は削除できません。');
-        return;
-    }
-    const keys = getQualityLodEditorKeys(worlds[selectedWorldId]);
-    if (keys.length <= 1) return;
-
-    const keyToDelete = selectedQualityLodKey;
-    if (!confirm(`LOD${keyToDelete} を削除しますか？この LOD の models 設定も失われます。`)) return;
-
-    worlds = buildWorldsFromScene();
-    const w = worlds[selectedWorldId];
-    if (!w || !w.qualityLods || typeof w.qualityLods !== 'object') return;
-
-    delete w.qualityLods[keyToDelete];
-    ensureWorldQualityLod1(w);
-
-    selectedQualityLodKey = '1';
-    renderWorldList();
-    renderQualityLodPanel(w);
-
-    const gen = ++worldSelectLoadGen;
-    setWorldEditLoader(true, 'LOD を削除しています…');
-    try {
-        await loadWorldIntoScene(w);
-    } finally {
-        if (gen === worldSelectLoadGen) setWorldEditLoader(false);
-    }
-    writeWorldEditCache();
-}
-
-/**
- * 品質 LOD パネルのイベント（1 回だけ）
- */
-function bindQualityLodEditorEvents() {
-    if (qualityLodEditorInitialized) return;
-    qualityLodEditorInitialized = true;
-    document.getElementById('btn-quality-lod-add')?.addEventListener('click', () => {
-        void addQualityLodToSelectedWorld();
-    });
-    document.getElementById('btn-quality-lod-delete')?.addEventListener('click', () => {
-        void deleteQualityLodFromSelectedWorld();
-    });
-    document.getElementById('quality-lod-label')?.addEventListener('change', () => {
-        if (!selectedWorldId || !worlds[selectedWorldId]) return;
-        const w = worlds[selectedWorldId];
-        ensureWorldQualityLod1(w);
-        ensureQualityLodEntry(w, selectedQualityLodKey);
-        const el = document.getElementById('quality-lod-label');
-        w.qualityLods[selectedQualityLodKey].label = el ? el.value.trim() : '';
-        renderWorldList();
-        writeWorldEditCache();
-    });
-    document.getElementById('quality-lod-label')?.addEventListener('input', () => {
-        if (!selectedWorldId || !worlds[selectedWorldId]) return;
-        const w = worlds[selectedWorldId];
-        ensureWorldQualityLod1(w);
-        ensureQualityLodEntry(w, selectedQualityLodKey);
-        const el = document.getElementById('quality-lod-label');
-        w.qualityLods[selectedQualityLodKey].label = el ? el.value.trim() : '';
-        renderWorldList();
-    });
-}
-
 /**
  * Prefab 用 LOD オブジェクトパネルを埋める
  * @param {import('three').Object3D} obj
@@ -2567,15 +2796,18 @@ function buildWorldsFromScene() {
                         : {}
             };
         }
-        if (wid !== selectedWorldId && w.qualityLods && typeof w.qualityLods === 'object') {
-            out[wid].qualityLods = JSON.parse(JSON.stringify(w.qualityLods));
+        if (wid !== selectedWorldId && Array.isArray(w.rods)) {
+            out[wid].rods = w.rods.map((r) => ({
+                id: r.id,
+                label: r.label,
+                description: r.description != null ? String(r.description) : '',
+            }));
         }
     }
     if (selectedWorldId) {
         const w = out[selectedWorldId];
         if (w) {
-            /** @type {Record<string, unknown>[]} */
-            const sceneModels = [];
+            w.models = [];
             w.lights = [];
             w.pdfs = [];
             w.flightBoards = [];
@@ -2626,8 +2858,16 @@ function buildWorldsFromScene() {
                             delete c.lodPartRanks;
                             delete c.lodRanks;
                         }
+                        if (c.rodOverrides && typeof c.rodOverrides === 'object' && !Array.isArray(c.rodOverrides)) {
+                            c.rodOverrides = JSON.parse(JSON.stringify(c.rodOverrides));
+                        } else {
+                            delete c.rodOverrides;
+                        }
+                        delete c._editorDisplayedRodManifest;
+                    } else {
+                        delete c.rodOverrides;
                     }
-                    sceneModels.push(c);
+                    w.models.push(c);
                 }
                 if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
                     const cfg = { ...child.userData.lightConfig };
@@ -2683,29 +2923,6 @@ function buildWorldsFromScene() {
             } else {
                 delete w.physicsAssist;
             }
-            const srcWorld = worlds[selectedWorldId];
-            ensureWorldQualityLod1(w);
-            if (srcWorld) ensureWorldQualityLod1(srcWorld);
-            const qKey = selectedQualityLodKey || '1';
-            if (!w.qualityLods || typeof w.qualityLods !== 'object') {
-                w.qualityLods = {};
-            }
-            const labelEl = document.getElementById('quality-lod-label');
-            const labelVal = labelEl ? labelEl.value.trim() : '';
-            ensureQualityLodEntry(w, qKey);
-            w.qualityLods[qKey].label = labelVal;
-            w.qualityLods[qKey].models = sceneModels;
-            if (srcWorld && srcWorld.qualityLods && typeof srcWorld.qualityLods === 'object') {
-                for (const [k, entry] of Object.entries(srcWorld.qualityLods)) {
-                    if (k === qKey) continue;
-                    w.qualityLods[k] = JSON.parse(JSON.stringify(entry));
-                }
-            }
-            const lod1 = w.qualityLods['1'];
-            w.models =
-                lod1 && typeof lod1 === 'object' && Array.isArray(lod1.models)
-                    ? lod1.models.map((m) => (m && typeof m === 'object' ? { ...m } : m))
-                    : sceneModels.map((m) => (m && typeof m === 'object' ? { ...m } : m));
             const srcLod = worlds[selectedWorldId] && worlds[selectedWorldId].lodSystem;
             if (srcLod && typeof srcLod === 'object') {
                 w.lodSystem = {
@@ -2716,10 +2933,18 @@ function buildWorldsFromScene() {
                             : {}
                 };
             }
+            const srcRods = worlds[selectedWorldId] && worlds[selectedWorldId].rods;
+            if (Array.isArray(srcRods)) {
+                w.rods = srcRods.map((r) => ({
+                    id: r.id,
+                    label: r.label,
+                    description: r.description != null ? String(r.description) : '',
+                }));
+            }
         }
     }
     normalizeWorldsLod(out);
-    normalizeWorldsQualityLods(out);
+    normalizeWorldsRod(out);
     return out;
 }
 
@@ -2729,8 +2954,6 @@ function buildWorldsFromScene() {
  */
 async function applyWorldsStateFromJson(parsed) {
     worlds = JSON.parse(JSON.stringify(parsed));
-    normalizeWorldsQualityLods(worlds);
-    ensureAllWorldsQualityLod1();
     renderWorldList();
     populateDestWorldSelect();
     const ids = Object.keys(worlds);
@@ -2770,17 +2993,12 @@ function syncSelectWorldChrome(id) {
     if (w) {
         document.getElementById('world-name-row').style.display = '';
         document.getElementById('world-name').value = w.name || id;
-        const qlKeys = getQualityLodEditorKeys(w);
-        if (qlKeys.length && !qlKeys.includes(selectedQualityLodKey)) {
-            selectedQualityLodKey = qlKeys[0];
-        }
-        renderQualityLodPanel(w);
     } else {
         document.getElementById('world-name-row').style.display = 'none';
-        renderQualityLodPanel(null);
     }
     document.getElementById('btn-delete-world').disabled = !id;
     populateDestWorldSelect();
+    renderWorldRodPanel();
 }
 
 /**
@@ -2898,6 +3116,7 @@ async function runWithConcurrency(concurrency, factories) {
 async function loadWorldModelEntryForEditor(config, idx) {
     const path = config.path || '';
     const pfm = String(config.prefabManifest || '').trim();
+    const loadManifest = pfm ? resolvePrefabManifestForRod(config, editorPreviewRodId) : pfm;
     const pos = config.position || { x: 0, y: 0, z: 0 };
     const rot = config.rotation || { x: 0, y: 0, z: 0 };
     const scale = config.scale || { x: 1, y: 1, z: 1 };
@@ -2921,6 +3140,9 @@ async function loadWorldModelEntryForEditor(config, idx) {
         if (Array.isArray(config.lodRanks) && config.lodRanks.length) {
             cfgBase.lodRanks = config.lodRanks.map((x) => Math.max(1, Math.floor(Number(x))));
         }
+        if (config.rodOverrides && typeof config.rodOverrides === 'object' && !Array.isArray(config.rodOverrides)) {
+            cfgBase.rodOverrides = JSON.parse(JSON.stringify(config.rodOverrides));
+        }
     }
     if (config.aircraft && config.aircraft.id) {
         const ser = serializeAircraftForWorldJson(config.aircraft);
@@ -2937,11 +3159,12 @@ async function loadWorldModelEntryForEditor(config, idx) {
         let triangleCount;
         if (pfm) {
             const res = await loadModelFromConfig({
-                prefabManifest: pfm,
-                path: String(path || '').trim() || pfm
+                prefabManifest: loadManifest,
+                path: String(path || '').trim() || loadManifest
             });
             model = res.model;
             triangleCount = res.triangleCount;
+            cfgBase._editorDisplayedRodManifest = loadManifest;
         } else {
             const res = await loadModelFromConfig({
                 path,
@@ -2964,14 +3187,8 @@ async function loadWorldModelEntryForEditor(config, idx) {
  */
 async function loadWorldIntoScene(world) {
     ensureWorldLodShape(world);
-    renderQualityLodPanel(world);
-    ensureWorldQualityLod1(world);
-    const qlKeys = getQualityLodEditorKeys(world);
-    const lodKey =
-        qlKeys.length > 0
-            ? (qlKeys.includes(selectedQualityLodKey) ? selectedQualityLodKey : qlKeys[0])
-            : null;
-    const sceneWorld = resolveWorldForQualityLod(world, lodKey) || world;
+    ensureWorldRodsShape(world);
+    editorPreviewRodId = DEFAULT_ROD_ID;
     stopFlightBoardEditorPolling();
     while (editGroup.children.length) {
         const c = editGroup.children[0];
@@ -3068,7 +3285,7 @@ async function loadWorldIntoScene(world) {
     }
     updatePhysicsAssistSpawnHint();
 
-    const models = sceneWorld.models || [];
+    const models = world.models || [];
     const factories = models.map((config, idx) => () => loadWorldModelEntryForEditor(config, idx));
     const slots = await runWithConcurrency(ADMIN_WORLD_MODEL_LOAD_CONCURRENCY, factories);
     const errs = [];
@@ -3099,8 +3316,11 @@ async function loadWorldIntoScene(world) {
     }
     const wCur = getSelectedWorldForLod();
     if (wCur) ensureWorldLodShape(wCur);
+    const wRod = getSelectedWorldForRod();
+    if (wRod) ensureWorldRodsShape(wRod);
     renderWorldObjectList();
     renderWorldLodPanel();
+    renderWorldRodPanel();
     applyEditorVisualMode();
 }
 
@@ -3234,8 +3454,6 @@ function applyWorldEditCacheToState(data) {
     if (!data || data.v !== 1) return false;
     if (typeof data.worlds !== 'object' || data.worlds === null || Array.isArray(data.worlds)) return false;
     worlds = JSON.parse(JSON.stringify(data.worlds));
-    normalizeWorldsQualityLods(worlds);
-    ensureAllWorldsQualityLod1();
     modelList = Array.isArray(data.modelList) ? data.modelList.slice() : [];
     prefabManifestList = Array.isArray(data.prefabManifestList) ? data.prefabManifestList.slice() : [];
     mtlList = Array.isArray(data.mtlList) ? data.mtlList.slice() : [];
@@ -3247,8 +3465,7 @@ async function fetchWorlds() {
     const res = await fetch('/admin/worlds', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load worlds');
     worlds = await res.json();
-    normalizeWorldsQualityLods(worlds);
-    ensureAllWorldsQualityLod1();
+    normalizeWorldsRod(worlds);
 }
 
 async function fetchModels() {
@@ -3588,40 +3805,12 @@ function renderWorldList() {
     el.innerHTML = '';
     Object.keys(worlds).forEach((id) => {
         const w = worlds[id];
-        ensureWorldQualityLod1(w);
-
-        const row = document.createElement('div');
-        row.className = 'item world-list-row' + (id === selectedWorldId ? ' selected' : '');
-        row.dataset.id = id;
-
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'world-list-name';
-        nameSpan.textContent = w.name || id;
-        nameSpan.addEventListener('click', () => {
-            void selectWorld(id, id === selectedWorldId ? selectedQualityLodKey : '1');
-        });
-        row.appendChild(nameSpan);
-
-        const lodWrap = document.createElement('span');
-        lodWrap.className = 'world-quality-lod-badges';
-        const qlKeys = getQualityLodEditorKeys(w);
-        for (const key of qlKeys) {
-            const lodBtn = document.createElement('button');
-            lodBtn.type = 'button';
-            const isSelected = id === selectedWorldId && key === selectedQualityLodKey;
-            lodBtn.className =
-                'world-quality-lod-badge world-list-lod-btn' + (isSelected ? ' selected' : '');
-            const customLabel = getQualityLodLabel(w, key);
-            lodBtn.textContent = customLabel !== `LOD${key}` ? `LOD${key}: ${customLabel}` : `LOD${key}`;
-            lodBtn.title = customLabel;
-            lodBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                void selectWorld(id, key);
-            });
-            lodWrap.appendChild(lodBtn);
-        }
-        row.appendChild(lodWrap);
-        el.appendChild(row);
+        const div = document.createElement('div');
+        div.className = 'item' + (id === selectedWorldId ? ' selected' : '');
+        div.textContent = w.name || id;
+        div.dataset.id = id;
+        div.addEventListener('click', () => void selectWorld(id));
+        el.appendChild(div);
     });
 }
 
@@ -3676,28 +3865,7 @@ function renderModelList() {
     updateAddObjMtlRowVisibility();
 }
 
-async function selectWorld(id, lodKey = null) {
-    if (!worlds[id]) return;
-    ensureWorldQualityLod1(worlds[id]);
-
-    const keys = getQualityLodEditorKeys(worlds[id]);
-    const resolvedLod =
-        lodKey != null && keys.includes(String(lodKey))
-            ? String(lodKey)
-            : keys.includes(selectedQualityLodKey)
-              ? selectedQualityLodKey
-              : keys[0] || '1';
-
-    if (selectedWorldId === id && resolvedLod !== selectedQualityLodKey) {
-        await switchQualityLodTab(resolvedLod);
-        return;
-    }
-
-    if (selectedWorldId && selectedWorldId !== id) {
-        worlds = buildWorldsFromScene();
-    }
-
-    selectedQualityLodKey = resolvedLod;
+async function selectWorld(id) {
     const gen = ++worldSelectLoadGen;
     syncSelectWorldChrome(id);
     const w = worlds[id];
@@ -4346,7 +4514,7 @@ function bindEvents() {
     // 右パネル: モデル/ライト/設定 カテゴリ切り替え、クリックで展開
     const rightCategoryNav = document.querySelector('.we-right-category-nav');
     bindWorldLodEditorEvents();
-    bindQualityLodEditorEvents();
+    bindWorldRodEditorEvents();
 
     if (rightCategoryNav) {
         rightCategoryNav.addEventListener('click', (e) => {
@@ -4387,6 +4555,20 @@ function bindEvents() {
     }
     document.getElementById('obj-lod-id')?.addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-lod-rank-default')?.addEventListener('change', syncObjectFromPanel);
+
+    document.getElementById('obj-rod-tabs')?.addEventListener('click', (ev) => {
+        const t = /** @type {HTMLElement} */ (ev.target);
+        const tab = t.closest('.obj-rod-tab');
+        if (!tab || !tab.dataset.rodId) return;
+        void setEditorPreviewRod(tab.dataset.rodId);
+    });
+    document.getElementById('obj-rod-manifest')?.addEventListener('change', async () => {
+        syncObjectFromPanel({ recordUndo: true });
+        if (selectedObject?.userData?.config && String(selectedObject.userData.config.prefabManifest || '').trim()) {
+            await reloadPrefabObjectForRodPreview(selectedObject);
+            applyEditorVisualMode();
+        }
+    });
 
     document.getElementById('obj-animate').addEventListener('change', syncObjectFromPanel);
     document.getElementById('obj-anim-x').addEventListener('change', syncObjectFromPanel);
@@ -4878,9 +5060,7 @@ function bindEvents() {
             floorWidth: DEFAULT_FLOOR_WIDTH_M,
             floorDepth: DEFAULT_FLOOR_DEPTH_M,
             lodSystem: { ids: [], thresholdsById: {} },
-            qualityLods: {
-                '1': { label: '', models: [] }
-            }
+            rods: [{ id: DEFAULT_ROD_ID, label: 'ロッド1', description: '' }]
         };
         renderWorldList();
         void selectWorld(id);
