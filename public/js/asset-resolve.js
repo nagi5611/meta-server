@@ -12,6 +12,44 @@ const signedHrefCache = new Map();
 const SIGN_BATCH_SIZE = 64;
 
 /**
+ * ブラウザ上では fetch / GLTFLoader が CORS を要求するため CDN 署名 URL ではなく同一オリジンを使う
+ * @returns {boolean}
+ */
+function useSameOriginModelHrefsInBrowser() {
+    return typeof window !== 'undefined';
+}
+
+/**
+ * CDN 絶対 URL を論理パスへ（同一オリジン /models 等へ写すため）
+ * @param {string} cdnUrl
+ * @param {AssetModelsCfg} cfg
+ * @returns {string|null}
+ */
+function logicalPosixFromCdnUrl(cdnUrl, cfg) {
+    const base = String(cfg.cdnBaseUrl || '').replace(/\/+$/, '');
+    if (!base) return null;
+    let uClean;
+    try {
+        uClean = new URL(cdnUrl.split('#')[0]).href.replace(/\/+$/, '');
+    } catch {
+        return null;
+    }
+    const baseNorm = base.startsWith('http') ? base.replace(/\/+$/, '') : `https://${base.replace(/\/+$/, '')}`;
+    if (!uClean.startsWith(baseNorm)) return null;
+    const suffix = decodeURIComponent(uClean.slice(baseNorm.length).replace(/^\//, ''));
+    if (!suffix) return null;
+    if (
+        suffix.startsWith('models/')
+        || suffix.startsWith('avatars/')
+        || suffix.startsWith('plane/')
+        || /^[^/]+\/avatars\//.test(suffix)
+    ) {
+        return suffix;
+    }
+    return `models/${suffix}`;
+}
+
+/**
  * /api/client-config を一度だけ取得
  * @returns {Promise<unknown>}
  */
@@ -108,6 +146,7 @@ async function signAndCacheUrlKeys(urlKeys) {
  * @returns {Promise<void>}
  */
 export async function prefetchSignedAssetHrefs(paths) {
+    if (useSameOriginModelHrefsInBrowser()) return;
     const cfg = await getAssetModelsConfig();
     if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) return;
     const keys = [];
@@ -159,8 +198,6 @@ export async function resolveModelAssetHref(pathOrUrl) {
     const cfg = await getAssetModelsConfig();
 
     if (raw.startsWith('https://') || raw.startsWith('http://')) {
-        // ワールド等に同一オリジン絶対 URL が載っている場合、署名 API は CDN ホスト以外を拒否する（host mismatch 400）。
-        // 相対パス扱いへ落として CDN 正規 URL を組み立て署名させる。
         try {
             if (typeof window !== 'undefined') {
                 const abs = new URL(raw);
@@ -170,12 +207,25 @@ export async function resolveModelAssetHref(pathOrUrl) {
                         return resolveModelAssetHref(pathAndQuery);
                     }
                 }
+                if (cfg.mode === 'cdn' && cfg.cdnBaseUrl && useSameOriginModelHrefsInBrowser()) {
+                    const posix = logicalPosixFromCdnUrl(raw, cfg);
+                    if (posix) {
+                        return sameOriginPathForAssetLogicalPath(posix.split('?')[0]);
+                    }
+                }
             }
         } catch {
             /* fall through */
         }
         if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) {
             return raw;
+        }
+        if (useSameOriginModelHrefsInBrowser()) {
+            const posix = logicalPosixFromCdnUrl(raw, cfg);
+            if (posix) {
+                return sameOriginPathForAssetLogicalPath(posix.split('?')[0]);
+            }
+            return originUrlFromCdnUrl(raw);
         }
         const uKey = raw.split('#')[0];
         const cached = signedHrefCache.get(uKey);
@@ -187,9 +237,14 @@ export async function resolveModelAssetHref(pathOrUrl) {
     }
 
     const pathStr = raw.startsWith('/') ? raw.slice(1) : raw;
-    const sameOriginPath = sameOriginPathForAssetLogicalPath(pathStr);
+    const pathOnly = pathStr.split('?')[0].split('#')[0];
+    const sameOriginPath = sameOriginPathForAssetLogicalPath(pathOnly);
 
     if (cfg.mode !== 'cdn' || !cfg.cdnBaseUrl) {
+        return sameOriginPath;
+    }
+
+    if (useSameOriginModelHrefsInBrowser()) {
         return sameOriginPath;
     }
 
@@ -226,6 +281,13 @@ export async function resolveEnvAssetHref(pathOrUrl) {
                     const pathAndQuery = `${abs.pathname.replace(/^\//, '')}${abs.search}`;
                     if (pathAndQuery.length > 0) {
                         return resolveEnvAssetHref(pathAndQuery + trailingHash);
+                    }
+                }
+                if (cfg.mode === 'cdn' && cfg.cdnBaseUrl && useSameOriginModelHrefsInBrowser()) {
+                    const envMatch = abs.pathname.match(/\/env\/(.+)$/i);
+                    if (envMatch) {
+                        const tail = envMatch[1].split('/').map((seg) => encodeURIComponent(seg)).join('/');
+                        return `/env/${tail}${trailingHash}`;
                     }
                 }
             }
@@ -272,6 +334,10 @@ export async function resolveEnvAssetHref(pathOrUrl) {
     const isDefaultHdr = normalizedPath === 'env/default.hdr';
 
     if (!(cfg.mode === 'cdn' && cfg.cdnBaseUrl)) {
+        return sameOriginPath;
+    }
+
+    if (useSameOriginModelHrefsInBrowser() && normalizedPath.startsWith('env/')) {
         return sameOriginPath;
     }
 
