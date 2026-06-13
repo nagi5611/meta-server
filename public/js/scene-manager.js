@@ -1196,7 +1196,7 @@ class SceneManager {
                     }
                     return;
                 }
-                completeUnit(fileLabel, pfm ? progressExtraPrefab : {});
+                completeUnit(fileLabel, pfm ? progressExtraPrefab : { loadKind: 'model' });
             };
 
             if (!pfm && !modelPath) {
@@ -1341,7 +1341,7 @@ class SceneManager {
                 }
                 model.userData.worldModelIndex = idx;
                 finishAddModel(model, fullConfig, modelPath, tris);
-                completeUnit(fileLabel, {});
+                completeUnit(fileLabel, { loadKind: 'model' });
             } catch (error) {
                 console.error(`Error loading model ${modelPath}:`, error);
                 snapBudgetDone();
@@ -1414,6 +1414,7 @@ class SceneManager {
                 fileName: pdfLabel,
                 completedCount: loadState.completedCount,
                 totalCount,
+                loadKind: 'pdf',
             });
         };
         let pdfjsLib;

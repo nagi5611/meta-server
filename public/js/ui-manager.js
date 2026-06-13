@@ -3,6 +3,7 @@
  */
 
 import { t } from './metaverse-i18n.js';
+import { isDeveloperModeEnabled } from './metaverse-client-settings.js';
 
 /**
  * innerHTML 向けに文字列をエスケープする（表示名 XSS 対策）
@@ -299,32 +300,100 @@ class UIManager {
     }
 
     /**
-     * 読み込み中ファイル名とプログレスバーを更新する（オブジェクト数ベース）
+     * 読み込み種別に応じた表示用ラベルを返す
+     * @param {string | undefined} loadKind
+     * @returns {string}
+     */
+    _worldLoadKindLabel(loadKind) {
+        if (loadKind === 'prefab') return t('worldLoad.prefab');
+        if (loadKind === 'pdf') return t('worldLoad.pdf');
+        if (loadKind === 'model') return t('worldLoad.model');
+        return t('worldLoad.loading');
+    }
+
+    /**
+     * ダウンロード進捗を 0–99% にマップする（表示完了まで 100% にしない）
+     * @param {number} completedCount
+     * @param {number} totalCount
+     * @returns {number}
+     */
+    _worldLoadDownloadPct(completedCount, totalCount) {
+        const totalB = Math.max(1, Math.floor(Number(totalCount)) || 1);
+        const c = Math.min(Math.max(0, Number(completedCount) || 0), totalB);
+        if (c >= totalB) return 99;
+        return Math.round((c / totalB) * 99);
+    }
+
+    /**
+     * プログレスバーとパーセント表示を更新する
+     * @param {number} pct
+     */
+    _setWorldLoadPct(pct) {
+        const clamped = Math.min(100, Math.max(0, Math.round(pct)));
+        this.worldLoadBarFill.style.width = `${clamped}%`;
+        if (this.worldLoadPct) {
+            this.worldLoadPct.textContent = `${clamped}%`;
+        }
+    }
+
+    /**
+     * 開発者モード時の詳細ロード表示（プレハブ名・ファイル名）
+     * @param {{ fileName?: string, loadKind?: string, prefabTitle?: string }} detail
+     */
+    _applyWorldLoadDeveloperLabels(detail) {
+        const { fileName, loadKind, prefabTitle } = detail || {};
+        const name = (fileName && String(fileName).trim()) || '—';
+        this.worldLoadLabel.textContent = t('worldLoad.loading');
+        if (!this.worldLoadAsset) return;
+        if (loadKind === 'prefab' && prefabTitle && String(prefabTitle).trim()) {
+            const pTitle = String(prefabTitle).trim();
+            this.worldLoadAsset.textContent =
+                name && name !== '—'
+                    ? t('worldLoad.prefabLine', { title: pTitle, name })
+                    : t('worldLoad.prefabTitleOnly', { title: pTitle });
+            return;
+        }
+        this.worldLoadAsset.textContent = name;
+    }
+
+    /**
+     * 読み込み中の種別ラベルとプログレスバーを更新する（オブジェクト数ベース、最大 99%）
      * @param {{ fileName: string, completedCount: number, totalCount: number, loadKind?: string, prefabTitle?: string }} detail
      */
     updateWorldLoadProgress(detail) {
         if (!this.worldLoadLabel || !this.worldLoadBarFill) return;
-        const { fileName, completedCount, totalCount, loadKind, prefabTitle } = detail || {};
-        const name = (fileName && String(fileName).trim()) || '—';
-        this.worldLoadLabel.textContent = t('worldLoad.loading');
-        if (this.worldLoadAsset) {
-            if (loadKind === 'prefab' && prefabTitle && String(prefabTitle).trim()) {
-                const pTitle = String(prefabTitle).trim();
-                this.worldLoadAsset.textContent =
-                    name && name !== '—'
-                        ? t('worldLoad.prefabLine', { title: pTitle, name })
-                        : t('worldLoad.prefabTitleOnly', { title: pTitle });
-            } else {
-                this.worldLoadAsset.textContent = name;
+        const { completedCount, totalCount, loadKind } = detail || {};
+        if (isDeveloperModeEnabled()) {
+            this._applyWorldLoadDeveloperLabels(detail);
+        } else {
+            this.worldLoadLabel.textContent = this._worldLoadKindLabel(loadKind);
+            if (this.worldLoadAsset) {
+                this.worldLoadAsset.textContent = '';
             }
         }
-        const totalB = Math.max(1, Math.floor(Number(totalCount)) || 1);
-        const c = Math.min(Math.max(0, Number(completedCount) || 0), totalB);
-        const pct = Math.round((c / totalB) * 100);
-        this.worldLoadBarFill.style.width = `${pct}%`;
-        if (this.worldLoadPct) {
-            this.worldLoadPct.textContent = `${pct}%`;
+        this._setWorldLoadPct(this._worldLoadDownloadPct(completedCount, totalCount));
+    }
+
+    /**
+     * 全ダウンロード完了後、表示が整うまで 99% を維持してから 100% でオーバーを閉じる
+     * @param {() => void} [beforePaint] 初回描画前に呼ぶ（例: renderer.render）
+     */
+    async finalizeWorldLoadProgress(beforePaint) {
+        if (!this.worldLoadOverlay || !this.worldLoadBarFill) return;
+        if (this.worldLoadLabel) {
+            this.worldLoadLabel.textContent = t('worldLoad.finalizing');
         }
+        if (this.worldLoadAsset) {
+            this.worldLoadAsset.textContent = '';
+        }
+        this._setWorldLoadPct(99);
+        beforePaint?.();
+        await new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+        });
+        this._setWorldLoadPct(100);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        this.hideWorldLoadProgress();
     }
 
     /**

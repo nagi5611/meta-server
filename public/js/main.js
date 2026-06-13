@@ -28,6 +28,7 @@ import { initAvatorScalableAnimations } from '../../addons/avator-scalable-anima
 import { initMatsuyamaFlightsSubsystem } from '../../addons/matsuyama-flights/client/init.js';
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 import { loadClientConfigOnce } from './asset-resolve.js';
+import { isAdminMetaverseEntryPath } from './admin-metaverse-auth.js';
 
 const DEFAULT_ROOM = 'lobby';
 
@@ -51,15 +52,6 @@ function getWorldIdFromUrl() {
         /* ignore */
     }
     return null;
-}
-
-/**
- * 管理者用メタバースの URL か（/admin または /admin/）
- * @returns {boolean}
- */
-function isAdminMetaverseEntryPath() {
-    const p = window.location.pathname;
-    return p === '/admin' || p === '/admin/';
 }
 
 class MetaverseApp {
@@ -153,26 +145,6 @@ class MetaverseApp {
             /* 既定の true のまま */
         }
 
-        // /admin セッション: Basic認証済みでトークン取得が必須
-        if (isAdminMetaverseEntryPath()) {
-            try {
-                const res = await fetch('/admin/enter-metaverse', { credentials: 'include' });
-                if (!res.ok) {
-                    alert(t('main.needBasicAuth'));
-                    window.location.href = '/admin.html' + window.location.search + window.location.hash;
-                    return;
-                }
-                const { token, username } = await res.json();
-                sessionStorage.setItem('metaverseAdminToken', token);
-                localStorage.setItem('username', username);
-            } catch (err) {
-                console.error('Admin metaverse auth failed:', err);
-                alert(t('main.adminAuthFailed'));
-                window.location.href = '/admin.html' + window.location.search + window.location.hash;
-                return;
-            }
-        }
-
         // Initialize scene
         this.sceneManager = new SceneManager();
         this.sceneManager.init();
@@ -191,7 +163,7 @@ class MetaverseApp {
         this.worldManager.setWorldLoadUiHandlers({
             begin: (opts) => this.uiManager.showWorldLoadProgress(opts.totalCount, opts),
             progress: (detail) => this.uiManager.updateWorldLoadProgress(detail),
-            end: () => this.uiManager.hideWorldLoadProgress()
+            finalize: (beforePaint) => this.uiManager.finalizeWorldLoadProgress(beforePaint),
         });
 
         // Set physics manager reference in scene manager for BVH collider
@@ -353,7 +325,8 @@ class MetaverseApp {
         initAvatorScalableAnimations(this);
         initMatsuyamaFlightsSubsystem(this).catch((e) => console.warn('[matsuyama-flights] init failed', e));
 
-        this.networkManager.connect();
+        const connected = await this.networkManager.connect();
+        if (!connected) return;
         this.networkManager.startSendingUpdates(this.characterController);
         if (this.pdfViewerManager) this.pdfViewerManager.setSocket(this.networkManager.socket);
         if (this.taikoGameManager) this.taikoGameManager.setSocket(this.networkManager.socket);

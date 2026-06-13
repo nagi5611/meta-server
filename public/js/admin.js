@@ -6583,8 +6583,7 @@ async function enterMetaverseAsAdmin(worldId, itemBtn) {
             closeEnterMetaverseWorldModal();
             return;
         }
-        const { token, username } = await res.json();
-        sessionStorage.setItem('metaverseAdminToken', token);
+        const { username } = await res.json();
         localStorage.setItem('username', username);
         const url = new URL('/admin', window.location.origin);
         url.searchParams.set('world', worldId);

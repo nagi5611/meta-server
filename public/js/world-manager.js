@@ -14,7 +14,7 @@ class WorldManager {
         this.currentWorld = null;
         this.onWorldChangeCallback = null;
         this.worlds = null; // Set by init() from API
-        /** @type {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string, prefabTitle?: string }) => void, end?: () => void } | null} */
+        /** @type {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string }) => void, finalize?: (beforePaint?: () => void) => Promise<void> } | null} */
         this._worldLoadUi = null;
         /** @type {ViewDistanceStreaming | null} */
         this._viewDistanceStreaming = null;
@@ -39,7 +39,7 @@ class WorldManager {
 
     /**
      * ワールド読み込み中のロードバー等（メインクライアントから登録）
-     * @param {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string, prefabTitle?: string }) => void, end?: () => void } | null} handlers
+     * @param {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string }) => void, finalize?: (beforePaint?: () => void) => Promise<void> } | null} handlers
      */
     setWorldLoadUiHandlers(handlers) {
         this._worldLoadUi = handlers || null;
@@ -207,7 +207,9 @@ class WorldManager {
             );
         } finally {
             if (totalAssets > 0) {
-                this._worldLoadUi?.end?.();
+                await this._worldLoadUi?.finalize?.(() => {
+                    this.sceneManager.render();
+                });
             }
         }
     }

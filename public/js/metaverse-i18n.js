@@ -41,6 +41,26 @@ export const METAVERSE_STRINGS = {
         en: 'Loading manifests…',
         zh: '正在加载清单…',
     },
+    'worldLoad.prefab': {
+        ja: '大規模データを読み込み中',
+        en: 'Loading large assets…',
+        zh: '正在加载大型数据…',
+    },
+    'worldLoad.pdf': {
+        ja: 'PDFデータを読み込み中',
+        en: 'Loading PDF…',
+        zh: '正在加载 PDF…',
+    },
+    'worldLoad.model': {
+        ja: '3Dモデルを読み込み中',
+        en: 'Loading 3D model…',
+        zh: '正在加载 3D 模型…',
+    },
+    'worldLoad.finalizing': {
+        ja: '表示の準備中…',
+        en: 'Preparing display…',
+        zh: '正在准备显示…',
+    },
     'worldLoad.prefabLine': {
         ja: 'プレハブ「{title}」 — {name}',
         en: 'Prefab "{title}" — {name}',
@@ -305,6 +325,17 @@ export const METAVERSE_STRINGS = {
         ja: 'デバッグ用。青系＝描画距離 R、黄系＝半径 2R',
         en: 'Debug: blue = distance R, yellow = radius 2R',
         zh: '调试：蓝为距离 R，黄为半径 2R',
+    },
+    'settings.developerModeLabel': { ja: '開発者モード', en: 'Developer mode', zh: '开发者模式' },
+    'settings.developerModeTitle': {
+        ja: 'ワールド読み込み時にファイル名などの詳細を表示',
+        en: 'Show detailed file names during world load',
+        zh: '世界加载时显示详细文件名',
+    },
+    'settings.developerModeHint': {
+        ja: 'ON にするとロード画面にプレハブ名・ファイル名などが表示されます',
+        en: 'When on, the load screen shows prefab names and file paths.',
+        zh: '开启后，加载画面会显示预制体名与文件路径。',
     },
     'settings.viewModeLabel': { ja: '画面表示', en: 'View', zh: '视角' },
     'settings.viewModeToggleTitle': {

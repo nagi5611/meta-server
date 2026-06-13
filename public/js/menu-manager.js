@@ -93,6 +93,7 @@ class MenuManager {
             pixelRatioCap: 1,
             viewDistanceM: 50,
             showViewRangeSpheres: false,
+            developerMode: false,
             viewMode: 'third',
             visualMode: 'standard'
         };
@@ -597,6 +598,10 @@ class MenuManager {
             this.saveSettings();
             this.sceneManager?.applyGraphicsSettings(this.settings);
         });
+        document.getElementById('developerModeToggle')?.addEventListener('change', (e) => {
+            this.settings.developerMode = !!e.target.checked;
+            this.saveSettings();
+        });
         document.getElementById('viewModeToggle')?.addEventListener('change', (e) => {
             this.settings.viewMode = e.target.checked ? 'first' : 'third';
             this.updateViewModeButton();
@@ -951,6 +956,7 @@ class MenuManager {
                 this.settings.pixelRatioCap = g.pixelRatioCap;
                 this.settings.viewDistanceM = g.viewDistanceM;
                 this.settings.showViewRangeSpheres = g.showViewRangeSpheres;
+                this.settings.developerMode = !!this.settings.developerMode;
                 this.settings.visualMode = g.visualMode;
             } catch (e) {
                 console.error('Failed to load settings:', e);
@@ -1012,6 +1018,8 @@ class MenuManager {
         if (viewDistValEl) viewDistValEl.textContent = String(Math.round(vd));
         const showVrEl = document.getElementById('showViewRangeSpheres');
         if (showVrEl) showVrEl.checked = !!this.settings.showViewRangeSpheres;
+        const developerModeEl = document.getElementById('developerModeToggle');
+        if (developerModeEl) developerModeEl.checked = !!this.settings.developerMode;
         this.updateViewModeButton();
     }
 

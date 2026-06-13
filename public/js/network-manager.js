@@ -2,6 +2,11 @@ import { io } from 'socket.io-client';
 import * as THREE from 'three';
 import { notifyServiceWorkerInvalidate } from './service-worker-register.js';
 import { t } from './metaverse-i18n.js';
+import {
+    fetchAdminMetaverseEntry,
+    isAdminMetaverseEntryPath,
+    redirectAdminMetaverseAuthFailed,
+} from './admin-metaverse-auth.js';
 
 class NetworkManager {
     constructor(playerManager) {
@@ -129,22 +134,60 @@ class NetworkManager {
         this._perfPayloadGetter = typeof fn === 'function' ? fn : null;
     }
 
-    connect() {
+    /**
+     * Socket 接続用 auth（初回・再接続のたびに管理者トークンを新規取得）
+     * @returns {Promise<{ adminToken?: string }>}
+     */
+    async _resolveSocketAuth() {
+        if (!isAdminMetaverseEntryPath()) return {};
+        const entry = await fetchAdminMetaverseEntry();
+        if (!entry) return {};
+        if (entry.username) {
+            localStorage.setItem('username', entry.username);
+            this.username = entry.username;
+        }
+        return { adminToken: entry.token };
+    }
+
+    /**
+     * Socket.io サーバーへ接続する（管理者は connect 直前にトークン取得）
+     * @returns {Promise<boolean>} 接続開始できたら true（管理者認証失敗時は false）
+     */
+    async connect() {
         // window.location.origin に統一（Vite プロキシ経由で httpOnly Cookie が Socket に届く）
         const socketUrl = window.location.origin;
 
+        if (isAdminMetaverseEntryPath()) {
+            const entry = await fetchAdminMetaverseEntry();
+            if (!entry) {
+                redirectAdminMetaverseAuthFailed();
+                return false;
+            }
+            localStorage.setItem('username', entry.username);
+            this.username = entry.username;
+        }
+
         console.log(`Connecting to Socket.io server at: ${socketUrl}`);
 
-        const adminToken = sessionStorage.getItem('metaverseAdminToken');
-        const auth = adminToken ? { adminToken } : {};
         this.socket = io(socketUrl, {
             transports: ['websocket', 'polling'],
-            auth,
+            auth: () => this._resolveSocketAuth(),
             withCredentials: true,
         });
 
+        this.socket.io.on('reconnect_attempt', async () => {
+            if (!isAdminMetaverseEntryPath()) return;
+            const entry = await fetchAdminMetaverseEntry();
+            if (entry?.token) {
+                this.socket.auth = { adminToken: entry.token };
+                if (entry.username) {
+                    localStorage.setItem('username', entry.username);
+                    this.username = entry.username;
+                }
+            }
+        });
+
         this.socket.on('connect', () => {
-            if (adminToken) sessionStorage.removeItem('metaverseAdminToken');
             this.myPlayerId = this.socket.id;
             this.lastPongTime = Date.now();
             console.log(`Connected to server. My ID: ${this.myPlayerId}`);
@@ -366,6 +409,8 @@ class NetworkManager {
                 this.onPhysicsPositionCorrection(data);
             }
         });
+
+        return true;
     }
 
     /**
