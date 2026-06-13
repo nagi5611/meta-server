@@ -87,6 +87,10 @@ class PhysicsManager {
          * 誤接地 → 次フレームで vy=0・重力停止 → 落下が遅く見えるのを防ぐ
          */
         this.groundMaxFallSpeedForGrounded = 1.25;
+
+        /** 速度リセット／減衰のデバッグログを出す */
+        this.debugVelocityChanges = true;
+        this._velLogBefore = new THREE.Vector3();
     }
 
     async init() {
@@ -170,6 +174,31 @@ class PhysicsManager {
         return out;
     }
 
+    /**
+     * 速度リセット／減衰をコンソールに記録する
+     * @param {'reset'|'damp'} kind
+     * @param {string} reason
+     * @param {THREE.Vector3} before
+     * @param {THREE.Vector3} after
+     * @param {Record<string, unknown>} [detail]
+     */
+    _logVelocityChange(kind, reason, before, after, detail) {
+        if (!this.debugVelocityChanges) return;
+
+        const dvx = after.x - before.x;
+        const dvy = after.y - before.y;
+        const dvz = after.z - before.z;
+        if (Math.hypot(dvx, dvy, dvz) < 1e-5) return;
+
+        console.log(`[Physics] velocity ${kind}: ${reason}`, {
+            before: { x: before.x, y: before.y, z: before.z },
+            after: { x: after.x, y: after.y, z: after.z },
+            delta: { x: dvx, y: dvy, z: dvz },
+            playerIsOnGround: this.playerIsOnGround,
+            ...detail,
+        });
+    }
+
     updatePlayer(delta, moveDirection) {
         if (!this.collider || !this.collider.geometry.boundsTree) {
             if (!this._warnedNoCollider) {
@@ -186,7 +215,18 @@ class PhysicsManager {
 
         // 接地かつ下向き／静止のときだけ vy を 0（上向きはジャンプ残り → 重力を積分する）
         if (this.playerIsOnGround && this.playerVelocity.y <= 0.12) {
-            this.playerVelocity.y = 0;
+            if (Math.abs(this.playerVelocity.y) > 1e-5) {
+                this._velLogBefore.copy(this.playerVelocity);
+                this.playerVelocity.y = 0;
+                this._logVelocityChange(
+                    'reset',
+                    'grounded-frame-start-clear-vy',
+                    this._velLogBefore,
+                    this.playerVelocity
+                );
+            } else {
+                this.playerVelocity.y = 0;
+            }
         } else {
             this.playerVelocity.y += delta * this.gravity;
         }
@@ -213,8 +253,15 @@ class PhysicsManager {
                 this.playerPosition.x = this._tunnelStart.x;
                 this.playerPosition.z = this._tunnelStart.z;
                 this.playerPosition.y = keepY;
+                this._velLogBefore.copy(this.playerVelocity);
                 this.playerVelocity.x = 0;
                 this.playerVelocity.z = 0;
+                this._logVelocityChange(
+                    'reset',
+                    'wall-tunnel-rollback-xz',
+                    this._velLogBefore,
+                    this.playerVelocity
+                );
             }
         }
 
@@ -308,21 +355,54 @@ class PhysicsManager {
             if (this._stuckResolveTimestamps.length >= this.STUCK_RESOLVE_THRESHOLD) {
                 this._stuckResolveTimestamps.length = 0;
                 this.playerPosition.y += this.STUCK_Y_LIFT;
+                this._velLogBefore.copy(this.playerVelocity);
                 this.playerVelocity.set(0, 0, 0);
+                this._logVelocityChange(
+                    'reset',
+                    'stuck-resolve-lift',
+                    this._velLogBefore,
+                    this.playerVelocity,
+                    { liftY: this.STUCK_Y_LIFT }
+                );
                 return;
             }
         }
 
         if (!this.playerIsOnGround) {
+            this._velLogBefore.copy(this.playerVelocity);
+            const nx = deltaVector.x;
+            const ny = deltaVector.y;
+            const nz = deltaVector.z;
             deltaVector.normalize();
             this.playerVelocity.addScaledVector(deltaVector, -deltaVector.dot(this.playerVelocity));
+            this._logVelocityChange(
+                'damp',
+                'bvh-collision-projection',
+                this._velLogBefore,
+                this.playerVelocity,
+                { pushNormal: { x: nx, y: ny, z: nz }, offset }
+            );
         } else {
             // 接地でも上昇中は vy を残す（誤接地のフレームでジャンプ初速を消さない）
             if (this.playerVelocity.y <= 0) {
+                this._velLogBefore.copy(this.playerVelocity);
                 this.playerVelocity.set(0, 0, 0);
+                this._logVelocityChange(
+                    'reset',
+                    'grounded-landing-zero',
+                    this._velLogBefore,
+                    this.playerVelocity
+                );
             } else {
+                this._velLogBefore.copy(this.playerVelocity);
                 this.playerVelocity.x = 0;
                 this.playerVelocity.z = 0;
+                this._logVelocityChange(
+                    'reset',
+                    'grounded-rise-clear-xz',
+                    this._velLogBefore,
+                    this.playerVelocity
+                );
             }
         }
 
@@ -394,7 +474,9 @@ class PhysicsManager {
     }
 
     resetVelocity() {
+        this._velLogBefore.copy(this.playerVelocity);
         this.playerVelocity.set(0, 0, 0);
+        this._logVelocityChange('reset', 'resetVelocity', this._velLogBefore, this.playerVelocity);
         this.playerIsOnGround = false;
         this._coyoteJumpUntilMs = 0;
     }
@@ -415,7 +497,9 @@ class PhysicsManager {
         } else {
             this.playerPosition.set(0, 10, 0);
         }
+        this._velLogBefore.copy(this.playerVelocity);
         this.playerVelocity.set(0, 0, 0);
+        this._logVelocityChange('reset', 'player-reset-fall', this._velLogBefore, this.playerVelocity);
         this.playerIsOnGround = false;
         this._coyoteJumpUntilMs = 0;
         console.log('Player reset');
