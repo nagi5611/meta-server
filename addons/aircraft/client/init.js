@@ -49,7 +49,13 @@ export async function initAircraftSubsystem(app) {
         return app.aircraftManager.tryBoardNearest();
     });
     app.uiManager.setAircraftHudHandlers({
-        onExit: () => app.aircraftManager.exitPiloting(),
+        onExit: () => {
+            if (app.aircraftManager?.isPassenger) {
+                app.aircraftManager.exitPassenger();
+                return;
+            }
+            void app.aircraftManager.exitPiloting();
+        },
         onToggleCamera: () => app.aircraftManager.toggleCameraMode()
     });
 

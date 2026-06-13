@@ -1019,11 +1019,17 @@ class MetaverseApp {
             // 操縦中は機体を先に進めてから、キャラ（物理・非表示アバター）を機体位置へ同期
             if (this.aircraftManager?.isPiloting && this.aircraftController) {
                 this.aircraftController.update(deltaTime);
-                this.uiManager.updateAircraftHudTelemetry(this.aircraftController.getHudSnapshot());
-                this.aircraftManager.updateMinimap();
             }
             if (this.aircraftManager?.isPassenger && this.aircraftController) {
                 this.aircraftController.updatePassengerCamera();
+            }
+            if (
+                this.aircraftManager
+                && (this.aircraftManager.isPiloting || this.aircraftManager.isPassenger)
+            ) {
+                const snap = this.aircraftManager.getBoardingHudSnapshot();
+                if (snap) this.uiManager.updateAircraftHudTelemetry(snap);
+                this.aircraftManager.updateMinimap();
             }
             this.characterController.update(deltaTime);
 

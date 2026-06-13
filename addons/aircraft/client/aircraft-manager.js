@@ -7,10 +7,13 @@ import {
 } from '../../../public/js/aircraft/camera-viewpoints.js';
 import AircraftController from './aircraft-controller.js';
 import AircraftMinimap from './aircraft-minimap.js';
+import { AIRCRAFT_GROUNDED_EXIT_HEADROOM } from './aircraft-physics-defaults.js';
 
 const STORAGE_CAMERA = 'metaverse-aircraft-camera';
 const BOARD_SOCKET_WAIT_MS = 10000;
 const BOARD_ACK_TIMEOUT_MS = 8000;
+const GROUND_SAMPLE_RAY_MAX = 500;
+const GROUND_CLEARANCE_ABOVE = 0.5;
 
 /** @type {Record<string, string>} */
 const BOARD_ERROR_JA = {
@@ -81,7 +84,154 @@ export default class AircraftManager {
         /** ミニマップ更新間隔（ms）。3D 正射影は重いため低 FPS で十分 */
         this._minimapUpdateIntervalMs = 500;
         this._minimapLastUpdateMs = 0;
+        /** 同乗 HUD: 速度推定用 */
+        this._passengerHudPrevPos = new THREE.Vector3();
+        this._passengerHudPrevEuler = { x: 0, y: 0, z: 0 };
+        this._passengerHudPrevTime = 0;
+        this._passengerHudQuat = new THREE.Quaternion();
+        this._passengerHudEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+        this._rayDown = new THREE.Vector3(0, -1, 0);
         this._loadCameraModeFromStorage();
+    }
+
+    /**
+     * @returns {AircraftSlot|null}
+     */
+    _boardingSlot() {
+        if (this.isPiloting && this.activeSlot) return this.activeSlot;
+        if (this.isPassenger && this.passengerSlot) return this.passengerSlot;
+        return null;
+    }
+
+    /**
+     * 操縦・同乗中の飛行 HUD とミニマップを表示する
+     * @param {AircraftSlot} slot
+     */
+    _showFlightUiForSlot(slot) {
+        this.uiManager.showAircraftHud(slot.controlMode === 'easy' ? 'easy' : 'hard');
+        void this.loadFlightMapForWorld().then(() => {
+            if (this.isPiloting || this.isPassenger) {
+                this.minimap.show();
+                this.updateMinimap(true);
+            }
+        });
+    }
+
+    /**
+     * 操縦・同乗 UI（HUD / ミニマップ）を隠す
+     */
+    _hideFlightUi() {
+        this.minimap.hide();
+        this.uiManager.hideAircraftHud();
+    }
+
+    /**
+     * @param {THREE.Vector3} worldPos
+     * @returns {boolean}
+     */
+    _estimateGroundedAt(worldPos) {
+        const pm = this.sceneManager?.physicsManager;
+        const hit = pm?.raycastStaticWorld?.(worldPos, this._rayDown, GROUND_SAMPLE_RAY_MAX);
+        if (!hit) return false;
+        const headroom = worldPos.y - (hit.point.y + GROUND_CLEARANCE_ABOVE);
+        return headroom <= AIRCRAFT_GROUNDED_EXIT_HEADROOM;
+    }
+
+    /**
+     * 同乗者向け HUD（ネットワーク同期済み機体姿勢・速度推定）
+     * @returns {object|null}
+     */
+    getPassengerHudSnapshot() {
+        const slot = this.passengerSlot;
+        const root = slot?.root;
+        if (!this.isPassenger || !root) return null;
+
+        root.updateMatrixWorld(true);
+        root.getWorldPosition(this._tmpPlayerPos);
+        root.getWorldQuaternion(this._passengerHudQuat);
+        this._passengerHudEuler.setFromQuaternion(this._passengerHudQuat, 'YXZ');
+        const r2d = 180 / Math.PI;
+        const pitchDeg = this._passengerHudEuler.x * r2d;
+        const yawDeg = this._passengerHudEuler.y * r2d;
+        const rollDeg = this._passengerHudEuler.z * r2d;
+
+        const now = performance.now();
+        let speedMs = 0;
+        let omegaYaw = 0;
+        let omegaPitch = 0;
+        let omegaRoll = 0;
+        if (this._passengerHudPrevTime > 0) {
+            const dt = (now - this._passengerHudPrevTime) / 1000;
+            if (dt > 1e-4) {
+                speedMs = this._passengerHudPrevPos.distanceTo(this._tmpPlayerPos) / dt;
+                omegaPitch = (this._passengerHudEuler.x - this._passengerHudPrevEuler.x) / dt;
+                omegaYaw = (this._passengerHudEuler.y - this._passengerHudPrevEuler.y) / dt;
+                omegaRoll = (this._passengerHudEuler.z - this._passengerHudPrevEuler.z) / dt;
+            }
+        }
+        this._passengerHudPrevPos.copy(this._tmpPlayerPos);
+        this._passengerHudPrevEuler.x = this._passengerHudEuler.x;
+        this._passengerHudPrevEuler.y = this._passengerHudEuler.y;
+        this._passengerHudPrevEuler.z = this._passengerHudEuler.z;
+        this._passengerHudPrevTime = now;
+
+        const grounded = this._estimateGroundedAt(this._tmpPlayerPos);
+        const isEasy = slot.controlMode === 'easy';
+        const vp = viewpointAtIndex(
+            resolveSlotCameraViewpoints(slot),
+            this.aircraftController.viewpointIndex
+        );
+
+        if (isEasy) {
+            return {
+                controlMode: 'easy',
+                worldX: this._tmpPlayerPos.x,
+                worldY: this._tmpPlayerPos.y,
+                worldZ: this._tmpPlayerPos.z,
+                speedMs,
+                pitchDeg,
+                yawDeg,
+                rollDeg,
+                omegaYaw,
+                omegaPitch,
+                omegaRoll,
+                viewpointName: vp?.name || vp?.id || '',
+                grounded,
+            };
+        }
+
+        return {
+            controlMode: 'hard',
+            speedMs,
+            pitchDeg,
+            yawDeg,
+            rollDeg,
+            omegaYaw,
+            omegaPitch,
+            omegaRoll,
+            grounded,
+        };
+    }
+
+    /**
+     * 操縦・同乗中の HUD テレメトリ
+     * @returns {object|null}
+     */
+    getBoardingHudSnapshot() {
+        if (this.isPiloting) return this.aircraftController.getHudSnapshot();
+        if (this.isPassenger) return this.getPassengerHudSnapshot();
+        return null;
+    }
+
+    /**
+     * 同乗 HUD 速度推定のリセット
+     */
+    _resetPassengerHudTracking() {
+        this._passengerHudPrevTime = 0;
+        this._passengerHudPrevPos.set(0, 0, 0);
+        this._passengerHudPrevEuler.x = 0;
+        this._passengerHudPrevEuler.y = 0;
+        this._passengerHudPrevEuler.z = 0;
     }
 
     /**
@@ -111,7 +261,7 @@ export default class AircraftManager {
             }
             const j = await res.json();
             const ok = await this.minimap.setMap(j.map);
-            if (ok && this.isPiloting) {
+            if (ok && (this.isPiloting || this.isPassenger)) {
                 this.minimap.show();
                 this.updateMinimap(true);
             } else if (!ok) this.minimap.hide();
@@ -126,11 +276,12 @@ export default class AircraftManager {
      * @returns {{ worldX: number, worldZ: number, yawDeg: number }|null}
      */
     getMinimapState() {
-        if (!this.isPiloting || !this.activeSlot?.root) return null;
-        const root = this.activeSlot.root;
+        const slot = this._boardingSlot();
+        if (!slot?.root) return null;
+        const root = slot.root;
         root.updateMatrixWorld(true);
         root.getWorldPosition(this._minimapPosScratch);
-        const snap = this.aircraftController.getHudSnapshot();
+        const snap = this.getBoardingHudSnapshot();
         return {
             worldX: this._minimapPosScratch.x,
             worldZ: this._minimapPosScratch.z,
@@ -145,7 +296,7 @@ export default class AircraftManager {
     getMinimapOtherAircraft() {
         /** @type {{ label: string, x: number, z: number }[]} */
         const out = [];
-        const skipId = this.isPiloting && this.activeSlot ? this.activeSlot.id : null;
+        const skipId = this._boardingSlot()?.id ?? null;
         for (const [slotId] of this._slotPilotId) {
             if (slotId === skipId) continue;
             const slot = this.slotsById.get(slotId);
@@ -167,7 +318,7 @@ export default class AircraftManager {
      * @param {boolean} [force] true なら間引きを無視して即時更新
      */
     updateMinimap(force = false) {
-        if (!this.isPiloting) return;
+        if (!this.isPiloting && !this.isPassenger) return;
         const now = performance.now();
         if (
             !force &&
@@ -418,6 +569,8 @@ export default class AircraftManager {
         this._applyStoredViewpointForSlot(slot);
         this.aircraftController.updatePassengerCamera();
         this.uiManager.hideAircraftBoardPrompt();
+        this._resetPassengerHudTracking();
+        this._showFlightUiForSlot(slot);
 
         this._pilotKeyHandler = (e) => {
             if (!this.isPassenger) return;
@@ -454,6 +607,8 @@ export default class AircraftManager {
         this.characterController.setAircraftPoseProvider(null);
         this.isPassenger = false;
         this.passengerSlot = null;
+        this._resetPassengerHudTracking();
+        this._hideFlightUi();
         this.uiManager.hideAircraftBoardPrompt();
         this._notifyPilotingChange();
         this._flushNetworkOccupancy();
@@ -475,13 +630,7 @@ export default class AircraftManager {
         this.aircraftController.bindSlot(slot);
         this._applyStoredViewpointForSlot(slot);
         this.aircraftController.snapPilotCamera();
-        this.uiManager.showAircraftHud(slot.controlMode === 'easy' ? 'easy' : 'hard');
-        void this.loadFlightMapForWorld().then(() => {
-            if (this.isPiloting) {
-                this.minimap.show();
-                this.updateMinimap(true);
-            }
-        });
+        this._showFlightUiForSlot(slot);
         this.uiManager.hideAircraftBoardPrompt();
 
         this._pilotKeyHandler = (e) => {
@@ -532,8 +681,7 @@ export default class AircraftManager {
         this.characterController.setAircraftPoseProvider(null);
         this.isPiloting = false;
         this.activeSlot = null;
-        this.minimap.hide();
-        this.uiManager.hideAircraftHud();
+        this._hideFlightUi();
         this._notifyPilotingChange();
         this._flushNetworkOccupancy();
     }
@@ -654,8 +802,7 @@ export default class AircraftManager {
         this.characterController.setAircraftPoseProvider(null);
         this.isPiloting = false;
         this.activeSlot = null;
-        this.minimap.hide();
-        this.uiManager.hideAircraftHud();
+        this._hideFlightUi();
         this.uiManager.hideAircraftBoardPrompt();
         if (sid) this.resetSlotToParked(sid);
         this._notifyPilotingChange();
