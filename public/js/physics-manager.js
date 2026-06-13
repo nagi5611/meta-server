@@ -82,6 +82,12 @@ class PhysicsManager {
         this.groundProbeOriginLift = 2;
         /** レイが一時的に外れたときの直近カプセル中心の最低 Y */
         this._lastKnownMinCapsuleY = null;
+        /** 床スナップ: このめり込み未満は無視（ジッター防止） */
+        this.floorSnapMinPenetration = 0.02;
+        /** 床スナップ: 高速落下時はこのめり込み以上だけ復帰（床抜け復帰用） */
+        this.floorSnapDeepPenetration = 0.12;
+        /** 床スナップ: |vy| がこの値以下なら通常着地としてスナップ可 (m/s) */
+        this.floorSnapMaxFallSpeed = 2.0;
     }
 
     async init() {
@@ -557,7 +563,7 @@ class PhysicsManager {
     }
 
     /**
-     * 移動後に床レイでカプセル中心 Y を強制スナップ（床抜け復帰・飛行機と同系）
+     * 移動後に床レイでカプセル中心 Y を強制スナップ（床抜け復帰のみ・速度・接地フラグは触らない）
      * @returns {boolean} 位置を補正したか
      */
     _enforceFloorFromRaycast() {
@@ -578,10 +584,14 @@ class PhysicsManager {
 
         if (minCapsuleY == null || this.playerPosition.y >= minCapsuleY) return false;
 
+        const penetration = minCapsuleY - this.playerPosition.y;
+        if (penetration < this.floorSnapMinPenetration) return false;
+
+        const slowFall = this.playerVelocity.y >= -this.floorSnapMaxFallSpeed;
+        const deepClip = penetration >= this.floorSnapDeepPenetration;
+        if (!slowFall && !deepClip) return false;
+
         this.playerPosition.y = minCapsuleY;
-        if (this.playerVelocity.y <= 0.12) {
-            this.playerIsOnGround = true;
-        }
         return true;
     }
 
