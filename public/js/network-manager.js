@@ -32,8 +32,8 @@ class NetworkManager {
         // Ping / latency
         this.pingMs = null;
         this.lastPongTime = 0;
-        this.NO_RESPONSE_THRESHOLD_MS = 10000;  // 10秒で応答なし表示
-        this.DISCONNECT_THRESHOLD_MS = 30000;   // 30秒で強制切断
+        this.NO_RESPONSE_THRESHOLD_MS = 3000;   // 3秒で応答なし・再接続開始
+        this.DISCONNECT_THRESHOLD_MS = 30000;   // 30秒で強制切断（ゾンビ接続の保険）
         this.RECONNECT_TRY_INTERVAL_MS = 3000;  // 応答なし時は3秒ごとに再接続
         /** @type {(() => object)|null} report-ping に載せる性能ペイロード */
         this._perfPayloadGetter = null;
@@ -624,7 +624,7 @@ class NetworkManager {
         this._reconnectInFlight = true;
         try {
             if (this.socket.connected && this._isUnresponsive()) {
-                console.warn('[Net] No server response — forcing disconnect before reconnect');
+                console.warn('[Net] No server response for 3s — forcing disconnect before reconnect');
                 this.socket.disconnect();
             }
 

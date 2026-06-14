@@ -1,0 +1,141 @@
+/* public/css/pro-mode.css — プロモード時のUI最小化 */
+
+/* PC: 左上の設定アイコン（通常は非表示） */
+.pro-mode-settings-btn {
+    display: none;
+    position: fixed;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    z-index: 1100;
+    opacity: 0.4;
+    background: rgba(255, 255, 255, 0.85);
+    border: none;
+    border-radius: 12px;
+    width: 48px;
+    height: 48px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity 0.15s ease;
+}
+
+.pro-mode-settings-btn:hover,
+.pro-mode-settings-btn:focus-visible {
+    opacity: 0.65;
+}
+
+.pro-mode-settings-btn .icon {
+    width: 24px;
+    height: 24px;
+    color: #0288d1;
+}
+
+/* プロモード: 常時表示の HUD を非表示 */
+[data-pro-mode="true"] #info,
+[data-pro-mode="true"] #mobile-info,
+[data-pro-mode="true"] #admin-player-info-panel,
+[data-pro-mode="true"] #teleport-prompt,
+[data-pro-mode="true"] #chat-container,
+[data-pro-mode="true"] #emoji-menu,
+[data-pro-mode="true"] #admin-menu,
+[data-pro-mode="true"] #mobile-controls,
+[data-pro-mode="true"] #mobile-landscape-overlay,
+[data-pro-mode="true"] #xr-stick-feedback,
+[data-pro-mode="true"] #google-maps-attribution,
+[data-pro-mode="true"] #aircraft-hud,
+[data-pro-mode="true"] #aircraft-board-prompt,
+[data-pro-mode="true"] #taiko-game-overlay,
+[data-pro-mode="true"] #pdf-viewer-overlay {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* ロード中・PDF・太鼓などアクティブなオーバーレイは表示を維持 */
+[data-pro-mode="true"] #world-load-overlay:not([style*="display: none"]):not([style*="display:none"]),
+[data-pro-mode="true"] #pdf-viewer-overlay:not([style*="display: none"]):not([style*="display:none"]),
+[data-pro-mode="true"] #taiko-game-overlay:not([style*="display: none"]):not([style*="display:none"]) {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+}
+
+/* モーダルは開いているとき表示 */
+[data-pro-mode="true"] #settings-modal.visible,
+[data-pro-mode="true"] #help-modal.visible,
+[data-pro-mode="true"] #logout-modal.visible,
+[data-pro-mode="true"] #restart-modal.visible,
+[data-pro-mode="true"] #video-modal.visible {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+}
+
+/* PC: メニューバー非表示、左上設定アイコンのみ */
+@media (min-width: 769px) and (min-height: 601px) {
+    [data-pro-mode="true"] #menu-bar {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+    }
+
+    [data-pro-mode="true"] .pro-mode-settings-btn {
+        display: flex !important;
+    }
+
+    [data-pro-mode="true"] .mobile-menu-toggle {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+    }
+}
+
+/* モバイル: メニューボタンのみ表示（展開時はメニューバーも表示） */
+@media (max-width: 768px), (max-height: 600px) {
+    [data-pro-mode="true"] #menu-bar:not(.mobile-menu-open) {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+    }
+
+    [data-pro-mode="true"] #menu-bar.mobile-menu-open {
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        top: calc(8px + env(safe-area-inset-top, 0px));
+        left: calc(12px + env(safe-area-inset-left, 0px));
+        right: auto;
+        transform-origin: left center;
+        padding: 0 56px 0 20px;
+        border-radius: 15px;
+        border: 2px solid #0288d1;
+        border-left: none;
+        animation: proModeMobileMenuExtend 0.3s ease-out forwards;
+    }
+
+    @keyframes proModeMobileMenuExtend {
+        from {
+            opacity: 0;
+            transform: scaleX(0);
+        }
+        to {
+            opacity: 1;
+            transform: scaleX(1);
+        }
+    }
+
+    [data-pro-mode="true"] .mobile-menu-toggle {
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        top: calc(12px + env(safe-area-inset-top, 0px));
+        left: calc(12px + env(safe-area-inset-left, 0px));
+        right: auto;
+    }
+
+    [data-pro-mode="true"] .pro-mode-settings-btn {
+        display: none !important;
+    }
+}

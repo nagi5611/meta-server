@@ -480,7 +480,7 @@ class UIManager {
 
     /**
      * Update ping display: 応答時間を色分けで表示
-     * 100ms以内: 緑, 300ms以内: 黄, それ以上: 赤, 10秒応答なし: 応答なし
+     * 100ms以内: 緑, 300ms以内: 黄, それ以上: 赤, 3秒応答なし: 応答なし
      * @param {{ pingMs: number|null, noResponse: boolean }} status
      */
     updatePingDisplay(status) {

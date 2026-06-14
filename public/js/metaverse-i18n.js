@@ -337,6 +337,17 @@ export const METAVERSE_STRINGS = {
         en: 'When on, the load screen shows prefab names and file paths.',
         zh: '开启后，加载画面会显示预制体名与文件路径。',
     },
+    'settings.proModeLabel': { ja: 'プロモード', en: 'Pro mode', zh: '专业模式' },
+    'settings.proModeTitle': {
+        ja: 'UIを最小化して3D画面を広く表示します',
+        en: 'Minimize UI for a wider 3D view',
+        zh: '最小化界面以扩大 3D 视野',
+    },
+    'settings.proModeHint': {
+        ja: 'ON にするとモバイルはメニューボタンのみ、PC は左上の設定アイコン（40% 透明度）のみが表示されます',
+        en: 'When on, mobile shows only the menu button; PC shows only a settings icon (40% opacity) at top left.',
+        zh: '开启后，手机仅显示菜单按钮，电脑仅在左上角显示设置图标（40% 透明度）。',
+    },
     'settings.viewModeLabel': { ja: '画面表示', en: 'View', zh: '视角' },
     'settings.viewModeToggleTitle': {
         ja: '1人称と3人称を切り替える',

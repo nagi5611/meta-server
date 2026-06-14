@@ -24,6 +24,7 @@ class MenuManager {
         this.stampBtn = document.getElementById('stamp-btn');
         this.videoBtn = document.getElementById('video-btn');
         this.settingsBtn = document.getElementById('settings-btn');
+        this.proModeSettingsBtn = document.getElementById('pro-mode-settings-btn');
         this.logoutBtn = document.getElementById('logout-btn');
         this.restartWorldBtn = document.getElementById('restart-world-btn');
 
@@ -94,6 +95,7 @@ class MenuManager {
             viewDistanceM: 50,
             showViewRangeSpheres: false,
             developerMode: false,
+            proMode: false,
             viewMode: 'third',
             visualMode: 'standard'
         };
@@ -108,6 +110,7 @@ class MenuManager {
         this.setupEventListeners();
         this.setupVideoEventListeners();
         this.updateSettingsUI();
+        this.applyProMode();
         this.updateButtonStates();
         this.loadAudioDevices();
         this.loadVideoDevices();
@@ -448,6 +451,7 @@ class MenuManager {
         
         // Settings button
         this.settingsBtn.addEventListener('click', () => this.openSettings());
+        this.proModeSettingsBtn?.addEventListener('click', () => this.openSettings());
         this.settingsCloseBtn.addEventListener('click', () => this.closeSettings());
         
         // Exit button (退出: ロビーに戻る / ログアウト選択)
@@ -601,6 +605,11 @@ class MenuManager {
         document.getElementById('developerModeToggle')?.addEventListener('change', (e) => {
             this.settings.developerMode = !!e.target.checked;
             this.saveSettings();
+        });
+        document.getElementById('proModeToggle')?.addEventListener('change', (e) => {
+            this.settings.proMode = !!e.target.checked;
+            this.saveSettings();
+            this.applyProMode();
         });
         document.getElementById('viewModeToggle')?.addEventListener('change', (e) => {
             this.settings.viewMode = e.target.checked ? 'first' : 'third';
@@ -957,6 +966,7 @@ class MenuManager {
                 this.settings.viewDistanceM = g.viewDistanceM;
                 this.settings.showViewRangeSpheres = g.showViewRangeSpheres;
                 this.settings.developerMode = !!this.settings.developerMode;
+                this.settings.proMode = !!this.settings.proMode;
                 this.settings.visualMode = g.visualMode;
             } catch (e) {
                 console.error('Failed to load settings:', e);
@@ -1020,7 +1030,24 @@ class MenuManager {
         if (showVrEl) showVrEl.checked = !!this.settings.showViewRangeSpheres;
         const developerModeEl = document.getElementById('developerModeToggle');
         if (developerModeEl) developerModeEl.checked = !!this.settings.developerMode;
+        const proModeEl = document.getElementById('proModeToggle');
+        if (proModeEl) proModeEl.checked = !!this.settings.proMode;
         this.updateViewModeButton();
+    }
+
+    /**
+     * プロモードの ON/OFF を body 属性と設定ボタン表示に反映する。
+     */
+    applyProMode() {
+        const enabled = !!this.settings.proMode;
+        if (enabled) {
+            document.body.setAttribute('data-pro-mode', 'true');
+        } else {
+            document.body.removeAttribute('data-pro-mode');
+        }
+        if (this.proModeSettingsBtn) {
+            this.proModeSettingsBtn.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+        }
     }
 
     /**
