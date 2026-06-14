@@ -40,7 +40,6 @@
 [data-pro-mode="true"] #chat-container,
 [data-pro-mode="true"] #emoji-menu,
 [data-pro-mode="true"] #admin-menu,
-[data-pro-mode="true"] #mobile-controls,
 [data-pro-mode="true"] #mobile-landscape-overlay,
 [data-pro-mode="true"] #xr-stick-feedback,
 [data-pro-mode="true"] #google-maps-attribution,
@@ -137,5 +136,22 @@
 
     [data-pro-mode="true"] .pro-mode-settings-btn {
         display: none !important;
+    }
+
+    /* 操作系: 見えないがタッチ・ドラッグは有効 */
+    [data-pro-mode="true"] #mobile-controls {
+        opacity: 0 !important;
+        visibility: visible !important;
+        pointer-events: none !important;
+    }
+
+    [data-pro-mode="true"] #mobile-controls > * {
+        pointer-events: auto !important;
+    }
+
+    [data-pro-mode="true"] #mobile-controls .nipple,
+    [data-pro-mode="true"] #mobile-controls .nipple .back,
+    [data-pro-mode="true"] #mobile-controls .nipple .front {
+        opacity: 0 !important;
     }
 }

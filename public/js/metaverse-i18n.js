@@ -344,9 +344,9 @@ export const METAVERSE_STRINGS = {
         zh: '最小化界面以扩大 3D 视野',
     },
     'settings.proModeHint': {
-        ja: 'ON にするとモバイルはメニューボタンのみ、PC は左上の設定アイコン（40% 透明度）のみが表示されます',
-        en: 'When on, mobile shows only the menu button; PC shows only a settings icon (40% opacity) at top left.',
-        zh: '开启后，手机仅显示菜单按钮，电脑仅在左上角显示设置图标（40% 透明度）。',
+        ja: 'ON にするとモバイルはメニューボタンのみ表示（操作系は非表示のまま操作可能）、PC は左上の設定アイコン（40% 透明度）のみが表示されます',
+        en: 'When on, mobile shows only the menu button (controls stay invisible but usable); PC shows only a settings icon (40% opacity) at top left.',
+        zh: '开启后，手机仅显示菜单按钮（操作区不可见但仍可操作），电脑仅在左上角显示设置图标（40% 透明度）。',
     },
     'settings.viewModeLabel': { ja: '画面表示', en: 'View', zh: '视角' },
     'settings.viewModeToggleTitle': {
