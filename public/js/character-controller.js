@@ -148,6 +148,7 @@ class CharacterController {
         this._suspendPhysicsUntilGameplayInput = false;
         this.physicsManager.playerVelocity.set(0, 0, 0);
         this.physicsManager.probeGroundedAtFeet();
+        this.physicsManager.snapToFloorFromRayIfPenetrating();
     }
 
     /**
@@ -236,7 +237,12 @@ class CharacterController {
                 if (this.isMobileMode || this.xrPresenting) return;
                 this.notifyGameplayInputIntent();
                 if (!this.isPointerLocked) {
-                    document.body.requestPointerLock();
+                    requestAnimationFrame(() => {
+                        if (this.isMobileMode || this.xrPresenting || document.pointerLockElement) return;
+                        document.body.requestPointerLock().catch((err) => {
+                            console.warn('[PointerLock]', err?.message || err);
+                        });
+                    });
                 }
             });
         }

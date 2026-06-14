@@ -80,8 +80,10 @@ class PhysicsManager {
         this.feetClearanceAboveGround = 0.038;
         /** 床レイ原点をカプセル中心より上にずらす（m）— メッシュ内での取りこぼし緩和 */
         this.groundProbeOriginLift = 2;
-        /** 床スナップ: このめり込み以上のみ復帰（通常落下には干渉しない） */
-        this.floorSnapDeepPenetration = 0.35;
+        /** 床スナップ: このめり込み以上でレイ復帰＋着地 */
+        this.floorSnapMinPenetration = 0.008;
+        /** probeGroundedAtFeet: 床までこの高さ以内ならスナップして接地 */
+        this.groundProbeMaxHeadroom = 3.0;
         /**
          * BVH 接地: これより速く落下中は床への擦過で接地扱いにしない (m/s)
          * 誤接地 → 次フレームで vy=0・重力停止 → 落下が遅く見えるのを防ぐ
@@ -344,6 +346,7 @@ class PhysicsManager {
         }
 
         this._enforceFloorFromRaycast();
+        this._stabilizeStandingOnFloor();
 
         // 床・メッシュ挟み込み: 大きな補正が短時間に繰り返されたら Y を持ち上げて抜ける（スポーン TP はしない）
         const falling = this.playerVelocity.y < 0;
@@ -438,27 +441,39 @@ class PhysicsManager {
     }
 
     /**
-     * 物理停止から再開する直前用: 足元直下に床があれば playerIsOnGround を true にする（初回ジャンプ用）
+     * 床めり込み時にレイで位置を戻し着地する（初回入力直後など）
+     * @returns {boolean}
+     */
+    snapToFloorFromRayIfPenetrating() {
+        return this._enforceFloorFromRaycast();
+    }
+
+    /**
+     * 足元レイで床へスナップし接地状態を整える（初回入力・ジャンプ前用）
+     * @returns {boolean} 接地できたか
      */
     probeGroundedAtFeet() {
         if (!this.collider || !this.collider.geometry?.boundsTree) {
             this.playerIsOnGround = false;
-            return;
+            return false;
         }
         this.collider.updateMatrixWorld(true);
-        const origin = this.tempVector.set(
-            this.playerPosition.x,
-            this.playerPosition.y + 0.28,
-            this.playerPosition.z
-        );
-        const hit = this.raycastStaticWorld(origin, this._rayDown, 2.5);
-        if (!hit || hit.point == null) {
+        const ground = this._sampleGroundBelow(this.playerPosition);
+        if (!ground) {
             this.playerIsOnGround = false;
-            return;
+            return false;
         }
-        const feetY = this.playerPosition.y - this.capsuleInfo.radius;
-        const gap = hit.point.y - feetY;
-        this.playerIsOnGround = gap > this.groundProbeGapMin && gap < this.groundProbeGapMax;
+        const { minCapsuleY, headroom } = ground;
+        if (headroom > this.groundProbeMaxHeadroom || headroom < -0.25) {
+            this.playerIsOnGround = false;
+            return false;
+        }
+        if (headroom < 0.02) {
+            this.playerPosition.y = minCapsuleY;
+        }
+        this.playerVelocity.y = 0;
+        this.playerIsOnGround = true;
+        return true;
     }
 
     /**
@@ -648,7 +663,25 @@ class PhysicsManager {
     }
 
     /**
-     * 深い床抜け時のみ Y をレイで復帰（速度・接地フラグは変更しない）
+     * 低速・静止時に床直上へ吸着（BVH だけでは接地にならない微浮き対策）
+     */
+    _stabilizeStandingOnFloor() {
+        if (this.playerVelocity.y < -0.6 || this.playerVelocity.y > 0.12) return;
+
+        const ground = this._sampleGroundBelow(this.playerPosition);
+        if (!ground) return;
+        if (ground.headroom > 0.15 || ground.headroom < -0.08) return;
+
+        const beforeVy = this.playerVelocity.y;
+        this.playerPosition.y = ground.minCapsuleY;
+        if (beforeVy <= 0.12) {
+            this.playerVelocity.y = 0;
+        }
+        this.playerIsOnGround = true;
+    }
+
+    /**
+     * 床レイ: めり込み時は位置を戻し、落下中なら着地（vy=0・接地）。空中では呼ばれない
      * @returns {boolean}
      */
     _enforceFloorFromRaycast() {
@@ -659,9 +692,21 @@ class PhysicsManager {
         if (minCapsuleY == null || this.playerPosition.y >= minCapsuleY) return false;
 
         const penetration = minCapsuleY - this.playerPosition.y;
-        if (penetration < this.floorSnapDeepPenetration) return false;
+        if (penetration < this.floorSnapMinPenetration) return false;
 
+        this._velLogBefore.copy(this.playerVelocity);
         this.playerPosition.y = minCapsuleY;
+        if (this.playerVelocity.y <= 0.12) {
+            this.playerVelocity.y = 0;
+            this.playerIsOnGround = true;
+            this._logVelocityChange(
+                'reset',
+                'floor-ray-snap-landing',
+                this._velLogBefore,
+                this.playerVelocity,
+                { penetration, minCapsuleY }
+            );
+        }
         return true;
     }
 
