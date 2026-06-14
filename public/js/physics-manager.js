@@ -346,7 +346,9 @@ class PhysicsManager {
         this._enforceFloorFromRaycast();
 
         // 床・メッシュ挟み込み: 大きな補正が短時間に繰り返されたら Y を持ち上げて抜ける（スポーン TP はしない）
-        if (offset >= this.STUCK_MIN_OFFSET) {
+        const falling = this.playerVelocity.y < 0;
+        const floorLikePush = Math.abs(pushDirY) >= 0.52;
+        if (offset >= this.STUCK_MIN_OFFSET && !(falling && floorLikePush)) {
             const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
             this._stuckResolveTimestamps.push(now);
             const cutoff = now - this.STUCK_RESOLVE_WINDOW_MS;
@@ -370,12 +372,8 @@ class PhysicsManager {
         }
 
         if (!this.playerIsOnGround) {
-            // 高速落下中の床めり込み押し出しは位置補正のみ。速度投影すると毎フレーム vy が削られて落下が遅くなる
-            const floorLikePush = Math.abs(pushDirY) >= 0.52;
-            const falling = this.playerVelocity.y < 0;
-            const skipFloorProjection = floorLikePush && falling;
-
-            if (!skipFloorProjection) {
+            // 落下中 (vy<0) は位置補正のみ。速度投影は天井・壁への上昇時だけ行う
+            if (!falling) {
                 this._velLogBefore.copy(this.playerVelocity);
                 const nx = deltaVector.x;
                 const ny = deltaVector.y;
