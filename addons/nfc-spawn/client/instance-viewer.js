@@ -101,10 +101,10 @@ function showExperienceStartGuide() {
 }
 
 /**
- * 読み込み済み GLB のマテリアルを屋外向けに少し明るくする
+ * テクスチャのないマテリアルを白にする
  * @param {HTMLElement} root
  */
-function brightenLoadedModels(root) {
+function whitenUntexturedModels(root) {
     const el = /** @type {import('aframe').Entity & { object3D?: import('three').Object3D }} */ (root);
     const obj = el?.object3D;
     if (!obj) return;
@@ -113,32 +113,11 @@ function brightenLoadedModels(root) {
         if (!mesh?.isMesh || !mesh.material) return;
         const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
         for (const mat of mats) {
-            if (!mat || !('isMeshStandardMaterial' in mat) || !mat.isMeshStandardMaterial) continue;
-            if (mat.map) {
-                mat.color?.set?.(0xffffff);
-            }
-            mat.roughness = Math.min(Number(mat.roughness) || 1, 0.92);
-            mat.metalness = Math.min(Number(mat.metalness) || 0, 0.35);
-            mat.envMapIntensity = Math.max(Number(mat.envMapIntensity) || 1, 1);
+            if (!mat || mat.map) continue;
+            mat.color?.set?.(0xffffff);
             mat.needsUpdate = true;
         }
     });
-}
-
-/**
- * レンダラー露出を端末向けに調整
- */
-function tuneInstanceRenderer() {
-    const sceneEl = document.querySelector('a-scene');
-    if (!sceneEl) return;
-    const apply = () => {
-        const renderer = sceneEl.renderer;
-        if (renderer && 'toneMappingExposure' in renderer) {
-            renderer.toneMappingExposure = 1.45;
-        }
-    };
-    if (sceneEl.hasLoaded) apply();
-    else sceneEl.addEventListener('loaded', apply, { once: true });
 }
 
 /**
@@ -213,6 +192,7 @@ function attachGlbEntity(parent, opts) {
         if (opts.rotation) ent.setAttribute('rotation', opts.rotation);
         if (opts.scale) ent.setAttribute('scale', opts.scale);
         const onLoaded = () => {
+            whitenUntexturedModels(ent);
             cleanup();
             resolve(ent);
         };
@@ -228,13 +208,6 @@ function attachGlbEntity(parent, opts) {
         ent.addEventListener('model-error', onError);
         ent.setAttribute('gltf-model', `url(${opts.url})`);
         parent.appendChild(ent);
-        ent.addEventListener(
-            'model-loaded',
-            () => {
-                brightenLoadedModels(ent);
-            },
-            { once: true }
-        );
     });
 }
 
@@ -324,7 +297,6 @@ async function loadInstanceManifest(manifest, spawnId) {
 }
 
 async function bootstrap() {
-    tuneInstanceRenderer();
     const token = getTokenFromUrl();
     if (!token) {
         setOverlayMessage('token パラメータがありません', true);
