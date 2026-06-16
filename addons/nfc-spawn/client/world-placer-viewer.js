@@ -154,6 +154,22 @@ export class NfcSpawnWorldPlacer {
         this._placementMarker = createSpawnMarkerGroup(0x22cc66);
         this._placementMarker.visible = false;
         this._scene.add(this._placementMarker);
+        const sphereGeo = new THREE.SphereGeometry(1, 28, 18);
+        const sphereMat = new THREE.MeshBasicMaterial({
+            color: 0x4488ff,
+            transparent: true,
+            opacity: 0.12,
+            depthWrite: false,
+        });
+        this._loadSphere = new THREE.Mesh(sphereGeo, sphereMat);
+        this._loadSphere.visible = false;
+        this._scene.add(this._loadSphere);
+        const wire = new THREE.LineSegments(
+            new THREE.WireframeGeometry(sphereGeo),
+            new THREE.LineBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 0.35 })
+        );
+        this._loadSphere.add(wire);
+        this._loadRadius = 15;
         this._grid = new THREE.GridHelper(400, 80, 0x333333, 0x4a6a4a);
         this._grid.position.y = 0;
         this._scene.add(this._grid);
@@ -194,6 +210,7 @@ export class NfcSpawnWorldPlacer {
         if (!this.onPlacementChange || !this._placementMarker.visible) return;
         const p = this._placementMarker.position;
         const yaw = (this._placementMarker.rotation.y * 180) / Math.PI;
+        this.updateLoadSphereAt(p);
         this.onPlacementChange({
             x: Math.round(p.x * 1000) / 1000,
             y: Math.round(p.y * 1000) / 1000,
@@ -316,6 +333,38 @@ export class NfcSpawnWorldPlacer {
         this._placementMarker.rotation.y = ((Number(pos.yaw) || 0) * Math.PI) / 180;
         this._transform.attach(this._placementMarker);
         this._controls.target.set(pos.x, pos.y, pos.z);
+        this.updateLoadSphereAt(this._placementMarker.position);
+    }
+
+    /**
+     * @param {boolean} visible
+     */
+    setLoadSphereVisible(visible) {
+        this._loadSphere.visible = visible;
+    }
+
+    /**
+     * @param {number} radiusM
+     */
+    setLoadRadius(radiusM) {
+        const r = Math.max(0.5, Number(radiusM) || 15);
+        this._loadRadius = r;
+        this._loadSphere.scale.setScalar(r);
+    }
+
+    /**
+     * @param {{ x: number, y: number, z: number }} pos
+     */
+    updateLoadSphereAt(pos) {
+        if (!this._loadSphere.visible) return;
+        this._loadSphere.position.set(pos.x, pos.y, pos.z);
+    }
+
+    /**
+     * @returns {number}
+     */
+    getLoadRadius() {
+        return this._loadRadius;
     }
 
     hidePlacementMarker() {

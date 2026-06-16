@@ -1,35 +1,44 @@
 # nfc-spawn アドオン
 
-ジオラマ等の NFC タグからメタバースの特定ワールド・座標へ入場するためのアドオンです。
+ジオラマ等の NFC タグからメタバースへ入場、またはスマホ専用 3D インスタンスを表示するアドオンです。
 
-## 概要
+## 2 タイプ
 
-- URL 形式: `https://<host>/?spawn=<TOKEN>`（座標は URL に含めない）
-- トークン → サーバー DB 参照 → ワールド + スポーン座標を返す
-- 管理画面（サイドバー「NFCタグ」）でタグごとのスポーン地点を CRUD
+| タイプ | URL | 説明 |
+|--------|-----|------|
+| **テレポート** | `https://<host>/?spawn=<TOKEN>` | フルメタバースの指定ワールド・座標へ入場 |
+| **インスタンス** | `https://<host>/instance/?token=<TOKEN>` | A-Frame 閲覧専用（マルチプレイなし）。ベイク済み 3D のみ |
 
 ## 有効化
 
 1. 管理画面「アドオン」で `nfc-spawn` を有効化
 2. **Node プロセスを再起動**
 
+## 管理画面（NFCタグ）
+
+- 3D プレビューで位置を配置
+- **インスタンス型**: ロード半径（球）を調整 → プレビュー確認 → **「インスタンスを生成 / 再ベイク」**（手動）
+- ベイク完了後のみインスタンス URL が有効
+
 ## HTTP API
 
 ### 公開
 
 ```http
-GET /api/addons/nfc-spawn/spawn/:token
+GET /api/addons/nfc-spawn/spawn/:token      # テレポート型のみ
+GET /api/addons/nfc-spawn/instance/:token   # インスタンス型（ベイク済みのみ）
+GET /api/addons/nfc-spawn/instance-assets/:spawnId/*
 ```
 
 ### 管理（Basic 認証）
 
 | メソッド | パス |
 |----------|------|
-| GET | `/admin/addons/nfc-spawn/spawns` |
-| POST | `/admin/addons/nfc-spawn/spawns` |
-| PUT | `/admin/addons/nfc-spawn/spawns/:id` |
-| DELETE | `/admin/addons/nfc-spawn/spawns/:id` |
+| GET/POST | `/admin/addons/nfc-spawn/spawns` |
+| PUT/DELETE | `/admin/addons/nfc-spawn/spawns/:id` |
 | POST | `/admin/addons/nfc-spawn/spawns/:id/regenerate-token` |
+| GET | `/admin/addons/nfc-spawn/spawns/:id/bake-preview` |
+| POST | `/admin/addons/nfc-spawn/spawns/:id/bake` |
 
 ## 設定（任意）
 
@@ -37,22 +46,34 @@ GET /api/addons/nfc-spawn/spawn/:token
 
 ```json
 {
-  "publicBaseUrl": "https://meta.example.com"
+  "publicBaseUrl": "",
+  "maxBakeEntries": 50,
+  "maxBakeBytes": 104857600,
+  "defaultModelRadius": 5
 }
 ```
 
-NFC に焼く URL のホストを固定したい場合に指定。未設定時はリクエストヘッダから推定。
+## ストレージ
 
-環境変数: `ADDON_NFC_SPAWN_PUBLIC_BASE_URL`
+- DB: `plugin-databases/nfc-spawn.db`
+- インスタンス資産: `data/nfc-instances/{spawnId}/`（manifest.json + models/ + prefabs/）
 
-## データベース
+## テスト
 
-`plugin-databases/nfc-spawn.db`（テーブル `nfc_spawns`）
+```bash
+npm run test:nfc-spawn
+```
 
-管理画面「データベース」→ `plugin/nfc-spawn` からも閲覧可能。
+## 手動テストチェックリスト
+
+- [ ] テレポート型: `/?spawn=TOKEN` で入場・テレポート
+- [ ] インスタンス型: 保存 → ベイク → `/instance/?token=TOKEN` で A-Frame 表示
+- [ ] インスタンス未ベイク時は API 404
+- [ ] テレポートトークンで instance API は 404
+- [ ] 半径変更・プレビュー除外・再ベイク
+- [ ] タグ削除で `nfc-instances/{id}` も削除
 
 ## セキュリティ
 
 - トークンは 128bit ランダム（base64url）
-- 座標の URL 直書きテレポートは不可
 - トークン URL を知っている人は利用可能（NFC 物理認証は別途）

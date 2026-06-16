@@ -53,6 +53,8 @@ function getStoragePathsFromSrcDirectory(srcDirectory) {
         DB_DIR: path.join(base, 'db'),
         /** 各 addon 専用 SQLite（pluginId.db） */
         PLUGIN_DATABASES_DIR: path.join(dataDir, 'plugin-databases'),
+        /** NFC インスタンス型のベイク済み 3D 資産 */
+        NFC_INSTANCES_DIR: path.join(dataDir, 'nfc-instances'),
         SERVER_LOG_DIR: path.join(base, 'logs'),
     };
 }
@@ -76,6 +78,7 @@ function getStoragePathsFromExplicitEnv() {
         CHART_BGM_DIR: path.join(path.dirname(requireEnv('META_CHARTS_PATH')), 'chart-bgm'),
         DB_DIR: metaDbDir,
         PLUGIN_DATABASES_DIR: path.join(path.dirname(metaDbDir), 'plugin-databases'),
+        NFC_INSTANCES_DIR: path.join(path.dirname(metaDbDir), 'nfc-instances'),
         SERVER_LOG_DIR: requireEnv('META_SERVER_LOG_DIR'),
     };
 }
@@ -113,6 +116,7 @@ export function validateAndPrepareStoragePaths() {
 
     ensureDirExists(STORAGE_PATHS.DB_DIR, 'META_DB_DIR');
     ensureDirExists(STORAGE_PATHS.PLUGIN_DATABASES_DIR, 'PLUGIN_DATABASES_DIR');
+    ensureDirExists(STORAGE_PATHS.NFC_INSTANCES_DIR, 'NFC_INSTANCES_DIR');
     ensureDirExists(STORAGE_PATHS.SERVER_LOG_DIR, 'META_SERVER_LOG_DIR');
 }
 

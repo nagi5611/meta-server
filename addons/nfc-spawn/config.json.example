@@ -1,3 +1,6 @@
 {
-    "publicBaseUrl": ""
+    "publicBaseUrl": "",
+    "maxBakeEntries": 50,
+    "maxBakeBytes": 104857600,
+    "defaultModelRadius": 5
 }

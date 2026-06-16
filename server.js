@@ -1647,6 +1647,15 @@ app.get('/login/', (req, res) => {
     res.sendFile(loginIndexPath);
 });
 
+const instanceIndexDist = path.join(__dirname, 'dist', 'instance', 'index.html');
+const instanceIndexPublic = path.join(__dirname, 'public', 'instance', 'index.html');
+const sendInstanceIndex = (req, res) => {
+    const file = fs.existsSync(instanceIndexDist) ? instanceIndexDist : instanceIndexPublic;
+    res.sendFile(file);
+};
+app.get('/instance', sendInstanceIndex);
+app.get('/instance/', sendInstanceIndex);
+
 // ============================
 // Host monitor: systemd ユニットの状態と起動（任意・ADMIN Basic 認証）
 // HOST_MONITOR_UNITS=meta-server.service,nginx.service のようにカンマ区切り

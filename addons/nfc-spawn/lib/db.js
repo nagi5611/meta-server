@@ -4,6 +4,13 @@ import { randomBytes } from 'node:crypto';
 const SPAWN_TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const LABEL_MAX_LEN = 128;
 const NFC_UID_MAX_LEN = 64;
+const SPAWN_TYPES = new Set(['teleport', 'instance']);
+const LOAD_RADIUS_MIN = 1;
+const LOAD_RADIUS_MAX = 500;
+
+const SELECT_COLS = `id, spawn_token, label, nfc_tag_uid, world_id, x, y, z, yaw, enabled,
+    type, load_radius, instance_manifest_path, baked_at, bake_revision,
+    created_at, updated_at`;
 
 /**
  * @returns {string}
@@ -25,13 +32,7 @@ export function isValidSpawnTokenFormat(token) {
  * @returns {object[]}
  */
 export function listNfcSpawns(db) {
-    return db
-        .prepare(
-            `SELECT id, spawn_token, label, nfc_tag_uid, world_id, x, y, z, yaw, enabled, created_at, updated_at
-             FROM nfc_spawns
-             ORDER BY id ASC`
-        )
-        .all();
+    return db.prepare(`SELECT ${SELECT_COLS} FROM nfc_spawns ORDER BY id ASC`).all();
 }
 
 /**
@@ -40,12 +41,7 @@ export function listNfcSpawns(db) {
  * @returns {object|undefined}
  */
 export function getNfcSpawnById(db, id) {
-    return db
-        .prepare(
-            `SELECT id, spawn_token, label, nfc_tag_uid, world_id, x, y, z, yaw, enabled, created_at, updated_at
-             FROM nfc_spawns WHERE id = ?`
-        )
-        .get(id);
+    return db.prepare(`SELECT ${SELECT_COLS} FROM nfc_spawns WHERE id = ?`).get(id);
 }
 
 /**
@@ -54,12 +50,7 @@ export function getNfcSpawnById(db, id) {
  * @returns {object|undefined}
  */
 export function getNfcSpawnByToken(db, token) {
-    return db
-        .prepare(
-            `SELECT id, spawn_token, label, nfc_tag_uid, world_id, x, y, z, yaw, enabled, created_at, updated_at
-             FROM nfc_spawns WHERE spawn_token = ?`
-        )
-        .get(token);
+    return db.prepare(`SELECT ${SELECT_COLS} FROM nfc_spawns WHERE spawn_token = ?`).get(token);
 }
 
 /**
@@ -84,9 +75,30 @@ export function rowToSpawnPlan(row) {
 export function resolveSpawnByToken(db, token) {
     const row = getNfcSpawnByToken(db, token);
     if (!row) return null;
+    const type = String(row.type || 'teleport');
+    if (type !== 'teleport') return null;
     const plan = rowToSpawnPlan(row);
     if (!plan) return null;
     return { ...plan, enabled: row.enabled === 1 };
+}
+
+/**
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} token
+ * @returns {{ id: number, label: string, enabled: boolean, manifestPath: string, bakeRevision: number }|null}
+ */
+export function resolveInstanceByToken(db, token) {
+    const row = getNfcSpawnByToken(db, token);
+    if (!row) return null;
+    if (String(row.type || '') !== 'instance') return null;
+    if (!row.baked_at || !row.instance_manifest_path) return null;
+    return {
+        id: row.id,
+        label: String(row.label || ''),
+        enabled: row.enabled === 1,
+        manifestPath: String(row.instance_manifest_path),
+        bakeRevision: Number(row.bake_revision) || 0,
+    };
 }
 
 /**
@@ -115,9 +127,18 @@ export function parseSpawnBody(body) {
         nfcTagUid = uid;
     }
     const enabled = body?.enabled === false || body?.enabled === 0 ? 0 : 1;
+    const typeRaw = typeof body?.type === 'string' ? body.type.trim() : 'teleport';
+    const type = SPAWN_TYPES.has(typeRaw) ? typeRaw : 'teleport';
+    let loadRadius = null;
+    if (type === 'instance') {
+        loadRadius = Number(body?.load_radius);
+        if (!Number.isFinite(loadRadius) || loadRadius < LOAD_RADIUS_MIN || loadRadius > LOAD_RADIUS_MAX) {
+            return { ok: false, error: 'invalid_load_radius' };
+        }
+    }
     return {
         ok: true,
-        data: { label, worldId, x, y, z, yaw, nfcTagUid, enabled },
+        data: { label, worldId, x, y, z, yaw, nfcTagUid, enabled, type, loadRadius },
     };
 }
 
@@ -130,8 +151,10 @@ export function createNfcSpawn(db, data) {
     const token = generateSpawnToken();
     const result = db
         .prepare(
-            `INSERT INTO nfc_spawns (spawn_token, label, nfc_tag_uid, world_id, x, y, z, yaw, enabled, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+            `INSERT INTO nfc_spawns (
+                spawn_token, label, nfc_tag_uid, world_id, x, y, z, yaw, enabled,
+                type, load_radius, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
         )
         .run(
             token,
@@ -142,7 +165,9 @@ export function createNfcSpawn(db, data) {
             data.y,
             data.z,
             data.yaw,
-            data.enabled
+            data.enabled,
+            data.type || 'teleport',
+            data.loadRadius
         );
     return getNfcSpawnById(db, Number(result.lastInsertRowid));
 }
@@ -154,9 +179,24 @@ export function createNfcSpawn(db, data) {
  * @returns {object|undefined}
  */
 export function updateNfcSpawn(db, id, data) {
+    const existing = getNfcSpawnById(db, id);
+    const typeChanged =
+        existing && data.type !== undefined && String(existing.type || 'teleport') !== String(data.type);
+    const positionChanged =
+        existing &&
+        (existing.x !== data.x ||
+            existing.y !== data.y ||
+            existing.z !== data.z ||
+            (data.loadRadius != null && existing.load_radius !== data.loadRadius));
+    const clearBake = typeChanged || (existing?.type === 'instance' && positionChanged);
+
     db.prepare(
         `UPDATE nfc_spawns
-         SET label = ?, nfc_tag_uid = ?, world_id = ?, x = ?, y = ?, z = ?, yaw = ?, enabled = ?, updated_at = datetime('now')
+         SET label = ?, nfc_tag_uid = ?, world_id = ?, x = ?, y = ?, z = ?, yaw = ?, enabled = ?,
+             type = ?, load_radius = ?,
+             instance_manifest_path = CASE WHEN ? THEN NULL ELSE instance_manifest_path END,
+             baked_at = CASE WHEN ? THEN NULL ELSE baked_at END,
+             updated_at = datetime('now')
          WHERE id = ?`
     ).run(
         data.label,
@@ -167,8 +207,15 @@ export function updateNfcSpawn(db, id, data) {
         data.z,
         data.yaw,
         data.enabled,
+        data.type || 'teleport',
+        data.loadRadius,
+        clearBake ? 1 : 0,
+        clearBake ? 1 : 0,
         id
     );
+    if (clearBake) {
+        db.prepare('DELETE FROM nfc_instance_entries WHERE spawn_id = ?').run(id);
+    }
     return getNfcSpawnById(db, id);
 }
 
@@ -190,20 +237,68 @@ export function deleteNfcSpawn(db, id) {
 export function regenerateSpawnToken(db, id) {
     const token = generateSpawnToken();
     const result = db
-        .prepare(
-            `UPDATE nfc_spawns SET spawn_token = ?, updated_at = datetime('now') WHERE id = ?`
-        )
+        .prepare(`UPDATE nfc_spawns SET spawn_token = ?, updated_at = datetime('now') WHERE id = ?`)
         .run(token, id);
     if (result.changes === 0) return undefined;
     return getNfcSpawnById(db, id);
 }
 
 /**
+ * @param {import('better-sqlite3').Database} db
+ * @param {number} spawnId
+ * @param {{ manifestPath: string, entries: object[] }} bakeResult
+ * @returns {object|undefined}
+ */
+export function recordInstanceBake(db, spawnId, bakeResult) {
+    const existing = getNfcSpawnById(db, spawnId);
+    if (!existing) return undefined;
+    const revision = (Number(existing.bake_revision) || 0) + 1;
+    const bakedAt = new Date().toISOString();
+    db.prepare(
+        `UPDATE nfc_spawns
+         SET instance_manifest_path = ?, baked_at = ?, bake_revision = ?, updated_at = datetime('now')
+         WHERE id = ?`
+    ).run(bakeResult.manifestPath, bakedAt, revision, spawnId);
+    db.prepare('DELETE FROM nfc_instance_entries WHERE spawn_id = ?').run(spawnId);
+    const insert = db.prepare(
+        `INSERT INTO nfc_instance_entries (spawn_id, world_model_index, entry_kind, prefab_manifest, part_indices, source_path)
+         VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    for (const e of bakeResult.entries) {
+        insert.run(
+            spawnId,
+            e.worldModelIndex,
+            e.entryKind,
+            e.prefabManifest || null,
+            e.partIndices != null ? JSON.stringify(e.partIndices) : null,
+            e.sourcePath || null
+        );
+    }
+    return getNfcSpawnById(db, spawnId);
+}
+
+/**
+ * @param {import('better-sqlite3').Database} db
+ * @param {number} spawnId
+ * @returns {object[]}
+ */
+export function listInstanceEntries(db, spawnId) {
+    return db
+        .prepare(
+            `SELECT id, spawn_id, world_model_index, entry_kind, prefab_manifest, part_indices, source_path
+             FROM nfc_instance_entries WHERE spawn_id = ? ORDER BY id ASC`
+        )
+        .all(spawnId);
+}
+
+/**
  * @param {object} row
  * @param {string} spawnUrl
+ * @param {string} instanceUrl
  * @returns {object}
  */
-export function serializeSpawnRow(row, spawnUrl) {
+export function serializeSpawnRow(row, spawnUrl, instanceUrl) {
+    const type = String(row.type || 'teleport');
     return {
         id: row.id,
         spawn_token: row.spawn_token,
@@ -215,8 +310,15 @@ export function serializeSpawnRow(row, spawnUrl) {
         z: row.z,
         yaw: row.yaw,
         enabled: row.enabled === 1,
+        type,
+        load_radius: row.load_radius,
+        instance_manifest_path: row.instance_manifest_path,
+        baked_at: row.baked_at,
+        bake_revision: row.bake_revision ?? 0,
+        hasBake: !!(row.baked_at && row.instance_manifest_path),
         created_at: row.created_at,
         updated_at: row.updated_at,
-        spawnUrl,
+        spawnUrl: type === 'teleport' ? spawnUrl : null,
+        instanceUrl: type === 'instance' ? instanceUrl : null,
     };
 }

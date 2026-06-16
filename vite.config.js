@@ -48,6 +48,7 @@ function copyPublicAssets() {
 
             copyDirRecursive(path.join(publicDir, 'js'), path.join(distDir, 'js'));
             copyDirRecursive(path.join(publicDir, 'css'), path.join(distDir, 'css'));
+            copyDirRecursive(path.join(publicDir, 'instance'), path.join(distDir, 'instance'));
             copyDirRecursive(addonsDir, path.join(distDir, 'addons'));
 
             for (const htmlName of ['admin.html', 'sw.js']) {

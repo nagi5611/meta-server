@@ -18,6 +18,9 @@ let spawns = [];
 /** @type {number|null} */
 let editingId = null;
 
+/** @type {Set<number>} */
+let excludedPreviewIndices = new Set();
+
 /** @type {import('./world-placer-viewer.js').NfcSpawnWorldPlacer|null} */
 let worldPlacer = null;
 
@@ -94,7 +97,7 @@ function ensurePanelDom() {
     panel.innerHTML = `
         <section class="nfc-spawn-section">
             <h2>NFCタグ・スポーン地点</h2>
-            <p class="hint">3D プレビュー上の<strong>緑のマーカー</strong>をドラッグして位置を決め、「NFCタグを追加」で登録します。オレンジは既存タグです。URL は <code>/?spawn=TOKEN</code> 形式です。</p>
+            <p class="hint">3D プレビュー上の<strong>緑のマーカー</strong>をドラッグして位置を決めます。<strong>テレポート</strong>型は <code>/?spawn=TOKEN</code>、<strong>インスタンス</strong>型は <code>/instance/?token=TOKEN</code>（A-Frame 閲覧専用）です。</p>
             <p id="nfc-spawn-status" class="status-text" role="status"></p>
 
             <div class="nfc-spawn-toolbar">
@@ -116,6 +119,24 @@ function ensurePanelDom() {
                         <h3 id="nfc-spawn-form-title">新規 NFC タグ</h3>
                         <form id="nfc-spawn-form" class="nfc-spawn-form">
                             <input type="hidden" id="nfc-spawn-edit-id" value="">
+                            <label class="nfc-spawn-label">タイプ
+                                <select id="nfc-spawn-type">
+                                    <option value="teleport">テレポート（フルメタバース）</option>
+                                    <option value="instance">インスタンス（スマホ閲覧専用）</option>
+                                </select>
+                            </label>
+                            <div id="nfc-spawn-instance-fields" class="nfc-spawn-instance-fields" hidden>
+                                <label class="nfc-spawn-label">ロード半径 (m)
+                                    <input type="range" id="nfc-spawn-load-radius" min="1" max="100" step="1" value="15">
+                                    <span id="nfc-spawn-load-radius-val">15 m</span>
+                                </label>
+                                <div class="nfc-spawn-bake-preview-wrap">
+                                    <h4>球内モデル（プレビュー）</h4>
+                                    <ul id="nfc-spawn-bake-preview" class="nfc-spawn-bake-preview"></ul>
+                                </div>
+                                <p id="nfc-spawn-bake-status" class="nfc-spawn-bake-status"></p>
+                                <button type="button" class="btn btn-secondary" id="nfc-spawn-bake-btn" disabled>インスタンスを生成 / 再ベイク</button>
+                            </div>
                             <label class="nfc-spawn-label">ラベル
                                 <input type="text" id="nfc-spawn-label" required maxlength="128" placeholder="図書館模型">
                             </label>
@@ -141,6 +162,7 @@ function ensurePanelDom() {
                             <p><strong>トークン:</strong> <code id="nfc-spawn-meta-token" class="nfc-spawn-token-code">-</code></p>
                             <div class="nfc-spawn-meta-actions">
                                 <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-copy-url">URLコピー</button>
+                                <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-copy-instance-url" hidden>インスタンスURL</button>
                                 <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-regen-btn">トークン再発行</button>
                             </div>
                         </div>
@@ -152,6 +174,7 @@ function ensurePanelDom() {
                             <table class="nfc-spawn-table">
                                 <thead>
                                     <tr>
+                                        <th>タイプ</th>
                                         <th>ID</th>
                                         <th>ラベル</th>
                                         <th>座標</th>
@@ -196,6 +219,9 @@ async function ensureWorldPlacer() {
             set('nfc-spawn-y', pos.y);
             set('nfc-spawn-z', pos.z);
             set('nfc-spawn-yaw', pos.yaw);
+            if (getSelectedType() === 'instance' && worldPlacer) {
+                worldPlacer.updateLoadSphereAt({ x: pos.x, y: pos.y, z: pos.z });
+            }
         };
         worldPlacer.onTagMarkerPick = (id) => {
             const row = spawns.find((s) => s.id === id);
@@ -214,6 +240,106 @@ function getSelectedWorldId() {
 }
 
 /**
+ * @returns {'teleport'|'instance'}
+ */
+function getSelectedType() {
+    const v = /** @type {HTMLSelectElement} */ (document.getElementById('nfc-spawn-type'))?.value;
+    return v === 'instance' ? 'instance' : 'teleport';
+}
+
+/**
+ * @returns {number}
+ */
+function getLoadRadius() {
+    return parseFloat(/** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-load-radius'))?.value) || 15;
+}
+
+function syncTypeUi() {
+    const type = getSelectedType();
+    const instanceFields = document.getElementById('nfc-spawn-instance-fields');
+    const copyInst = document.getElementById('nfc-spawn-copy-instance-url');
+    if (instanceFields) instanceFields.hidden = type !== 'instance';
+    if (copyInst) copyInst.hidden = type !== 'instance';
+    const radiusVal = document.getElementById('nfc-spawn-load-radius-val');
+    if (radiusVal) radiusVal.textContent = `${getLoadRadius()} m`;
+    void ensureWorldPlacer().then((p) => {
+        if (!p) return;
+        if (type === 'instance') {
+            p.setLoadSphereVisible(true);
+            p.setLoadRadius(getLoadRadius());
+            const x = parseFloat(/** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-x'))?.value);
+            const y = parseFloat(/** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-y'))?.value);
+            const z = parseFloat(/** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-z'))?.value);
+            if ([x, y, z].every(Number.isFinite)) p.updateLoadSphereAt({ x, y, z });
+        } else {
+            p.setLoadSphereVisible(false);
+        }
+    });
+    void refreshBakePreview();
+}
+
+/**
+ * @param {object|null} [row]
+ */
+function updateBakeStatus(row = null) {
+    const el = document.getElementById('nfc-spawn-bake-status');
+    if (!el) return;
+    const r =
+        row ||
+        (editingId != null ? spawns.find((s) => s.id === editingId) : null);
+    if (!r || r.type !== 'instance') {
+        el.textContent = '';
+        return;
+    }
+    if (r.hasBake) {
+        el.textContent = `ベイク済み: rev ${r.bake_revision} / ${r.baked_at || ''}`;
+    } else {
+        el.textContent = '未ベイク（インスタンス URL はベイク後に有効）';
+    }
+}
+
+async function refreshBakePreview() {
+    const list = document.getElementById('nfc-spawn-bake-preview');
+    const bakeBtn = document.getElementById('nfc-spawn-bake-btn');
+    if (!list) return;
+    if (getSelectedType() !== 'instance' || editingId == null) {
+        list.innerHTML = '<li class="nfc-spawn-preview-hint">インスタンス型を保存後にプレビューできます</li>';
+        if (bakeBtn) bakeBtn.disabled = true;
+        return;
+    }
+    const exclude = [...excludedPreviewIndices].join(',');
+    const q = exclude ? `?exclude=${encodeURIComponent(exclude)}` : '';
+    try {
+        const j = await apiFetch(`${API_BASE}/${editingId}/bake-preview${q}`);
+        const entries = j.preview?.entries || [];
+        if (!entries.length) {
+            list.innerHTML = '<li class="nfc-spawn-preview-hint">半径内にモデルなし</li>';
+        } else {
+            list.innerHTML = entries
+                .map((e) => {
+                    const included = !excludedPreviewIndices.has(e.worldModelIndex);
+                    const checked = included ? ' checked' : '';
+                    const parts = e.partIndices?.length ? ` parts:${e.partIndices.join(',')}` : '';
+                    return `<li><label><input type="checkbox" class="nfc-preview-include" data-idx="${e.worldModelIndex}"${checked}> ${escapeHtml(e.label)} <code>${escapeHtml(e.entryKind)}</code>${escapeHtml(parts)}</label></li>`;
+                })
+                .join('');
+            list.querySelectorAll('.nfc-preview-include').forEach((cb) => {
+                cb.addEventListener('change', () => {
+                    const idx = Number(cb.getAttribute('data-idx'));
+                    if (/** @type {HTMLInputElement} */ (cb).checked) excludedPreviewIndices.delete(idx);
+                    else excludedPreviewIndices.add(idx);
+                    void refreshBakePreview();
+                });
+            });
+        }
+        if (bakeBtn) bakeBtn.disabled = false;
+    } catch {
+        list.innerHTML = '<li class="nfc-spawn-preview-hint">プレビュー取得失敗</li>';
+        if (bakeBtn) bakeBtn.disabled = true;
+    }
+}
+
+/**
  * 選択ワールドの 3D とマーカーを更新
  */
 async function reloadWorldViewer() {
@@ -225,7 +351,11 @@ async function reloadWorldViewer() {
         const world = worldsData[worldId];
         if (world) await placer.loadWorld(world);
         refreshWorldMarkers();
-        if (!editingId && world) placer.focusDefaultSpawn(world);
+        syncTypeUi();
+        if (!editingId && world) {
+            const placer = worldPlacer;
+            if (placer) placer.focusDefaultSpawn(world);
+        }
         setStatus('');
     } catch (e) {
         setStatus(e instanceof Error ? e.message : 'ワールド読込失敗', true);
@@ -278,6 +408,7 @@ function populateWorldSelect() {
 
 function resetForm() {
     editingId = null;
+    excludedPreviewIndices = new Set();
     const title = document.getElementById('nfc-spawn-form-title');
     const cancel = document.getElementById('nfc-spawn-cancel-btn');
     const saveBtn = document.getElementById('nfc-spawn-save-btn');
@@ -342,6 +473,12 @@ function fillForm(row) {
     set('nfc-spawn-z', row.z);
     set('nfc-spawn-yaw', row.yaw ?? 0);
     set('nfc-spawn-uid', row.nfc_tag_uid || '');
+    const typeSel = document.getElementById('nfc-spawn-type');
+    if (typeSel) typeSel.value = row.type === 'instance' ? 'instance' : 'teleport';
+    const radiusInput = document.getElementById('nfc-spawn-load-radius');
+    if (radiusInput && row.load_radius != null) {
+        radiusInput.value = String(row.load_radius);
+    }
     const enabled = document.getElementById('nfc-spawn-enabled');
     if (enabled) enabled.checked = row.enabled !== false;
     const metaId = document.getElementById('nfc-spawn-meta-id');
@@ -349,7 +486,11 @@ function fillForm(row) {
     if (metaId) metaId.textContent = String(row.id);
     if (metaToken) metaToken.textContent = row.spawn_token || '-';
     const copyBtn = document.getElementById('nfc-spawn-copy-url');
+    const copyInstBtn = document.getElementById('nfc-spawn-copy-instance-url');
     if (copyBtn) copyBtn.dataset.url = row.spawnUrl || '';
+    if (copyInstBtn) copyInstBtn.dataset.url = row.instanceUrl || '';
+    updateBakeStatus(row);
+    syncTypeUi();
     refreshWorldMarkers();
     void ensureWorldPlacer().then((p) => {
         if (!p) return;
@@ -366,7 +507,8 @@ function readFormBody() {
     const yaw = parseFloat(/** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-yaw'))?.value);
     const uidRaw = /** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-uid'))?.value?.trim();
     const enabled = /** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-enabled'))?.checked;
-    return {
+    const type = getSelectedType();
+    const body = {
         label,
         world_id,
         x,
@@ -375,7 +517,12 @@ function readFormBody() {
         yaw: Number.isFinite(yaw) ? yaw : 0,
         nfc_tag_uid: uidRaw || null,
         enabled: enabled !== false,
+        type,
     };
+    if (type === 'instance') {
+        body.load_radius = getLoadRadius();
+    }
+    return body;
 }
 
 function renderTable() {
@@ -386,15 +533,17 @@ function renderTable() {
     if (countEl) countEl.textContent = filtered.length ? `(${filtered.length})` : '';
     if (!tbody) return;
     if (!filtered.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="nfc-spawn-empty">このワールドに登録なし</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="nfc-spawn-empty">このワールドに登録なし</td></tr>';
         return;
     }
     tbody.innerHTML = filtered
         .map((row) => {
             const coord = `${row.x}, ${row.y}, ${row.z}`;
             const enabledMark = row.enabled ? '有効' : '無効';
+            const typeLabel = row.type === 'instance' ? 'インスタンス' : 'テレポート';
             const sel = row.id === editingId ? ' class="nfc-spawn-row-selected"' : '';
             return `<tr data-id="${row.id}"${sel}>
+                <td>${typeLabel}</td>
                 <td><code>${row.id}</code></td>
                 <td>${escapeHtml(row.label)}</td>
                 <td><code>${escapeHtml(coord)}</code></td>
@@ -456,7 +605,11 @@ function bindForm() {
     const newBtn = document.getElementById('nfc-spawn-new-btn');
     const yawInput = document.getElementById('nfc-spawn-yaw');
     const copyUrlBtn = document.getElementById('nfc-spawn-copy-url');
+    const copyInstBtn = document.getElementById('nfc-spawn-copy-instance-url');
     const regenBtn = document.getElementById('nfc-spawn-regen-btn');
+    const typeSel = document.getElementById('nfc-spawn-type');
+    const radiusInput = document.getElementById('nfc-spawn-load-radius');
+    const bakeBtn = document.getElementById('nfc-spawn-bake-btn');
 
     if (!form) return;
 
@@ -473,21 +626,22 @@ function bindForm() {
         }
         try {
             if (editingId != null) {
-                await apiFetch(`${API_BASE}/${editingId}`, {
+                const j = await apiFetch(`${API_BASE}/${editingId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
                 });
                 setStatus('更新しました');
+                if (j.spawn) fillForm(j.spawn);
             } else {
-                await apiFetch(API_BASE, {
+                const j = await apiFetch(API_BASE, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
                 });
                 setStatus('NFCタグを追加しました');
+                if (j.spawn) fillForm(j.spawn);
             }
-            resetForm();
             await refreshNfcSpawnPanel();
         } catch (err) {
             setStatus(err instanceof Error ? err.message : '保存に失敗', true);
@@ -520,11 +674,50 @@ function bindForm() {
         if (Number.isFinite(yaw) && worldPlacer) worldPlacer.setPlacementYaw(yaw);
     });
 
+    typeSel?.addEventListener('change', () => syncTypeUi());
+
+    radiusInput?.addEventListener('input', () => {
+        const radiusVal = document.getElementById('nfc-spawn-load-radius-val');
+        if (radiusVal) radiusVal.textContent = `${getLoadRadius()} m`;
+        if (worldPlacer) worldPlacer.setLoadRadius(getLoadRadius());
+        void refreshBakePreview();
+    });
+
+    bakeBtn?.addEventListener('click', async () => {
+        if (editingId == null) return;
+        if (!window.confirm('インスタンスを生成 / 再ベイクしますか？')) return;
+        bakeBtn.disabled = true;
+        setStatus('ベイク中…');
+        try {
+            const j = await apiFetch(`${API_BASE}/${editingId}/bake`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    excludeModelIndices: [...excludedPreviewIndices],
+                }),
+            });
+            if (j.spawn) fillForm(j.spawn);
+            setStatus(`ベイク完了（${j.bake?.entryCount ?? 0} 件）`);
+            await refreshNfcSpawnPanel();
+        } catch (e) {
+            setStatus(e instanceof Error ? e.message : 'ベイクに失敗', true);
+        } finally {
+            bakeBtn.disabled = false;
+        }
+    });
+
     copyUrlBtn?.addEventListener('click', async () => {
         const url = copyUrlBtn.dataset.url || '';
         if (!url) return;
         const ok = await copyText(url);
         setStatus(ok ? 'URL をコピーしました' : 'コピーに失敗しました', !ok);
+    });
+
+    copyInstBtn?.addEventListener('click', async () => {
+        const url = copyInstBtn.dataset.url || '';
+        if (!url) return;
+        const ok = await copyText(url);
+        setStatus(ok ? 'インスタンス URL をコピーしました' : 'コピーに失敗しました', !ok);
     });
 
     regenBtn?.addEventListener('click', async () => {
@@ -589,6 +782,11 @@ function injectAdminStyles() {
         .nfc-spawn-row-selected { background: rgba(68, 170, 255, 0.12); }
         .nfc-spawn-actions { display: flex; flex-wrap: wrap; gap: 0.25rem; }
         .nfc-spawn-empty { text-align: center; color: #888; }
+        .nfc-spawn-instance-fields { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem 0; border-top: 1px dashed var(--admin-border, #444); }
+        .nfc-spawn-bake-preview { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow: auto; font-size: 0.82rem; }
+        .nfc-spawn-bake-preview li { padding: 0.2rem 0; }
+        .nfc-spawn-preview-hint { color: #888; }
+        .nfc-spawn-bake-status { font-size: 0.85rem; margin: 0; color: #aaa; }
         .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.8rem; }
     `;
     document.head.appendChild(style);
