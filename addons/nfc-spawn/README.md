@@ -49,7 +49,7 @@ GET /api/addons/nfc-spawn/instance-assets/:spawnId/*
 ```json
 {
   "publicBaseUrl": "",
-  "maxBakeEntries": 50,
+  "maxBakeEntries": 1000,
   "maxBakeBytes": 104857600,
   "defaultModelRadius": 5
 }

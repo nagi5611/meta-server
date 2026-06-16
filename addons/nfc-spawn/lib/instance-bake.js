@@ -10,7 +10,7 @@ import {
     selectModelsInSphere,
 } from './sphere-selection.js';
 
-const DEFAULT_MAX_ENTRIES = 50;
+const DEFAULT_MAX_ENTRIES = 1000;
 const DEFAULT_MAX_BYTES = 100 * 1024 * 1024;
 const DEFAULT_MODEL_RADIUS = 5;
 

@@ -134,7 +134,7 @@ function parseBakeExcludes(body) {
  */
 function getBakeConfig(config) {
     return {
-        maxEntries: typeof config.maxBakeEntries === 'number' ? config.maxBakeEntries : 50,
+        maxEntries: typeof config.maxBakeEntries === 'number' ? config.maxBakeEntries : 1000,
         maxBytes: typeof config.maxBakeBytes === 'number' ? config.maxBakeBytes : 100 * 1024 * 1024,
         defaultModelRadius:
             typeof config.defaultModelRadius === 'number' ? config.defaultModelRadius : 5,
