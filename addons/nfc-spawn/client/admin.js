@@ -934,6 +934,7 @@ function injectAdminStyles() {
     style.id = 'nfc-spawn-admin-styles';
     style.textContent = `
         .admin-nav-item .nfc-admin-nav-svg { vertical-align: -0.15em; margin-right: 0.35em; flex-shrink: 0; }
+        .admin-sidebar.collapsed .admin-nav-item .nfc-admin-nav-svg { margin-right: 0; }
         .admin-nav-item { display: flex; align-items: center; }
         .nfc-spawn-toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; margin-bottom: 1rem; }
         .nfc-spawn-toolbar-world { min-width: 200px; margin: 0; }

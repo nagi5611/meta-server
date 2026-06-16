@@ -41,6 +41,12 @@ body {
     font-size: 18px;
 }
 
+.admin-sidebar.collapsed .admin-nav-item svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
 .admin-nav {
     display: flex;
     flex-direction: column;
