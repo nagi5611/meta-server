@@ -255,6 +255,14 @@ class ChatManager {
     }
 
     /**
+     * Socket 差し替え後にチャット等のリスナーを新 socket に付け直す
+     */
+    rebindNetworkEvents() {
+        if (!this.networkManager?.socket) return;
+        this.setupNetworkEvents();
+    }
+
+    /**
      * chat-my-message が楽観送信と同じ本文なら重複表示せず確定表示に切り替える
      * @param {{ message?: string, timestamp?: number }} data
      * @returns {boolean} 処理済みなら true

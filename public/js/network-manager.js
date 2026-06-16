@@ -39,6 +39,11 @@ class NetworkManager {
         this.NO_RESPONSE_THRESHOLD_MS = 3000;   // 3秒で応答なし・再接続開始
         this.DISCONNECT_THRESHOLD_MS = 30000;   // 30秒で強制切断（ゾンビ接続の保険）
         this.RECONNECT_TRY_INTERVAL_MS = 3000;  // 応答なし時は3秒ごとに再接続
+        this.DISPLAY_READY_CONNECT_WAIT_MS = 1000; // 表示完了時、接続中なら追加で待つ時間
+        /** @type {boolean} 表示完了後の接続やり直しを1回だけ行ったか */
+        this._displayReadyReconnectAttempted = false;
+        /** @type {boolean} restartConnection 中（disconnect で自動再接続しない） */
+        this._restartingConnection = false;
         /** @type {(() => object)|null} report-ping に載せる性能ペイロード */
         this._perfPayloadGetter = null;
 
@@ -401,7 +406,7 @@ class NetworkManager {
             this.stopDisconnectCheck();
             this.pingMs = null;
             console.log('Disconnected from server');
-            if (!this._intentionalDisconnect) {
+            if (!this._intentionalDisconnect && !this._restartingConnection) {
                 this.startReconnectAttempts();
             }
         });
@@ -604,6 +609,76 @@ class NetworkManager {
         if (this.socket) {
             this.socket.disconnect();
         }
+    }
+
+    /**
+     * Socket が接続済みか
+     * @returns {boolean}
+     */
+    isSocketConnected() {
+        return !!this.socket?.connected;
+    }
+
+    /**
+     * 接続試行中か（未接続だが socket あり／connect 待ち）
+     * @returns {boolean}
+     */
+    isStillConnecting() {
+        if (this.socket?.connected) return false;
+        return this._connectionPending || !!this.socket;
+    }
+
+    /**
+     * 進行中の接続を止めて connect() を最初からやり直す
+     * @returns {Promise<boolean>}
+     */
+    async restartConnection() {
+        if (this._intentionalDisconnect) return false;
+
+        this._restartingConnection = true;
+        try {
+            console.warn('[Net] Aborting in-progress connection and restarting…');
+            this.stopSendingUpdates();
+            this.stopPing();
+            this.stopDisconnectCheck();
+            this.stopReconnectAttempts();
+            this.pingMs = null;
+            this.lastPongTime = 0;
+            this.myPlayerId = null;
+
+            if (this.socket) {
+                try {
+                    if (this.socket.io) this.socket.io.reconnection(false);
+                    this.socket.removeAllListeners();
+                    this.socket.disconnect();
+                } catch (_) { /* ignore */ }
+                this.socket = null;
+            }
+
+            return await this.connect();
+        } finally {
+            this._restartingConnection = false;
+        }
+    }
+
+    /**
+     * メタバース表示完了時: まだ接続中なら1秒待ち、未接続なら接続をやり直す（1回のみ）
+     * @returns {Promise<boolean>} socket を作り直したら true
+     */
+    async ensureConnectedAfterDisplayReady() {
+        if (this.isSocketConnected()) return false;
+        if (!this.isStillConnecting() || this._displayReadyReconnectAttempted) return false;
+
+        console.log('[Net] Display ready but still connecting — waiting 1s…');
+        await new Promise((resolve) => {
+            setTimeout(resolve, this.DISPLAY_READY_CONNECT_WAIT_MS);
+        });
+
+        if (this.isSocketConnected()) return false;
+
+        this._displayReadyReconnectAttempted = true;
+        await this.restartConnection();
+        return true;
     }
 
     /**

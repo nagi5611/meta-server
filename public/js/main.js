@@ -563,6 +563,13 @@ class MetaverseApp {
         // 初回操作まで歩行・落下物理を止める（低スペックでロード後に沈むのを防ぐ）
         this.characterController.setSuspendPhysicsUntilGameplayInput(true);
 
+        // 表示完了時点でまだ接続中なら1秒待ち、未接続なら接続処理をやり直す
+        const socketRestarted = await this.networkManager.ensureConnectedAfterDisplayReady();
+        if (socketRestarted) {
+            this._rewireSocketConsumers();
+            void this._joinVoiceAndVideoIfReady();
+        }
+
         // Start game loop (WebXR 対応の setAnimationLoop)
         this.clock = performance.now();
         this._perfNextFpsWindowAt = performance.now() + 10000;
@@ -898,6 +905,20 @@ class MetaverseApp {
                 resolve();
             });
         });
+    }
+
+    /**
+     * Socket 差し替え後に socket 参照を持つ各マネージャを更新する
+     */
+    _rewireSocketConsumers() {
+        const sock = this.networkManager?.socket;
+        if (!sock) return;
+        if (this.pdfViewerManager?.setSocket) this.pdfViewerManager.setSocket(sock);
+        if (this.taikoGameManager?.setSocket) this.taikoGameManager.setSocket(sock);
+        if (this.pdfViewerVoiceChatManager?.setSocket) this.pdfViewerVoiceChatManager.setSocket(sock);
+        if (this.voiceChatManager) this.voiceChatManager.socket = sock;
+        if (this.videoChatManager) this.videoChatManager.socket = sock;
+        if (this.chatManager?.rebindNetworkEvents) this.chatManager.rebindNetworkEvents();
     }
 
     /**
