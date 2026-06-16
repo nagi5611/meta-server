@@ -1675,6 +1675,7 @@ function switchPanel(panelId) {
     const navItem = document.querySelector(`.admin-nav-item[data-panel="${requestedPanelId}"]`);
     if (panel) panel.classList.add('active');
     if (navItem) navItem.classList.add('active');
+    document.dispatchEvent(new CustomEvent('admin-panel-activated', { detail: { panelId: resolvedPanelId } }));
 
     if (currentPanelId === 'panel-chart' && resolvedPanelId !== 'panel-chart') {
         stopChartPreview();
@@ -6126,7 +6127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let initialPanel = params.get('panel');
     if (initialPanel === 'world-edit') initialPanel = 'panel-world-edit';
     if (initialPanel === 'security') initialPanel = 'panel-security';
-    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-aircraft', 'panel-database', 'panel-avatar-management', 'panel-chart', 'panel-chart-inactive', 'panel-addons'];
+    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-aircraft', 'panel-database', 'panel-avatar-management', 'panel-chart', 'panel-chart-inactive', 'panel-addons', 'panel-addon-nfc-spawn'];
     if (initialPanel && validPanels.includes(initialPanel)) {
         switchPanel(initialPanel);
     }

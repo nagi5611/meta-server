@@ -1,16 +1,28 @@
-// addons/nfc-spawn/client/admin.js — 管理画面に NFCタグパネルを動的追加
+// addons/nfc-spawn/client/admin.js — 管理画面に NFCタグパネル（3Dワールド配置付き）
 const PANEL_ID = 'panel-addon-nfc-spawn';
 const NAV_DATA_PANEL = 'panel-addon-nfc-spawn';
 const API_BASE = '/admin/addons/nfc-spawn/spawns';
 
+/** NFC アイコン（Bootstrap Icons に bi-nfc が無いためインライン SVG） */
+const NFC_NAV_ICON_SVG = `<svg class="nfc-admin-nav-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="1.1em" height="1.1em" fill="currentColor" aria-hidden="true"><path d="M4.5 2A2.5 2.5 0 0 0 2 4.5v7A2.5 2.5 0 0 0 4.5 14h7a2.5 2.5 0 0 0 2.5-2.5v-7A2.5 2.5 0 0 0 11.5 2h-7zm0 1h7A1.5 1.5 0 0 1 13 4.5v7a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 11.5v-7A1.5 1.5 0 0 1 4.5 3z"/><path d="M5.1 5.05a.5.5 0 0 0-.7.7 2.9 2.9 0 0 1 0 4.1.5.5 0 1 0 .7.7 3.9 3.9 0 0 0 0-5.5.5.5 0 0 0-.7 0zm5.6 0a.5.5 0 0 1 .7.7 3.9 3.9 0 0 1 0 5.5.5.5 0 1 1-.7-.7 2.9 2.9 0 0 0 0-4.1.5.5 0 0 1 .7-.7z"/><path d="M6.45 6.4a.5.5 0 0 0-.63.77 1.2 1.2 0 0 1 0 1.46.5.5 0 1 0 .78.64 2.2 2.2 0 0 0 0-2.74.5.5 0 0 0-.15-.13zm3.34 0a.5.5 0 0 1 .78-.64 2.2 2.2 0 0 1 0 2.74.5.5 0 0 1-.78-.64 1.2 1.2 0 0 0 0-1.46.5.5 0 0 1 .15-.13z"/><circle cx="8" cy="8" r=".85"/></svg>`;
+
 /** @type {string[]} */
 let worldIds = [];
+
+/** @type {Record<string, object>} */
+let worldsData = {};
 
 /** @type {object[]} */
 let spawns = [];
 
 /** @type {number|null} */
 let editingId = null;
+
+/** @type {import('./world-placer-viewer.js').NfcSpawnWorldPlacer|null} */
+let worldPlacer = null;
+
+/** @type {Promise<void>|null} */
+let viewerInitPromise = null;
 
 /**
  * @param {string} path
@@ -47,6 +59,17 @@ async function copyText(text) {
 }
 
 /**
+ * @param {string} s
+ */
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/**
  * サイドバー・パネル DOM を挿入
  */
 function ensurePanelDom() {
@@ -60,13 +83,10 @@ function ensurePanelDom() {
     btn.type = 'button';
     btn.className = 'admin-nav-item';
     btn.dataset.panel = NAV_DATA_PANEL;
-    btn.innerHTML = '<i class="bi bi-nfc"></i> NFCタグ';
+    btn.innerHTML = `${NFC_NAV_ICON_SVG}<span>NFCタグ</span>`;
     const addonsBtn = nav.querySelector('[data-panel="panel-addons"]');
-    if (addonsBtn) {
-        nav.insertBefore(btn, addonsBtn);
-    } else {
-        nav.appendChild(btn);
-    }
+    if (addonsBtn) nav.insertBefore(btn, addonsBtn);
+    else nav.appendChild(btn);
 
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
@@ -74,62 +94,152 @@ function ensurePanelDom() {
     panel.innerHTML = `
         <section class="nfc-spawn-section">
             <h2>NFCタグ・スポーン地点</h2>
-            <p class="hint">各タグに割り当てた不透明トークンで <code>/?spawn=TOKEN</code> から入場します。座標は URL に含めません。アドオン有効化後は Node 再起動が必要です。</p>
+            <p class="hint">3D プレビュー上の<strong>緑のマーカー</strong>をドラッグして位置を決め、「NFCタグを追加」で登録します。オレンジは既存タグです。URL は <code>/?spawn=TOKEN</code> 形式です。</p>
             <p id="nfc-spawn-status" class="status-text" role="status"></p>
 
-            <div class="nfc-spawn-layout">
-                <div class="nfc-spawn-form-wrap">
-                    <h3 id="nfc-spawn-form-title">新規タグ</h3>
-                    <form id="nfc-spawn-form" class="nfc-spawn-form">
-                        <input type="hidden" id="nfc-spawn-edit-id" value="">
-                        <label class="nfc-spawn-label">ラベル
-                            <input type="text" id="nfc-spawn-label" required maxlength="128" placeholder="図書館模型">
-                        </label>
-                        <label class="nfc-spawn-label">ワールド
-                            <select id="nfc-spawn-world" required></select>
-                        </label>
-                        <div class="nfc-spawn-coords">
-                            <label>X <input type="number" id="nfc-spawn-x" step="any" value="0"></label>
-                            <label>Y <input type="number" id="nfc-spawn-y" step="any" value="10"></label>
-                            <label>Z <input type="number" id="nfc-spawn-z" step="any" value="0"></label>
-                            <label>Yaw° <input type="number" id="nfc-spawn-yaw" step="any" value="0"></label>
-                        </div>
-                        <label class="nfc-spawn-label">NFC UID（任意・メモ）
-                            <input type="text" id="nfc-spawn-uid" maxlength="64" placeholder="04:AB:...">
-                        </label>
-                        <label class="nfc-spawn-check">
-                            <input type="checkbox" id="nfc-spawn-enabled" checked> 有効
-                        </label>
-                        <div class="nfc-spawn-form-actions">
-                            <button type="submit" class="btn btn-primary" id="nfc-spawn-save-btn">保存</button>
-                            <button type="button" class="btn btn-secondary" id="nfc-spawn-cancel-btn" hidden>キャンセル</button>
-                        </div>
-                    </form>
+            <div class="nfc-spawn-toolbar">
+                <label class="nfc-spawn-label nfc-spawn-toolbar-world">ワールド
+                    <select id="nfc-spawn-world"></select>
+                </label>
+                <button type="button" class="btn btn-secondary" id="nfc-spawn-reload-world">ワールド再読込</button>
+                <button type="button" class="btn btn-primary" id="nfc-spawn-new-btn">新規配置</button>
+            </div>
+
+            <div class="nfc-spawn-main-layout">
+                <div class="nfc-spawn-viewer-wrap">
+                    <div id="nfc-spawn-viewer-mount" class="nfc-spawn-viewer-mount" aria-label="ワールド3Dプレビュー"></div>
+                    <p class="hint nfc-spawn-viewer-hint">マーカーをドラッグして移動・向きは Yaw で調整</p>
                 </div>
 
-                <div class="nfc-spawn-table-wrap">
-                    <h3>登録一覧</h3>
-                    <div class="table-responsive">
-                        <table class="nfc-spawn-table">
-                            <thead>
-                                <tr>
-                                    <th>ラベル</th>
-                                    <th>ワールド</th>
-                                    <th>座標</th>
-                                    <th>有効</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody id="nfc-spawn-tbody"></tbody>
-                        </table>
+                <div class="nfc-spawn-side">
+                    <div class="nfc-spawn-form-card">
+                        <h3 id="nfc-spawn-form-title">新規 NFC タグ</h3>
+                        <form id="nfc-spawn-form" class="nfc-spawn-form">
+                            <input type="hidden" id="nfc-spawn-edit-id" value="">
+                            <label class="nfc-spawn-label">ラベル
+                                <input type="text" id="nfc-spawn-label" required maxlength="128" placeholder="図書館模型">
+                            </label>
+                            <div class="nfc-spawn-coords">
+                                <label>X <input type="number" id="nfc-spawn-x" step="any" value="0" readonly></label>
+                                <label>Y <input type="number" id="nfc-spawn-y" step="any" value="10" readonly></label>
+                                <label>Z <input type="number" id="nfc-spawn-z" step="any" value="0" readonly></label>
+                                <label>Yaw° <input type="number" id="nfc-spawn-yaw" step="any" value="0"></label>
+                            </div>
+                            <label class="nfc-spawn-label">NFC UID（任意・メモ）
+                                <input type="text" id="nfc-spawn-uid" maxlength="64" placeholder="04:AB:...">
+                            </label>
+                            <label class="nfc-spawn-check">
+                                <input type="checkbox" id="nfc-spawn-enabled" checked> 有効
+                            </label>
+                            <div class="nfc-spawn-form-actions">
+                                <button type="submit" class="btn btn-primary" id="nfc-spawn-save-btn">NFCタグを追加</button>
+                                <button type="button" class="btn btn-secondary" id="nfc-spawn-cancel-btn" hidden>キャンセル</button>
+                            </div>
+                        </form>
+                        <div id="nfc-spawn-edit-meta" class="nfc-spawn-edit-meta" hidden>
+                            <p><strong>ID:</strong> <span id="nfc-spawn-meta-id">-</span></p>
+                            <p><strong>トークン:</strong> <code id="nfc-spawn-meta-token" class="nfc-spawn-token-code">-</code></p>
+                            <div class="nfc-spawn-meta-actions">
+                                <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-copy-url">URLコピー</button>
+                                <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-regen-btn">トークン再発行</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="nfc-spawn-table-wrap">
+                        <h3>登録一覧 <span id="nfc-spawn-list-count" class="nfc-spawn-list-count"></span></h3>
+                        <div class="table-responsive nfc-spawn-table-scroll">
+                            <table class="nfc-spawn-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>ラベル</th>
+                                        <th>座標</th>
+                                        <th>有効</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="nfc-spawn-tbody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
         </section>
     `;
     panels.appendChild(panel);
+    btn.addEventListener('click', () => {
+        document.dispatchEvent(new CustomEvent('admin-panel-request', { detail: { panelId: NAV_DATA_PANEL } }));
+    });
+}
 
-    btn.addEventListener('click', () => showNfcSpawnPanel());
+/**
+ * 3D ビューア初期化
+ */
+async function ensureWorldPlacer() {
+    if (worldPlacer) return worldPlacer;
+    if (viewerInitPromise) {
+        await viewerInitPromise;
+        return worldPlacer;
+    }
+    viewerInitPromise = (async () => {
+        const mount = document.getElementById('nfc-spawn-viewer-mount');
+        if (!mount) return;
+        const mod = await import('./world-placer-viewer.js');
+        worldPlacer = new mod.NfcSpawnWorldPlacer(mount);
+        worldPlacer.onPlacementChange = (pos) => {
+            const set = (id, val) => {
+                const el = document.getElementById(id);
+                if (el) el.value = String(val);
+            };
+            set('nfc-spawn-x', pos.x);
+            set('nfc-spawn-y', pos.y);
+            set('nfc-spawn-z', pos.z);
+            set('nfc-spawn-yaw', pos.yaw);
+        };
+        worldPlacer.onTagMarkerPick = (id) => {
+            const row = spawns.find((s) => s.id === id);
+            if (row) selectSpawnRow(row);
+        };
+    })();
+    await viewerInitPromise;
+    return worldPlacer;
+}
+
+/**
+ * @returns {string}
+ */
+function getSelectedWorldId() {
+    return /** @type {HTMLSelectElement} */ (document.getElementById('nfc-spawn-world'))?.value || worldIds[0] || '';
+}
+
+/**
+ * 選択ワールドの 3D とマーカーを更新
+ */
+async function reloadWorldViewer() {
+    const worldId = getSelectedWorldId();
+    const placer = await ensureWorldPlacer();
+    if (!placer || !worldId) return;
+    setStatus('ワールドを読み込み中…');
+    try {
+        const world = worldsData[worldId];
+        if (world) await placer.loadWorld(world);
+        refreshWorldMarkers();
+        if (!editingId && world) placer.focusDefaultSpawn(world);
+        setStatus('');
+    } catch (e) {
+        setStatus(e instanceof Error ? e.message : 'ワールド読込失敗', true);
+    }
+}
+
+/**
+ * 現在ワールドのタグマーカーを 3D に反映
+ */
+function refreshWorldMarkers() {
+    if (!worldPlacer) return;
+    const worldId = getSelectedWorldId();
+    const filtered = spawns.filter((s) => s.world_id === worldId);
+    worldPlacer.setTagMarkers(filtered, editingId);
 }
 
 /**
@@ -156,45 +266,55 @@ function setStatus(msg, isError = false) {
     el.classList.toggle('error', isError);
 }
 
-/**
- * ワールド select を更新
- */
 function populateWorldSelect() {
     const sel = document.getElementById('nfc-spawn-world');
     if (!sel) return;
+    const prev = sel.value;
     sel.innerHTML = worldIds
         .map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`)
         .join('');
+    if (prev && worldIds.includes(prev)) sel.value = prev;
 }
 
-/**
- * @param {string} s
- */
-function escapeHtml(s) {
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
-/**
- * フォームをリセット
- */
 function resetForm() {
     editingId = null;
     const title = document.getElementById('nfc-spawn-form-title');
     const cancel = document.getElementById('nfc-spawn-cancel-btn');
+    const saveBtn = document.getElementById('nfc-spawn-save-btn');
     const editId = document.getElementById('nfc-spawn-edit-id');
-    if (title) title.textContent = '新規タグ';
+    const meta = document.getElementById('nfc-spawn-edit-meta');
+    if (title) title.textContent = '新規 NFC タグ';
     if (cancel) cancel.hidden = true;
+    if (saveBtn) saveBtn.textContent = 'NFCタグを追加';
     if (editId) editId.value = '';
+    if (meta) meta.hidden = true;
     const form = document.getElementById('nfc-spawn-form');
     if (form) form.reset();
     const enabled = document.getElementById('nfc-spawn-enabled');
     if (enabled) enabled.checked = true;
-    const y = document.getElementById('nfc-spawn-y');
-    if (y) y.value = '10';
+    const worldSel = document.getElementById('nfc-spawn-world');
+    if (worldSel && worldSel.value) {
+        /* keep world */
+    }
+    refreshWorldMarkers();
+    void ensureWorldPlacer().then((p) => {
+        if (!p) return;
+        const world = worldsData[getSelectedWorldId()];
+        if (world) p.focusDefaultSpawn(world);
+    });
+}
+
+/**
+ * @param {object} row
+ */
+function selectSpawnRow(row) {
+    if (row.world_id && row.world_id !== getSelectedWorldId()) {
+        const sel = document.getElementById('nfc-spawn-world');
+        if (sel) sel.value = row.world_id;
+        void reloadWorldViewer().then(() => fillForm(row));
+        return;
+    }
+    fillForm(row);
 }
 
 /**
@@ -204,16 +324,19 @@ function fillForm(row) {
     editingId = row.id;
     const title = document.getElementById('nfc-spawn-form-title');
     const cancel = document.getElementById('nfc-spawn-cancel-btn');
+    const saveBtn = document.getElementById('nfc-spawn-save-btn');
     const editId = document.getElementById('nfc-spawn-edit-id');
+    const meta = document.getElementById('nfc-spawn-edit-meta');
     if (title) title.textContent = `編集: ${row.label}`;
     if (cancel) cancel.hidden = false;
+    if (saveBtn) saveBtn.textContent = '変更を保存';
     if (editId) editId.value = String(row.id);
+    if (meta) meta.hidden = false;
     const set = (id, val) => {
         const el = document.getElementById(id);
         if (el) el.value = val;
     };
     set('nfc-spawn-label', row.label);
-    set('nfc-spawn-world', row.world_id);
     set('nfc-spawn-x', row.x);
     set('nfc-spawn-y', row.y);
     set('nfc-spawn-z', row.z);
@@ -221,14 +344,22 @@ function fillForm(row) {
     set('nfc-spawn-uid', row.nfc_tag_uid || '');
     const enabled = document.getElementById('nfc-spawn-enabled');
     if (enabled) enabled.checked = row.enabled !== false;
+    const metaId = document.getElementById('nfc-spawn-meta-id');
+    const metaToken = document.getElementById('nfc-spawn-meta-token');
+    if (metaId) metaId.textContent = String(row.id);
+    if (metaToken) metaToken.textContent = row.spawn_token || '-';
+    const copyBtn = document.getElementById('nfc-spawn-copy-url');
+    if (copyBtn) copyBtn.dataset.url = row.spawnUrl || '';
+    refreshWorldMarkers();
+    void ensureWorldPlacer().then((p) => {
+        if (!p) return;
+        p.showPlacementMarker({ x: row.x, y: row.y, z: row.z, yaw: row.yaw ?? 0 });
+    });
 }
 
-/**
- * フォームから body を読む
- */
 function readFormBody() {
     const label = /** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-label'))?.value?.trim();
-    const world_id = /** @type {HTMLSelectElement} */ (document.getElementById('nfc-spawn-world'))?.value;
+    const world_id = getSelectedWorldId();
     const x = parseFloat(/** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-x'))?.value);
     const y = parseFloat(/** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-y'))?.value);
     const z = parseFloat(/** @type {HTMLInputElement} */ (document.getElementById('nfc-spawn-z'))?.value);
@@ -247,63 +378,41 @@ function readFormBody() {
     };
 }
 
-/**
- * 一覧テーブルを描画
- */
 function renderTable() {
     const tbody = document.getElementById('nfc-spawn-tbody');
+    const countEl = document.getElementById('nfc-spawn-list-count');
+    const worldId = getSelectedWorldId();
+    const filtered = spawns.filter((s) => s.world_id === worldId);
+    if (countEl) countEl.textContent = filtered.length ? `(${filtered.length})` : '';
     if (!tbody) return;
-    if (!spawns.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="nfc-spawn-empty">登録なし</td></tr>';
+    if (!filtered.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="nfc-spawn-empty">このワールドに登録なし</td></tr>';
         return;
     }
-    tbody.innerHTML = spawns
+    tbody.innerHTML = filtered
         .map((row) => {
             const coord = `${row.x}, ${row.y}, ${row.z}`;
             const enabledMark = row.enabled ? '有効' : '無効';
-            return `<tr data-id="${row.id}">
+            const sel = row.id === editingId ? ' class="nfc-spawn-row-selected"' : '';
+            return `<tr data-id="${row.id}"${sel}>
+                <td><code>${row.id}</code></td>
                 <td>${escapeHtml(row.label)}</td>
-                <td><code>${escapeHtml(row.world_id)}</code></td>
                 <td><code>${escapeHtml(coord)}</code></td>
                 <td>${enabledMark}</td>
                 <td class="nfc-spawn-actions">
-                    <button type="button" class="btn btn-secondary btn-sm nfc-copy-url" data-url="${escapeHtml(row.spawnUrl || '')}">URL</button>
-                    <button type="button" class="btn btn-secondary btn-sm nfc-edit">編集</button>
-                    <button type="button" class="btn btn-secondary btn-sm nfc-regen">再発行</button>
+                    <button type="button" class="btn btn-secondary btn-sm nfc-locate">表示</button>
                     <button type="button" class="btn btn-secondary btn-sm nfc-delete">削除</button>
                 </td>
             </tr>`;
         })
         .join('');
 
-    tbody.querySelectorAll('.nfc-copy-url').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-            const url = btn.getAttribute('data-url') || '';
-            if (!url) return;
-            const ok = await copyText(url);
-            setStatus(ok ? 'URL をコピーしました' : 'コピーに失敗しました', !ok);
-        });
-    });
-    tbody.querySelectorAll('.nfc-edit').forEach((btn) => {
+    tbody.querySelectorAll('.nfc-locate').forEach((btn) => {
         btn.addEventListener('click', () => {
             const tr = btn.closest('tr');
             const id = Number(tr?.getAttribute('data-id'));
             const row = spawns.find((s) => s.id === id);
-            if (row) fillForm(row);
-        });
-    });
-    tbody.querySelectorAll('.nfc-regen').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-            const tr = btn.closest('tr');
-            const id = Number(tr?.getAttribute('data-id'));
-            if (!id || !window.confirm('トークンを再発行しますか？旧 URL は使えなくなります。')) return;
-            try {
-                await apiFetch(`${API_BASE}/${id}/regenerate-token`, { method: 'POST' });
-                setStatus('トークンを再発行しました');
-                await refreshNfcSpawnPanel();
-            } catch (e) {
-                setStatus(e instanceof Error ? e.message : '再発行に失敗', true);
-            }
+            if (row) selectSpawnRow(row);
         });
     });
     tbody.querySelectorAll('.nfc-delete').forEach((btn) => {
@@ -323,29 +432,32 @@ function renderTable() {
     });
 }
 
-/**
- * データ読み込み
- */
 async function refreshNfcSpawnPanel() {
     try {
         const worldsRes = await apiFetch('/admin/worlds');
-        worldIds = Object.keys(worldsRes || {}).sort();
+        worldsData = worldsRes && typeof worldsRes === 'object' ? worldsRes : {};
+        worldIds = Object.keys(worldsData).sort();
         populateWorldSelect();
-
         const j = await apiFetch(API_BASE);
         spawns = j.spawns || [];
         renderTable();
+        refreshWorldMarkers();
+        await reloadWorldViewer();
     } catch (e) {
         setStatus(e instanceof Error ? e.message : '読み込みに失敗', true);
     }
 }
 
-/**
- * フォーム送信
- */
 function bindForm() {
     const form = document.getElementById('nfc-spawn-form');
     const cancel = document.getElementById('nfc-spawn-cancel-btn');
+    const worldSel = document.getElementById('nfc-spawn-world');
+    const reloadBtn = document.getElementById('nfc-spawn-reload-world');
+    const newBtn = document.getElementById('nfc-spawn-new-btn');
+    const yawInput = document.getElementById('nfc-spawn-yaw');
+    const copyUrlBtn = document.getElementById('nfc-spawn-copy-url');
+    const regenBtn = document.getElementById('nfc-spawn-regen-btn');
+
     if (!form) return;
 
     form.addEventListener('submit', async (e) => {
@@ -353,6 +465,10 @@ function bindForm() {
         const body = readFormBody();
         if (!body.label) {
             setStatus('ラベルを入力してください', true);
+            return;
+        }
+        if (![body.x, body.y, body.z].every((n) => Number.isFinite(n))) {
+            setStatus('3D ビューアで位置を決めてください', true);
             return;
         }
         try {
@@ -369,7 +485,7 @@ function bindForm() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
                 });
-                setStatus('作成しました');
+                setStatus('NFCタグを追加しました');
             }
             resetForm();
             await refreshNfcSpawnPanel();
@@ -382,36 +498,95 @@ function bindForm() {
         resetForm();
         setStatus('');
     });
+
+    worldSel?.addEventListener('change', () => {
+        resetForm();
+        void reloadWorldViewer();
+        renderTable();
+    });
+
+    reloadBtn?.addEventListener('click', () => void reloadWorldViewer());
+
+    newBtn?.addEventListener('click', () => {
+        resetForm();
+        void ensureWorldPlacer().then((p) => {
+            const world = worldsData[getSelectedWorldId()];
+            if (p && world) p.focusDefaultSpawn(world);
+        });
+    });
+
+    yawInput?.addEventListener('input', () => {
+        const yaw = parseFloat(/** @type {HTMLInputElement} */ (yawInput).value);
+        if (Number.isFinite(yaw) && worldPlacer) worldPlacer.setPlacementYaw(yaw);
+    });
+
+    copyUrlBtn?.addEventListener('click', async () => {
+        const url = copyUrlBtn.dataset.url || '';
+        if (!url) return;
+        const ok = await copyText(url);
+        setStatus(ok ? 'URL をコピーしました' : 'コピーに失敗しました', !ok);
+    });
+
+    regenBtn?.addEventListener('click', async () => {
+        if (editingId == null) return;
+        if (!window.confirm('トークンを再発行しますか？旧 URL は使えなくなります。')) return;
+        try {
+            const j = await apiFetch(`${API_BASE}/${editingId}/regenerate-token`, { method: 'POST' });
+            if (j.spawn) fillForm(j.spawn);
+            setStatus('トークンを再発行しました');
+            await refreshNfcSpawnPanel();
+        } catch (e) {
+            setStatus(e instanceof Error ? e.message : '再発行に失敗', true);
+        }
+    });
 }
 
-/**
- * 管理 UI 初期化
- */
 function initNfcSpawnAdmin() {
     ensurePanelDom();
     bindForm();
     injectAdminStyles();
+    document.addEventListener('admin-panel-activated', (e) => {
+        if (e.detail?.panelId === NAV_DATA_PANEL) void refreshNfcSpawnPanel();
+    });
+    document.addEventListener('admin-panel-request', (e) => {
+        if (e.detail?.panelId === NAV_DATA_PANEL) showNfcSpawnPanel();
+    });
 }
 
-/**
- * 最小限のレイアウト用スタイル
- */
 function injectAdminStyles() {
     if (document.getElementById('nfc-spawn-admin-styles')) return;
     const style = document.createElement('style');
     style.id = 'nfc-spawn-admin-styles';
     style.textContent = `
-        .nfc-spawn-layout { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 1.5rem; align-items: start; }
-        @media (max-width: 900px) { .nfc-spawn-layout { grid-template-columns: 1fr; } }
-        .nfc-spawn-form { display: flex; flex-direction: column; gap: 0.75rem; }
+        .admin-nav-item .nfc-admin-nav-svg { vertical-align: -0.15em; margin-right: 0.35em; flex-shrink: 0; }
+        .admin-nav-item { display: flex; align-items: center; }
+        .nfc-spawn-toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; margin-bottom: 1rem; }
+        .nfc-spawn-toolbar-world { min-width: 200px; margin: 0; }
+        .nfc-spawn-main-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); gap: 1rem; align-items: start; }
+        @media (max-width: 1100px) { .nfc-spawn-main-layout { grid-template-columns: 1fr; } }
+        .nfc-spawn-viewer-wrap { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+        .nfc-spawn-viewer-mount { width: 100%; height: min(52vh, 520px); min-height: 280px; background: #1a1a22; border: 1px solid var(--admin-border, #444); border-radius: 6px; overflow: hidden; }
+        .nfc-spawn-viewer-hint { margin: 0; font-size: 0.85rem; }
+        .nfc-spawn-side { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+        .nfc-spawn-form-card { padding: 0.75rem 1rem; border: 1px solid var(--admin-border, #444); border-radius: 6px; background: var(--admin-card-bg, rgba(0,0,0,0.15)); }
+        .nfc-spawn-form { display: flex; flex-direction: column; gap: 0.65rem; }
         .nfc-spawn-label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; }
         .nfc-spawn-label input, .nfc-spawn-label select { width: 100%; }
         .nfc-spawn-coords { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
         .nfc-spawn-coords label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; }
+        .nfc-spawn-coords input[readonly] { opacity: 0.85; cursor: default; }
         .nfc-spawn-check { display: flex; align-items: center; gap: 0.5rem; }
         .nfc-spawn-form-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-        .nfc-spawn-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-        .nfc-spawn-table th, .nfc-spawn-table td { border: 1px solid var(--admin-border, #444); padding: 0.4rem 0.5rem; text-align: left; }
+        .nfc-spawn-edit-meta { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--admin-border, #444); font-size: 0.88rem; }
+        .nfc-spawn-edit-meta p { margin: 0.25rem 0; }
+        .nfc-spawn-token-code { word-break: break-all; font-size: 0.8rem; }
+        .nfc-spawn-meta-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.5rem; }
+        .nfc-spawn-table-wrap h3 { margin-bottom: 0.5rem; }
+        .nfc-spawn-list-count { font-weight: normal; color: #888; font-size: 0.9em; }
+        .nfc-spawn-table-scroll { max-height: 280px; overflow: auto; }
+        .nfc-spawn-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .nfc-spawn-table th, .nfc-spawn-table td { border: 1px solid var(--admin-border, #444); padding: 0.35rem 0.45rem; text-align: left; }
+        .nfc-spawn-row-selected { background: rgba(68, 170, 255, 0.12); }
         .nfc-spawn-actions { display: flex; flex-wrap: wrap; gap: 0.25rem; }
         .nfc-spawn-empty { text-align: center; color: #888; }
         .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.8rem; }
