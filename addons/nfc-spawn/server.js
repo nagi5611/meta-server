@@ -104,6 +104,32 @@ function parseExcludeIndices(body) {
 }
 
 /**
+ * @param {unknown} body
+ * @returns {Set<string>}
+ */
+function parseExcludeParts(body) {
+    const raw = body?.excludeParts;
+    if (!Array.isArray(raw)) return new Set();
+    const set = new Set();
+    for (const v of raw) {
+        const s = String(v).trim();
+        if (/^\d+:\d+$/.test(s)) set.add(s);
+    }
+    return set;
+}
+
+/**
+ * @param {unknown} body
+ * @returns {{ excludeModelIndices: Set<number>, excludeParts: Set<string> }}
+ */
+function parseBakeExcludes(body) {
+    return {
+        excludeModelIndices: parseExcludeIndices(body),
+        excludeParts: parseExcludeParts(body),
+    };
+}
+
+/**
  * @param {Record<string, unknown>} config
  */
 function getBakeConfig(config) {
@@ -259,12 +285,8 @@ export default {
                 }
                 try {
                     const spawnRow = spawnRowFromParsedData(parsed.data);
-                    const exclude = parseExcludeIndices(req.body);
-                    const preview = await previewInstanceBake(
-                        spawnRow,
-                        { excludeModelIndices: exclude },
-                        bakeConfig
-                    );
+                    const excludes = parseBakeExcludes(req.body);
+                    const preview = await previewInstanceBake(spawnRow, excludes, bakeConfig);
                     res.json({ ok: true, preview });
                 } catch (e) {
                     ctx.logger.error('POST bake-preview', e);
@@ -298,10 +320,10 @@ export default {
                     if (!row) {
                         return res.status(500).json({ ok: false, error: 'save_failed' });
                     }
-                    const exclude = parseExcludeIndices(req.body);
+                    const excludes = parseBakeExcludes(req.body);
                     const bakeResult = await bakeInstance(
                         row,
-                        { excludeModelIndices: exclude },
+                        excludes,
                         bakeConfig
                     );
                     const updated = recordInstanceBake(db, row.id, bakeResult);
@@ -408,15 +430,14 @@ export default {
                     if (String(row.type || '') !== 'instance') {
                         return res.status(400).json({ ok: false, error: 'not_instance_type' });
                     }
-                    const exclude = new Set();
                     const excludeRaw = req.query.exclude;
-                    if (typeof excludeRaw === 'string' && excludeRaw.trim()) {
-                        for (const p of excludeRaw.split(',')) {
-                            const n = Number(p.trim());
-                            if (Number.isInteger(n) && n >= 0) exclude.add(n);
-                        }
-                    }
-                    const preview = await previewInstanceBake(row, { excludeModelIndices: exclude }, bakeConfig);
+                    const excludes = parseBakeExcludes({
+                        excludeModelIndices:
+                            typeof excludeRaw === 'string' && excludeRaw.trim()
+                                ? excludeRaw.split(',').map((p) => Number(p.trim()))
+                                : [],
+                    });
+                    const preview = await previewInstanceBake(row, excludes, bakeConfig);
                     res.json({ ok: true, preview });
                 } catch (e) {
                     ctx.logger.error('GET bake-preview', e);
@@ -436,8 +457,8 @@ export default {
                     if (String(row.type || '') !== 'instance') {
                         return res.status(400).json({ ok: false, error: 'not_instance_type' });
                     }
-                    const exclude = parseExcludeIndices(req.body);
-                    const bakeResult = await bakeInstance(row, { excludeModelIndices: exclude }, bakeConfig);
+                    const excludes = parseBakeExcludes(req.body);
+                    const bakeResult = await bakeInstance(row, excludes, bakeConfig);
                     const updated = recordInstanceBake(db, row.id, bakeResult);
                     res.json({
                         ok: true,

@@ -21,6 +21,9 @@ let editingId = null;
 /** @type {Set<number>} */
 let excludedPreviewIndices = new Set();
 
+/** @type {Set<string>} worldModelIndex:partIndex */
+let excludedPreviewParts = new Set();
+
 /** @type {ReturnType<typeof setTimeout>|null} */
 let previewDebounceTimer = null;
 
@@ -45,22 +48,110 @@ async function apiFetch(path, init) {
 }
 
 /**
+ * クライアント側でインスタンス URL を組み立てる（API 未返却時のフォールバック）
+ * @param {string} token
+ */
+function buildClientInstanceUrl(token) {
+    const t = String(token || '').trim();
+    if (!t) return '';
+    return `${window.location.origin}/instance/?token=${encodeURIComponent(t)}`;
+}
+
+/**
+ * クライアント側でテレポート URL を組み立てる
+ * @param {string} token
+ */
+function buildClientSpawnUrl(token) {
+    const t = String(token || '').trim();
+    if (!t) return '';
+    return `${window.location.origin}/?spawn=${encodeURIComponent(t)}`;
+}
+
+/**
+ * 編集中スポーンのトークン（メタ表示から）
+ */
+function getMetaSpawnToken() {
+    const el = document.getElementById('nfc-spawn-meta-token');
+    const t = el?.textContent?.trim();
+    if (!t || t === '-') return '';
+    return t;
+}
+
+/**
+ * コピー用 URL を解決（API 値 → トークンから組み立て）
+ * @param {'spawn'|'instance'} kind
+ * @param {object} [row]
+ */
+function resolveCopyUrl(kind, row = null) {
+    const token = row?.spawn_token || getMetaSpawnToken();
+    if (kind === 'instance') {
+        return row?.instanceUrl || buildClientInstanceUrl(token);
+    }
+    return row?.spawnUrl || buildClientSpawnUrl(token);
+}
+
+/**
+ * URL コピーボタンと表示欄を同期
+ * @param {object} [row]
+ */
+function syncCopyUrlButtons(row = null) {
+    const type = row?.type === 'instance' || row?.type === 'teleport' ? row.type : getSelectedType();
+    const copyUrlBtn = document.getElementById('nfc-spawn-copy-url');
+    const copyInstBtn = document.getElementById('nfc-spawn-copy-instance-url');
+    const urlDisplay = /** @type {HTMLInputElement|null} */ (
+        document.getElementById('nfc-spawn-instance-url-display')
+    );
+    const urlWrap = document.getElementById('nfc-spawn-instance-url-wrap');
+    const spawnUrl = resolveCopyUrl('spawn', row);
+    const instanceUrl = resolveCopyUrl('instance', row);
+
+    if (copyUrlBtn) {
+        copyUrlBtn.dataset.url = spawnUrl;
+        copyUrlBtn.hidden = type === 'instance';
+    }
+    if (copyInstBtn) {
+        copyInstBtn.dataset.url = instanceUrl;
+        copyInstBtn.hidden = type !== 'instance';
+        copyInstBtn.disabled = !instanceUrl;
+    }
+    if (urlWrap) urlWrap.hidden = type !== 'instance';
+    if (urlDisplay) {
+        urlDisplay.value = instanceUrl;
+        urlDisplay.placeholder = instanceUrl ? '' : '保存後に URL が表示されます';
+    }
+}
+
+/**
  * @param {string} text
  */
 async function copyText(text) {
+    const value = String(text || '').trim();
+    if (!value) return false;
     try {
-        await navigator.clipboard.writeText(text);
-        return true;
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
     } catch {
+        /* fallback below */
+    }
+    try {
         const ta = document.createElement('textarea');
-        ta.value = text;
+        ta.value = value;
+        ta.setAttribute('readonly', '');
         ta.style.position = 'fixed';
-        ta.style.left = '-9999px';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.opacity = '0';
         document.body.appendChild(ta);
+        ta.focus();
         ta.select();
+        ta.setSelectionRange(0, value.length);
         const ok = document.execCommand('copy');
         document.body.removeChild(ta);
         return ok;
+    } catch {
+        return false;
     }
 }
 
@@ -134,7 +225,7 @@ function ensurePanelDom() {
                                     <span id="nfc-spawn-load-radius-val">15 m</span>
                                 </label>
                                 <div class="nfc-spawn-bake-preview-wrap">
-                                    <h4>球内モデル（プレビュー）</h4>
+                                    <h4>球内モデル（パーツ単位プレビュー）</h4>
                                     <ul id="nfc-spawn-bake-preview" class="nfc-spawn-bake-preview"></ul>
                                 </div>
                                 <p id="nfc-spawn-bake-status" class="nfc-spawn-bake-status"></p>
@@ -163,9 +254,15 @@ function ensurePanelDom() {
                         <div id="nfc-spawn-edit-meta" class="nfc-spawn-edit-meta" hidden>
                             <p><strong>ID:</strong> <span id="nfc-spawn-meta-id">-</span></p>
                             <p><strong>トークン:</strong> <code id="nfc-spawn-meta-token" class="nfc-spawn-token-code">-</code></p>
+                            <p id="nfc-spawn-instance-url-wrap" class="nfc-spawn-instance-url-wrap" hidden>
+                                <strong>インスタンス URL</strong>
+                                <span class="nfc-spawn-url-row">
+                                    <input type="text" id="nfc-spawn-instance-url-display" class="prop-input nfc-spawn-url-input" readonly placeholder="保存後に URL が表示されます">
+                                    <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-copy-instance-url">コピー</button>
+                                </span>
+                            </p>
                             <div class="nfc-spawn-meta-actions">
-                                <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-copy-url">URLコピー</button>
-                                <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-copy-instance-url" hidden>インスタンスURL</button>
+                                <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-copy-url">テレポートURL</button>
                                 <button type="button" class="btn btn-secondary btn-sm" id="nfc-spawn-regen-btn">トークン再発行</button>
                             </div>
                         </div>
@@ -261,9 +358,8 @@ function getLoadRadius() {
 function syncTypeUi() {
     const type = getSelectedType();
     const instanceFields = document.getElementById('nfc-spawn-instance-fields');
-    const copyInst = document.getElementById('nfc-spawn-copy-instance-url');
     if (instanceFields) instanceFields.hidden = type !== 'instance';
-    if (copyInst) copyInst.hidden = type !== 'instance';
+    syncCopyUrlButtons();
     const radiusVal = document.getElementById('nfc-spawn-load-radius-val');
     if (radiusVal) radiusVal.textContent = `${getLoadRadius()} m`;
     void ensureWorldPlacer().then((p) => {
@@ -308,6 +404,7 @@ function readBakeRequestBody() {
         body.label = `インスタンス ${body.world_id || getSelectedWorldId()}`;
     }
     body.excludeModelIndices = [...excludedPreviewIndices];
+    body.excludeParts = [...excludedPreviewParts];
     if (editingId != null) body.id = editingId;
     return body;
 }
@@ -359,6 +456,12 @@ async function refreshBakePreview() {
         } else {
             list.innerHTML = entries
                 .map((e) => {
+                    if (e.entryKind === 'prefab_part') {
+                        const partKey = `${e.worldModelIndex}:${e.partIndex}`;
+                        const included = !excludedPreviewParts.has(partKey);
+                        const checked = included ? ' checked' : '';
+                        return `<li class="nfc-spawn-preview-part"><label><input type="checkbox" class="nfc-preview-include-part" data-part-key="${escapeHtml(partKey)}"${checked}> <code>prefab</code> ${escapeHtml(e.label)} <span class="nfc-spawn-part-idx">#${e.partIndex}</span></label></li>`;
+                    }
                     const included = !excludedPreviewIndices.has(e.worldModelIndex);
                     const checked = included ? ' checked' : '';
                     const parts = e.partIndices?.length ? ` parts:${e.partIndices.join(',')}` : '';
@@ -370,6 +473,14 @@ async function refreshBakePreview() {
                     const idx = Number(cb.getAttribute('data-idx'));
                     if (/** @type {HTMLInputElement} */ (cb).checked) excludedPreviewIndices.delete(idx);
                     else excludedPreviewIndices.add(idx);
+                    scheduleBakePreviewRefresh();
+                });
+            });
+            list.querySelectorAll('.nfc-preview-include-part').forEach((cb) => {
+                cb.addEventListener('change', () => {
+                    const key = cb.getAttribute('data-part-key') || '';
+                    if (/** @type {HTMLInputElement} */ (cb).checked) excludedPreviewParts.delete(key);
+                    else excludedPreviewParts.add(key);
                     scheduleBakePreviewRefresh();
                 });
             });
@@ -452,6 +563,7 @@ function populateWorldSelect() {
 function resetForm() {
     editingId = null;
     excludedPreviewIndices = new Set();
+    excludedPreviewParts = new Set();
     const title = document.getElementById('nfc-spawn-form-title');
     const cancel = document.getElementById('nfc-spawn-cancel-btn');
     const saveBtn = document.getElementById('nfc-spawn-save-btn');
@@ -530,10 +642,7 @@ function fillForm(row) {
     const metaToken = document.getElementById('nfc-spawn-meta-token');
     if (metaId) metaId.textContent = String(row.id);
     if (metaToken) metaToken.textContent = row.spawn_token || '-';
-    const copyBtn = document.getElementById('nfc-spawn-copy-url');
-    const copyInstBtn = document.getElementById('nfc-spawn-copy-instance-url');
-    if (copyBtn) copyBtn.dataset.url = row.spawnUrl || '';
-    if (copyInstBtn) copyInstBtn.dataset.url = row.instanceUrl || '';
+    syncCopyUrlButtons(row);
     updateBakeStatus(row);
     syncTypeUi();
     refreshWorldMarkers();
@@ -635,6 +744,10 @@ async function refreshNfcSpawnPanel() {
         const j = await apiFetch(API_BASE);
         spawns = j.spawns || [];
         renderTable();
+        if (editingId != null) {
+            const row = spawns.find((s) => s.id === editingId);
+            if (row) syncCopyUrlButtons(row);
+        }
         refreshWorldMarkers();
         await reloadWorldViewer();
     } catch (e) {
@@ -757,17 +870,36 @@ function bindForm() {
     });
 
     copyUrlBtn?.addEventListener('click', async () => {
-        const url = copyUrlBtn.dataset.url || '';
-        if (!url) return;
+        const url = resolveCopyUrl('spawn');
+        if (!url) {
+            setStatus('先に保存してトークンを発行してください', true);
+            return;
+        }
         const ok = await copyText(url);
-        setStatus(ok ? 'URL をコピーしました' : 'コピーに失敗しました', !ok);
+        setStatus(ok ? 'テレポート URL をコピーしました' : 'コピーに失敗しました', !ok);
     });
 
-    copyInstBtn?.addEventListener('click', async () => {
-        const url = copyInstBtn.dataset.url || '';
-        if (!url) return;
+    const handleCopyInstanceUrl = async () => {
+        const url = resolveCopyUrl('instance');
+        if (!url) {
+            setStatus('先に保存してトークンを発行してください', true);
+            return;
+        }
         const ok = await copyText(url);
+        if (ok) {
+            const urlDisplay = /** @type {HTMLInputElement|null} */ (
+                document.getElementById('nfc-spawn-instance-url-display')
+            );
+            if (urlDisplay) urlDisplay.value = url;
+        }
         setStatus(ok ? 'インスタンス URL をコピーしました' : 'コピーに失敗しました', !ok);
+    };
+
+    copyInstBtn?.addEventListener('click', () => void handleCopyInstanceUrl());
+
+    const urlDisplay = document.getElementById('nfc-spawn-instance-url-display');
+    urlDisplay?.addEventListener('click', () => {
+        urlDisplay.select();
     });
 
     regenBtn?.addEventListener('click', async () => {
@@ -822,6 +954,9 @@ function injectAdminStyles() {
         .nfc-spawn-form-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
         .nfc-spawn-edit-meta { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--admin-border, #444); font-size: 0.88rem; }
         .nfc-spawn-edit-meta p { margin: 0.25rem 0; }
+        .nfc-spawn-instance-url-wrap { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.5rem 0; }
+        .nfc-spawn-url-row { display: flex; gap: 0.35rem; align-items: center; }
+        .nfc-spawn-url-input { flex: 1; min-width: 0; font-size: 0.82rem; }
         .nfc-spawn-token-code { word-break: break-all; font-size: 0.8rem; }
         .nfc-spawn-meta-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.5rem; }
         .nfc-spawn-table-wrap h3 { margin-bottom: 0.5rem; }
@@ -835,6 +970,8 @@ function injectAdminStyles() {
         .nfc-spawn-instance-fields { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem 0; border-top: 1px dashed var(--admin-border, #444); }
         .nfc-spawn-bake-preview { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow: auto; font-size: 0.82rem; }
         .nfc-spawn-bake-preview li { padding: 0.2rem 0; }
+        .nfc-spawn-preview-part { padding-left: 0.25rem; }
+        .nfc-spawn-part-idx { opacity: 0.65; font-size: 0.78rem; }
         .nfc-spawn-preview-hint { color: #888; }
         .nfc-spawn-bake-status { font-size: 0.85rem; margin: 0; color: #aaa; }
         .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.8rem; }

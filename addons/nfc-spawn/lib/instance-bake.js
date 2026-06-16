@@ -97,9 +97,49 @@ export function spawnRowFromParsedData(data) {
 }
 
 /**
+ * prefab_part を同一 worldModelIndex ごとに prefab_parts へまとめる（ベイク用）
+ * @param {object[]} entries
+ */
+export function groupSelectionsForBake(entries) {
+    /** @type {object[]} */
+    const result = [];
+    /** @type {Map<number, object>} */
+    const prefabByModel = new Map();
+    for (const sel of entries) {
+        if (sel.entryKind === 'prefab_part') {
+            const idx = sel.worldModelIndex;
+            let grouped = prefabByModel.get(idx);
+            if (!grouped) {
+                grouped = {
+                    worldModelIndex: idx,
+                    entryKind: 'prefab_parts',
+                    label: sel.label.split(' · ')[0] || sel.label,
+                    prefabManifest: sel.prefabManifest,
+                    sourcePath: sel.sourcePath,
+                    partIndices: [],
+                };
+                prefabByModel.set(idx, grouped);
+            }
+            const pi = sel.partIndex;
+            if (Number.isInteger(pi) && !grouped.partIndices.includes(pi)) {
+                grouped.partIndices.push(pi);
+            }
+            continue;
+        }
+        result.push(sel);
+    }
+    for (const grouped of prefabByModel.values()) {
+        grouped.partIndices.sort((a, b) => a - b);
+        if (grouped.partIndices.length) result.push(grouped);
+    }
+    return result;
+}
+
+/**
  * @param {object} spawnRow
  * @param {object} [options]
  * @param {Set<number>} [options.excludeModelIndices]
+ * @param {Set<string>} [options.excludeParts]
  * @param {object} [config]
  */
 export async function previewInstanceBake(spawnRow, options = {}, config = {}) {
@@ -115,6 +155,7 @@ export async function previewInstanceBake(spawnRow, options = {}, config = {}) {
         defaultModelRadius,
         loadManifest: async (manifestPath) => readPrefabManifestSync(manifestPath),
         excludeModelIndices: options.excludeModelIndices,
+        excludeParts: options.excludeParts,
     });
     return { entries, center, radius, worldId: spawnRow.world_id };
 }
@@ -123,6 +164,7 @@ export async function previewInstanceBake(spawnRow, options = {}, config = {}) {
  * @param {object} spawnRow
  * @param {object} [options]
  * @param {Set<number>} [options.excludeModelIndices]
+ * @param {Set<string>} [options.excludeParts]
  * @param {object} bakeConfig
  */
 export async function bakeInstance(spawnRow, options = {}, bakeConfig = {}) {
@@ -139,6 +181,8 @@ export async function bakeInstance(spawnRow, options = {}, bakeConfig = {}) {
     if (preview.entries.length > maxEntries) {
         throw new Error('too_many_entries');
     }
+
+    const bakeSelections = groupSelectionsForBake(preview.entries);
 
     const spawnId = spawnRow.id;
     const instanceDir = getInstanceDir(spawnId);
@@ -158,7 +202,7 @@ export async function bakeInstance(spawnRow, options = {}, bakeConfig = {}) {
     let totalBytes = 0;
     let prefabCounter = 0;
 
-    for (const sel of preview.entries) {
+    for (const sel of bakeSelections) {
         const config =
             typeof worldModels[sel.worldModelIndex] === 'string'
                 ? { path: worldModels[sel.worldModelIndex] }
@@ -261,7 +305,12 @@ export async function bakeInstance(spawnRow, options = {}, bakeConfig = {}) {
         worldModelIndex: e.worldModelIndex,
         entryKind: e.entryKind,
         prefabManifest: e.prefabManifest || null,
-        partIndices: e.partIndices || null,
+        partIndices:
+            e.partIndex != null
+                ? [e.partIndex]
+                : e.partIndices?.length
+                  ? e.partIndices
+                  : null,
         sourcePath: e.sourcePath || null,
     }));
 

@@ -100,8 +100,96 @@ describe('sphere-selection', () => {
             loadManifest: async () => manifest,
         });
         assert.equal(entries.length, 1);
-        assert.equal(entries[0].entryKind, 'prefab_parts');
-        assert.deepEqual(entries[0].partIndices, [0]);
+        assert.equal(entries[0].entryKind, 'prefab_part');
+        assert.equal(entries[0].partIndex, 0);
+    });
+
+    it('selectModelsInSphere picks only touching prefab parts (not whole prefab)', async () => {
+        const manifest = {
+            displayName: 'Split',
+            bounds: {
+                center: [25, 0, 0],
+                radius: 30,
+                min: [-5, -5, -5],
+                max: [55, 5, 5],
+            },
+            parts: [
+                {
+                    file: 'models/near.glb',
+                    bounds: {
+                        center: [2, 0, 0],
+                        radius: 2,
+                        min: [0, -1, -1],
+                        max: [4, 1, 1],
+                    },
+                },
+                {
+                    file: 'models/far.glb',
+                    bounds: {
+                        center: [48, 0, 0],
+                        radius: 2,
+                        min: [46, -1, -1],
+                        max: [50, 1, 1],
+                    },
+                },
+            ],
+        };
+        const models = [
+            {
+                prefabManifest: 'models/Split-prefab-manifest.json',
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+                scale: { x: 1, y: 1, z: 1 },
+            },
+        ];
+        const entries = await selectModelsInSphere({
+            worldModels: models,
+            center: { x: 0, y: 0, z: 0 },
+            radius: 6,
+            loadManifest: async () => manifest,
+        });
+        assert.equal(entries.length, 1);
+        assert.equal(entries[0].entryKind, 'prefab_part');
+        assert.equal(entries[0].partIndex, 0);
+    });
+
+    it('selectModelsInSphere returns multiple prefab_part entries', async () => {
+        const manifest = {
+            displayName: 'Duo',
+            parts: [
+                {
+                    file: 'models/a.glb',
+                    bounds: {
+                        center: [2, 0, 0],
+                        radius: 2,
+                        min: [0, -1, -1],
+                        max: [4, 1, 1],
+                    },
+                },
+                {
+                    file: 'models/b.glb',
+                    bounds: {
+                        center: [4, 0, 0],
+                        radius: 2,
+                        min: [2, -1, -1],
+                        max: [6, 1, 1],
+                    },
+                },
+            ],
+        };
+        const entries = await selectModelsInSphere({
+            worldModels: [
+                {
+                    prefabManifest: 'models/Duo-prefab-manifest.json',
+                    position: { x: 0, y: 0, z: 0 },
+                },
+            ],
+            center: { x: 0, y: 0, z: 0 },
+            radius: 10,
+            loadManifest: async () => manifest,
+        });
+        assert.equal(entries.length, 2);
+        assert.ok(entries.every((e) => e.entryKind === 'prefab_part'));
     });
 
     it('selectModelsInSphere respects prefab rotation (Three.js XYZ)', async () => {
@@ -134,7 +222,7 @@ describe('sphere-selection', () => {
             loadManifest: async () => manifest,
         });
         assert.equal(entries.length, 1);
-        assert.equal(entries[0].entryKind, 'prefab_parts');
-        assert.deepEqual(entries[0].partIndices, [0]);
+        assert.equal(entries[0].entryKind, 'prefab_part');
+        assert.equal(entries[0].partIndex, 0);
     });
 });

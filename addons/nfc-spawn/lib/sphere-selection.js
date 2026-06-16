@@ -205,7 +205,23 @@ export function boundsIntersectQuerySphere(queryCenter, queryRadius, config, bou
 }
 
 /**
- * @typedef {{ worldModelIndex: number, entryKind: 'glb'|'prefab_whole'|'prefab_parts', label: string, prefabManifest?: string, partIndices?: number[], sourcePath?: string }} SelectionEntry
+ * マニフェストにパーツ単位 bounds があるか（VAS と同義）
+ * @param {ReturnType<typeof normalizePrefabManifest>} man
+ */
+export function prefabManifestHasPartBounds(man) {
+    return !!(man?.parts?.length && man.parts.some((p) => p.bounds));
+}
+
+/**
+ * @param {number} worldModelIndex
+ * @param {number} partIndex
+ */
+export function partSelectionKey(worldModelIndex, partIndex) {
+    return `${worldModelIndex}:${partIndex}`;
+}
+
+/**
+ * @typedef {{ worldModelIndex: number, entryKind: 'glb'|'prefab_whole'|'prefab_parts'|'prefab_part', label: string, prefabManifest?: string, partIndex?: number, partLabel?: string, partIndices?: number[], sourcePath?: string }} SelectionEntry
  */
 
 /**
@@ -216,6 +232,7 @@ export function boundsIntersectQuerySphere(queryCenter, queryRadius, config, bou
  * @param {number} [options.defaultModelRadius]
  * @param {(manifestPath: string) => Promise<object|null>} options.loadManifest
  * @param {Set<number>} [options.excludeModelIndices]
+ * @param {Set<string>} [options.excludeParts] worldModelIndex:partIndex
  */
 export async function selectModelsInSphere({
     worldModels,
@@ -224,6 +241,7 @@ export async function selectModelsInSphere({
     defaultModelRadius = 5,
     loadManifest,
     excludeModelIndices,
+    excludeParts,
 }) {
     /** @type {SelectionEntry[]} */
     const entries = [];
@@ -240,42 +258,34 @@ export async function selectModelsInSphere({
             const raw = await loadManifest(pfm);
             if (!raw) continue;
             const man = normalizePrefabManifest(raw);
-            const partsWithBounds = man.parts
-                .map((p, idx) => ({ p, idx }))
-                .filter(({ p }) => p.bounds);
-            if (partsWithBounds.length > 0) {
-                const selected = [];
-                for (const { p, idx } of partsWithBounds) {
+            if (prefabManifestHasPartBounds(man)) {
+                const displayName = man.displayName || pfm;
+                for (let pi = 0; pi < man.parts.length; pi++) {
+                    const part = man.parts[pi];
+                    if (!part.bounds) continue;
+                    const key = partSelectionKey(i, pi);
+                    if (excludeParts?.has(key)) continue;
                     if (
                         boundsIntersectQuerySphere(
                             center,
                             radius,
                             config,
-                            /** @type {PrefabBounds} */ (p.bounds)
+                            /** @type {PrefabBounds} */ (part.bounds)
                         )
                     ) {
-                        selected.push(idx);
+                        const partLabel = part.file.split(/[/\\]/).pop() || part.file;
+                        entries.push({
+                            worldModelIndex: i,
+                            entryKind: 'prefab_part',
+                            partIndex: pi,
+                            partLabel,
+                            label: `${displayName} · ${partLabel}`,
+                            prefabManifest: pfm,
+                            sourcePath: modelPath || pfm,
+                        });
                     }
                 }
-                if (selected.length > 0) {
-                    for (let pi = 0; pi < man.parts.length; pi++) {
-                        if (!man.parts[pi].bounds && !selected.includes(pi)) {
-                            selected.push(pi);
-                        }
-                    }
-                }
-                selected.sort((a, b) => a - b);
-                if (selected.length > 0) {
-                    entries.push({
-                        worldModelIndex: i,
-                        entryKind: 'prefab_parts',
-                        label: man.displayName || pfm,
-                        prefabManifest: pfm,
-                        partIndices: selected,
-                        sourcePath: modelPath || pfm,
-                    });
-                    continue;
-                }
+                continue;
             }
             if (man.bounds) {
                 if (
