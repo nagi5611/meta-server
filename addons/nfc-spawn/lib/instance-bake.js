@@ -80,6 +80,23 @@ function relativeTrs(config, origin) {
 }
 
 /**
+ * プレビュー・ベイク用の仮 spawn 行
+ * @param {object} data parseSpawnBody の data
+ */
+export function spawnRowFromParsedData(data) {
+    return {
+        world_id: data.worldId,
+        x: data.x,
+        y: data.y,
+        z: data.z,
+        yaw: data.yaw,
+        load_radius: data.loadRadius,
+        type: 'instance',
+        label: data.label,
+    };
+}
+
+/**
  * @param {object} spawnRow
  * @param {object} [options]
  * @param {Set<number>} [options.excludeModelIndices]

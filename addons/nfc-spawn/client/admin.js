@@ -21,6 +21,9 @@ let editingId = null;
 /** @type {Set<number>} */
 let excludedPreviewIndices = new Set();
 
+/** @type {ReturnType<typeof setTimeout>|null} */
+let previewDebounceTimer = null;
+
 /** @type {import('./world-placer-viewer.js').NfcSpawnWorldPlacer|null} */
 let worldPlacer = null;
 
@@ -135,7 +138,7 @@ function ensurePanelDom() {
                                     <ul id="nfc-spawn-bake-preview" class="nfc-spawn-bake-preview"></ul>
                                 </div>
                                 <p id="nfc-spawn-bake-status" class="nfc-spawn-bake-status"></p>
-                                <button type="button" class="btn btn-secondary" id="nfc-spawn-bake-btn" disabled>インスタンスを生成 / 再ベイク</button>
+                                <button type="button" class="btn btn-secondary" id="nfc-spawn-bake-btn">インスタンスを生成 / 再ベイク</button>
                             </div>
                             <label class="nfc-spawn-label">ラベル
                                 <input type="text" id="nfc-spawn-label" required maxlength="128" placeholder="図書館模型">
@@ -222,6 +225,7 @@ async function ensureWorldPlacer() {
             if (getSelectedType() === 'instance' && worldPlacer) {
                 worldPlacer.updateLoadSphereAt({ x: pos.x, y: pos.y, z: pos.z });
             }
+            scheduleBakePreviewRefresh();
         };
         worldPlacer.onTagMarkerPick = (id) => {
             const row = spawns.find((s) => s.id === id);
@@ -278,6 +282,36 @@ function syncTypeUi() {
     void refreshBakePreview();
 }
 
+function scheduleBakePreviewRefresh() {
+    if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
+    previewDebounceTimer = setTimeout(() => void refreshBakePreview(), 350);
+}
+
+/**
+ * インスタンス型のプレビュー・ベイクに必要な入力が揃っているか
+ */
+function canUseInstanceBakeDraft() {
+    if (getSelectedType() !== 'instance') return false;
+    const body = readFormBody();
+    if (!body.world_id) return false;
+    if (![body.x, body.y, body.z].every((n) => Number.isFinite(n))) return false;
+    if (!Number.isFinite(body.load_radius)) return false;
+    return true;
+}
+
+/**
+ * ベイク API 用ボディ（ラベル未入力時は自動生成）
+ */
+function readBakeRequestBody() {
+    const body = readFormBody();
+    if (!body.label?.trim()) {
+        body.label = `インスタンス ${body.world_id || getSelectedWorldId()}`;
+    }
+    body.excludeModelIndices = [...excludedPreviewIndices];
+    if (editingId != null) body.id = editingId;
+    return body;
+}
+
 /**
  * @param {object|null} [row]
  */
@@ -302,15 +336,23 @@ async function refreshBakePreview() {
     const list = document.getElementById('nfc-spawn-bake-preview');
     const bakeBtn = document.getElementById('nfc-spawn-bake-btn');
     if (!list) return;
-    if (getSelectedType() !== 'instance' || editingId == null) {
-        list.innerHTML = '<li class="nfc-spawn-preview-hint">インスタンス型を保存後にプレビューできます</li>';
+    if (getSelectedType() !== 'instance') {
+        list.innerHTML = '';
         if (bakeBtn) bakeBtn.disabled = true;
         return;
     }
-    const exclude = [...excludedPreviewIndices].join(',');
-    const q = exclude ? `?exclude=${encodeURIComponent(exclude)}` : '';
+    if (!canUseInstanceBakeDraft()) {
+        list.innerHTML =
+            '<li class="nfc-spawn-preview-hint">3D で位置を決め、半径を設定してください</li>';
+        if (bakeBtn) bakeBtn.disabled = true;
+        return;
+    }
     try {
-        const j = await apiFetch(`${API_BASE}/${editingId}/bake-preview${q}`);
+        const j = await apiFetch(`${API_BASE}/bake-preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(readBakeRequestBody()),
+        });
         const entries = j.preview?.entries || [];
         if (!entries.length) {
             list.innerHTML = '<li class="nfc-spawn-preview-hint">半径内にモデルなし</li>';
@@ -328,13 +370,14 @@ async function refreshBakePreview() {
                     const idx = Number(cb.getAttribute('data-idx'));
                     if (/** @type {HTMLInputElement} */ (cb).checked) excludedPreviewIndices.delete(idx);
                     else excludedPreviewIndices.add(idx);
-                    void refreshBakePreview();
+                    scheduleBakePreviewRefresh();
                 });
             });
         }
         if (bakeBtn) bakeBtn.disabled = false;
-    } catch {
-        list.innerHTML = '<li class="nfc-spawn-preview-hint">プレビュー取得失敗</li>';
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : 'プレビュー取得失敗';
+        list.innerHTML = `<li class="nfc-spawn-preview-hint">${escapeHtml(msg)}</li>`;
         if (bakeBtn) bakeBtn.disabled = true;
     }
 }
@@ -433,6 +476,8 @@ function resetForm() {
         const world = worldsData[getSelectedWorldId()];
         if (world) p.focusDefaultSpawn(world);
     });
+    syncTypeUi();
+    scheduleBakePreviewRefresh();
 }
 
 /**
@@ -674,27 +719,32 @@ function bindForm() {
         if (Number.isFinite(yaw) && worldPlacer) worldPlacer.setPlacementYaw(yaw);
     });
 
-    typeSel?.addEventListener('change', () => syncTypeUi());
+    typeSel?.addEventListener('change', () => {
+        syncTypeUi();
+        scheduleBakePreviewRefresh();
+    });
 
     radiusInput?.addEventListener('input', () => {
         const radiusVal = document.getElementById('nfc-spawn-load-radius-val');
         if (radiusVal) radiusVal.textContent = `${getLoadRadius()} m`;
         if (worldPlacer) worldPlacer.setLoadRadius(getLoadRadius());
-        void refreshBakePreview();
+        scheduleBakePreviewRefresh();
     });
 
     bakeBtn?.addEventListener('click', async () => {
-        if (editingId == null) return;
-        if (!window.confirm('インスタンスを生成 / 再ベイクしますか？')) return;
+        if (getSelectedType() !== 'instance') return;
+        if (!canUseInstanceBakeDraft()) {
+            setStatus('3D で位置を決め、半径を設定してください', true);
+            return;
+        }
+        if (!window.confirm('インスタンスを保存してベイクしますか？')) return;
         bakeBtn.disabled = true;
-        setStatus('ベイク中…');
+        setStatus('保存・ベイク中…');
         try {
-            const j = await apiFetch(`${API_BASE}/${editingId}/bake`, {
+            const j = await apiFetch(`${API_BASE}/bake`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    excludeModelIndices: [...excludedPreviewIndices],
-                }),
+                body: JSON.stringify(readBakeRequestBody()),
             });
             if (j.spawn) fillForm(j.spawn);
             setStatus(`ベイク完了（${j.bake?.entryCount ?? 0} 件）`);

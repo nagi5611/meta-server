@@ -37,8 +37,10 @@ GET /api/addons/nfc-spawn/instance-assets/:spawnId/*
 | GET/POST | `/admin/addons/nfc-spawn/spawns` |
 | PUT/DELETE | `/admin/addons/nfc-spawn/spawns/:id` |
 | POST | `/admin/addons/nfc-spawn/spawns/:id/regenerate-token` |
-| GET | `/admin/addons/nfc-spawn/spawns/:id/bake-preview` |
-| POST | `/admin/addons/nfc-spawn/spawns/:id/bake` |
+| POST | `/admin/addons/nfc-spawn/spawns/bake-preview` | 保存前でも座標・半径でプレビュー |
+| POST | `/admin/addons/nfc-spawn/spawns/bake` | 保存＋ベイクを一括（`id` 任意） |
+| GET | `/admin/addons/nfc-spawn/spawns/:id/bake-preview` | 既存行向け（レガシー） |
+| POST | `/admin/addons/nfc-spawn/spawns/:id/bake` | 既存行向け（レガシー） |
 
 ## 設定（任意）
 
@@ -67,7 +69,8 @@ npm run test:nfc-spawn
 ## 手動テストチェックリスト
 
 - [ ] テレポート型: `/?spawn=TOKEN` で入場・テレポート
-- [ ] インスタンス型: 保存 → ベイク → `/instance/?token=TOKEN` で A-Frame 表示
+- [ ] インスタンス型: 3Dで位置・半径を決めて **保存せず** プレビュー → 「インスタンスを生成 / 再ベイク」で一括保存
+- [ ] インスタンス型: `/instance/?token=TOKEN` で A-Frame 表示
 - [ ] インスタンス未ベイク時は API 404
 - [ ] テレポートトークンで instance API は 404
 - [ ] 半径変更・プレビュー除外・再ベイク

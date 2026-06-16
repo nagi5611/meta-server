@@ -20,7 +20,7 @@ import {
     serializeSpawnRow,
     updateNfcSpawn,
 } from './lib/db.js';
-import { bakeInstance, deleteInstanceFiles, getInstanceDir, previewInstanceBake } from './lib/instance-bake.js';
+import { bakeInstance, deleteInstanceFiles, getInstanceDir, previewInstanceBake, spawnRowFromParsedData } from './lib/instance-bake.js';
 
 const JSON_BODY_LIMIT = '32kb';
 const SPAWN_ID_RE = /^\d+$/;
@@ -246,6 +246,86 @@ export default {
                 } catch (e) {
                     ctx.logger.error('POST admin spawn', e);
                     res.status(500).json({ ok: false, error: 'create_failed' });
+                }
+            });
+
+            app.post('/admin/addons/nfc-spawn/spawns/bake-preview', jsonMw, async (req, res) => {
+                const parsed = parseSpawnBody({ ...req.body, type: 'instance' });
+                if (!parsed.ok) {
+                    return res.status(400).json({ ok: false, error: parsed.error });
+                }
+                if (!isValidWorldId(parsed.data.worldId)) {
+                    return res.status(400).json({ ok: false, error: 'unknown_world' });
+                }
+                try {
+                    const spawnRow = spawnRowFromParsedData(parsed.data);
+                    const exclude = parseExcludeIndices(req.body);
+                    const preview = await previewInstanceBake(
+                        spawnRow,
+                        { excludeModelIndices: exclude },
+                        bakeConfig
+                    );
+                    res.json({ ok: true, preview });
+                } catch (e) {
+                    ctx.logger.error('POST bake-preview', e);
+                    res.status(500).json({ ok: false, error: 'preview_failed' });
+                }
+            });
+
+            app.post('/admin/addons/nfc-spawn/spawns/bake', jsonMw, async (req, res) => {
+                const idRaw = req.body?.id;
+                const id =
+                    idRaw != null && SPAWN_ID_RE.test(String(idRaw)) ? Number(idRaw) : null;
+                const parsed = parseSpawnBody({ ...req.body, type: 'instance' });
+                if (!parsed.ok) {
+                    return res.status(400).json({ ok: false, error: parsed.error });
+                }
+                if (!isValidWorldId(parsed.data.worldId)) {
+                    return res.status(400).json({ ok: false, error: 'unknown_world' });
+                }
+                try {
+                    const db = ctx.openDatabase();
+                    let row;
+                    if (id != null) {
+                        const existing = getNfcSpawnById(db, id);
+                        if (!existing) {
+                            return res.status(404).json({ ok: false, error: 'not_found' });
+                        }
+                        row = updateNfcSpawn(db, id, parsed.data);
+                    } else {
+                        row = createNfcSpawn(db, parsed.data);
+                    }
+                    if (!row) {
+                        return res.status(500).json({ ok: false, error: 'save_failed' });
+                    }
+                    const exclude = parseExcludeIndices(req.body);
+                    const bakeResult = await bakeInstance(
+                        row,
+                        { excludeModelIndices: exclude },
+                        bakeConfig
+                    );
+                    const updated = recordInstanceBake(db, row.id, bakeResult);
+                    res.json({
+                        ok: true,
+                        bake: {
+                            totalBytes: bakeResult.totalBytes,
+                            entryCount: bakeResult.entryCount,
+                            bakeRevision: bakeResult.bakeRevision,
+                        },
+                        spawn: rowWithUrls(req, ctx.config, updated),
+                    });
+                } catch (e) {
+                    const msg = e instanceof Error ? e.message : 'bake_failed';
+                    ctx.logger.error('POST bake (upsert)', e);
+                    const clientErrors = new Set([
+                        'not_instance_type',
+                        'no_models_in_sphere',
+                        'too_many_entries',
+                        'no_models_baked',
+                        'bake_too_large',
+                    ]);
+                    const code = clientErrors.has(msg) ? msg : 'bake_failed';
+                    res.status(clientErrors.has(msg) ? 400 : 500).json({ ok: false, error: code });
                 }
             });
 
