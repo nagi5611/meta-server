@@ -59,7 +59,7 @@
     </div>
     <div id="instance-overlay" hidden></div>
     <a-scene
-        renderer="antialias: false; colorManagement: true"
+        renderer="antialias: false; colorManagement: true; exposure: 1.45; toneMapping: ACESFilmic"
         vr-mode-ui="enabled: false"
         device-orientation-permission-ui="enabled: false"
         embedded
@@ -71,8 +71,10 @@
             look-controls="magicWindowTrackingEnabled: false; touchEnabled: true; pointerLockEnabled: false"
             wasd-controls="enabled: false"
             position="0 1.6 4"></a-entity>
-        <a-entity light="type: ambient; intensity: 0.6"></a-entity>
-        <a-entity light="type: directional; intensity: 0.8" position="2 4 3"></a-entity>
+        <!-- Three.js r155+ 向け: 半球光 + 環境光 + 太陽光（旧 0.6/0.8 では暗すぎる） -->
+        <a-entity light="type: hemisphere; color: #dbeafe; groundColor: #6b7280; intensity: 1.35"></a-entity>
+        <a-entity light="type: ambient; color: #ffffff; intensity: 0.55"></a-entity>
+        <a-entity light="type: directional; color: #fff8ee; intensity: 1.75; castShadow: false" position="45 90 35"></a-entity>
     </a-scene>
     <script type="module" src="/addons/nfc-spawn/client/instance-viewer.js"></script>
 </body>
