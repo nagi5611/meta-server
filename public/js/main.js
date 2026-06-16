@@ -29,6 +29,10 @@ import { initMatsuyamaFlightsSubsystem } from '../../addons/matsuyama-flights/cl
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 import { loadClientConfigOnce } from './asset-resolve.js';
 import { fetchAdminMetaverseEntry, isAdminMetaverseEntryPath } from './admin-metaverse-auth.js';
+import {
+    applyClientSpawnPlan,
+    tryResolveClientSpawn,
+} from '../../lib/client-spawn-registry.js';
 
 const DEFAULT_ROOM = 'lobby';
 
@@ -243,12 +247,20 @@ class MetaverseApp {
             if (this.teleportManager) this.teleportManager.handleTeleport();
         });
 
-        // Load initial world: URL ?world= / #world= が有効なら優先、なければ lobby または先頭
+        // Load initial world: ?spawn= (NFC) > ?world= / #world= > lobby
+        const spawnPlan = await tryResolveClientSpawn();
         const defaultWorldId = this.worldManager.getWorld('lobby') ? 'lobby' : (this.worldManager.getAllWorlds()[0]?.id || 'lobby');
         const urlWorldId = getWorldIdFromUrl();
-        const initialWorldId =
-            urlWorldId && this.worldManager.getWorld(urlWorldId) ? urlWorldId : defaultWorldId;
-        if (urlWorldId && urlWorldId !== initialWorldId) {
+        let initialWorldId = defaultWorldId;
+        if (spawnPlan?.worldId && this.worldManager.getWorld(spawnPlan.worldId)) {
+            initialWorldId = spawnPlan.worldId;
+        } else if (urlWorldId && this.worldManager.getWorld(urlWorldId)) {
+            initialWorldId = urlWorldId;
+        }
+        if (spawnPlan?.worldId && spawnPlan.worldId !== initialWorldId) {
+            console.warn(`[spawn] Unknown world in spawn token, using default: ${spawnPlan.worldId}`);
+        }
+        if (!spawnPlan?.worldId && urlWorldId && urlWorldId !== initialWorldId) {
             console.warn(`Unknown world in URL, using default: ${urlWorldId}`);
         }
         console.log('Loading world:', initialWorldId);
@@ -291,8 +303,11 @@ class MetaverseApp {
             });
         });
 
-        // Get spawn point for current world
-        const spawnPoint = this.worldManager.getSpawnPoint();
+        // Get spawn point for current world（NFC ?spawn= があれば DB 座標を優先）
+        const worldSpawn = this.worldManager.getSpawnPoint();
+        const spawnPoint = spawnPlan?.position
+            ? { x: spawnPlan.position.x, y: spawnPlan.position.y, z: spawnPlan.position.z }
+            : worldSpawn;
 
         this.isMobileMode = isMobile();
 
@@ -327,6 +342,9 @@ class MetaverseApp {
         };
 
         // Set initial position
+        if (spawnPlan && typeof spawnPlan.yaw === 'number' && Number.isFinite(spawnPlan.yaw)) {
+            this.characterController.cameraYaw = (spawnPlan.yaw * Math.PI) / 180;
+        }
         this.characterController.setPosition(spawnPoint.x, spawnPoint.y, spawnPoint.z);
 
         console.log('Loading player avatar...');
@@ -348,6 +366,9 @@ class MetaverseApp {
 
         const connected = await networkConnectPromise;
         if (!connected) return;
+        if (spawnPlan) {
+            await applyClientSpawnPlan(this, spawnPlan);
+        }
         this.networkManager.startSendingUpdates(this.characterController);
         if (this.pdfViewerManager) this.pdfViewerManager.setSocket(this.networkManager.socket);
         if (this.taikoGameManager) this.taikoGameManager.setSocket(this.networkManager.socket);
