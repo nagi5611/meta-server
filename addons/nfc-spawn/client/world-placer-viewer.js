@@ -390,6 +390,14 @@ export class NfcSpawnWorldPlacer {
         this._emitPlacementChange();
     }
 
+    /** ワールドモデルとマーカーをクリア（選択変更時） */
+    unloadWorld() {
+        this._clearWorldRoot();
+        this.setTagMarkers([]);
+        this.hidePlacementMarker();
+        this.setLoadSphereVisible(false);
+    }
+
     dispose() {
         if (this._disposed) return;
         this._disposed = true;
