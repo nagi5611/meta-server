@@ -60,4 +60,81 @@ describe('sphere-selection', () => {
         });
         assert.equal(entries.length, 0);
     });
+
+    it('selectModelsInSphere picks prefab part via AABB when bounding sphere misses', async () => {
+        const manifest = {
+            displayName: 'LongPart',
+            parts: [
+                {
+                    file: 'models/long-part.glb',
+                    bounds: {
+                        center: [10, 0, 0],
+                        radius: 1,
+                        min: [0, -1, -1],
+                        max: [20, 1, 1],
+                    },
+                },
+                {
+                    file: 'models/far-part.glb',
+                    bounds: {
+                        center: [80, 0, 0],
+                        radius: 1,
+                        min: [70, -1, -1],
+                        max: [90, 1, 1],
+                    },
+                },
+            ],
+        };
+        const models = [
+            {
+                prefabManifest: 'models/Long-prefab-manifest.json',
+                position: { x: 30, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+                scale: { x: 1, y: 1, z: 1 },
+            },
+        ];
+        const entries = await selectModelsInSphere({
+            worldModels: models,
+            center: { x: 0, y: 0, z: 0 },
+            radius: 35,
+            loadManifest: async () => manifest,
+        });
+        assert.equal(entries.length, 1);
+        assert.equal(entries[0].entryKind, 'prefab_parts');
+        assert.deepEqual(entries[0].partIndices, [0]);
+    });
+
+    it('selectModelsInSphere respects prefab rotation (Three.js XYZ)', async () => {
+        const manifest = {
+            displayName: 'RotatedPart',
+            parts: [
+                {
+                    file: 'models/near.glb',
+                    bounds: {
+                        center: [8, 0, 0],
+                        radius: 2,
+                        min: [6, -1, -1],
+                        max: [10, 1, 1],
+                    },
+                },
+            ],
+        };
+        const models = [
+            {
+                prefabManifest: 'models/Rot-prefab-manifest.json',
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 90, z: 0 },
+                scale: { x: 1, y: 1, z: 1 },
+            },
+        ];
+        const entries = await selectModelsInSphere({
+            worldModels: models,
+            center: { x: 0, y: 0, z: 0 },
+            radius: 10,
+            loadManifest: async () => manifest,
+        });
+        assert.equal(entries.length, 1);
+        assert.equal(entries[0].entryKind, 'prefab_parts');
+        assert.deepEqual(entries[0].partIndices, [0]);
+    });
 });

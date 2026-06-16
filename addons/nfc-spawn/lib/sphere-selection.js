@@ -1,4 +1,5 @@
-// addons/nfc-spawn/lib/sphere-selection.js — 球内モデル選択（Node / ブラウザ共用・Three.js 非依存）
+// addons/nfc-spawn/lib/sphere-selection.js — 球内モデル選択（viewer / VAS と同一 TRS）
+import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 
 /**
  * @typedef {{ min: [number, number, number], max: [number, number, number], center: [number, number, number], radius: number }} PrefabBounds
@@ -106,42 +107,27 @@ export function spheresIntersect(a, ra, b, rb) {
 }
 
 /**
- * @param {number} deg
- */
-function degToRad(deg) {
-    return (deg * Math.PI) / 180;
-}
-
-/**
+ * models[].rotation（度・XYZ）と scale を Three.js Object3D と同じ TRS で適用
  * @param {{ x: number, y: number, z: number }} rotationDeg
  * @param {{ x: number, y: number, z: number }} local
  * @param {{ x: number, y: number, z: number }} scale
  */
 function transformLocalPoint(rotationDeg, local, scale) {
-    const sx = scale.x;
-    const sy = scale.y;
-    const sz = scale.z;
-    let x = local.x * sx;
-    let y = local.y * sy;
-    let z = local.z * sz;
-    const rx = degToRad(rotationDeg.x);
-    const ry = degToRad(rotationDeg.y);
-    const rz = degToRad(rotationDeg.z);
-    const cx = Math.cos(rx);
-    const sxr = Math.sin(rx);
-    const cy = Math.cos(ry);
-    const syr = Math.sin(ry);
-    const cz = Math.cos(rz);
-    const szr = Math.sin(rz);
-    let x1 = x;
-    let y1 = cy * y - syr * z;
-    let z1 = syr * y + cy * z;
-    let x2 = cz * x1 + szr * y1;
-    let y2 = -szr * x1 + cz * y1;
-    let z2 = z1;
-    const y3 = cx * y2 - sxr * z2;
-    const z3 = sxr * y2 + cx * z2;
-    return { x: x2, y: y3, z: z3 };
+    const quat = new Quaternion().setFromEuler(
+        new Euler(
+            (rotationDeg.x * Math.PI) / 180,
+            (rotationDeg.y * Math.PI) / 180,
+            (rotationDeg.z * Math.PI) / 180,
+            'XYZ'
+        )
+    );
+    const matrix = new Matrix4().compose(
+        new Vector3(0, 0, 0),
+        quat,
+        new Vector3(scale.x, scale.y, scale.z)
+    );
+    const v = new Vector3(local.x, local.y, local.z).applyMatrix4(matrix);
+    return { x: v.x, y: v.y, z: v.z };
 }
 
 /**
@@ -260,11 +246,25 @@ export async function selectModelsInSphere({
             if (partsWithBounds.length > 0) {
                 const selected = [];
                 for (const { p, idx } of partsWithBounds) {
-                    const sphere = computeWorldLoadSphere(config, /** @type {PrefabBounds} */ (p.bounds));
-                    if (spheresIntersect(center, radius, sphere.center, sphere.radius)) {
+                    if (
+                        boundsIntersectQuerySphere(
+                            center,
+                            radius,
+                            config,
+                            /** @type {PrefabBounds} */ (p.bounds)
+                        )
+                    ) {
                         selected.push(idx);
                     }
                 }
+                if (selected.length > 0) {
+                    for (let pi = 0; pi < man.parts.length; pi++) {
+                        if (!man.parts[pi].bounds && !selected.includes(pi)) {
+                            selected.push(pi);
+                        }
+                    }
+                }
+                selected.sort((a, b) => a - b);
                 if (selected.length > 0) {
                     entries.push({
                         worldModelIndex: i,
