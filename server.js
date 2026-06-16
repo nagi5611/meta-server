@@ -1632,9 +1632,10 @@ app.post('/api/auth/register/teacher', authRegisterIpLimiter, requirePublicRegis
     }
 });
 
-// Redirect legacy login.html to /login/
+// Redirect legacy login.html to /login/（クエリは維持）
 app.get('/login.html', (req, res) => {
-    res.redirect(301, '/login/');
+    const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    res.redirect(301, `/login/${q}`);
 });
 
 // ログイン画面（常に public から配信；dist に含まれないため。リダイレクトは行わず両パスで同じファイルを返す）

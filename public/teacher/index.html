@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Metaverse Simple - 教師ログイン</title>
+    <script src="/js/spawn-pending-storage.js"></script>
     <style>
         * {
             margin: 0;
@@ -234,8 +235,19 @@
         </div>
     </div>
 
+    <script src="/js/spawn-pending-storage.js"></script>
     <script>
         (function () {
+            if (window.metaverseSpawnPending) {
+                window.metaverseSpawnPending.captureSpawnFromUrl();
+                window.metaverseSpawnPending.patchLoginLinks();
+            }
+            const hash = window.location.hash || '';
+            const withSpawn = (path) =>
+                window.metaverseSpawnPending
+                    ? window.metaverseSpawnPending.appendSpawnQuery(path) + hash
+                    : path + window.location.search + hash;
+
             const savedUsername = localStorage.getItem('username');
             if (!savedUsername || savedUsername.trim().length < 2 || localStorage.getItem('userRole') !== 'teacher' || savedUsername.trim().toLowerCase() === 'admin') {
                 return;
@@ -244,7 +256,7 @@
                 .then((r) => r.json())
                 .then((d) => {
                     if (d && d.authenticated && d.role === 'teacher') {
-                        window.location.href = '/index.html' + window.location.search + window.location.hash;
+                        window.location.href = withSpawn('/index.html');
                     }
                 })
                 .catch(() => {});
@@ -284,7 +296,9 @@
                 if (data.success) {
                     localStorage.setItem('username', data.displayName || data.username);
                     localStorage.setItem('userRole', 'teacher');
-                    window.location.href = '/index.html' + window.location.search + window.location.hash;
+                    window.location.href = (window.metaverseSpawnPending
+                        ? window.metaverseSpawnPending.appendSpawnQuery('/index.html') + (window.location.hash || '')
+                        : '/index.html' + window.location.search + window.location.hash);
                     return;
                 }
 

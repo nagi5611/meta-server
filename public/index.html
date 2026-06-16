@@ -12,22 +12,29 @@
     <link rel="stylesheet" href="css/visual-mode-high-contrast.css">
     <link rel="stylesheet" href="css/pro-mode.css">
     <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
+    <script src="/js/spawn-pending-storage.js"></script>
     <script>
-        // アクセス制御
+        // アクセス制御（NFC ?spawn= は sessionStorage に保持してログイン後も復元）
+        if (window.metaverseSpawnPending) {
+            window.metaverseSpawnPending.captureSpawnFromUrl();
+        }
         const username = localStorage.getItem('username');
         const p = window.location.pathname;
+        const hash = window.location.hash || '';
+        const withSpawn = (path) =>
+            window.metaverseSpawnPending
+                ? window.metaverseSpawnPending.appendSpawnQuery(path) + hash
+                : path + window.location.search + hash;
         const isAdminPath = p === '/admin' || p === '/admin/';
         if (isAdminPath) {
             // /admin: Basic認証でページ取得済み。トークン取得は main.js で実施
         } else {
             if (username && username.trim().toLowerCase() === 'admin') {
-                window.location.href = '/admin' + window.location.search + window.location.hash;
+                window.location.href = withSpawn('/admin');
                 throw new Error('redirect');
             }
             if (!username || username.trim().length < 2) {
-                const q = window.location.search || '';
-                const h = window.location.hash || '';
-                window.location.href = '/login/' + q + h;
+                window.location.href = withSpawn('/login/');
             }
         }
     </script>

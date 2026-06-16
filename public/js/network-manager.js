@@ -320,7 +320,9 @@ class NetworkManager {
             localStorage.removeItem('userRole');
             this.username = 'Guest';
             alert(msg);
-            window.location.href = '/login/';
+            window.location.href = window.metaverseSpawnPending
+                ? window.metaverseSpawnPending.appendSpawnQuery('/login/')
+                : '/login/';
         });
 
         this.socket.on('change-world-rejected', (data) => {
@@ -437,7 +439,9 @@ class NetworkManager {
             } catch (_) { /* ignore */ }
             localStorage.removeItem('username');
             localStorage.removeItem('userRole');
-            window.location.href = '/login/';
+            window.location.href = window.metaverseSpawnPending
+                ? window.metaverseSpawnPending.appendSpawnQuery('/login/')
+                : '/login/';
         });
 
         // Handle admin teleport

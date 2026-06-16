@@ -4,7 +4,7 @@ import {
     registerClientSpawnResolver,
 } from '../../../lib/client-spawn-registry.js';
 import { applySpawnPlanToApp, resolveSpawnToken } from './init.js';
-import { getSpawnTokenFromUrl } from './spawn-url.js';
+import { getSpawnTokenFromUrl, clearPendingSpawnToken } from './spawn-url.js';
 
 registerClientSpawnResolver(async () => {
     const token = getSpawnTokenFromUrl();
@@ -14,6 +14,7 @@ registerClientSpawnResolver(async () => {
 
 registerClientSpawnApplier(async (app, plan) => {
     await applySpawnPlanToApp(app, plan);
+    clearPendingSpawnToken();
 });
 
 console.info('[addon:nfc-spawn] client loaded');

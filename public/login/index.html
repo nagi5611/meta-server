@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Metaverse Simple - 一般ログイン</title>
+    <script src="/js/spawn-pending-storage.js"></script>
     <style>
         * {
             margin: 0;
@@ -245,11 +246,21 @@
     </div>
 
     <script>
+        if (window.metaverseSpawnPending) {
+            window.metaverseSpawnPending.captureSpawnFromUrl();
+            window.metaverseSpawnPending.patchLoginLinks();
+        }
+        const hash = window.location.hash || '';
+        const withSpawn = (path) =>
+            window.metaverseSpawnPending
+                ? window.metaverseSpawnPending.appendSpawnQuery(path) + hash
+                : path + window.location.search + hash;
+
         // 既にログイン済みの場合は自動的にゲーム画面へ（admin は管理者専用のため除外）
         const savedUsername = localStorage.getItem('username');
         if (savedUsername && savedUsername.trim().length >= 2) {
             if (savedUsername.trim().toLowerCase() !== 'admin') {
-                window.location.href = '/index.html' + window.location.search + window.location.hash;
+                window.location.href = withSpawn('/index.html');
             } else {
                 localStorage.removeItem('username');
                 localStorage.removeItem('userRole');
@@ -323,7 +334,7 @@
                 loginBtn.textContent = 'ログイン中...';
 
                 setTimeout(() => {
-                    window.location.href = '/index.html' + window.location.search + window.location.hash;
+                    window.location.href = withSpawn('/index.html');
                 }, 300);
             } catch (_) {
                 errorMessage.textContent = '通信エラーが発生しました';
