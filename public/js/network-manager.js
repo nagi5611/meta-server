@@ -22,6 +22,10 @@ class NetworkManager {
         this._intentionalDisconnect = false;
         /** @type {boolean} 再接続試行の同時実行防止 */
         this._reconnectInFlight = false;
+        /** @type {boolean} connect() 呼び出し後、初回 connect イベント待ち */
+        this._connectionPending = false;
+        /** @type {(() => void|Promise<void>)|null} 接続成功時（再接続含む）の追加処理 */
+        this._postConnectHandler = null;
         this.currentWorld = 'lobby'; // Track current world
         this.username = localStorage.getItem('username') || 'Guest';
         /** 管理者の透明化状態。他プレイヤーに送り、相手側で非表示にする */
@@ -142,6 +146,14 @@ class NetworkManager {
     }
 
     /**
+     * 接続成功時（再接続含む）に呼ぶハンドラ
+     * @param {() => void|Promise<void>} fn
+     */
+    setPostConnectHandler(fn) {
+        this._postConnectHandler = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
      * Socket 接続用 auth（初回・再接続のたびに管理者トークンを新規取得）
      * @returns {Promise<{ adminToken?: string }>}
      */
@@ -162,12 +174,14 @@ class NetworkManager {
      */
     async connect() {
         this._intentionalDisconnect = false;
+        this._connectionPending = true;
         // window.location.origin に統一（Vite プロキシ経由で httpOnly Cookie が Socket に届く）
         const socketUrl = window.location.origin;
 
         if (isAdminMetaverseEntryPath()) {
             const entry = await fetchAdminMetaverseEntry();
             if (!entry) {
+                this._connectionPending = false;
                 redirectAdminMetaverseAuthFailed();
                 return false;
             }
@@ -175,7 +189,7 @@ class NetworkManager {
             this.username = entry.username;
         }
 
-        console.log(`Connecting to Socket.io server at: ${socketUrl}`);
+        console.log(`[Net] Attempting connect to ${socketUrl}`);
 
         this.socket = io(socketUrl, {
             transports: ['websocket', 'polling'],
@@ -200,9 +214,10 @@ class NetworkManager {
 
         this.socket.on('connect', () => {
             this.stopReconnectAttempts();
+            this._connectionPending = false;
             this.myPlayerId = this.socket.id;
             this.lastPongTime = Date.now();
-            console.log(`Connected to server. My ID: ${this.myPlayerId}`);
+            console.log(`[Net] Connected. My ID: ${this.myPlayerId}`);
 
             // Start ping
             this.startPing();
@@ -211,6 +226,12 @@ class NetworkManager {
             // Send username to server
             this.socket.emit('set-username', this.username);
             console.log(`Sent username to server: ${this.username}`);
+
+            if (this._postConnectHandler) {
+                Promise.resolve(this._postConnectHandler()).catch((err) => {
+                    console.error('[Net] postConnect handler failed:', err);
+                });
+            }
         });
 
         this.socket.on('asset-invalidate', (payload) => {
@@ -575,6 +596,7 @@ class NetworkManager {
 
     disconnect() {
         this._intentionalDisconnect = true;
+        this._connectionPending = false;
         this.stopSendingUpdates();
         this.stopPing();
         this.stopDisconnectCheck();
@@ -704,12 +726,24 @@ class NetworkManager {
 
     /**
      * Get ping status for UI
-     * @returns {{ pingMs: number|null, noResponse: boolean }}
+     * @returns {{ pingMs: number|null, noResponse: boolean, connecting: boolean, reconnecting: boolean }}
      */
     getPingStatus() {
+        const reconnecting = !!this._reconnectInterval;
+        const connected = !!this.socket?.connected;
+
+        if (!connected) {
+            const connecting = this._connectionPending || reconnecting || !!this.socket;
+            return { pingMs: null, noResponse: false, connecting, reconnecting };
+        }
+
+        if (this.lastPongTime <= 0) {
+            return { pingMs: null, noResponse: false, connecting: true, reconnecting: false };
+        }
+
         const elapsed = Date.now() - this.lastPongTime;
         const noResponse = elapsed >= this.NO_RESPONSE_THRESHOLD_MS;
-        return { pingMs: this.pingMs, noResponse };
+        return { pingMs: this.pingMs, noResponse, connecting: false, reconnecting: false };
     }
 }
 

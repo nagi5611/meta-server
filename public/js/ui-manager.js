@@ -481,17 +481,23 @@ class UIManager {
     /**
      * Update ping display: 応答時間を色分けで表示
      * 100ms以内: 緑, 300ms以内: 黄, それ以上: 赤, 3秒応答なし: 応答なし
-     * @param {{ pingMs: number|null, noResponse: boolean }} status
+     * @param {{ pingMs: number|null, noResponse: boolean, connecting?: boolean, reconnecting?: boolean }} status
      */
     updatePingDisplay(status) {
         const el = document.getElementById('ping-value');
         const container = document.getElementById('ping-display');
         if (!el || !container) return;
 
-        const { pingMs, noResponse } = status || {};
+        const { pingMs, noResponse, connecting, reconnecting } = status || {};
 
-        container.classList.remove('ping-green', 'ping-yellow', 'ping-red', 'ping-none');
-        if (noResponse) {
+        container.classList.remove('ping-green', 'ping-yellow', 'ping-red', 'ping-none', 'ping-connecting');
+        if (reconnecting) {
+            el.textContent = t('ui.pingReconnecting');
+            container.classList.add('ping-connecting');
+        } else if (connecting) {
+            el.textContent = t('ui.pingConnecting');
+            container.classList.add('ping-connecting');
+        } else if (noResponse) {
             el.textContent = t('ui.pingNone');
             container.classList.add('ping-none');
         } else if (pingMs != null) {

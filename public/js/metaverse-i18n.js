@@ -416,6 +416,8 @@ export const METAVERSE_STRINGS = {
     'ui.glbAnimDefault': { ja: '[E] アニメーション', en: '[E] Animation', zh: '[E] 动画' },
     'ui.mobileAnimDefault': { ja: 'アニメーションを再生', en: 'Play animation', zh: '播放动画' },
     'ui.pingNone': { ja: '応答なし', en: 'No response', zh: '无响应' },
+    'ui.pingConnecting': { ja: '接続中…', en: 'Connecting…', zh: '连接中…' },
+    'ui.pingReconnecting': { ja: '再接続中…', en: 'Reconnecting…', zh: '重新连接中…' },
     'ui.pingTitle': { ja: '応答時間', en: 'Latency', zh: '延迟' },
     'ui.videoOnTitle': { ja: 'ビデオON', en: 'Video on', zh: '视频开' },
     'ui.micOnTitle': { ja: 'マイクON', en: 'Mic on', zh: '麦克风开' },
