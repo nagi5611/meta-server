@@ -33,13 +33,23 @@ const spawnResolveLimiter = rateLimit({
     message: { ok: false, error: 'rate_limited' },
 });
 
-const instanceAssetsLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 120,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { ok: false, error: 'rate_limited' },
-});
+/**
+ * ベイク済み静的 GLB 配信用（大量パーツ読込向けに緩め）
+ * @param {Record<string, unknown>} config
+ */
+function createInstanceAssetsLimiter(config) {
+    const max =
+        typeof config.instanceAssetsRateLimitMax === 'number'
+            ? config.instanceAssetsRateLimitMax
+            : 10000;
+    return rateLimit({
+        windowMs: 60 * 1000,
+        max,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { ok: false, error: 'rate_limited' },
+    });
+}
 
 /**
  * @param {import('express').Request} req
@@ -148,6 +158,7 @@ export default {
     async register(ctx) {
         const jsonMw = express.json({ limit: JSON_BODY_LIMIT });
         const bakeConfig = getBakeConfig(ctx.config);
+        const instanceAssetsLimiter = createInstanceAssetsLimiter(ctx.config);
 
         ctx.hooks.on(HOOKS.EXPRESS_SETUP, ({ app }) => {
             app.get(`${ctx.paths.httpBasePath}/spawn/:token`, spawnResolveLimiter, (req, res) => {

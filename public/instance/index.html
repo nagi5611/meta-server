@@ -19,11 +19,44 @@
             background: rgba(20,20,30,0.9); color: #ddd; font-size: 0.85rem;
             padding: 0.5rem 0.75rem; text-align: center;
         }
+        #instance-start-guide {
+            position: fixed; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.72); padding: 1rem;
+        }
+        #instance-start-guide[hidden] { display: none !important; }
+        .instance-start-guide-card {
+            max-width: 22rem; width: 100%; background: #1e1e28; color: #f2f2f2;
+            border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 1.25rem 1.1rem;
+            font-family: system-ui, -apple-system, sans-serif; text-align: left;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+        }
+        .instance-start-guide-card h1 {
+            margin: 0 0 0.75rem; font-size: 1.15rem; font-weight: 700; text-align: center;
+        }
+        .instance-start-guide-list {
+            margin: 0 0 1rem; padding-left: 1.1rem; font-size: 0.92rem; line-height: 1.55;
+        }
+        .instance-start-guide-list li { margin-bottom: 0.45rem; }
+        .instance-start-btn {
+            display: block; width: 100%; border: none; border-radius: 8px; padding: 0.75rem 1rem;
+            font-size: 1rem; font-weight: 600; background: #3d7eff; color: #fff; cursor: pointer;
+        }
+        .instance-start-btn:active { background: #2f68d4; }
     </style>
 </head>
 
 <body>
-    <div id="instance-desktop-hint" hidden>スマートフォンでの閲覧を推奨します（タッチで視点操作）</div>
+    <div id="instance-desktop-hint" hidden>マウスドラッグで視点を変えられます</div>
+    <div id="instance-start-guide" hidden>
+        <div class="instance-start-guide-card">
+            <h1>3Dインスタンス</h1>
+            <ul class="instance-start-guide-list">
+                <li id="instance-guide-gyro" hidden>スマホを回転させると、ジャイロで視点が動きます</li>
+                <li id="instance-guide-touch">画面をドラッグして視点を変えられます</li>
+            </ul>
+            <button type="button" id="instance-start-btn" class="instance-start-btn">体験を開始</button>
+        </div>
+    </div>
     <div id="instance-overlay" hidden></div>
     <a-scene
         renderer="antialias: false; colorManagement: true"
@@ -32,7 +65,12 @@
         embedded
         style="width: 100%; height: 100%;">
         <a-sky color="#87CEEB"></a-sky>
-        <a-entity id="instance-camera" camera look-controls wasd-controls="enabled: false" position="0 1.6 4"></a-entity>
+        <a-entity
+            id="instance-camera"
+            camera
+            look-controls="magicWindowTrackingEnabled: false; touchEnabled: true; pointerLockEnabled: false"
+            wasd-controls="enabled: false"
+            position="0 1.6 4"></a-entity>
         <a-entity light="type: ambient; intensity: 0.6"></a-entity>
         <a-entity light="type: directional; intensity: 0.8" position="2 4 3"></a-entity>
     </a-scene>
