@@ -44,6 +44,8 @@ class NetworkManager {
         this._displayReadyReconnectAttempted = false;
         /** @type {boolean} restartConnection 中（disconnect で自動再接続しない） */
         this._restartingConnection = false;
+        /** @type {{ adminToken?: string }} Socket.io 同期 auth（非 async にしてメインスレッド占有中も即送信） */
+        this._cachedSocketAuth = {};
         /** @type {(() => object)|null} report-ping に載せる性能ペイロード */
         this._perfPayloadGetter = null;
 
@@ -175,16 +177,20 @@ class NetworkManager {
 
     /**
      * Socket.io サーバーへ接続する（管理者は connect 直前にトークン取得）
+     * @param {Promise<{ token: string, username: string }|null>|null} [adminEntryPromise] 先行取得中の admin トークン
      * @returns {Promise<boolean>} 接続開始できたら true（管理者認証失敗時は false）
      */
-    async connect() {
+    async connect(adminEntryPromise = null) {
         this._intentionalDisconnect = false;
         this._connectionPending = true;
         // window.location.origin に統一（Vite プロキシ経由で httpOnly Cookie が Socket に届く）
         const socketUrl = window.location.origin;
 
+        this._cachedSocketAuth = {};
         if (isAdminMetaverseEntryPath()) {
-            const entry = await fetchAdminMetaverseEntry();
+            const entry = adminEntryPromise
+                ? await adminEntryPromise
+                : await fetchAdminMetaverseEntry();
             if (!entry) {
                 this._connectionPending = false;
                 redirectAdminMetaverseAuthFailed();
@@ -192,13 +198,16 @@ class NetworkManager {
             }
             localStorage.setItem('username', entry.username);
             this.username = entry.username;
+            this._cachedSocketAuth = { adminToken: entry.token };
         }
 
         console.log(`[Net] Attempting connect to ${socketUrl}`);
 
+        // auth は同期オブジェクトのみ（async auth は BVH 等でメインスレッド占有中に
+        // 認証パケット送信が遅延し、pingTimeout 45 秒待ちになる）
         this.socket = io(socketUrl, {
             transports: ['websocket', 'polling'],
-            auth: () => this._resolveSocketAuth(),
+            auth: this._cachedSocketAuth,
             withCredentials: true,
             reconnection: true,
             reconnectionDelay: this.RECONNECT_TRY_INTERVAL_MS,
@@ -209,7 +218,8 @@ class NetworkManager {
             if (!isAdminMetaverseEntryPath()) return;
             const entry = await fetchAdminMetaverseEntry();
             if (entry?.token) {
-                this.socket.auth = { adminToken: entry.token };
+                this._cachedSocketAuth.adminToken = entry.token;
+                this.socket.auth = this._cachedSocketAuth;
                 if (entry.username) {
                     localStorage.setItem('username', entry.username);
                     this.username = entry.username;
@@ -729,7 +739,8 @@ class NetworkManager {
                 if (isAdminMetaverseEntryPath()) {
                     const entry = await fetchAdminMetaverseEntry();
                     if (entry?.token) {
-                        this.socket.auth = { adminToken: entry.token };
+                        this._cachedSocketAuth.adminToken = entry.token;
+                        this.socket.auth = this._cachedSocketAuth;
                         if (entry.username) {
                             localStorage.setItem('username', entry.username);
                             this.username = entry.username;

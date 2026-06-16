@@ -253,6 +253,11 @@ class MetaverseApp {
         }
         console.log('Loading world:', initialWorldId);
 
+        // admin トークンをワールド読込より先に取得開始（Socket auth を同期送信するため）
+        const adminEntryPromise = isAdminMetaverseEntryPath()
+            ? fetchAdminMetaverseEntry()
+            : null;
+
         // ワールド読込と並行して Socket 接続を開始（入場時点で ping 応答済みにする）
         this.playerManager = new PlayerManager(this.sceneManager.getScene());
         this.playerBlockList = new PlayerBlockList();
@@ -266,7 +271,7 @@ class MetaverseApp {
             await this._onNetworkPostConnect();
             await this._joinVoiceAndVideoIfReady();
         });
-        const networkConnectPromise = this.networkManager.connect();
+        const networkConnectPromise = this.networkManager.connect(adminEntryPromise);
 
         await new Promise((resolve) => {
             this.worldManager.loadWorld(initialWorldId, () => {
