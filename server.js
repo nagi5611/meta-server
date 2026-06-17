@@ -85,7 +85,7 @@ import {
     getAddonsRoot,
 } from './lib/plugin-bootstrap.js';
 import { getScalableAnimationSlotsForAdmin } from './lib/avator-scalable-bindings.js';
-import { setAddonEnabled, getAddonConfigEntries, setAddonConfigValue, deleteAddonConfigValue } from './db/addons-registry.js';
+import { setAddonEnabled, getAddonConfigEntries, setAddonConfigValue, deleteAddonConfigValue, getAddonEnabledMap, ensureWebxrVrOnUpgrade } from './db/addons-registry.js';
 import { registerAdminDatabaseExplorerRoutes } from './lib/admin-database-explorer.js';
 import { setAircraftServerDeps } from './lib/aircraft-server/deps-registry.js';
 import { validateWorldsAircraft, validateWorldsAircraftPhysics } from './lib/aircraft-server/validate-worlds.js';
@@ -6205,6 +6205,21 @@ app.get('/api/worlds', (req, res) => {
     } catch (err) {
         console.error('GET /api/worlds error:', err);
         res.status(500).json({ error: 'Failed to read worlds' });
+    }
+});
+
+app.get('/api/addons/enabled', (req, res) => {
+    try {
+        const map = getAddonEnabledMap();
+        const out = {};
+        for (const [id, enabled] of map.entries()) {
+            out[id] = enabled;
+        }
+        res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+        res.json(out);
+    } catch (err) {
+        console.error('GET /api/addons/enabled error:', err);
+        res.status(500).json({ error: 'Failed to read addon enabled flags' });
     }
 });
 

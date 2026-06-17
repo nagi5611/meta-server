@@ -255,8 +255,8 @@
     font-weight: 700 !important;
 }
 
-[data-visual-mode="highContrast"] #xr-dom-overlay-root #info,
-[data-visual-mode="highContrast"] #xr-dom-overlay-root #chat-container,
-[data-visual-mode="highContrast"] #xr-dom-overlay-root #menu-bar {
+[data-visual-mode="highContrast"] #immersive-overlay-root #info,
+[data-visual-mode="highContrast"] #immersive-overlay-root #chat-container,
+[data-visual-mode="highContrast"] #immersive-overlay-root #menu-bar {
     /* WebXR DOM Overlay 内も同じ HC ルールを継承 */
 }

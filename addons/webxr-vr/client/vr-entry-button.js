@@ -1,4 +1,4 @@
-// public/js/vr-entry-button.js — WebXR 入室ボタン（local-floor / dom-overlay 対応）。three@0.160 の VRButton は sessionInit 固定のため分離。
+// addons/webxr-vr/client/vr-entry-button.js — WebXR 入室ボタン（local-floor / dom-overlay 対応）
 
 /**
  * Metaverse 用 VR 入室ボタンを生成する。

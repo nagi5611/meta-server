@@ -1,6 +1,7 @@
-// public/js/webxr-locomotion.js — WebXR（リグ同期／左スティック移動／テレポート／スナップターン／ジャンプ）
+// addons/webxr-vr/client/webxr-locomotion.js — WebXR ロコモーション
 
 import * as THREE from 'three';
+import { WebXrMovementDelegate } from './movement-delegate.js';
 
 const LS_LOCOMOTION = 'metaverse-vr-locomotion';
 const SNAP_RAD = (Math.PI / 180) * 30;
@@ -18,7 +19,6 @@ const SINGLE_CTRL_SNAP_AX1_MAX = 0.38;
  * @param {number} x
  * @param {number} y
  * @param {number} dead
- * @returns {{ x: number, y: number, mag: number }}
  */
 function applyStickDeadzone(x, y, dead) {
     const m = Math.hypot(x, y);
@@ -32,16 +32,13 @@ function applyStickDeadzone(x, y, dead) {
 }
 
 /**
- * axes (0,1) と (2,3) のうちノルムが大きいペアを採用する（ランタイムでスティック軸がずれる場合への対応）。
  * @param {Gamepad} gp
- * @returns {{ x: number, y: number, tag: string }}
  */
 function pickPrimaryThumbstickXY(gp) {
     if (!gp || !gp.axes || gp.axes.length < 2) {
         return { x: 0, y: 0, tag: '—' };
     }
     const a = gp.axes;
-    /** @type {{ x: number, y: number, tag: string }[]} */
     const cands = [{ x: a[0] || 0, y: a[1] || 0, tag: '0,1' }];
     if (a.length >= 4) {
         cands.push({ x: a[2] || 0, y: a[3] || 0, tag: '2,3' });
@@ -62,19 +59,21 @@ export default class WebXRLocomotion {
     /**
      * @param {object} opts
      * @param {THREE.WebGLRenderer} opts.renderer
-     * @param {import('./scene-manager.js').default} opts.sceneManager
-     * @param {import('./physics-manager.js').default} opts.physicsManager
-     * @param {import('./character-controller.js').default} opts.characterController
+     * @param {import('../../../public/js/scene-manager.js').default} opts.sceneManager
+     * @param {import('../../../public/js/physics-manager.js').default} opts.physicsManager
+     * @param {import('../../../public/js/character-controller.js').default} opts.characterController
+     * @param {WebXrMovementDelegate} opts.movementDelegate
      * @param {import('./xr-player-rig.js').XrPlayerRig|null} [opts.xrPlayerRig]
      * @param {HTMLElement|null} [opts.domOverlayRoot]
-     * @param {() => void} [opts.onVrSessionStart] renderer.xr sessionstart 時（一人称化など）
-     * @param {() => void} [opts.onVrSessionEnd] sessionend 時（視点復元など）
+     * @param {() => void} [opts.onVrSessionStart]
+     * @param {() => void} [opts.onVrSessionEnd]
      */
     constructor({
         renderer,
         sceneManager,
         physicsManager,
         characterController,
+        movementDelegate,
         xrPlayerRig = null,
         domOverlayRoot = null,
         onVrSessionStart = null,
@@ -84,6 +83,7 @@ export default class WebXRLocomotion {
         this.sceneManager = sceneManager;
         this.physicsManager = physicsManager;
         this.characterController = characterController;
+        this.movementDelegate = movementDelegate;
         this.xrPlayerRig = xrPlayerRig || null;
         this.domOverlayRoot = domOverlayRoot;
         this.onVrSessionStart = typeof onVrSessionStart === 'function' ? onVrSessionStart : null;
@@ -105,13 +105,15 @@ export default class WebXRLocomotion {
         this.renderer.xr.addEventListener('sessionstart', this._onSessionStart);
         this.renderer.xr.addEventListener('sessionend', this._onSessionEnd);
 
-        /** @type {HTMLElement|null} */
-        this._stickFeedbackEl = typeof document !== 'undefined' ? document.getElementById('xr-stick-feedback') : null;
+        this._stickFeedbackEl = typeof document !== 'undefined'
+            ? document.getElementById('immersive-stick-feedback')
+            : null;
 
         this._savedPixelRatio = null;
         this._controllersWired = false;
         this._wireControllers();
         this._bindOverlayButtons();
+        this._ensureLocomotionUi();
     }
 
     /** @returns {LocomotionMode} */
@@ -154,6 +156,38 @@ export default class WebXRLocomotion {
         this._syncOverlayActiveStates();
     }
 
+    /** VR ロコモーションモード切替 UI を動的生成 */
+    _ensureLocomotionUi() {
+        if (!this.domOverlayRoot) return;
+        if (this.domOverlayRoot.querySelector('[data-vr-locomotion-panel]')) return;
+
+        const panel = document.createElement('div');
+        panel.className = 'immersive-overlay-panel';
+        panel.setAttribute('data-vr-locomotion-panel', '1');
+        panel.hidden = true;
+
+        const title = document.createElement('span');
+        title.className = 'immersive-overlay-title';
+        title.textContent = 'VR 移動';
+
+        const buttons = document.createElement('div');
+        buttons.className = 'immersive-overlay-buttons';
+
+        for (const [mode, label] of [['both', '両方'], ['smooth', 'スムーズ'], ['teleport', 'テレポート']]) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'immersive-loco-btn';
+            btn.setAttribute('data-vr-locomotion', mode);
+            btn.textContent = label;
+            buttons.appendChild(btn);
+        }
+
+        panel.appendChild(title);
+        panel.appendChild(buttons);
+        this.domOverlayRoot.appendChild(panel);
+        this._syncOverlayActiveStates();
+    }
+
     _wireControllers() {
         if (this._controllersWired) return;
         this._controllersWired = true;
@@ -165,8 +199,8 @@ export default class WebXRLocomotion {
 
     _handleSessionStart() {
         document.exitPointerLock?.();
-        // 没入直後から歩行物理を有効にし、スティック移動が効くようにする
         this.characterController.notifyGameplayInputIntent();
+        this.sceneManager.setBlockRendererRecreate(true);
         if (this.onVrSessionStart) {
             try {
                 this.onVrSessionStart();
@@ -184,6 +218,9 @@ export default class WebXRLocomotion {
         this._savedPixelRatio = this.renderer.getPixelRatio();
         this.renderer.setPixelRatio(Math.min(this._savedPixelRatio, 1));
         this.sceneManager.onWindowResize();
+
+        const panel = this.domOverlayRoot?.querySelector('[data-vr-locomotion-panel]');
+        if (panel) panel.hidden = false;
     }
 
     _handleSessionEnd() {
@@ -206,6 +243,10 @@ export default class WebXRLocomotion {
             this._savedPixelRatio = null;
             this.sceneManager.onWindowResize();
         }
+        this.sceneManager.setBlockRendererRecreate(false);
+
+        const panel = this.domOverlayRoot?.querySelector('[data-vr-locomotion-panel]');
+        if (panel) panel.hidden = true;
     }
 
     /**
@@ -213,9 +254,9 @@ export default class WebXRLocomotion {
      */
     update(deltaTime) {
         const presenting = this.renderer.xr.isPresenting;
-        this.characterController.setXrPresenting(presenting);
+        this.movementDelegate.setPresenting(presenting);
         if (!presenting) {
-            this.characterController.setXrMoveVector({ x: 0, y: 0, force: 0 });
+            this.movementDelegate.setMoveVector({ x: 0, y: 0, force: 0 });
             if (this._stickFeedbackEl) {
                 this._stickFeedbackEl.hidden = true;
                 this._stickFeedbackEl.textContent = '';
@@ -231,14 +272,13 @@ export default class WebXRLocomotion {
 
         const inp = this._readInputs(session);
 
-        this.characterController.setXrMoveVector({
+        this.movementDelegate.setMoveVector({
             x: inp.moveX,
             y: inp.moveY,
             force: inp.moveMag
         });
 
         this._updateStickFeedback(session, inp);
-
         this._maybeSnapTurn(inp.snapX);
 
         if (inp.leftGrip && !this._prevLeftGrip) {
@@ -248,9 +288,8 @@ export default class WebXRLocomotion {
     }
 
     /**
-     * 左スティック入力の検出状況を没入中のみ表示する。
      * @param {XRSession} session
-     * @param {{ moveX: number, moveY: number, moveMag: number, rawHypot: number, axisTag: string, hasMoveGamepad: boolean, sourceCount: number }} inp
+     * @param {object} inp
      */
     _updateStickFeedback(session, inp) {
         const el = this._stickFeedbackEl;
@@ -286,10 +325,8 @@ export default class WebXRLocomotion {
 
     /**
      * @param {XRSession} session
-     * @returns {{ moveX: number, moveY: number, moveMag: number, snapX: number, leftGrip: boolean, rawHypot: number, axisTag: string, hasMoveGamepad: boolean, sourceCount: number }}
      */
     _readInputs(session) {
-        /** @type {{ src: XRInputSource, gp: Gamepad }[]} */
         const sources = [];
         for (const src of session.inputSources) {
             const gp = src.gamepad;
@@ -323,7 +360,6 @@ export default class WebXRLocomotion {
         let moveX = 0;
         let moveY = 0;
         let moveMag = 0;
-        /** @type {string} */
         let axisTag = '—';
         let rawHypot = 0;
         const hasMoveGamepad = !!moveEntry;
@@ -368,7 +404,7 @@ export default class WebXRLocomotion {
         if (this._snapCooldown > 0) return;
         if (Math.abs(snapX) < SNAP_THRESHOLD) return;
         const sign = snapX > 0 ? -1 : 1;
-        this.characterController.applyXrSnapTurn(sign * SNAP_RAD);
+        this.movementDelegate.applySnapTurn(sign * SNAP_RAD);
         this._snapCooldown = SNAP_COOLDOWN_SEC;
         this.characterController.notifyGameplayInputIntent();
     }

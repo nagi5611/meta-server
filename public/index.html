@@ -41,8 +41,8 @@
 </head>
 
 <body>
-    <!-- WebXR DOM Overlay 用: 没入中もこの子ツリーが HMD 上に表示される（canvas は含めない） -->
-    <div id="xr-dom-overlay-root" class="xr-dom-overlay-root">
+    <!-- 没入オーバーレイ用: 没入中もこの子ツリーが HMD 上に表示される（canvas は含めない） -->
+    <div id="immersive-overlay-root" class="immersive-overlay-root">
     <!-- モバイル用コンパクト info (768px以下で表示) -->
     <div id="mobile-info" class="mobile-info" aria-hidden="true">
         <span id="mobile-world-name">-</span> | <span id="mobile-position">0,0,0</span> | <span id="mobile-player-count">0</span>
@@ -676,7 +676,7 @@
         </div>
     </div>
 
-    <div id="xr-stick-feedback" class="xr-stick-feedback" hidden aria-live="polite"></div>
+    <div id="immersive-stick-feedback" class="immersive-stick-feedback" hidden aria-live="polite"></div>
     <div id="google-maps-attribution" class="google-maps-attribution" hidden aria-hidden="true">© Google</div>
     </div>
 

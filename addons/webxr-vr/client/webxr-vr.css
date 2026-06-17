@@ -1,0 +1,93 @@
+/* addons/webxr-vr/client/webxr-vr.css — WebXR DOM Overlay / ロコモーション UI */
+
+.immersive-overlay-root,
+.xr-dom-overlay-root {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    min-height: 100vh;
+    pointer-events: none;
+}
+
+.immersive-overlay-root *,
+.xr-dom-overlay-root * {
+    pointer-events: auto;
+}
+
+.immersive-stick-feedback,
+#immersive-stick-feedback,
+.xr-stick-feedback,
+#xr-stick-feedback {
+    position: fixed;
+    right: 12px;
+    bottom: 100px;
+    z-index: 10002;
+    max-width: min(320px, 88vw);
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(20, 24, 32, 0.9);
+    border: 1px solid rgba(79, 195, 247, 0.5);
+    color: #e8f4fc;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: pre-line;
+    pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.immersive-overlay-panel,
+.xr-dom-overlay-panel {
+    position: fixed;
+    left: 12px;
+    bottom: 72px;
+    z-index: 10001;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(20, 24, 32, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #f0f4f8;
+    font-size: 12px;
+    line-height: 1.4;
+    pointer-events: auto;
+}
+
+.immersive-overlay-title,
+.xr-dom-overlay-title {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.immersive-overlay-buttons,
+.xr-dom-overlay-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.immersive-loco-btn,
+.xr-loco-btn {
+    flex: 1;
+    min-width: 72px;
+    padding: 10px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.immersive-loco-btn.active,
+.xr-loco-btn.active {
+    background: rgba(2, 136, 209, 0.55);
+    border-color: #4fc3f7;
+}
+
+#metaverse-vr-button {
+    z-index: 10000 !important;
+}

@@ -148,4 +148,27 @@ export function seedFirstRunDefaultAddons(addonsRoot) {
         db.prepare('INSERT INTO addon_enabled (plugin_id, enabled) VALUES (?, 1)').run('matsuyama-flights');
         console.log('[addons-registry] first run: enabled addon matsuyama-flights');
     }
+    const webxrManifest = path.join(addonsRoot, 'webxr-vr', 'plugin.json');
+    if (fs.existsSync(webxrManifest)) {
+        db.prepare('INSERT INTO addon_enabled (plugin_id, enabled) VALUES (?, 1)').run('webxr-vr');
+        console.log('[addons-registry] first run: enabled addon webxr-vr');
+    }
+}
+
+/**
+ * アップグレード時: webxr-vr 行が無ければ有効化（既存環境の VR 維持）
+ * @param {string} addonsRoot
+ */
+export function ensureWebxrVrOnUpgrade(addonsRoot) {
+    if (!db) return;
+    const manifest = path.join(addonsRoot, 'webxr-vr', 'plugin.json');
+    if (!fs.existsSync(manifest)) return;
+    const row = db.prepare('SELECT enabled FROM addon_enabled WHERE plugin_id = ?').get('webxr-vr');
+    if (row) return;
+    try {
+        db.prepare('INSERT INTO addon_enabled (plugin_id, enabled) VALUES (?, 1)').run('webxr-vr');
+        console.log('[addons-registry] upgrade: enabled addon webxr-vr');
+    } catch (e) {
+        console.warn('[addons-registry] ensureWebxrVrOnUpgrade failed:', e);
+    }
 }

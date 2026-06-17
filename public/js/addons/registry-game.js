@@ -5,3 +5,4 @@ import '../../../addons/aircraft/client/game.js';
 import '../../../addons/avator-scalable-animations/client/game.js';
 import '../../../addons/matsuyama-flights/client/game.js';
 import '../../../addons/nfc-spawn/client/game.js';
+import '../../../addons/webxr-vr/client/game.js';

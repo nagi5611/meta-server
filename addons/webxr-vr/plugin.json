@@ -1,0 +1,8 @@
+{
+    "id": "webxr-vr",
+    "version": "1.0.0",
+    "main": "server.js",
+    "engines": {
+        "meta-server": ">=1.0.0"
+    }
+}

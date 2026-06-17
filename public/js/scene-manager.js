@@ -46,6 +46,10 @@ import {
 } from './aircraft/camera-viewpoints.js';
 import { applyMeshVisualEulerDegToModel } from './aircraft/mesh-visual-pivot.js';
 import {
+    resolveGraphicsTier,
+    resolvePixelRatio,
+} from '../../lib/client-addon-registry.js';
+import {
     buildEncodedModelUrlFromPath,
     loadPrefabGroupFromManifest,
     loadSinglePrefabPartGlb,
@@ -194,30 +198,28 @@ class SceneManager {
         this._bvhRegenCoalesced = false;
         /** ワールド設定の床表示希望（距離カリングと AND） */
         this._floorWantedVisible = true;
-        /** WebXR セッション中は true（FPS 優先のティア上書きに使用） */
-        this._xrSessionActive = false;
-        /** 直近の MenuManager 設定（XR 終了後の再適用用） */
+        /** 直近の MenuManager 設定（没入終了後の再適用用） */
         this._lastGraphicsSettings = null;
         /** 現在のレンダラの antialias フラグ（ティア変更時の再生成判定） */
         this._rendererAntialias = true;
-
-        this._onXRSessionStart = () => {
-            this._xrSessionActive = true;
-            this.applyGraphicsSettings(this._lastGraphicsSettings || this.graphicsOptions);
-        };
-        this._onXRSessionEnd = () => {
-            this._xrSessionActive = false;
-            this.applyGraphicsSettings(this._lastGraphicsSettings || this.graphicsOptions);
-        };
+        /** 没入セッション中はレンダラ再生成をブロック */
+        this._blockRendererRecreate = false;
     }
 
     /**
-     * 実効グラフィックティア（WebXR 中は low 相当）
+     * @param {boolean} blocked
+     */
+    setBlockRendererRecreate(blocked) {
+        this._blockRendererRecreate = !!blocked;
+    }
+
+    /**
+     * 実効グラフィックティア（アドオン override 適用）
      * @returns {'high'|'medium'|'low'}
      */
     _effectiveGraphicsTier() {
-        if (this._xrSessionActive) return 'low';
-        return normalizeGraphicsTier(this.graphicsOptions.graphicsTier);
+        const base = normalizeGraphicsTier(this.graphicsOptions.graphicsTier);
+        return resolveGraphicsTier(base);
     }
 
     /**
@@ -242,8 +244,7 @@ class SceneManager {
         let v;
         if (cap === 'full') v = dpr;
         else v = Math.min(dpr, typeof cap === 'number' ? cap : 1);
-        if (this._xrSessionActive) return Math.min(1, v);
-        return v;
+        return resolvePixelRatio(v);
     }
 
     init() {
@@ -287,7 +288,6 @@ class SceneManager {
             antialias
         });
         this.renderer = renderer;
-        this.renderer.xr.enabled = true;
         applyToneMapping(
             THREE,
             this.renderer,
@@ -301,8 +301,6 @@ class SceneManager {
         this.renderer.shadowMap.enabled = true;
         const shadowConfig = this._getShadowConfigForEffectiveTier();
         this.renderer.shadowMap.type = shadowConfig.type;
-
-        this._wireXRGraphicsOverrides();
 
         // Base lights are added per-world via addWorldLights()
 
@@ -325,17 +323,6 @@ class SceneManager {
     }
 
     /**
-     * WebXR 中は FPS 優先でシャドウ・ピクセル比を下げる（レンダラ差し替え時は再登録）
-     */
-    _wireXRGraphicsOverrides() {
-        if (!this.renderer?.xr) return;
-        this.renderer.xr.removeEventListener('sessionstart', this._onXRSessionStart);
-        this.renderer.xr.removeEventListener('sessionend', this._onXRSessionEnd);
-        this.renderer.xr.addEventListener('sessionstart', this._onXRSessionStart);
-        this.renderer.xr.addEventListener('sessionend', this._onXRSessionEnd);
-    }
-
-    /**
      * HDR を読み込み IBL を設定する（失敗時はログのみ）
      */
     async _loadIBLAsync() {
@@ -352,11 +339,11 @@ class SceneManager {
     }
 
     /**
-     * レンダラ再生成（antialias ティア変更時）。WebXR 中は呼ばないこと。
+     * レンダラ再生成（antialias ティア変更時）。没入中は呼ばないこと。
      * @param {boolean} antialias
      */
     _recreateRenderer(antialias) {
-        if (this._xrSessionActive) return;
+        if (this._blockRendererRecreate) return;
         disposeSceneIBL(this.scene);
         if (this.renderer) {
             this.renderer.dispose();
@@ -365,7 +352,6 @@ class SceneManager {
             canvas: this.canvas,
             antialias
         });
-        this.renderer.xr.enabled = true;
         this._rendererAntialias = antialias;
         applyToneMapping(
             THREE,
@@ -380,7 +366,6 @@ class SceneManager {
         this.renderer.shadowMap.enabled = true;
         const shadowConfig = this._getShadowConfigForEffectiveTier();
         this.renderer.shadowMap.type = shadowConfig.type;
-        this._wireXRGraphicsOverrides();
         const shadowMapSize = shadowConfig.mapSize;
         this.worldLights.forEach((light) => {
             if (light.castShadow && light.shadow) {
@@ -2207,7 +2192,7 @@ class SceneManager {
         const tier = this._effectiveGraphicsTier();
         const needAA = getAntialiasForTier(tier);
 
-        if (this.renderer && !this._xrSessionActive && this._rendererAntialias !== needAA) {
+        if (this.renderer && !this._blockRendererRecreate && this._rendererAntialias !== needAA) {
             this._recreateRenderer(needAA);
             return;
         }

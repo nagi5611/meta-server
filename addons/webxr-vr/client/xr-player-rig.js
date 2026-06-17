@@ -1,4 +1,4 @@
-// public/js/xr-player-rig.js — WebXR 用プレイヤーリグ（足元ワールド座標と HMD を three.js の親行列で結ぶ）
+// addons/webxr-vr/client/xr-player-rig.js — WebXR 用プレイヤーリグ
 
 import * as THREE from 'three';
 
@@ -11,17 +11,18 @@ export class XrPlayerRig {
      * @param {THREE.Scene} opts.scene
      * @param {THREE.PerspectiveCamera} opts.camera
      * @param {THREE.WebGLRenderer} opts.renderer
-     * @param {() => boolean} [opts.shouldApplyRig] false のとき attach/sync しない
+     * @param {() => boolean} [opts.shouldApplyRig]
+     * @param {() => number} [opts.getRigYaw]
      */
-    constructor({ scene, camera, renderer, shouldApplyRig = null }) {
+    constructor({ scene, camera, renderer, shouldApplyRig = null, getRigYaw = null }) {
         this.scene = scene;
         this.camera = camera;
         this.renderer = renderer;
         this.shouldApplyRig = typeof shouldApplyRig === 'function' ? shouldApplyRig : () => true;
+        this.getRigYaw = typeof getRigYaw === 'function' ? getRigYaw : () => 0;
 
         this.rig = new THREE.Group();
         this.rig.name = 'xrPlayerRig';
-        /** @type {number} セッション開始時のキャラヨー（ラジアン） */
         this._baseYaw = 0;
         this._attached = false;
     }
@@ -32,8 +33,7 @@ export class XrPlayerRig {
     }
 
     /**
-     * WebXR セッション開始時: カメラをリグの子にする。
-     * @param {import('./character-controller.js').default} characterController
+     * @param {import('../../../public/js/character-controller.js').default} characterController
      */
     attach(characterController) {
         if (this._attached) return;
@@ -47,9 +47,6 @@ export class XrPlayerRig {
         this.sync(characterController);
     }
 
-    /**
-     * セッション終了時: カメラをシーンから切り離す。
-     */
     detach() {
         if (!this._attached) return;
         if (this.camera.parent === this.rig) {
@@ -62,8 +59,7 @@ export class XrPlayerRig {
     }
 
     /**
-     * 毎フレーム: 足元とリグヨー（スナップ累積込み）を反映する。render 直前に呼ぶ。
-     * @param {import('./character-controller.js').default} characterController
+     * @param {import('../../../public/js/character-controller.js').default} characterController
      */
     sync(characterController) {
         if (!this._attached || !this.renderer.xr.isPresenting) return;
@@ -71,7 +67,7 @@ export class XrPlayerRig {
 
         const feet = characterController.getPosition();
         this.rig.position.set(feet.x, feet.y, feet.z);
-        this.rig.rotation.set(0, this._baseYaw + characterController.xrRigYaw, 0);
+        this.rig.rotation.set(0, this._baseYaw + this.getRigYaw(), 0);
         this.rig.updateMatrixWorld(true);
     }
 

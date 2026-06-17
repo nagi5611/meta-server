@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getInputGuard } from '../../lib/client-addon-registry.js';
 
 /** 1 イベントあたりのヨー（左右）回転の上限（ラジアン） */
 const MAX_YAW_VIEW_DELTA_PER_EVENT_RAD = (10 * Math.PI) / 180;
@@ -85,18 +86,8 @@ class CharacterController {
         this.flyUp = false;
         this.flyDown = false;
 
-        /** WebXR 没入中はカメラ操作をスキップし、移動は HMD＋リグヨー基準 */
-        this.xrPresenting = false;
-        this.xrMoveVector = { x: 0, y: 0 };
-        this.xrMoveForce = 0;
-        /** スナップターン累積（ラジアン）。移動の前方向に適用 */
-        this.xrRigYaw = 0;
-        this._xrVrSpeedScale = 0.72;
-        this._xrUp = new THREE.Vector3(0, 1, 0);
-        this._xrHeadFwd = new THREE.Vector3();
-        this._xrMoveFwd = new THREE.Vector3();
-        this._xrMoveRight = new THREE.Vector3();
-        this._xrRigQuat = new THREE.Quaternion();
+        /** @type {import('../../lib/client-addon-registry.js').MovementDelegate|null} */
+        this.movementDelegate = null;
 
         /** true の間は歩行物理（重力・BVH 移動）を回さない。初回ゲーム入力で false に戻す */
         this._suspendPhysicsUntilGameplayInput = false;
@@ -152,38 +143,34 @@ class CharacterController {
     }
 
     /**
-     * WebXR セッションの有無（main / WebXRLocomotion から設定）
-     * @param {boolean} presenting
+     * @param {import('../../lib/client-addon-registry.js').MovementDelegate|null} delegate
      */
-    setXrPresenting(presenting) {
-        const next = !!presenting;
-        if (this.xrPresenting === next) return;
-        this.xrPresenting = next;
-        if (!next) {
-            this.xrRigYaw = 0;
-            this.xrMoveVector.x = 0;
-            this.xrMoveVector.y = 0;
-            this.xrMoveForce = 0;
-        }
+    setMovementDelegate(delegate) {
+        this.movementDelegate = delegate;
     }
 
     /**
-     * VR 用スムーズ移動ベクトル（スティック左右=x、前後=y。WebXRLocomotion が設定）
-     * @param {{ x: number, y: number, force?: number }} v
+     * 没入モード等でデスクトップ入力をブロックするか
+     * @returns {boolean}
      */
-    setXrMoveVector(v) {
-        this.xrMoveVector.x = v.x;
-        this.xrMoveVector.y = v.y;
-        this.xrMoveForce = typeof v.force === 'number' ? Math.min(1, Math.max(0, v.force)) : 1;
+    shouldBlockDesktopInput() {
+        if (getInputGuard()?.()) return true;
+        if (this.movementDelegate?.blocksDesktopInput?.()) return true;
+        return false;
     }
 
     /**
-     * スナップターン（ラジアン）
-     * @param {number} deltaYaw
+     * @returns {boolean}
      */
-    applyXrSnapTurn(deltaYaw) {
-        if (!Number.isFinite(deltaYaw)) return;
-        this.xrRigYaw += deltaYaw;
+    isPhysicsSuspended() {
+        return this._suspendPhysicsUntilGameplayInput;
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    isExternalInputActive() {
+        return this.movementDelegate?.isActive?.() ?? false;
     }
 
     setMobileMode(enabled) {
@@ -234,11 +221,11 @@ class CharacterController {
         const canvas = document.getElementById('canvas');
         if (canvas) {
             canvas.addEventListener('click', () => {
-                if (this.isMobileMode || this.xrPresenting) return;
+                if (this.isMobileMode || this.shouldBlockDesktopInput()) return;
                 this.notifyGameplayInputIntent();
                 if (!this.isPointerLocked) {
                     requestAnimationFrame(() => {
-                        if (this.isMobileMode || this.xrPresenting || document.pointerLockElement) return;
+                        if (this.isMobileMode || this.shouldBlockDesktopInput() || document.pointerLockElement) return;
                         document.body.requestPointerLock().catch((err) => {
                             console.warn('[PointerLock]', err?.message || err);
                         });
@@ -270,7 +257,7 @@ class CharacterController {
         if (this.isInputActive()) {
             return;
         }
-        if (this.xrPresenting) return;
+        if (this.shouldBlockDesktopInput()) return;
 
         if (!event.repeat && GAMEPLAY_KEY_CODES.has(event.code)) {
             this.notifyGameplayInputIntent();
@@ -319,7 +306,7 @@ class CharacterController {
         if (this.isInputActive()) {
             return;
         }
-        if (this.xrPresenting) return;
+        if (this.shouldBlockDesktopInput()) return;
 
         switch (event.code) {
             case 'KeyW':
@@ -368,8 +355,8 @@ class CharacterController {
         }
         const kbMoving = this.moveForward || this.moveBackward || this.moveLeft || this.moveRight;
         const mobileMoving = this.isMobileMode && (this.mobileMoveVector.x !== 0 || this.mobileMoveVector.y !== 0);
-        const xrMoving = this.xrPresenting && (this.xrMoveVector.x !== 0 || this.xrMoveVector.y !== 0);
-        const isMoving = kbMoving || mobileMoving || xrMoving;
+        const delegateMoving = this.movementDelegate?.isMoving?.() ?? false;
+        const isMoving = kbMoving || mobileMoving || delegateMoving;
         const mobileDashing = this.isMobileMode && mobileMoving && this.mobileMoveForce >= 0.85;
         const isGrounded = this.isFlyMode ? true : this.physicsManager.isGrounded();
         return { isMoving, isDashing: (isMoving && this.keysShift) || mobileDashing, isGrounded };
@@ -392,7 +379,7 @@ class CharacterController {
 
     onMouseMove(event) {
         if (this._aircraftPoseProvider) return;
-        if (this.xrPresenting) return;
+        if (this.shouldBlockDesktopInput()) return;
         if (!this.isPointerLocked) return;
 
         let dYaw = -event.movementX * this.mouseSensitivity;
@@ -444,8 +431,8 @@ class CharacterController {
             }
             return;
         }
-        if (this.xrPresenting) {
-            this._updateXrMovement(deltaTime);
+        if (this.movementDelegate?.isActive?.()) {
+            this.movementDelegate.update(deltaTime, this);
             return;
         }
 
@@ -586,58 +573,6 @@ class CharacterController {
         }
 
         this.camera.lookAt(lookAtTarget);
-    }
-
-    /**
-     * WebXR 中: 物理移動のみ。カメラ姿勢は WebXRManager が更新し、ワールド位置は XrPlayerRig が足元に同期する。
-     * @param {number} deltaTime
-     */
-    _updateXrMovement(deltaTime) {
-        this.direction.set(0, 0, 0);
-
-        const headFwd = this._xrHeadFwd.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
-        headFwd.y = 0;
-        if (headFwd.lengthSq() < 1e-8) {
-            headFwd.set(0, 0, -1);
-        } else {
-            headFwd.normalize();
-        }
-
-        this._xrRigQuat.setFromAxisAngle(this._xrUp, this.xrRigYaw);
-        const moveFwd = this._xrMoveFwd.copy(headFwd).applyQuaternion(this._xrRigQuat);
-        const moveRight = this._xrMoveRight.crossVectors(this._xrUp, moveFwd).normalize();
-
-        const useXrMove = this.xrMoveVector.x !== 0 || this.xrMoveVector.y !== 0;
-        if (useXrMove) {
-            this.direction.add(moveFwd.clone().multiplyScalar(this.xrMoveVector.y));
-            this.direction.add(moveRight.clone().multiplyScalar(this.xrMoveVector.x));
-        }
-
-        if (this.direction.length() > 0) {
-            this.direction.normalize();
-            this.playerYaw = Math.atan2(this.direction.x, this.direction.z);
-            this.playerQuaternion.setFromAxisAngle(this._xrUp, this.playerYaw);
-        }
-
-        const moveDirection = new THREE.Vector3();
-        if (this.direction.length() > 0) {
-            const speed = this.moveSpeed * this.adminSpeedMultiplier * this._xrVrSpeedScale * this.xrMoveForce;
-            moveDirection.copy(this.direction).multiplyScalar(speed * deltaTime);
-        }
-
-        if (this.isFlyMode) {
-            const pos = this.physicsManager.getCharacterPosition().clone();
-            pos.add(moveDirection);
-            const flySpeed = this.moveSpeed * this.adminSpeedMultiplier * 2;
-            if (this.flyUp) pos.y += flySpeed * deltaTime;
-            if (this.flyDown) pos.y -= flySpeed * deltaTime;
-            this.physicsManager.setCharacterPosition(pos.x, pos.y, pos.z);
-            this.physicsManager.resetVelocity();
-        } else if (this._suspendPhysicsUntilGameplayInput) {
-            this.physicsManager.playerVelocity.set(0, 0, 0);
-        } else {
-            this.physicsManager.updatePlayer(deltaTime, moveDirection);
-        }
     }
 
     getPosition() {

@@ -19,10 +19,13 @@ import PdfViewerManager from './pdf-viewer-manager.js';
 import { isMobile, setupFullscreen, tryLockLandscape, onResize } from './mobile-utils.js';
 import MobileJoystickManager from './mobile-joystick-manager.js';
 import MobileUIManager from './mobile-ui-manager.js';
-import { createMetaverseVRButton } from './vr-entry-button.js';
-import WebXRLocomotion from './webxr-locomotion.js';
-import { XrPlayerRig } from './xr-player-rig.js';
 import { registerMetaverseServiceWorker } from './service-worker-register.js';
+import {
+    runClientInits,
+    runFrameUpdates,
+    runClientDisposes,
+    getImmersiveState,
+} from '../../lib/client-addon-registry.js';
 import { initAircraftSubsystem } from '../../addons/aircraft/client/init.js';
 import { initAvatorScalableAnimations } from '../../addons/avator-scalable-animations/client/init.js';
 import { initMatsuyamaFlightsSubsystem } from '../../addons/matsuyama-flights/client/init.js';
@@ -82,10 +85,8 @@ class MetaverseApp {
         this.nearbyPdfPath = null;
         this.isMobileMode = false;
         this.resizeUnsubscribe = null;
-        this.webxrLocomotion = null;
-        this.xrPlayerRig = null;
         this._frameCallback = null;
-        /** @type {'first'|'third'|null} VR 開始前の視点モード（終了時に復元） */
+        /** @type {'first'|'third'|null} 没入開始前の視点モード（終了時に復元） */
         this._viewModeBeforeVr = null;
 
         // public/js/main.js — report-ping 用クライアント性能サンプル（FPS 1s/10s、LoAF/longtask）
@@ -553,38 +554,7 @@ class MetaverseApp {
             this.setupAdminPlayerInfoClick();
         }
 
-        const xrOverlayRoot = document.getElementById('xr-dom-overlay-root');
-        const vrBtn = createMetaverseVRButton(this.sceneManager.getRenderer(), {
-            domOverlayRoot: xrOverlayRoot || null
-        });
-        if (xrOverlayRoot) xrOverlayRoot.appendChild(vrBtn);
-        else document.body.appendChild(vrBtn);
-        this.xrPlayerRig = new XrPlayerRig({
-            scene: this.sceneManager.getScene(),
-            camera: this.sceneManager.getCamera(),
-            renderer: this.sceneManager.getRenderer(),
-            shouldApplyRig: () => !!this.characterController?.isWalkingCharacter()
-        });
-        this.webxrLocomotion = new WebXRLocomotion({
-            renderer: this.sceneManager.getRenderer(),
-            sceneManager: this.sceneManager,
-            physicsManager: this.physicsManager,
-            characterController: this.characterController,
-            xrPlayerRig: this.xrPlayerRig,
-            domOverlayRoot: xrOverlayRoot || null,
-            onVrSessionStart: () => {
-                const vm = this.menuManager.settings.viewMode;
-                this._viewModeBeforeVr = (vm === 'first' || vm === 'third') ? vm : 'third';
-                this.characterController.setViewMode('first');
-                this.playerManager.setLocalPlayerVisible(false);
-            },
-            onVrSessionEnd: () => {
-                const mode = this._viewModeBeforeVr != null ? this._viewModeBeforeVr : 'third';
-                this._viewModeBeforeVr = null;
-                this.characterController.setViewMode(mode);
-                this.playerManager.setLocalPlayerVisible(mode !== 'first');
-            }
-        });
+        await runClientInits(this);
 
         // 初回操作まで歩行・落下物理を止める（低スペックでロード後に沈むのを防ぐ）
         this.characterController.setSuspendPhysicsUntilGameplayInput(true);
@@ -604,7 +574,7 @@ class MetaverseApp {
         renderer.setAnimationLoop(this._frameCallback);
         window.addEventListener('beforeunload', () => {
             renderer.setAnimationLoop(null);
-            if (this.webxrLocomotion) this.webxrLocomotion.dispose();
+            runClientDisposes(this);
         });
 
         console.log('Metaverse Simple initialized!');
@@ -1018,17 +988,25 @@ class MetaverseApp {
     }
 
     /**
-     * 可視または WebXR 中のみ FPS を数え、10 秒周期で 1 秒窓をサンプルしてティアを更新する。
+     * 没入呈示中か（アドオンが未ロードなら false）
+     * @returns {boolean}
+     */
+    isImmersivePresenting() {
+        return getImmersiveState();
+    }
+
+    /**
+     * 可視または没入中のみ FPS を数え、10 秒周期で 1 秒窓をサンプルしてティアを更新する。
      * @param {number} _timeMs
      */
     _updateClientPerfSampling(_timeMs) {
         if (!this.sceneManager) return;
-        const xrActive = this.sceneManager.getRenderer().xr.isPresenting;
-        const visibleOrXr = document.visibilityState === 'visible' || xrActive;
+        const immersiveActive = this.isImmersivePresenting();
+        const visibleOrImmersive = document.visibilityState === 'visible' || immersiveActive;
         const now = performance.now();
 
         if (this._perfFpsSamplingActive) {
-            if (visibleOrXr) this._perfFpsFrames += 1;
+            if (visibleOrImmersive) this._perfFpsFrames += 1;
             if (now >= this._perfFpsSampleEndAt) {
                 const fps = this._perfFpsFrames;
                 this._perfLastFpsSample = fps;
@@ -1040,7 +1018,7 @@ class MetaverseApp {
         } else if (now >= this._perfNextFpsWindowAt) {
             this._perfFpsSamplingActive = true;
             this._perfFpsSampleEndAt = now + 1000;
-            this._perfFpsFrames = visibleOrXr ? 1 : 0;
+            this._perfFpsFrames = visibleOrImmersive ? 1 : 0;
         }
     }
 
@@ -1064,13 +1042,11 @@ class MetaverseApp {
             deltaTime = MAX_DELTA_TIME;
         }
 
-        if (this.webxrLocomotion) {
-            this.webxrLocomotion.update(deltaTime);
-        }
+        runFrameUpdates(this, deltaTime, timeMs, _xrFrame);
 
-        const xrActive = this.sceneManager.getRenderer().xr.isPresenting;
-        // WebXR 中はタブがバックグラウンド扱いでも物理を回す（ヘッドセット表示を維持）
-        if (this.isPageVisible || xrActive) {
+        const immersiveActive = this.isImmersivePresenting();
+        // 没入中はタブがバックグラウンド扱いでも物理を回す（ヘッドセット表示を維持）
+        if (this.isPageVisible || immersiveActive) {
             // 操縦中は機体を先に進めてから、キャラ（物理・非表示アバター）を機体位置へ同期
             if (this.aircraftManager?.isPiloting && this.aircraftController) {
                 this.aircraftController.update(deltaTime);
@@ -1204,10 +1180,6 @@ class MetaverseApp {
         }
 
         this.updateLandscapeOverlay();
-
-        if (this.xrPlayerRig?.isAttached() && this.sceneManager.getRenderer().xr.isPresenting) {
-            this.xrPlayerRig.sync(this.characterController);
-        }
 
         // Render scene
         this.sceneManager.render();

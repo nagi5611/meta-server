@@ -157,7 +157,7 @@ export function initAvatorScalableAnimations(app) {
         if (e.repeat) return;
         if (app.aircraftManager?.isPiloting || app.aircraftManager?.isPassenger) return;
         if (app.characterController?.isInputActive()) return;
-        if (app.characterController?.xrPresenting) return;
+        if (app.isImmersivePresenting?.()) return;
 
         const binding = codeToBinding.get(e.code);
         if (!binding) return;

@@ -475,7 +475,7 @@ export default class AircraftManager {
      */
     async tryBoardNearest() {
         if (!this.nearestSlot || this.isPiloting || this.isPassenger || this.isMobileMode) return false;
-        if (this.characterController.xrPresenting) return false;
+        if (this.characterController.isExternalInputActive?.()) return false;
         const slot = this.nearestSlot;
         if (!slot?.id || !slot?.root) {
             this._reportBoardFailure('invalid_slot');
@@ -823,7 +823,7 @@ export default class AircraftManager {
      */
     canBoard() {
         return !this.isMobileMode
-            && !this.characterController.xrPresenting
+            && !this.characterController.isExternalInputActive?.()
             && !!this.nearestSlot
             && !this.isPiloting
             && !this.isPassenger;

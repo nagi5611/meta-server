@@ -1,12 +1,14 @@
 # Meta Quest / WebXR 利用メモ
 
-本番・実機検証では **HTTPS**（Secure Context）が必要です。手順の骨子は [DEPLOY_PRODUCTION_HTTPS.md](./DEPLOY_PRODUCTION_HTTPS.md) を参照してください。LAN 内の Quest から PC を叩く場合は、`https://<PCのLAN-IP>:ポート` で届くよう TLS を構成し、証明書を端末側で信頼させる必要があります。
+実装は **`addons/webxr-vr/`** アドオンに集約されています。有効化と再起動は [addons/webxr-vr/README.md](../addons/webxr-vr/README.md) を参照してください。
+
+本番・実機検証では **HTTPS**（Secure Context）が必要です。
 
 ## 機能概要
 
 - **VR ボタン**（画面下中央付近）: 没入セッションの開始／終了。
-- **視点**: 没入開始時に **一人称** に切り替わり、終了すると直前の視点設定に戻ります（メニューの一人称／三人称設定と整合）。ワールド内の足元は **`xrPlayerRig`**（`THREE.Group`）が毎フレーム同期し、three.js の `camera.parent` 経由で HMD と結びつきます（`local-floor` 参照空間とアバター位置のずれを防ぐ）。
-- **移動モード**（`#xr-dom-overlay-root`）: 「テレポ＋スナップ」「スナップのみ」「テレポート」。選択は `localStorage` キー `metaverse-vr-locomotion` に保存されます（値は従来どおり `both` / `smooth` / `teleport`）。
+- **視点**: 没入開始時に **一人称** に切り替わり、終了すると直前の視点設定に戻ります。足元は **`addons/webxr-vr/client/xr-player-rig.js`** のリグが毎フレーム同期します。
+- **移動モード**（`#immersive-overlay-root`）: 「テレポ＋スナップ」「スナップのみ」「テレポート」。選択は `localStorage` キー `metaverse-vr-locomotion` に保存されます。
 - **左スティック（優先）**: **スムーズ移動**（前後左右）。頭の向き＋スナップ累積に対する相対方向。`handedness` が `none` のときは、最初に見つかった axes 付き gamepad を移動用に使います。
 - **右コントローラー スティック左右**（または 2 本目のコントローラー）: スナップターン（約 30°、クールダウンあり）。**片手のみ**で左右が区別できない場合は、縦入力が小さいときだけ横をスナップとして扱います。
 - **左グリップ（squeeze）**: ジャンプ（左手が無い場合は単一コントローラの squeeze にフォールバック）。
