@@ -1,0 +1,120 @@
+/* addons/smoke-view/play_vdb/css/play-vdb.css */
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #0a0a0f;
+    color: #e8e8ef;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+#play-vdb-canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    touch-action: none;
+}
+
+.play-vdb-overlay {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    max-width: min(420px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: rgba(12, 14, 22, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(8px);
+    pointer-events: auto;
+}
+
+.play-vdb-header h1 {
+    margin: 0 0 4px;
+    font-size: 1.15rem;
+    font-weight: 600;
+}
+
+.play-vdb-sub {
+    margin: 0 0 12px;
+    font-size: 0.82rem;
+    color: #a8b0c4;
+    line-height: 1.4;
+}
+
+.play-vdb-panel {
+    margin-bottom: 12px;
+}
+
+.play-vdb-panel h2 {
+    margin: 0 0 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #8b93a8;
+}
+
+.play-vdb-btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.play-vdb-btn {
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    font-size: 0.88rem;
+    cursor: pointer;
+}
+
+.play-vdb-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.play-vdb-btn-primary {
+    border-color: #4a7cff;
+    background: rgba(74, 124, 255, 0.25);
+}
+
+.play-vdb-hint {
+    margin: 0;
+    font-size: 0.75rem;
+    color: #8b93a8;
+}
+
+.play-vdb-mono {
+    margin: 0;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.play-vdb-fps {
+    margin: 6px 0 0;
+    font-size: 0.85rem;
+    color: #9fd4ff;
+}
+
+.play-vdb-error {
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(180, 40, 40, 0.25);
+    border: 1px solid rgba(255, 100, 100, 0.45);
+    color: #ffb4b4;
+    font-size: 0.82rem;
+    line-height: 1.4;
+}

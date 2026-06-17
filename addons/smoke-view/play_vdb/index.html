@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Play_VDB — SmokeView 検証</title>
+    <link rel="stylesheet" href="/play_vdb/css/play-vdb.css">
+</head>
+
+<body>
+    <canvas id="play-vdb-canvas" aria-label="PicoVDB WebGPU ビュー"></canvas>
+
+    <div id="play-vdb-overlay" class="play-vdb-overlay">
+        <header class="play-vdb-header">
+            <h1>Play_VDB</h1>
+            <p class="play-vdb-sub">SmokeView Phase 1 — ローカル .pvdb / .pvdb.gz の WebGPU 描画検証</p>
+        </header>
+
+        <section class="play-vdb-panel">
+            <div class="play-vdb-btn-row">
+                <button type="button" id="play-vdb-open-btn" class="play-vdb-btn play-vdb-btn-primary">.pvdb / .pvdb.gz を開く</button>
+                <button type="button" id="play-vdb-reset-camera" class="play-vdb-btn">カメラリセット</button>
+            </div>
+            <input type="file" id="play-vdb-file-input" accept=".pvdb,.gz,application/octet-stream" hidden>
+            <p class="play-vdb-hint">ドラッグ: 回転 / ホイール: ズーム / Alt+ドラッグ: パン</p>
+        </section>
+
+        <section class="play-vdb-panel">
+            <h2>ステータス</h2>
+            <p id="play-vdb-status" class="play-vdb-mono">初期化中…</p>
+            <p id="play-vdb-fps" class="play-vdb-fps">— FPS</p>
+        </section>
+
+        <section class="play-vdb-panel">
+            <h2>ボリューム情報</h2>
+            <pre id="play-vdb-info" class="play-vdb-mono">—</pre>
+        </section>
+
+        <p id="play-vdb-error" class="play-vdb-error" hidden></p>
+    </div>
+
+    <script type="module" src="/play_vdb/js/main.js"></script>
+</body>
+
+</html>

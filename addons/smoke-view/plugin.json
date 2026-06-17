@@ -1,0 +1,8 @@
+{
+    "id": "smoke-view",
+    "version": "0.1.0",
+    "main": "server.js",
+    "engines": {
+        "meta-server": ">=1.0.0"
+    }
+}
