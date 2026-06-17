@@ -1,0 +1,166 @@
+/* public/pre_xr/css/pre-xr.css — XR テストサイト UI */
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #0a0e14;
+    color: #e8eef4;
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+canvas {
+    display: block;
+}
+
+.pre-xr-overlay-root {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    overflow-y: auto;
+    padding: 12px 12px 88px;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(8, 12, 18, 0.55) 0%, rgba(8, 12, 18, 0.15) 40%, transparent 70%);
+}
+
+.pre-xr-overlay-root * {
+    pointer-events: auto;
+}
+
+.pre-xr-header h1 {
+    margin: 0 0 4px;
+    font-size: 1.05rem;
+    font-weight: 800;
+}
+
+.pre-xr-sub {
+    margin: 0 0 10px;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: rgba(232, 238, 244, 0.82);
+}
+
+.pre-xr-panel {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(16, 22, 30, 0.88);
+    border: 1px solid rgba(120, 180, 255, 0.28);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+}
+
+.pre-xr-panel h2 {
+    margin: 0 0 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #8ec8ff;
+    letter-spacing: 0.02em;
+}
+
+.pre-xr-panel--scroll {
+    max-height: 28vh;
+    overflow-y: auto;
+}
+
+.pre-xr-mono,
+#pre-xr-status-text {
+    margin: 0;
+    font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.pre-xr-btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.pre-xr-mode-btn {
+    flex: 1;
+    min-width: 72px;
+    padding: 8px 6px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 0.78rem;
+    cursor: pointer;
+}
+
+.pre-xr-mode-btn.active {
+    background: rgba(61, 126, 255, 0.55);
+    border-color: #6aa8ff;
+}
+
+.pre-xr-hint {
+    margin: 8px 0 0;
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: rgba(232, 238, 244, 0.72);
+}
+
+.pre-xr-event-log {
+    margin: 0;
+    padding-left: 1.2rem;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: #c8e6ff;
+}
+
+.pre-xr-event-log li {
+    margin-bottom: 2px;
+}
+
+#pre-xr-vr-button {
+    position: fixed;
+    bottom: 20px;
+    left: calc(50% - 52px);
+    z-index: 10000;
+    width: 104px;
+    padding: 12px 6px;
+    border: 1px solid #fff;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.4);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0.9;
+}
+
+#pre-xr-vr-button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.pre-xr-desktop-hud {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 9;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 10px;
+    background: rgba(10, 14, 20, 0.75);
+    font-size: 0.75rem;
+    color: #b8c8d8;
+    pointer-events: none;
+}
+
+@media (min-width: 720px) {
+    .pre-xr-overlay-root {
+        max-width: 420px;
+    }
+}

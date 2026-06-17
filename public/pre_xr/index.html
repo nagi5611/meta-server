@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>XR 入出力テスト — pre_xr</title>
+    <link rel="stylesheet" href="css/pre-xr.css">
+</head>
+
+<body>
+    <div id="pre-xr-overlay-root" class="pre-xr-overlay-root">
+        <header class="pre-xr-header">
+            <h1>pre_xr — WebXR 入出力テスト</h1>
+            <p class="pre-xr-sub">Meta Quest 等のコントローラー・スティック・ボタン検出を単体検証します（Three.js 直結）</p>
+        </header>
+
+        <section id="pre-xr-status" class="pre-xr-panel" aria-live="polite">
+            <h2>セッション</h2>
+            <pre id="pre-xr-status-text">初期化中…</pre>
+        </section>
+
+        <section id="pre-xr-input-panel" class="pre-xr-panel">
+            <h2>入力ソース</h2>
+            <div id="pre-xr-input-sources" class="pre-xr-mono">—</div>
+        </section>
+
+        <section id="pre-xr-loco-panel" class="pre-xr-panel">
+            <h2>ロコモーション検証</h2>
+            <div id="pre-xr-loco-state" class="pre-xr-mono">—</div>
+            <div class="pre-xr-btn-row">
+                <button type="button" class="pre-xr-mode-btn active" data-loco-mode="both">両方</button>
+                <button type="button" class="pre-xr-mode-btn" data-loco-mode="smooth">スムーズ</button>
+                <button type="button" class="pre-xr-mode-btn" data-loco-mode="teleport">テレポート</button>
+            </div>
+            <p class="pre-xr-hint">左スティック: 移動 / 右スティック左右: スナップ / 左グリップ: ジャンプ / 右トリガー離し: テレポート</p>
+        </section>
+
+        <section id="pre-xr-events" class="pre-xr-panel pre-xr-panel--scroll">
+            <h2>XR イベントログ</h2>
+            <ol id="pre-xr-event-log" class="pre-xr-event-log" reversed></ol>
+        </section>
+    </div>
+
+    <div id="pre-xr-desktop-hud" class="pre-xr-desktop-hud" hidden>
+        <span id="pre-xr-fps">FPS —</span>
+        <span>WASD + マウス: デスクトップ移動</span>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+
+</html>

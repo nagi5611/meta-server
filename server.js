@@ -1656,6 +1656,15 @@ const sendInstanceIndex = (req, res) => {
 app.get('/instance', sendInstanceIndex);
 app.get('/instance/', sendInstanceIndex);
 
+const preXrIndexDist = path.join(__dirname, 'dist', 'pre_xr', 'index.html');
+const preXrIndexPublic = path.join(__dirname, 'public', 'pre_xr', 'index.html');
+const sendPreXrIndex = (req, res) => {
+    const file = fs.existsSync(preXrIndexDist) ? preXrIndexDist : preXrIndexPublic;
+    res.sendFile(file);
+};
+app.get('/pre_xr', sendPreXrIndex);
+app.get('/pre_xr/', sendPreXrIndex);
+
 // ============================
 // Host monitor: systemd ユニットの状態と起動（任意・ADMIN Basic 認証）
 // HOST_MONITOR_UNITS=meta-server.service,nginx.service のようにカンマ区切り
