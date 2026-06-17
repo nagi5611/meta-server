@@ -65,6 +65,10 @@ class NetworkManager {
         this._pilotSendQuatScratch = new THREE.Quaternion();
         /** @type {Map<string, boolean>} 前 tick の飛行機搭乗状態（降機検知用） */
         this._remoteAircraftOccupied = new Map();
+        /** 表示距離内ワールド表示完了までリモートアバター GLB 読み込みを遅延 */
+        this._worldViewDisplayReady = false;
+        /** @type {object[]} */
+        this._pendingRemotePlayerCreates = [];
     }
 
     /**
@@ -95,6 +99,70 @@ class NetworkManager {
      */
     setLocalPlayerBlockedCheck(fn) {
         this._isLocalPlayerBlocked = typeof fn === 'function' ? fn : null;
+    }
+
+    /**
+     * 表示距離内のワールド表示が完了するまでリモートアバター作成を遅延する
+     * @param {boolean} ready
+     */
+    setWorldViewDisplayReady(ready) {
+        this._worldViewDisplayReady = !!ready;
+        if (!ready) {
+            this._pendingRemotePlayerCreates = [];
+        }
+    }
+
+    /**
+     * 遅延キューに溜まったリモートプレイヤーを作成する
+     */
+    async flushPendingRemotePlayers() {
+        if (!this._worldViewDisplayReady) return;
+        const pending = this._pendingRemotePlayerCreates.splice(0);
+        for (const player of pending) {
+            try {
+                await this._createRemotePlayerIfReady(player);
+            } catch (error) {
+                console.error(`Failed to create deferred remote player ${player.id}:`, error);
+            }
+        }
+        if (pending.length) {
+            this.updatePlayerCount();
+        }
+    }
+
+    /**
+     * @param {object} player
+     */
+    _queueRemotePlayerCreate(player) {
+        if (!player?.id || player.id === this.myPlayerId) return;
+        if (player.world !== this.currentWorld) return;
+        if (this._pendingRemotePlayerCreates.some((p) => p.id === player.id)) return;
+        this._pendingRemotePlayerCreates.push(player);
+    }
+
+    /**
+     * リモートプレイヤー GLB を作成（表示完了前はキューへ）
+     * @param {object} player
+     */
+    async _createRemotePlayerIfReady(player) {
+        if (!player?.id || player.id === this.myPlayerId) return;
+        if (player.world !== this.currentWorld) return;
+
+        if (!this._worldViewDisplayReady) {
+            this._queueRemotePlayerCreate(player);
+            return;
+        }
+
+        const name = player.displayName || player.username;
+        if (!this.playerManager.hasRemotePlayer(player.id)) {
+            await this.playerManager.createRemotePlayer(
+                player.id,
+                player.position,
+                name,
+                player.animState || 'idle'
+            );
+        }
+        this._syncRemotePlayerVisible(player);
     }
 
     /**
@@ -260,17 +328,9 @@ class NetworkManager {
 
             // Create all remote players (with async loading)
             const createPromises = players.map(async (player) => {
-                // Only show players in same world
                 if (player.id !== this.myPlayerId && player.world === this.currentWorld) {
                     try {
-                        const name = player.displayName || player.username;
-                        await this.playerManager.createRemotePlayer(
-                            player.id,
-                            player.position,
-                            name,
-                            player.animState || 'idle'
-                        );
-                        this._syncRemotePlayerVisible(player);
+                        await this._createRemotePlayerIfReady(player);
                     } catch (error) {
                         console.error(`Failed to create remote player ${player.id}:`, error);
                     }
@@ -288,14 +348,7 @@ class NetworkManager {
             // Only show if in same world
             if (player.id !== this.myPlayerId && player.world === this.currentWorld) {
                 try {
-                    const name = player.displayName || player.username;
-                    await this.playerManager.createRemotePlayer(
-                        player.id,
-                        player.position,
-                        name,
-                        player.animState || 'idle'
-                    );
-                    this._syncRemotePlayerVisible(player);
+                    await this._createRemotePlayerIfReady(player);
                     this.updatePlayerCount();
                 } catch (error) {
                     console.error(`Failed to create joining player ${player.id}:`, error);
@@ -349,16 +402,9 @@ class NetworkManager {
                 if (player.id !== this.myPlayerId) {
                     // Only show players in same world
                     if (player.world === this.currentWorld) {
-                        // Check if player exists, if not create it
                         if (!this.playerManager.hasRemotePlayer(player.id)) {
                             try {
-                                const name = player.displayName || player.username;
-                                await this.playerManager.createRemotePlayer(
-                                    player.id,
-                                    player.position,
-                                    name,
-                                    player.animState || 'idle'
-                                );
+                                await this._createRemotePlayerIfReady(player);
                             } catch (error) {
                                 console.error(`Failed to create remote player ${player.id} during update:`, error);
                             }

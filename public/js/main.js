@@ -173,6 +173,13 @@ class MetaverseApp {
             begin: (opts) => this.uiManager.showWorldLoadProgress(opts.totalCount, opts),
             progress: (detail) => this.uiManager.updateWorldLoadProgress(detail),
             finalize: (beforePaint) => this.uiManager.finalizeWorldLoadProgress(beforePaint),
+            onLoadStart: () => {
+                this.networkManager?.setWorldViewDisplayReady(false);
+            },
+            onLoadComplete: async () => {
+                this.networkManager?.setWorldViewDisplayReady(true);
+                await this.networkManager?.flushPendingRemotePlayers();
+            },
         });
 
         // Set physics manager reference in scene manager for BVH collider
@@ -275,6 +282,7 @@ class MetaverseApp {
         this.playerManager = new PlayerManager(this.sceneManager.getScene());
         this.playerBlockList = new PlayerBlockList();
         this.networkManager = new NetworkManager(this.playerManager);
+        this.networkManager.setWorldViewDisplayReady(false);
         this.networkManager.setLocalPlayerBlockedCheck((id) => this.playerBlockList.has(id));
         this.networkManager.currentWorld = initialWorldId;
         this.networkManager.onAdminTp = (data) => this.onAdminTp(data);
@@ -286,22 +294,19 @@ class MetaverseApp {
         });
         const networkConnectPromise = this.networkManager.connect(adminEntryPromise);
 
-        await new Promise((resolve) => {
-            this.worldManager.loadWorld(initialWorldId, () => {
-                console.log('World loaded:', initialWorldId);
-                // onWorldChange は後で登録するため、初回ロード時も帰属表示を反映する
-                this.updateGoogleMapsCopyrightVisibility(this.worldManager.getCurrentWorld());
-                // Setup teleport zones after world is loaded
-                this.updateTeleportZones();
-                this.updateTaikoZones();
-                this.updateGlbInteractZones();
-                this._worldReadyForNetwork = true;
-                if (this._networkConnectPendingRoomSync) {
-                    this._networkConnectPendingRoomSync = false;
-                    this._applyInitialRoomSync();
-                }
-                resolve();
-            });
+        await this.worldManager.loadWorld(initialWorldId, () => {
+            console.log('World loaded:', initialWorldId);
+            // onWorldChange は後で登録するため、初回ロード時も帰属表示を反映する
+            this.updateGoogleMapsCopyrightVisibility(this.worldManager.getCurrentWorld());
+            // Setup teleport zones after world is loaded
+            this.updateTeleportZones();
+            this.updateTaikoZones();
+            this.updateGlbInteractZones();
+            this._worldReadyForNetwork = true;
+            if (this._networkConnectPendingRoomSync) {
+                this._networkConnectPendingRoomSync = false;
+                this._applyInitialRoomSync();
+            }
         });
 
         // Get spawn point for current world（NFC ?spawn= があれば DB 座標を優先）

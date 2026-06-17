@@ -730,6 +730,18 @@ class SceneManager {
     }
 
     /**
+     * debounce 待ちの BVH 再生成を即時実行する（初回表示距離ロード完了後など）
+     * @returns {Promise<void>}
+     */
+    async flushBVHRegeneration() {
+        if (this._bvhRegenTimer) {
+            clearTimeout(this._bvhRegenTimer);
+            this._bvhRegenTimer = null;
+        }
+        await this._requestBVHRegeneration();
+    }
+
+    /**
      * BVH 再生成を Worker で実行（同時 1 本・coalesce 付き）
      * @returns {Promise<void>}
      */

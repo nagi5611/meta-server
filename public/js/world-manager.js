@@ -14,7 +14,7 @@ class WorldManager {
         this.currentWorld = null;
         this.onWorldChangeCallback = null;
         this.worlds = null; // Set by init() from API
-        /** @type {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string }) => void, finalize?: (beforePaint?: () => void) => Promise<void> } | null} */
+        /** @type {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string }) => void, finalize?: (beforePaint?: () => void) => Promise<void>, onLoadStart?: () => void, onLoadComplete?: () => void | Promise<void> } | null} */
         this._worldLoadUi = null;
         /** @type {ViewDistanceStreaming | null} */
         this._viewDistanceStreaming = null;
@@ -39,7 +39,7 @@ class WorldManager {
 
     /**
      * ワールド読み込み中のロードバー等（メインクライアントから登録）
-     * @param {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string }) => void, finalize?: (beforePaint?: () => void) => Promise<void> } | null} handlers
+     * @param {{ begin?: (o: { totalCount: number, preparing?: boolean }) => void, progress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string }) => void, finalize?: (beforePaint?: () => void) => Promise<void>, onLoadStart?: () => void, onLoadComplete?: () => void | Promise<void> } | null} handlers
      */
     setWorldLoadUiHandlers(handlers) {
         this._worldLoadUi = handlers || null;
@@ -116,6 +116,8 @@ class WorldManager {
 
         console.log(`Loading world: ${worldId}`);
 
+        this._worldLoadUi?.onLoadStart?.();
+
         const rodId = await promptRodSelection(world);
         this._activeRodId = rodId;
         const modelsForRod = resolveWorldModelsForRod(
@@ -178,6 +180,7 @@ class WorldManager {
                 modelsForRod,
                 async () => {
                     await vas.runInitialNearSpawn(spawn, viewDistanceM);
+                    await this.sceneManager.flushBVHRegeneration();
 
                     await this.sceneManager.loadWorldPdfs(world.pdfs || [], {
                         loadState,
@@ -186,14 +189,14 @@ class WorldManager {
                     if (typeof this._loadWorldFlightBoards === 'function') {
                         await this._loadWorldFlightBoards(world);
                     }
-                    console.log(`World loaded: ${worldId}`);
 
-                    if (onComplete) {
-                        onComplete(world);
-                    }
-
-                    if (this.onWorldChangeCallback) {
-                        this.onWorldChangeCallback(world);
+                    if (loadState.totalCount > 0 && loadState.completedCount < loadState.totalCount) {
+                        loadState.completedCount = loadState.totalCount;
+                        onLoadProgress({
+                            fileName: '',
+                            completedCount: loadState.completedCount,
+                            totalCount: loadState.totalCount,
+                        });
                     }
                 },
                 {
@@ -211,6 +214,14 @@ class WorldManager {
                     this.sceneManager.render();
                 });
             }
+            console.log(`World loaded: ${worldId}`);
+            if (onComplete) {
+                onComplete(world);
+            }
+            if (this.onWorldChangeCallback) {
+                this.onWorldChangeCallback(world);
+            }
+            await this._worldLoadUi?.onLoadComplete?.();
         }
     }
 
