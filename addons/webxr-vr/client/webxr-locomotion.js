@@ -94,7 +94,7 @@ export default class WebXRLocomotion {
 
         this._snapCooldown = 0;
         this._teleportCooldown = 0;
-        this._prevLeftGrip = false;
+        this._prevRightJump = false;
 
         this._tmpOrigin = new THREE.Vector3();
         this._tmpDir = new THREE.Vector3();
@@ -281,10 +281,10 @@ export default class WebXRLocomotion {
         this._updateStickFeedback(session, inp);
         this._maybeSnapTurn(inp.snapX);
 
-        if (inp.leftGrip && !this._prevLeftGrip) {
+        if (inp.rightJump && !this._prevRightJump) {
             this.characterController.triggerJump();
         }
-        this._prevLeftGrip = inp.leftGrip;
+        this._prevRightJump = inp.rightJump;
     }
 
     /**
@@ -384,20 +384,20 @@ export default class WebXRLocomotion {
             }
         }
 
-        let leftGrip = false;
+        let rightJump = false;
         for (const entry of sources) {
-            if (entry.src.handedness === 'left') {
-                const b1 = entry.gp.buttons[1];
-                leftGrip = !!(b1 && b1.pressed);
+            if (entry.src.handedness === 'right') {
+                const aBtn = entry.gp.buttons[4];
+                rightJump = !!(aBtn && aBtn.pressed);
                 break;
             }
         }
-        if (!leftGrip && sources.length === 1) {
-            const b1 = sources[0].gp.buttons[1];
-            leftGrip = !!(b1 && b1.pressed);
+        if (!rightJump && sources.length === 1) {
+            const aBtn = sources[0].gp.buttons[4];
+            rightJump = !!(aBtn && aBtn.pressed);
         }
 
-        return { moveX, moveY, moveMag, snapX, leftGrip, rawHypot, axisTag, hasMoveGamepad, sourceCount };
+        return { moveX, moveY, moveMag, snapX, rightJump, rawHypot, axisTag, hasMoveGamepad, sourceCount };
     }
 
     _maybeSnapTurn(snapX) {

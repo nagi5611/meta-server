@@ -90,7 +90,7 @@ export class WebXrMovementDelegate {
 
         this._rigQuat.setFromAxisAngle(this._up, this.rigYaw);
         const moveFwd = this._moveFwd.copy(headFwd).applyQuaternion(this._rigQuat);
-        const moveRight = this._moveRight.crossVectors(this._up, moveFwd).normalize();
+        const moveRight = this._moveRight.crossVectors(moveFwd, this._up).normalize();
 
         const useMove = this.moveVector.x !== 0 || this.moveVector.y !== 0;
         if (useMove) {
