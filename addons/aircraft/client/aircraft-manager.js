@@ -23,6 +23,7 @@ const BOARD_ERROR_JA = {
     busy: 'すでに他のプレイヤーが操縦しています。',
     no_player: 'サーバーにプレイヤーが登録されていません。再接続してください。',
     mobile_hard_only: 'Hard 操縦モードはモバイルでは利用できません。PC でお試しください。',
+};
 
 /**
  * @typedef {object} AircraftSlot
