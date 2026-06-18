@@ -55,6 +55,18 @@ export default class AircraftControllerEasy {
             rollR: false,
             brake: false,
         };
+        /** @type {AircraftControllerEasy['keys']} モバイル操縦 UI からのタッチ入力 */
+        this._touchKeys = {
+            forward: false,
+            back: false,
+            yawL: false,
+            yawR: false,
+            pitchUp: false,
+            pitchDn: false,
+            rollL: false,
+            rollR: false,
+            brake: false,
+        };
         this.cameraMode = 'cockpit';
         this.viewpointIndex = 0;
         this._onKeyDown = (e) => this._handleKey(e, true);
@@ -348,6 +360,50 @@ export default class AircraftControllerEasy {
         Object.keys(this.keys).forEach((k) => {
             this.keys[/** @type {keyof AircraftControllerEasy['keys']} */ (k)] = false;
         });
+        this._resetTouchInput();
+    }
+
+    _resetTouchInput() {
+        Object.keys(this._touchKeys).forEach((k) => {
+            this._touchKeys[/** @type {keyof AircraftControllerEasy['keys']} */ (k)] = false;
+        });
+    }
+
+    /**
+     * キー状態（キーボード OR タッチ）
+     * @param {keyof AircraftControllerEasy['keys']} name
+     * @returns {boolean}
+     */
+    _keyActive(name) {
+        return !!this.keys[name] || !!this._touchKeys[name];
+    }
+
+    /**
+     * モバイル操縦 UI からのタッチ入力をマージする（各軸は OR）
+     * @param {Partial<AircraftControllerEasy['keys']>} partialKeys
+     */
+    setTouchInput(partialKeys) {
+        if (!this.slot) return;
+        if (this._isInputActive()) return;
+        for (const [k, v] of Object.entries(partialKeys)) {
+            if (k in this._touchKeys) {
+                this._touchKeys[/** @type {keyof AircraftControllerEasy['keys']} */ (k)] = !!v;
+            }
+        }
+    }
+
+    /**
+     * pointer lock なしでもコックピット視線を更新（モバイルドラッグ用）
+     * @param {number} dx movementX 相当
+     * @param {number} dy movementY 相当
+     */
+    addPilotLookDelta(dx, dy) {
+        if (!this.slot) return;
+        if (this._isInputActive()) return;
+        this.pilotLookYaw -= dx * this._pilotMouseSensitivity;
+        this.pilotLookPitch -= dy * this._pilotMouseSensitivity;
+        const lim = Math.PI / 2 - 0.08;
+        this.pilotLookPitch = THREE.MathUtils.clamp(this.pilotLookPitch, -lim, lim);
     }
 
     /**
@@ -527,7 +583,7 @@ export default class AircraftControllerEasy {
     _updateLibraryVisuals(dt) {
         if (!this._libAnim?.blades?.length) return;
         const ph = this.physics;
-        const thrust = (this.keys.forward ? 1 : 0) - (this.keys.back ? 1 : 0);
+        const thrust = (this._keyActive('forward') ? 1 : 0) - (this._keyActive('back') ? 1 : 0);
         let t01 = thrust > 0 ? 1 : thrust < 0 ? 0.35 : 0;
         if (ph.maxSpeed > 0) {
             t01 = Math.max(t01, THREE.MathUtils.clamp(this.velocity.length() / ph.maxSpeed, 0, 1));
@@ -545,9 +601,9 @@ export default class AircraftControllerEasy {
         const root = this.slot.root;
         const dt = Math.min(0.1, deltaTime);
 
-        const yawIn = (this.keys.yawR ? 1 : 0) - (this.keys.yawL ? 1 : 0);
-        const pitchIn = (this.keys.pitchUp ? 1 : 0) - (this.keys.pitchDn ? 1 : 0);
-        const rollIn = (this.keys.rollL ? 1 : 0) - (this.keys.rollR ? 1 : 0);
+        const yawIn = (this._keyActive('yawR') ? 1 : 0) - (this._keyActive('yawL') ? 1 : 0);
+        const pitchIn = (this._keyActive('pitchUp') ? 1 : 0) - (this._keyActive('pitchDn') ? 1 : 0);
+        const rollIn = (this._keyActive('rollL') ? 1 : 0) - (this._keyActive('rollR') ? 1 : 0);
 
         const ph = this.physics;
         const dec = ph.angularDecel;
@@ -585,7 +641,7 @@ export default class AircraftControllerEasy {
         root.updateMatrixWorld(true);
         this._clampWorldBank(root);
 
-        const thrust = (this.keys.forward ? 1 : 0) - (this.keys.back ? 1 : 0);
+        const thrust = (this._keyActive('forward') ? 1 : 0) - (this._keyActive('back') ? 1 : 0);
         root.getWorldQuaternion(this._worldQuat);
         this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
         if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
@@ -689,7 +745,7 @@ export default class AircraftControllerEasy {
                     hx /= lenH;
                     hz /= lenH;
                     let fwdSpeed = this.velocity.x * hx + this.velocity.z * hz;
-                    if (this.keys.brake) {
+                    if (this._keyActive('brake')) {
                         const step = ph.wheelBrakeDecel * dt;
                         const mag = Math.abs(fwdSpeed);
                         if (mag > 0) {

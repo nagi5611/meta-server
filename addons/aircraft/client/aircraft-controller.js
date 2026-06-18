@@ -176,6 +176,27 @@ export default class AircraftController {
     }
 
     /**
+     * Easy 操縦向けタッチ入力（Hard では no-op）
+     * @param {Record<string, boolean>} partialKeys
+     */
+    setTouchInput(partialKeys) {
+        if (this._active === this._easy) {
+            this._easy.setTouchInput(partialKeys);
+        }
+    }
+
+    /**
+     * Easy 操縦向け視線デルタ（Hard では no-op）
+     * @param {number} dx
+     * @param {number} dy
+     */
+    addPilotLookDelta(dx, dy) {
+        if (this._active === this._easy) {
+            this._easy.addPilotLookDelta(dx, dy);
+        }
+    }
+
+    /**
      * @param {object|null|undefined} slot
      * @param {THREE.Vector3} [out]
      * @returns {THREE.Vector3|null}

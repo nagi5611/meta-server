@@ -668,6 +668,16 @@
         <button id="mobile-jump-btn" class="mobile-jump-btn" type="button" data-i18n-aria-label="mobile.jumpAria" aria-label="ジャンプ" data-i18n="mobile.jumpLabel">ジャンプ</button>
     </div>
 
+    <!-- モバイル Easy 飛行機操縦 UI（搭乗中のみ表示） -->
+    <div id="mobile-aircraft-controls" class="mobile-aircraft-controls" aria-hidden="true">
+        <div id="aircraft-camera-drag-layer" class="aircraft-camera-drag-layer" aria-hidden="true"></div>
+        <div id="aircraft-joystick-left-zone" class="aircraft-joystick-zone aircraft-joystick-left"></div>
+        <div id="aircraft-joystick-right-zone" class="aircraft-joystick-zone aircraft-joystick-right"></div>
+        <button id="aircraft-accel-btn" class="aircraft-thrust-btn aircraft-accel-btn" type="button" data-i18n="mobile.aircraftAccel">加速</button>
+        <button id="aircraft-decel-btn" class="aircraft-thrust-btn aircraft-decel-btn" type="button" data-i18n="mobile.aircraftDecel">減速</button>
+        <button id="aircraft-brake-btn" class="aircraft-thrust-btn aircraft-brake-btn" type="button" data-i18n="mobile.aircraftBrake">ブレーキ</button>
+    </div>
+
     <!-- 縦画面時オーバーレイ (横に回転してください) -->
     <div id="mobile-landscape-overlay" class="mobile-landscape-overlay" aria-hidden="true">
         <div class="mobile-landscape-message">

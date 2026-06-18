@@ -22,8 +22,7 @@ const BOARD_ERROR_JA = {
     invalid_slot: 'このワールドに飛行機が登録されていません（ID不一致）。',
     busy: 'すでに他のプレイヤーが操縦しています。',
     no_player: 'サーバーにプレイヤーが登録されていません。再接続してください。',
-    already_piloting: 'すでに別の飛行機を操縦しています。',
-};
+    mobile_hard_only: 'Hard 操縦モードはモバイルでは利用できません。PC でお試しください。',
 
 /**
  * @typedef {object} AircraftSlot
@@ -342,6 +341,14 @@ export default class AircraftManager {
 
     _notifyPilotingChange() {
         this.uiManager?.setMenuBarAircraftPiloting?.(this.isPiloting);
+        const isEasyPilotMobile =
+            this.isMobileMode
+            && this.isPiloting
+            && this.activeSlot?.controlMode === 'easy';
+        const inAircraftMobile =
+            this.isMobileMode && (this.isPiloting || this.isPassenger);
+        document.body.classList.toggle('aircraft-piloting-mobile', !!isEasyPilotMobile);
+        document.body.classList.toggle('aircraft-occupied-mobile', !!inAircraftMobile);
         try {
             this._onPilotingChange?.();
         } catch (_) { /* ignore */ }
@@ -415,7 +422,7 @@ export default class AircraftManager {
      * @param {THREE.Vector3} playerWorldFeet
      */
     updateProximity(playerWorldFeet) {
-        if (this.isPiloting || this.isPassenger || this.isMobileMode) {
+        if (this.isPiloting || this.isPassenger) {
             this.nearestSlot = null;
             return;
         }
@@ -474,9 +481,17 @@ export default class AircraftManager {
      * @returns {Promise<boolean>}
      */
     async tryBoardNearest() {
-        if (!this.nearestSlot || this.isPiloting || this.isPassenger || this.isMobileMode) return false;
+        if (!this.nearestSlot || this.isPiloting || this.isPassenger) return false;
         if (this.characterController.isExternalInputActive?.()) return false;
         const slot = this.nearestSlot;
+        if (
+            this.isMobileMode
+            && slot.controlMode !== 'easy'
+            && !this._slotHasOtherPilot(slot.id)
+        ) {
+            this._reportBoardFailure('mobile_hard_only');
+            return false;
+        }
         if (!slot?.id || !slot?.root) {
             this._reportBoardFailure('invalid_slot');
             return false;
@@ -822,10 +837,14 @@ export default class AircraftManager {
      * @returns {boolean}
      */
     canBoard() {
-        return !this.isMobileMode
-            && !this.characterController.isExternalInputActive?.()
-            && !!this.nearestSlot
-            && !this.isPiloting
-            && !this.isPassenger;
+        if (this.characterController.isExternalInputActive?.()) return false;
+        if (!this.nearestSlot || this.isPiloting || this.isPassenger) return false;
+        if (this.isMobileMode) {
+            const slot = this.nearestSlot;
+            if (slot.controlMode !== 'easy' && !this._slotHasOtherPilot(slot.id)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

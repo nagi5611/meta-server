@@ -441,7 +441,14 @@ class MetaverseApp {
             this.characterController.setMobileMode(nowMobile);
             if (this.aircraftManager) this.aircraftManager.setMobileMode(nowMobile);
             if (nowMobile) {
-                MobileJoystickManager.init(this.characterController);
+                if (
+                    this.aircraftManager?.isPiloting
+                    && this.aircraftManager.activeSlot?.controlMode === 'easy'
+                ) {
+                    this.syncMobileAircraftControls?.();
+                } else if (!this.aircraftManager?.isPiloting && !this.aircraftManager?.isPassenger) {
+                    MobileJoystickManager.init(this.characterController);
+                }
                 MobileUIManager.init();
                 if (!this.chatManager.isMinimized) this.chatManager.toggleMinimize();
             } else {
@@ -498,7 +505,10 @@ class MetaverseApp {
             this.playerManager.setLocalPlayerAircraftPilotGhostMode(!!isPilot);
             this.playerManager.setAircraftPilotViewGhostRemotes(!!isPilot);
         };
-        this.aircraftManager?.setOnPilotingChange?.(() => this.refreshLocalAvatarVisibility());
+        this.aircraftManager?.setOnPilotingChange?.(() => {
+            this.refreshLocalAvatarVisibility();
+            this.syncMobileAircraftControls?.();
+        });
 
         this.characterController.setViewMode(this.menuManager.settings.viewMode || 'third');
         this.refreshLocalAvatarVisibility();
@@ -1127,6 +1137,10 @@ class MetaverseApp {
             } else if (this.aircraftManager && (this.aircraftManager.isPiloting || this.aircraftManager.isPassenger)) {
                 this.uiManager.hideTeleportPrompt();
                 this.uiManager.hideAircraftBoardPrompt();
+                if (this.isMobileMode) {
+                    this.uiManager.hideMobileInteractButton();
+                    this.uiManager.setMobileInteractAction(null);
+                }
             } else if (this.teleportManager && this.teleportManager.nearestTaikoZone) {
                 this.uiManager.hideAircraftBoardPrompt();
                 this.uiManager.showTaikoPrompt();
@@ -1145,13 +1159,36 @@ class MetaverseApp {
                 this.uiManager.showTeleportPrompt(this.teleportManager.nearestZone.label);
             } else if (this.aircraftManager && this.aircraftManager.nearestSlot) {
                 this.uiManager.hideTeleportPrompt();
-                this.uiManager.showAircraftBoardPrompt(
-                    this.aircraftManager.nearestSlot.label,
-                    this.aircraftManager.getNearestBoardingUiMode()
-                );
+                if (this.isMobileMode) {
+                    const slot = this.aircraftManager.nearestSlot;
+                    const uiMode = this.aircraftManager.getNearestBoardingUiMode();
+                    const canBoardMobile =
+                        uiMode === 'passenger' || slot.controlMode === 'easy';
+                    if (canBoardMobile && this.aircraftManager.canBoard()) {
+                        this.uiManager.showMobileInteractButton(slot.label);
+                        this.uiManager.setMobileInteractAction(() => {
+                            void this.aircraftManager.tryBoardNearest();
+                        });
+                    } else {
+                        this.uiManager.hideMobileInteractButton();
+                        this.uiManager.setMobileInteractAction(null);
+                    }
+                    this.uiManager.hideAircraftBoardPrompt();
+                } else {
+                    this.uiManager.hideMobileInteractButton();
+                    this.uiManager.setMobileInteractAction(null);
+                    this.uiManager.showAircraftBoardPrompt(
+                        this.aircraftManager.nearestSlot.label,
+                        this.aircraftManager.getNearestBoardingUiMode()
+                    );
+                }
             } else {
                 this.uiManager.hideTeleportPrompt();
                 this.uiManager.hideAircraftBoardPrompt();
+                if (this.isMobileMode) {
+                    this.uiManager.hideMobileInteractButton();
+                    this.uiManager.setMobileInteractAction(null);
+                }
             }
         }
 

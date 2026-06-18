@@ -59,6 +59,16 @@
 
 管理「飛行機」タブで **ZIP アップロード前に Hard/Easy を宣言**し、パラメータ・視点は Hard/Easy サブタブでそれぞれ編集します。API 応答の `flightPhysics` / `camera` は `controlMode` に対応するアクティブ側のエイリアスです。
 
+### モバイル Easy 操縦 UI
+
+スマートフォン等（768px 以下 / 高さ 600px 以下）では **Easy 操縦モード** の飛行機のみ搭乗・操縦できます。
+
+- 機体近接時: 既存の `mobile-interact-btn` で搭乗（Hard 機体の操縦搭乗は拒否、同乗は可）
+- 操縦中: `#mobile-aircraft-controls`（左右スティック・加速/減速/ブレーキ・中央ドラッグ視線）を表示し、歩行用 `#mobile-controls` は非表示
+- Hard 操縦: **PC 推奨**（モバイルでは操縦搭乗不可）
+
+詳細は [`docs/mobile-aircraft-easy-controls-plan.md`](../../docs/mobile-aircraft-easy-controls-plan.md) を参照。
+
 ### worlds.json の例
 
 ```json
@@ -106,4 +116,6 @@ Blender 側で **オブジェクト名をユニークに**し、階層パス（�
 
 ## 手動回帰観点（要約）
 
-搭乗・離脱、二重搭乗拒否、切断・ワールド変更・管理 tp での機体解放、リモート機体姿勢、モバイルで搭乗プロンプト非表示、テレポート E キーと搭乗の競合。v1.1 追加: prefab+aircraft 併用ワールドの読込、ライブラリ API、管理「飛行機」ZIP→ビューア→保存→ゲーム内プロペラ表示。
+搭乗・離脱、二重搭乗拒否、切断・ワールド変更・管理 tp での機体解放、リモート機体姿勢、テレポート E キーと搭乗の競合。v1.1 追加: prefab+aircraft 併用ワールドの読込、ライブラリ API、管理「飛行機」ZIP→ビューア→保存→ゲーム内プロペラ表示。
+
+モバイル追加: Easy 機体のインタラクトボタン搭乗、操縦 UI と歩行 UI の切替、Hard 機体のモバイル操縦搭乗拒否、降機後ジョイスティック復帰、HUD/ミニマップとスティックの非干渉（`body.aircraft-piloting-mobile`）。

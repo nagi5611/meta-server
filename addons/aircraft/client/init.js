@@ -2,6 +2,8 @@
 
 import AircraftController from './aircraft-controller.js';
 import AircraftManager from './aircraft-manager.js';
+import MobileAircraftControls from '../../../public/js/mobile-aircraft-controls.js';
+import MobileJoystickManager from '../../../public/js/mobile-joystick-manager.js';
 
 /**
  * エアークラフトのコントローラ・マネージャを生成し UI / ネットワークと結線する。
@@ -76,4 +78,26 @@ export async function initAircraftSubsystem(app) {
         ),
         onReleased: (slotId) => app.aircraftManager.onAircraftReleased(slotId)
     });
+
+    /**
+     * Easy 操縦中のモバイル UI と歩行ジョイスティックの切り替え
+     */
+    app.syncMobileAircraftControls = () => {
+        if (!app.isMobileMode || !app.aircraftManager) return;
+        const mgr = app.aircraftManager;
+        const isEasyPilot = mgr.isPiloting && mgr.activeSlot?.controlMode === 'easy';
+
+        if (isEasyPilot) {
+            MobileJoystickManager.destroy();
+            MobileAircraftControls.show();
+            MobileAircraftControls.init(app.aircraftController);
+            return;
+        }
+
+        MobileAircraftControls.hide();
+        MobileAircraftControls.destroy();
+        if (!mgr.isPiloting && !mgr.isPassenger) {
+            MobileJoystickManager.init(app.characterController);
+        }
+    };
 }

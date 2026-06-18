@@ -408,6 +408,10 @@ export const METAVERSE_STRINGS = {
     'mobile.interact': { ja: 'インタラクト', en: 'Interact', zh: '交互' },
     'mobile.jumpAria': { ja: 'ジャンプ', en: 'Jump', zh: '跳跃' },
     'mobile.jumpLabel': { ja: 'ジャンプ', en: 'Jump', zh: '跳跃' },
+    'mobile.aircraftAccel': { ja: '加速', en: 'Accel', zh: '加速' },
+    'mobile.aircraftDecel': { ja: '減速', en: 'Decel', zh: '减速' },
+    'mobile.aircraftBrake': { ja: 'ブレーキ', en: 'Brake', zh: '刹车' },
+    'mobile.aircraftBoard': { ja: '搭乗', en: 'Board', zh: '登机' },
     'mobile.landscape': { ja: '横に回転してください', en: 'Please rotate to landscape', zh: '请横屏使用' },
 
     'ui.teleportPrefix': { ja: 'テレポート - ', en: 'Teleport - ', zh: '传送 - ' },

@@ -754,6 +754,30 @@ body {
         max-width: calc(100vw - 20px);
     }
 
+    /* Easy 操縦中: HUD を上部へ（スティックと非干渉） */
+    body.aircraft-piloting-mobile #aircraft-hud.is-easy {
+        left: 50%;
+        top: calc(8px + env(safe-area-inset-top, 0px));
+        bottom: auto;
+        transform: translateX(-50%);
+    }
+
+    body.aircraft-piloting-mobile .aircraft-minimap {
+        left: 10px;
+        right: auto;
+        top: calc(72px + env(safe-area-inset-top, 0px));
+        bottom: auto;
+        width: 160px;
+        height: 160px;
+    }
+
+    body.aircraft-piloting-mobile .aircraft-minimap-3d,
+    body.aircraft-piloting-mobile .aircraft-minimap-overlay,
+    body.aircraft-piloting-mobile .aircraft-minimap-canvas {
+        width: 160px;
+        height: 160px;
+    }
+
     #aircraft-hud .aircraft-hud-easy-panel {
         padding: 8px 12px;
         min-width: min(100%, calc(100vw - 20px));
@@ -2450,6 +2474,7 @@ a.admin-menu-link:hover {
 
 /* モバイル用要素 (768px超過時は非表示) */
 .mobile-controls,
+.mobile-aircraft-controls,
 .mobile-info,
 .mobile-menu-toggle,
 .mobile-landscape-overlay {
@@ -2648,6 +2673,99 @@ a.admin-menu-link:hover {
 
     .mobile-jump-btn:active {
         transform: scale(0.95);
+    }
+
+    /* Easy 飛行機操縦 UI */
+    .mobile-aircraft-controls {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 900;
+    }
+
+    .mobile-aircraft-controls > * {
+        pointer-events: auto;
+    }
+
+    .mobile-aircraft-controls[aria-hidden="true"] {
+        display: none !important;
+    }
+
+    .mobile-aircraft-controls[aria-hidden="false"] {
+        display: block !important;
+    }
+
+    body.aircraft-occupied-mobile #mobile-controls {
+        display: none !important;
+    }
+
+    .aircraft-camera-drag-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        touch-action: none;
+        pointer-events: auto;
+    }
+
+    .aircraft-joystick-zone {
+        position: fixed;
+        width: 140px;
+        height: 140px;
+        bottom: calc(30px + env(safe-area-inset-bottom, 0px));
+        touch-action: none;
+        z-index: 10;
+    }
+
+    .aircraft-joystick-left {
+        left: calc(40px + env(safe-area-inset-left, 0px));
+    }
+
+    .aircraft-joystick-right {
+        right: calc(40px + env(safe-area-inset-right, 0px));
+    }
+
+    .aircraft-thrust-btn {
+        position: fixed;
+        bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+        min-width: 72px;
+        height: 52px;
+        padding: 0 12px;
+        border: 2px solid rgba(255, 255, 255, 0.7);
+        border-radius: 26px;
+        background: rgba(0, 0, 0, 0.45);
+        color: #fff;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        z-index: 12;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        backdrop-filter: blur(6px);
+    }
+
+    .aircraft-thrust-btn:active {
+        transform: scale(0.96);
+    }
+
+    .aircraft-accel-btn {
+        left: calc(168px + env(safe-area-inset-left, 0px));
+        border-color: #00c853;
+        background: rgba(0, 200, 83, 0.75);
+        color: #000;
+        min-width: 80px;
+        height: 56px;
+        font-size: 15px;
+    }
+
+    .aircraft-decel-btn {
+        left: calc(258px + env(safe-area-inset-left, 0px));
+    }
+
+    .aircraft-brake-btn {
+        right: calc(168px + env(safe-area-inset-right, 0px));
+        border-color: #e53935;
+        background: rgba(229, 57, 53, 0.85);
+        color: #fff;
     }
 
     /* チャット: 初期 minimized、左上・infoの下、半透明 */
