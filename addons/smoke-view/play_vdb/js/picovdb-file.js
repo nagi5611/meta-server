@@ -53,6 +53,21 @@ export class PicoVDBFile {
             );
         }
 
+        if (this.header.gridCount === 0) {
+            throw new Error(
+                'PicoVDB にグリッドがありません（gridCount=0）。'
+                + ' nvdb→pvdb 変換が空出力の可能性があります。'
+                + ' convert.mjs で .nvdb を再変換してください。',
+            );
+        }
+
+        if (buffer.byteLength < PICOVDB_FILE_HEADER_SIZE + this.header.gridCount * PICOVDB_GRID_SIZE) {
+            throw new Error(
+                `PicoVDB ファイルが短すぎます（${buffer.byteLength} bytes）。`
+                + ' 破損または未完了の変換の可能性があります。',
+            );
+        }
+
         this.gridsBuffer = new Uint8Array(buffer, offset, this.header.gridCount * PICOVDB_GRID_SIZE);
         offset += this.header.gridCount * PICOVDB_GRID_SIZE;
 
@@ -148,6 +163,9 @@ export async function parsePicoVDBFromBuffer(buffer, options = {}) {
  * @returns {{ translation: number[], scale: number }}
  */
 export function computeAutoTransform(file) {
+    if (file.header.gridCount === 0) {
+        throw new Error('PicoVDB にグリッドがありません（gridCount=0）');
+    }
     const grid = file.getGrid(0);
     const sx = grid.indexBoundsMax[0] - grid.indexBoundsMin[0];
     const sy = grid.indexBoundsMax[1] - grid.indexBoundsMin[1];
