@@ -185,13 +185,14 @@ fn generate_camera_ray(screen_coord: vec2f, screen_size: vec2f) -> Ray {
 fn get_material(hit: Intersection, obj: Object) -> Material {
     switch obj.material_index {
         case 0u: {
-            return Material(vec3f(0.0, 0.1, 1.0), 0.0, 0.0, 0.1, array(0,0));
+            // Smoke / PicoVDB volume — dark matte gray
+            return Material(vec3f(0.20, 0.18, 0.16), 0.95, 0.0, 0.92, array(0, 0));
         }
         case 1u: {
-            return Material(vec3f(0.2, 0.2, 0.2), 1.0, 1.0, 1.0, array(0,0));
+            return Material(vec3f(0.2, 0.2, 0.2), 1.0, 1.0, 1.0, array(0, 0));
         }
         default: {
-            return Material(vec3f(0.0, 0.0, 0.0), 0, 0, 0, array(0,0));
+            return Material(vec3f(0.0, 0.0, 0.0), 0, 0, 0, array(0, 0));
         }
     }
 }
@@ -290,15 +291,23 @@ fn computeColor(ray: Ray, hit: Intersection) -> vec3f {
     let ambient = (kD * diffuse + specular) * ao;
 
     var color = ambient + lo;
-    if hit.distance > 10 {
-        color = applyFog(color, hit.distance-10, ray.direction, 0.01);
+
+    // PicoVDB smoke: reduce sky wash-out and push toward dense dark gray
+    if obj.object_type == OBJECT_TYPE_VDB {
+        let smokeDense = albedo * 0.28;
+        color = mix(color, smokeDense, 0.55);
+        color *= 1.4;
+    }
+
+    if hit.distance > 10 && obj.object_type != OBJECT_TYPE_VDB {
+        color = applyFog(color, hit.distance - 10, ray.direction, 0.01);
     }
     return color;
 }
 
 // toneMapping implements ACES
 fn toneMapping(color: vec3f) -> vec3f {
-    let exposure = 0.05; // Tuneable
+    let exposure = 0.09; // Smoke visibility (was 0.05)
     let exposed = color * exposure;
     let a = 2.51;
     let b = 0.03;
