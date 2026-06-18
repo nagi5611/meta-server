@@ -23,7 +23,7 @@ struct PicoVDBGrid {
   leafStart: u32,     // Index into leaves array (4 bytes)
   dataStart: u32,     // 16-byte index into data buffer (4 bytes)
   dataElemCount: u32, // Number of data elements for this grid (4 bytes)
-  gridType: u32,      // GRID_TYPE_SDF_FLOAT=1, GRID_TYPE_SDF_UINT8=2 (4 bytes)
+  gridType: u32,      // GRID_TYPE_SDF_FLOAT=1, GRID_TYPE_SDF_UINT8=2, GRID_TYPE_FOG_FLOAT=3 (4 bytes)
   _pad1: u32,
   indexBoundsMin: vec3i, // Index min (12 bytes)
   _pad2: u32,
@@ -33,6 +33,7 @@ struct PicoVDBGrid {
 
 const GRID_TYPE_SDF_FLOAT = 1;
 const GRID_TYPE_SDF_UINT8 = 2;
+const GRID_TYPE_FOG_FLOAT = 3;
 
 // https://webgpufundamentals.org/webgpu/lessons/resources/wgsl-offset-computer.html
 
