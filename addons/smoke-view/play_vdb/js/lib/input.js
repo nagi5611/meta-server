@@ -41,7 +41,12 @@ export function createInputHandler(window, canvas) {
 
     canvas.style.touchAction = 'none';
 
+    canvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+    });
+
     canvas.addEventListener('pointerdown', (e) => {
+        if (e.button === 2) e.preventDefault();
         canvas.setPointerCapture(e.pointerId);
         pointers.set(e.pointerId, e);
         if (pointers.size === 2) {
@@ -85,13 +90,15 @@ export function createInputHandler(window, canvas) {
         } else if (pointers.size === 1) {
             analog.x += mdx;
             analog.y += mdy;
-            analog.panning = (e.buttons & 4) !== 0 || isAlt;
+            // 2: 右ボタン（パン）, 4: 中ボタン, Alt+左: パン
+            analog.panning = (e.buttons & 2) !== 0 || (e.buttons & 4) !== 0 || isAlt;
         }
     });
 
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
-        analog.zoom -= Math.sign(e.deltaY);
+        // deltaY > 0: ズームアウト / < 0: ズームイン
+        analog.zoom -= e.deltaY * 0.002;
     }, { passive: false });
 
     return () => {
