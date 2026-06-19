@@ -71,7 +71,7 @@ struct Material { // 32
 @group(1) @binding(5) var<storage> picovdb_buffer: array<u32>;
 
 // --- Bind group 2: pass ---
-@group(2) @binding(0) var output_texture: texture_storage_2d<rgba8unorm, write>;
+@group(2) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;
 
 const MAX_DIST: f32 = 1e7;
 

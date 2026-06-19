@@ -18,6 +18,8 @@ const OBJECT_COUNT = 2;
 const FOV = (2 * Math.PI) / 5;
 const INPUT_BYTE_LENGTH = 96;
 const TAA_SETTINGS_BYTE_LENGTH = 16;
+/** Float render targets for compute + TAA (compatible with texture_2d<f32> / textureLoad). */
+const RENDER_TEXTURE_FORMAT = 'rgba16float';
 
 /**
  * @param {string} path
@@ -147,7 +149,7 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
         entries: [{
             binding: 0,
             visibility: GPUShaderStage.COMPUTE,
-            storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' },
+            storageTexture: { access: 'write-only', format: RENDER_TEXTURE_FORMAT, viewDimension: '2d' },
         }],
     });
 
@@ -163,6 +165,13 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
     });
 
     const taaShaderModule = device.createShaderModule({ label: 'TAA shader', code: taaWgsl });
+    const taaShaderInfo = await taaShaderModule.getCompilationInfo();
+    for (const message of taaShaderInfo.messages) {
+        if (message.type === 'error') {
+            throw new Error(`TAA シェーダーエラー L${message.lineNum}: ${message.message}`);
+        }
+    }
+
     const taaBindGroupLayout = device.createBindGroupLayout({
         label: 'TAA Bind Group Layout',
         entries: [
@@ -171,7 +180,7 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
             {
                 binding: 2,
                 visibility: GPUShaderStage.COMPUTE,
-                storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' },
+                storageTexture: { access: 'write-only', format: RENDER_TEXTURE_FORMAT, viewDimension: '2d' },
             },
             { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
         ],
@@ -387,21 +396,21 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
 
         raytracedTexture = device.createTexture({
             size: [width, height],
-            format: 'rgba8unorm',
+            format: RENDER_TEXTURE_FORMAT,
             usage: textureUsage,
         });
 
         taaHistoryTexture = device.createTexture({
             label: 'TAA history',
             size: [width, height],
-            format: 'rgba8unorm',
+            format: RENDER_TEXTURE_FORMAT,
             usage: textureUsage,
         });
 
         taaResolvedTexture = device.createTexture({
             label: 'TAA resolved',
             size: [width, height],
-            format: 'rgba8unorm',
+            format: RENDER_TEXTURE_FORMAT,
             usage: textureUsage,
         });
 

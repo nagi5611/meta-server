@@ -4,12 +4,12 @@ struct TaaSettings {
     _pad: vec2f,
 }
 
-@group(0) @binding(0) var current_tex: texture_2d<unorm>;
-@group(0) @binding(1) var history_tex: texture_2d<unorm>;
-@group(0) @binding(2) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(0) var current_tex: texture_2d<f32>;
+@group(0) @binding(1) var history_tex: texture_2d<f32>;
+@group(0) @binding(2) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(3) var<uniform> taa_settings: TaaSettings;
 
-fn load_rgb(tex: texture_2d<unorm>, coord: vec2i, dims: vec2u) -> vec3f {
+fn load_rgb(tex: texture_2d<f32>, coord: vec2i, dims: vec2u) -> vec3f {
     let clamped = clamp(coord, vec2i(0), vec2i(dims) - vec2i(1));
     return textureLoad(tex, clamped, 0).rgb;
 }
