@@ -166,8 +166,8 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
     const taaBindGroupLayout = device.createBindGroupLayout({
         label: 'TAA Bind Group Layout',
         entries: [
-            { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
-            { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+            { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float' } },
+            { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float' } },
             {
                 binding: 2,
                 visibility: GPUShaderStage.COMPUTE,

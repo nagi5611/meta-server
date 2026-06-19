@@ -28,7 +28,7 @@
  *   msaaSamples: number,
  * }} ShaderSettings */
 
-export const RENDER_SETTINGS_BYTE_LENGTH = 104;
+export const RENDER_SETTINGS_BYTE_LENGTH = 112;
 export const MSAA_SAMPLE_OPTIONS = [1, 2, 4];
 
 /** @type {Record<VolumeMode, number>} */
