@@ -1,6 +1,7 @@
 // addons/smoke-view/play_vdb/js/main.js — Play_VDB エントリ
 import { parsePicoVDBFromBuffer, computeAutoTransform } from './picovdb-file.js';
 import { createPlayVdbRenderer } from './renderer.js';
+import { createShaderControls } from './shader-controls.js';
 
 const statusEl = document.getElementById('play-vdb-status');
 const infoEl = document.getElementById('play-vdb-info');
@@ -9,6 +10,7 @@ const errorEl = document.getElementById('play-vdb-error');
 const fileInput = document.getElementById('play-vdb-file-input');
 const openBtn = document.getElementById('play-vdb-open-btn');
 const resetBtn = document.getElementById('play-vdb-reset-camera');
+const shaderControlsEl = document.getElementById('play-vdb-shader-controls');
 const canvas = document.getElementById('play-vdb-canvas');
 
 /**
@@ -58,6 +60,13 @@ async function init() {
         setStatus('初期化失敗');
         console.error('[play_vdb] init failed:', err);
         return;
+    }
+
+    if (shaderControlsEl) {
+        createShaderControls(shaderControlsEl, {
+            getSettings: () => renderer.getShaderSettings(),
+            setSettings: (partial) => renderer.setShaderSettings(partial),
+        });
     }
 
     openBtn?.addEventListener('click', () => fileInput?.click());

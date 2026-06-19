@@ -27,27 +27,193 @@ const BUNDLED_ZIG_DIRS = [
 function parseArgs(argv) {
     const positional = [];
     let gzip = false;
+    let recursive = false;
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--gzip' || a === '-z') {
             gzip = true;
             continue;
         }
+        if (a === '--recursive' || a === '-r') {
+            recursive = true;
+            continue;
+        }
         if (a === '--help' || a === '-h') {
-            return { help: true, gzip, positional };
+            return { help: true, gzip, recursive, positional };
         }
         positional.push(a);
     }
-    return { help: false, gzip, positional };
+    return { help: false, gzip, recursive, positional };
+}
+
+/**
+ * @param {string} globBase
+ * @returns {RegExp}
+ */
+function globBaseToRegExp(globBase) {
+    let re = '^';
+    for (let i = 0; i < globBase.length; i++) {
+        const ch = globBase[i];
+        if (ch === '*') {
+            re += '.*';
+            continue;
+        }
+        if (ch === '?') {
+            re += '.';
+            continue;
+        }
+        if ('\\^$+.|()[]{}'.includes(ch)) {
+            re += `\\${ch}`;
+            continue;
+        }
+        re += ch;
+    }
+    re += '$';
+    return new RegExp(re, 'i');
+}
+
+/**
+ * @param {string} filePath
+ * @returns {boolean}
+ */
+function isNvdbFile(filePath) {
+    return filePath.toLowerCase().endsWith('.nvdb');
+}
+
+/**
+ * @param {string} dir
+ * @param {boolean} recursive
+ * @returns {string[]}
+ */
+function listNvdbInDirectory(dir, recursive) {
+    /** @type {string[]} */
+    const found = [];
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isFile() && isNvdbFile(entry.name)) {
+            found.push(full);
+            continue;
+        }
+        if (recursive && entry.isDirectory()) {
+            found.push(...listNvdbInDirectory(full, true));
+        }
+    }
+    return found.sort();
+}
+
+/**
+ * @param {string} inputSpec
+ * @param {boolean} recursive
+ * @returns {string[]}
+ */
+function resolveInputFiles(inputSpec, recursive) {
+    const resolved = path.resolve(inputSpec);
+    const base = path.basename(resolved);
+    const hasGlob = /[*?[]/.test(base);
+
+    if (!hasGlob && fs.existsSync(resolved)) {
+        const st = fs.statSync(resolved);
+        if (st.isDirectory()) {
+            return listNvdbInDirectory(resolved, recursive);
+        }
+        if (st.isFile()) {
+            return [resolved];
+        }
+    }
+
+    if (hasGlob) {
+        const dir = path.dirname(resolved);
+        if (!fs.existsSync(dir)) {
+            return [];
+        }
+        const re = globBaseToRegExp(base);
+        return fs.readdirSync(dir)
+            .filter((name) => re.test(name) && isNvdbFile(name))
+            .map((name) => path.join(dir, name))
+            .sort();
+    }
+
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+        return [resolved];
+    }
+
+    return [];
+}
+
+/**
+ * @param {string} outputSpec
+ * @returns {boolean}
+ */
+function outputSpecIsDirectory(outputSpec) {
+    if (outputSpec.endsWith(path.sep) || outputSpec.endsWith('/')) {
+        return true;
+    }
+    const resolved = path.resolve(outputSpec);
+    if (fs.existsSync(resolved)) {
+        return fs.statSync(resolved).isDirectory();
+    }
+    const base = path.basename(outputSpec);
+    if (/[*?[]/.test(base)) {
+        return false;
+    }
+    return !base.toLowerCase().endsWith('.pvdb') && !base.toLowerCase().endsWith('.pvdb.gz');
+}
+
+/**
+ * @param {string} inputFile
+ * @param {string | undefined} outputSpec
+ * @param {boolean} gzip
+ * @returns {string}
+ */
+function resolveOutputPath(inputFile, outputSpec, gzip) {
+    const inputBase = path.basename(inputFile, '.nvdb');
+    let out;
+
+    if (!outputSpec) {
+        out = path.join(path.dirname(inputFile), `${inputBase}.pvdb`);
+    } else if (/[*?[]/.test(path.basename(outputSpec))) {
+        const outDir = path.resolve(path.dirname(outputSpec));
+        out = path.join(outDir, `${inputBase}.pvdb`);
+    } else if (outputSpecIsDirectory(outputSpec)) {
+        out = path.join(path.resolve(outputSpec), `${inputBase}.pvdb`);
+    } else {
+        out = path.resolve(outputSpec);
+    }
+
+    if (gzip && !out.toLowerCase().endsWith('.gz')) {
+        out += '.gz';
+    }
+    return out;
+}
+
+/**
+ * @param {string} filePath
+ */
+function ensureParentDir(filePath) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
 function printHelp() {
-    console.log(`Usage: node convert.mjs [--gzip] <input.nvdb> <output.pvdb>
+    console.log(`Usage:
+  node convert.mjs [--gzip] <input> [output]
 
-Converts NanoVDB (.nvdb) to PicoVDB (.pvdb) using the vendored PicoVDB Zig tool.
+Single file:
+  node convert.mjs frame.nvdb frame.pvdb
+  node convert.mjs --gzip frame.nvdb frame.pvdb.gz
+
+Batch (directory or glob):
+  node convert.mjs ./nvdb_data
+  node convert.mjs ./nvdb_data ./pvdb_data
+  node convert.mjs ./nvdb_data/*.nvdb ./pvdb_data
+  node convert.mjs ./nvdb_data/*.nvdb ./*.pvdb
+
+  output omitted  → .pvdb next to each .nvdb
+  output is dir   → same basename under that directory (created if needed)
 
 Options:
   --gzip, -z   Write gzip-compressed output (appends .gz if missing)
+  --recursive  With a directory input, include .nvdb in subfolders
 
 Requires Zig 0.15.2 (bundled under addons/smoke-view/tools/zig-0.15.2/ or on PATH).
 Vendor: addons/smoke-view/vendor/picovdb @ tag 0.0.1
@@ -233,27 +399,39 @@ function gzipFile(pvdbPath, gzipPath) {
     }
 }
 
-const { help, gzip, positional } = parseArgs(process.argv.slice(2));
-if (help || positional.length < 2) {
+const { help, gzip, recursive, positional } = parseArgs(process.argv.slice(2));
+if (help || positional.length < 1) {
     printHelp();
     process.exit(help ? 0 : 1);
 }
 
-let [inputPath, outputPath] = positional;
-inputPath = path.resolve(inputPath);
-outputPath = path.resolve(outputPath);
+const inputSpec = positional[0];
+const outputSpec = positional[1];
 
-if (!inputPath.toLowerCase().endsWith('.nvdb')) {
-    console.warn('Warning: input does not end with .nvdb');
-}
-if (!fs.existsSync(inputPath)) {
-    console.error(`Error: input not found: ${inputPath}`);
+const inputFiles = resolveInputFiles(inputSpec, recursive);
+if (inputFiles.length === 0) {
+    console.error(`Error: no .nvdb files matched: ${inputSpec}`);
+    console.error('Use a file path, directory, or glob (e.g. nvdb_data/*.nvdb).');
     process.exit(1);
 }
 
-if (gzip && !outputPath.toLowerCase().endsWith('.gz')) {
-    outputPath += '.gz';
+if (inputFiles.length > 1 && outputSpec) {
+    const outBase = path.basename(outputSpec);
+    const outIsGlob = /[*?[]/.test(outBase);
+    if (!outIsGlob && !outputSpecIsDirectory(outputSpec)) {
+        console.error('Error: multiple inputs require an output directory or glob, not a single .pvdb file.');
+        console.error('Example: node convert.mjs nvdb_data/*.nvdb pvdb_data/');
+        process.exit(1);
+    }
 }
+
+/** @type {{ input: string, output: string }[]} */
+const jobs = inputFiles.map((inputFile) => ({
+    input: inputFile,
+    output: resolveOutputPath(inputFile, outputSpec, gzip),
+}));
+
+console.log(`Converting ${jobs.length} file(s)...`);
 
 if (fs.existsSync(PICOVDB_EXE)) {
     if (!ensurePicovdbBinary('')) {
@@ -267,14 +445,26 @@ if (fs.existsSync(PICOVDB_EXE)) {
     if (!ensurePicovdbBinary(zigExe)) process.exit(1);
 }
 
-const rawOut = gzip
-    ? outputPath.replace(/\.gz$/i, '')
-    : outputPath;
-
-if (!runConvert(inputPath, rawOut)) process.exit(1);
-
-if (gzip) {
-    gzipFile(rawOut, outputPath);
+let failed = 0;
+for (let i = 0; i < jobs.length; i++) {
+    const { input, output } = jobs[i];
+    if (jobs.length > 1) {
+        console.log(`\n[${i + 1}/${jobs.length}]`);
+    }
+    ensureParentDir(output);
+    const rawOut = gzip ? output.replace(/\.gz$/i, '') : output;
+    if (!runConvert(input, rawOut)) {
+        failed += 1;
+        continue;
+    }
+    if (gzip) {
+        gzipFile(rawOut, output);
+    }
 }
 
-console.log('Done.');
+if (failed > 0) {
+    console.error(`\nFailed: ${failed} / ${jobs.length}`);
+    process.exit(1);
+}
+
+console.log(jobs.length > 1 ? `\nDone. ${jobs.length} file(s) converted.` : 'Done.');

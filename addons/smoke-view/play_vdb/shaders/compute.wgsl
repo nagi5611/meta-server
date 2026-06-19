@@ -3,7 +3,26 @@ struct Input {
     fov_scale: f32, // tan(fov * 0.5)
     time_delta: f32,
     pixel_radius: f32, // Cone spread per unit distance: 1 / (resolution.y * focal_length)
-    debug_iterations: u32, // 0 = normal rendering, 1 = debug iteration heatmap
+    debug_iterations: u32, // legacy; use render_settings.debug_heatmap
+}
+
+struct RenderSettings {
+    exposure: f32,
+    gamma: f32,
+    smoke_roughness: f32,
+    smoke_dense_mix: f32,
+    smoke_color: vec3f,
+    smoke_darken_mult: f32,
+    smoke_brightness: f32,
+    fog_density: f32,
+    fog_start: f32,
+    sun_elevation: f32, // radians above horizon
+    sun_azimuth: f32,   // radians
+    turbidity: f32,
+    ground_roughness: f32,
+    ground_metallic: f32,
+    debug_heatmap: u32,
+    _pad: u32,
 }
 
 // --- Object types ---
@@ -32,6 +51,7 @@ struct Material { // 32
 @group(0) @binding(0) var<uniform> input: Input;
 @group(0) @binding(1) var<storage> objects: array<Object>;
 @group(0) @binding(2) var<storage, read> skyState: SkyState;
+@group(0) @binding(3) var<uniform> render_settings: RenderSettings;
 
 // -- Bind group 1: data ---
 @group(1) @binding(0) var<storage> picovdb_grids: array<PicoVDBGrid>;
@@ -185,11 +205,22 @@ fn generate_camera_ray(screen_coord: vec2f, screen_size: vec2f) -> Ray {
 fn get_material(hit: Intersection, obj: Object) -> Material {
     switch obj.material_index {
         case 0u: {
-            // Smoke / PicoVDB volume — dark matte gray
-            return Material(vec3f(0.20, 0.18, 0.16), 0.95, 0.0, 0.92, array(0, 0));
+            return Material(
+                render_settings.smoke_color,
+                0.95,
+                0.0,
+                render_settings.smoke_roughness,
+                array(0, 0),
+            );
         }
         case 1u: {
-            return Material(vec3f(0.2, 0.2, 0.2), 1.0, 1.0, 1.0, array(0, 0));
+            return Material(
+                vec3f(0.2, 0.2, 0.2),
+                1.0,
+                render_settings.ground_metallic,
+                render_settings.ground_roughness,
+                array(0, 0),
+            );
         }
         default: {
             return Material(vec3f(0.0, 0.0, 0.0), 0, 0, 0, array(0, 0));
@@ -294,21 +325,20 @@ fn computeColor(ray: Ray, hit: Intersection) -> vec3f {
 
     // PicoVDB smoke: reduce sky wash-out and push toward dense dark gray
     if obj.object_type == OBJECT_TYPE_VDB {
-        let smokeDense = albedo * 0.28;
-        color = mix(color, smokeDense, 0.55);
-        color *= 1.4;
+        let smokeDense = albedo * render_settings.smoke_darken_mult;
+        color = mix(color, smokeDense, render_settings.smoke_dense_mix);
+        color *= render_settings.smoke_brightness;
     }
 
-    if hit.distance > 10 && obj.object_type != OBJECT_TYPE_VDB {
-        color = applyFog(color, hit.distance - 10, ray.direction, 0.01);
+    if hit.distance > render_settings.fog_start && obj.object_type != OBJECT_TYPE_VDB {
+        color = applyFog(color, hit.distance - render_settings.fog_start, ray.direction, render_settings.fog_density);
     }
     return color;
 }
 
 // toneMapping implements ACES
 fn toneMapping(color: vec3f) -> vec3f {
-    let exposure = 0.09; // Smoke visibility (was 0.05)
-    let exposed = color * exposure;
+    let exposed = color * render_settings.exposure;
     let a = 2.51;
     let b = 0.03;
     let c = 2.43;
@@ -347,9 +377,10 @@ fn computeMain(@builtin(global_invocation_id) global_id: vec3u) {
     //}
 
     color = toneMapping(color);
-    color = pow(color, vec3f(1.0 / 2.2));  // Gamma correction
+    let invGamma = 1.0 / max(render_settings.gamma, 0.01);
+    color = pow(color, vec3f(invGamma));
 
-    if input.debug_iterations == 1u {
+    if render_settings.debug_heatmap == 1u {
         let heat = clamp(f32(iterations) / 128.0, 0.0, 1.0);
         color = vec3f(0.0, heat, 0.0);
     }

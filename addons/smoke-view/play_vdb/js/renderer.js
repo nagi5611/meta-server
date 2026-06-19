@@ -4,6 +4,12 @@ import { createOrbitCamera } from './lib/camera.js';
 import { createInputHandler } from './lib/input.js';
 import { createSkyState } from './lib/hw-skymodel.js';
 import { gridTypeLabel } from './picovdb-file.js';
+import {
+    createDefaultShaderSettings,
+    RENDER_SETTINGS_BYTE_LENGTH,
+    sunDirectionFromDegrees,
+    writeRenderSettingsBuffer,
+} from './shader-settings.js';
 
 const SHADER_BASE = '/play_vdb/shaders/';
 const OBJECT_STRUCT_SIZE = 144;
@@ -119,6 +125,7 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
             { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
             { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
             { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+            { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
         ],
     });
 
@@ -198,17 +205,14 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
     groundObjectView.transform.set(mat4.translation(vec3.create(0, 2, 0)));
     groundObjectView.transform_inverse.set(mat4.translation(vec3.create(0, -2, 0)));
 
-    const sunZenith = (30.0 * Math.PI) / 180;
-    const sunAzimuth = 0.0;
-    const sunDirection = vec3.create(
-        Math.sin(sunZenith) * Math.cos(sunAzimuth),
-        Math.cos(sunZenith),
-        -Math.sin(sunZenith) * Math.sin(sunAzimuth),
-    );
-    const skyState = createSkyState({
-        elevation: 0.5 * Math.PI - sunZenith,
-        turbidity: 2.0,
-        albedo: [0.3, 0.3, 0.3],
+    /** @type {import('./shader-settings.js').ShaderSettings} */
+    let shaderSettings = createDefaultShaderSettings();
+
+    const renderSettingsData = new ArrayBuffer(RENDER_SETTINGS_BYTE_LENGTH);
+    const renderSettingsBuffer = device.createBuffer({
+        label: 'Render Settings',
+        size: RENDER_SETTINGS_BYTE_LENGTH,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
     const skyStateData = new ArrayBuffer(144);
@@ -223,11 +227,32 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
         skyRadiances: new Float32Array(skyStateData, 120, 3),
         solarRadiances: new Float32Array(skyStateData, 132, 3),
     };
-    skyStateView.sunDirection.set(sunDirection);
-    skyStateView.params.set(skyState.params);
-    skyStateView.skyRadiances.set(skyState.skyRadiances);
-    skyStateView.solarRadiances.set(skyState.solarRadiances);
-    device.queue.writeBuffer(skyStateBuffer, 0, skyStateData);
+
+    /** Rebuild Hosek-Wilkie sky coefficients from shader settings. */
+    function updateSkyFromSettings() {
+        const elevation = (shaderSettings.sunElevationDeg * Math.PI) / 180;
+        const skyState = createSkyState({
+            elevation,
+            turbidity: shaderSettings.turbidity,
+            albedo: [0.3, 0.3, 0.3],
+        });
+        const [sx, sy, sz] = sunDirectionFromDegrees(
+            shaderSettings.sunElevationDeg,
+            shaderSettings.sunAzimuthDeg,
+        );
+        skyStateView.sunDirection.set([sx, sy, sz]);
+        skyStateView.params.set(skyState.params);
+        skyStateView.skyRadiances.set(skyState.skyRadiances);
+        skyStateView.solarRadiances.set(skyState.solarRadiances);
+    }
+
+    function uploadRenderSettings() {
+        writeRenderSettingsBuffer(renderSettingsData, shaderSettings);
+        device.queue.writeBuffer(renderSettingsBuffer, 0, renderSettingsData);
+    }
+
+    updateSkyFromSettings();
+    uploadRenderSettings();
 
     const inputHandler = createInputHandler(window, canvas);
     const initialCameraPosition = vec3.create(3, 2, 5);
@@ -307,6 +332,7 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
                 { binding: 0, resource: { buffer: inputBuffer } },
                 { binding: 1, resource: { buffer: objectsBuffer } },
                 { binding: 2, resource: { buffer: skyStateBuffer } },
+                { binding: 3, resource: { buffer: renderSettingsBuffer } },
             ],
         });
 
@@ -514,6 +540,31 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
     return {
         uploadPicoVDB,
         stopLoop,
+        getShaderSettings() {
+            return { ...shaderSettings, smokeColor: [...shaderSettings.smokeColor] };
+        },
+        /**
+         * @param {Partial<import('./shader-settings.js').ShaderSettings>} partial
+         */
+        setShaderSettings(partial) {
+            const prev = shaderSettings;
+            shaderSettings = {
+                ...shaderSettings,
+                ...partial,
+                smokeColor: partial.smokeColor
+                    ? /** @type {[number, number, number]} */ ([...partial.smokeColor])
+                    : shaderSettings.smokeColor,
+            };
+            uploadRenderSettings();
+            if (
+                prev.sunElevationDeg !== shaderSettings.sunElevationDeg
+                || prev.sunAzimuthDeg !== shaderSettings.sunAzimuthDeg
+                || prev.turbidity !== shaderSettings.turbidity
+            ) {
+                updateSkyFromSettings();
+            }
+            updateObjects();
+        },
         resetCamera() {
             camera = createOrbitCamera({
                 position: initialCameraPosition,
