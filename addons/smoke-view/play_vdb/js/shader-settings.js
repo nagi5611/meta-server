@@ -16,9 +16,23 @@
  *   groundRoughness: number,
  *   groundMetallic: number,
  *   debugHeatmap: boolean,
+ *   taaEnabled: boolean,
+ *   taaBlend: number,
+ *   msaaSamples: number,
  * }} ShaderSettings */
 
 export const RENDER_SETTINGS_BYTE_LENGTH = 80;
+export const MSAA_SAMPLE_OPTIONS = [1, 2, 4];
+
+/**
+ * @param {number} value
+ * @returns {1 | 2 | 4}
+ */
+export function snapMsaaSamples(value) {
+    return MSAA_SAMPLE_OPTIONS.reduce((best, option) => (
+        Math.abs(option - value) < Math.abs(best - value) ? option : best
+    ));
+}
 
 /** @returns {ShaderSettings} */
 export function createDefaultShaderSettings() {
@@ -38,6 +52,9 @@ export function createDefaultShaderSettings() {
         groundRoughness: 1,
         groundMetallic: 1,
         debugHeatmap: false,
+        taaEnabled: true,
+        taaBlend: 0.1,
+        msaaSamples: 1,
     };
 }
 
@@ -70,6 +87,8 @@ export const SHADER_SLIDER_DEFS = [
     { group: '大気', key: 'turbidity', label: '濁度', min: 1, max: 10, step: 0.1 },
     { group: '地面', key: 'groundRoughness', label: 'ラフネス', min: 0, max: 1, step: 0.01 },
     { group: '地面', key: 'groundMetallic', label: 'メタリック', min: 0, max: 1, step: 0.01 },
+    { group: 'アンチエイリアス', key: 'taaBlend', label: 'TAA ブレンド', min: 0.05, max: 0.5, step: 0.01 },
+    { group: 'アンチエイリアス', key: 'msaaSamples', label: 'MSAA サンプル', min: 1, max: 4, step: 1 },
 ];
 
 /**

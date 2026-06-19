@@ -1,5 +1,9 @@
 // addons/smoke-view/play_vdb/js/shader-controls.js — シェーダー設定スライダー UI
-import { createDefaultShaderSettings, SHADER_SLIDER_DEFS } from './shader-settings.js';
+import {
+    createDefaultShaderSettings,
+    SHADER_SLIDER_DEFS,
+    snapMsaaSamples,
+} from './shader-settings.js';
 
 /**
  * @param {HTMLElement} container
@@ -37,6 +41,18 @@ export function createShaderControls(container, api) {
     heatmapLabel.append(' HDDA イテレーション表示');
     container.appendChild(heatmapLabel);
     inputs.set('debugHeatmap', heatmapInput);
+
+    const taaLabel = document.createElement('label');
+    taaLabel.className = 'play-vdb-check';
+    const taaInput = document.createElement('input');
+    taaInput.type = 'checkbox';
+    taaInput.addEventListener('change', () => {
+        api.setSettings({ taaEnabled: taaInput.checked });
+    });
+    taaLabel.appendChild(taaInput);
+    taaLabel.append(' TAA 有効');
+    container.appendChild(taaLabel);
+    inputs.set('taaEnabled', taaInput);
 
     let currentGroup = '';
     let groupEl = null;
@@ -83,6 +99,11 @@ export function createShaderControls(container, api) {
             } else if (key === 'smokeColor') {
                 const s = api.getSettings();
                 api.setSettings({ smokeColor: [v, s.smokeColor[1], s.smokeColor[2]] });
+            } else if (key === 'msaaSamples') {
+                const snapped = snapMsaaSamples(v);
+                slider.value = String(snapped);
+                valueEl.textContent = String(snapped);
+                api.setSettings({ msaaSamples: snapped });
             } else {
                 api.setSettings({ [key]: v });
             }
@@ -111,6 +132,7 @@ export function createShaderControls(container, api) {
             if (def.key === 'smokeColor') v = s.smokeColor[0];
             else if (def.key === 'smokeColorG') v = s.smokeColor[1];
             else if (def.key === 'smokeColorB') v = s.smokeColor[2];
+            else if (def.key === 'msaaSamples') v = snapMsaaSamples(s.msaaSamples);
             else v = s[def.key];
             slider.value = String(v);
             const valueEl = slider.parentElement?.querySelector('.play-vdb-slider-value');
@@ -118,6 +140,8 @@ export function createShaderControls(container, api) {
         }
         const heatmap = inputs.get('debugHeatmap');
         if (heatmap) heatmap.checked = s.debugHeatmap;
+        const taa = inputs.get('taaEnabled');
+        if (taa) taa.checked = s.taaEnabled;
     }
 
     syncUIFromSettings();

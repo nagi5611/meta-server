@@ -4,6 +4,8 @@ struct Input {
     time_delta: f32,
     pixel_radius: f32, // Cone spread per unit distance: 1 / (resolution.y * focal_length)
     debug_iterations: u32, // legacy; use render_settings.debug_heatmap
+    frame_index: u32,
+    sample_count: u32,
 }
 
 struct RenderSettings {
@@ -352,11 +354,19 @@ fn computeMain(@builtin(global_invocation_id) global_id: vec3u) {
     let dims = textureDimensions(output_texture);
     if global_id.x >= dims.x || global_id.y >= dims.y { return; }
 
-    let ray = generate_camera_ray(vec2f(global_id.xy) + 0.5, vec2f(dims));
-    var iterations: u32;
-    let hit = intersect_scene(ray, &iterations);
+    let sample_count = max(input.sample_count, 1u);
+    var color = vec3f(0.0);
+    var iterations: u32 = 0u;
 
-    var color = computeColor(ray, hit);
+    for (var si = 0u; si < sample_count; si++) {
+        let jitter = halton23(input.frame_index * sample_count + si);
+        let ray = generate_camera_ray(vec2f(global_id.xy) + 0.5 + jitter, vec2f(dims));
+        var sample_iterations: u32 = 0u;
+        let hit = intersect_scene(ray, &sample_iterations);
+        iterations += sample_iterations;
+        color += computeColor(ray, hit);
+    }
+    color /= f32(sample_count);
 
     //// Fog volume compositing (HDR, before tone mapping)
     //for (var i = 0i; i < i32(arrayLength(&objects)); i++) {
@@ -439,6 +449,24 @@ fn radicalInverseVdC(bits: u32) -> f32 {
 
 fn hammersley(i: u32, n: u32) -> vec2f {
   return vec2f(f32(i) / f32(n), radicalInverseVdC(i));
+}
+
+// Halton low-discrepancy sequence for subpixel jitter (bases 2 and 3)
+fn halton(index: u32, base: u32) -> f32 {
+    var result = 0.0;
+    var f = 1.0;
+    var i = index;
+    loop {
+        if i == 0u { break; }
+        f /= f32(base);
+        result += f * f32(i % base);
+        i /= base;
+    }
+    return result;
+}
+
+fn halton23(index: u32) -> vec2f {
+    return vec2f(halton(index + 1u, 2u), halton(index + 1u, 3u)) - vec2f(0.5);
 }
 
 fn importanceSampleGGX(xi: vec2f, n: vec3f, roughness: f32) -> vec3f {

@@ -7,6 +7,7 @@ import { gridTypeLabel } from './picovdb-file.js';
 import {
     createDefaultShaderSettings,
     RENDER_SETTINGS_BYTE_LENGTH,
+    snapMsaaSamples,
     sunDirectionFromDegrees,
     writeRenderSettingsBuffer,
 } from './shader-settings.js';
@@ -15,6 +16,8 @@ const SHADER_BASE = '/play_vdb/shaders/';
 const OBJECT_STRUCT_SIZE = 144;
 const OBJECT_COUNT = 2;
 const FOV = (2 * Math.PI) / 5;
+const INPUT_BYTE_LENGTH = 96;
+const TAA_SETTINGS_BYTE_LENGTH = 16;
 
 /**
  * @param {string} path
@@ -64,10 +67,11 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
     context.configure({ device, format: canvasFormat });
 
     onStatus('シェーダーを読み込み中…');
-    const [picoVdbWgsl, computeWgsl, blitWgsl] = await Promise.all([
+    const [picoVdbWgsl, computeWgsl, blitWgsl, taaWgsl] = await Promise.all([
         fetchShader('picovdb.wgsl'),
         fetchShader('compute.wgsl'),
         fetchShader('blit.wgsl'),
+        fetchShader('taa.wgsl'),
     ]);
 
     const vertices = new Float32Array([-1, 3, 3, -1, -1, -1]);
@@ -158,13 +162,39 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
         compute: { module: computeShaderModule, entryPoint: 'computeMain' },
     });
 
-    const inputValues = new ArrayBuffer(80);
+    const taaShaderModule = device.createShaderModule({ label: 'TAA shader', code: taaWgsl });
+    const taaBindGroupLayout = device.createBindGroupLayout({
+        label: 'TAA Bind Group Layout',
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+            { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+            {
+                binding: 2,
+                visibility: GPUShaderStage.COMPUTE,
+                storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' },
+            },
+            { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+        ],
+    });
+    const taaPipelineLayout = device.createPipelineLayout({
+        label: 'TAA Pipeline Layout',
+        bindGroupLayouts: [taaBindGroupLayout],
+    });
+    const taaPipeline = await device.createComputePipelineAsync({
+        label: 'TAA Pipeline',
+        layout: taaPipelineLayout,
+        compute: { module: taaShaderModule, entryPoint: 'taaMain' },
+    });
+
+    const inputValues = new ArrayBuffer(INPUT_BYTE_LENGTH);
     const inputViews = {
         camera_matrix: new Float32Array(inputValues, 0, 16),
         fov_scale: new Float32Array(inputValues, 64, 1),
         time_delta: new Float32Array(inputValues, 68, 1),
         pixel_radius: new Float32Array(inputValues, 72, 1),
         debug_iterations: new Uint32Array(inputValues, 76, 1),
+        frame_index: new Uint32Array(inputValues, 80, 1),
+        sample_count: new Uint32Array(inputValues, 84, 1),
     };
     inputViews.fov_scale[0] = Math.tan(FOV / 2);
 
@@ -207,6 +237,7 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
 
     /** @type {import('./shader-settings.js').ShaderSettings} */
     let shaderSettings = createDefaultShaderSettings();
+    inputViews.sample_count[0] = snapMsaaSamples(shaderSettings.msaaSamples);
 
     const renderSettingsData = new ArrayBuffer(RENDER_SETTINGS_BYTE_LENGTH);
     const renderSettingsBuffer = device.createBuffer({
@@ -251,8 +282,20 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
         device.queue.writeBuffer(renderSettingsBuffer, 0, renderSettingsData);
     }
 
-    updateSkyFromSettings();
     uploadRenderSettings();
+
+    const taaSettingsData = new ArrayBuffer(TAA_SETTINGS_BYTE_LENGTH);
+    const taaSettingsViews = {
+        blend: new Float32Array(taaSettingsData, 0, 1),
+        history_valid: new Uint32Array(taaSettingsData, 4, 1),
+    };
+    const taaSettingsBuffer = device.createBuffer({
+        label: 'TAA Settings',
+        size: TAA_SETTINGS_BYTE_LENGTH,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    updateSkyFromSettings();
 
     const inputHandler = createInputHandler(window, canvas);
     const initialCameraPosition = vec3.create(3, 2, 5);
@@ -280,14 +323,42 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
 
     /** @type {GPUTexture | null} */
     let raytracedTexture = null;
+    /** @type {GPUTexture | null} */
+    let taaHistoryTexture = null;
+    /** @type {GPUTexture | null} */
+    let taaResolvedTexture = null;
+    /** @type {GPUTexture | null} */
+    let displaySourceTexture = null;
     /** @type {GPUBindGroup | null} */
     let displayBindGroup = null;
+    /** @type {GPUBindGroup | null} */
+    let taaBindGroup = null;
     /** @type {GPUBindGroup | null} */
     let perFrameBindGroup = null;
     /** @type {GPUBindGroup | null} */
     let dataBindGroup = null;
     /** @type {GPUBindGroup | null} */
     let passBindGroup = null;
+
+    let frameIndex = 0;
+    let taaHistoryValid = false;
+    const prevCameraMatrix = new Float32Array(16);
+
+    /** Invalidate TAA accumulation (resize, camera reset, new file). */
+    function resetTaaHistory() {
+        taaHistoryValid = false;
+        frameIndex = 0;
+    }
+
+    /** @returns {boolean} */
+    function cameraMovedSinceLastFrame() {
+        for (let i = 0; i < 16; i++) {
+            if (Math.abs(camera.matrix[i] - prevCameraMatrix[i]) > 1e-5) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     function computePixelRadius() {
         inputViews.pixel_radius[0] = (2.0 * inputViews.fov_scale[0]) / height;
@@ -307,21 +378,52 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
 
     function createGPUResources() {
         if (raytracedTexture) raytracedTexture.destroy();
+        if (taaHistoryTexture) taaHistoryTexture.destroy();
+        if (taaResolvedTexture) taaResolvedTexture.destroy();
+
+        const textureUsage = GPUTextureUsage.STORAGE_BINDING
+            | GPUTextureUsage.TEXTURE_BINDING
+            | GPUTextureUsage.COPY_SRC;
 
         raytracedTexture = device.createTexture({
             size: [width, height],
             format: 'rgba8unorm',
-            usage: GPUTextureUsage.STORAGE_BINDING
-                | GPUTextureUsage.TEXTURE_BINDING
-                | GPUTextureUsage.COPY_SRC,
+            usage: textureUsage,
         });
+
+        taaHistoryTexture = device.createTexture({
+            label: 'TAA history',
+            size: [width, height],
+            format: 'rgba8unorm',
+            usage: textureUsage,
+        });
+
+        taaResolvedTexture = device.createTexture({
+            label: 'TAA resolved',
+            size: [width, height],
+            format: 'rgba8unorm',
+            usage: textureUsage,
+        });
+
+        displaySourceTexture = taaResolvedTexture;
 
         displayBindGroup = device.createBindGroup({
             label: 'Display bind group',
             layout: displayPipeline.getBindGroupLayout(0),
             entries: [
-                { binding: 0, resource: raytracedTexture.createView() },
+                { binding: 0, resource: displaySourceTexture.createView() },
                 { binding: 1, resource: displaySampler },
+            ],
+        });
+
+        taaBindGroup = device.createBindGroup({
+            label: 'TAA bind group',
+            layout: taaBindGroupLayout,
+            entries: [
+                { binding: 0, resource: raytracedTexture.createView() },
+                { binding: 1, resource: taaHistoryTexture.createView() },
+                { binding: 2, resource: taaResolvedTexture.createView() },
+                { binding: 3, resource: { buffer: taaSettingsBuffer } },
             ],
         });
 
@@ -358,6 +460,7 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
         });
 
         computePixelRadius();
+        resetTaaHistory();
     }
 
     function resizeCanvas() {
@@ -438,6 +541,7 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
         currentTransform = transform;
         createGPUResources();
         updateObjects();
+        resetTaaHistory();
 
         const grid = picoVDBFile.getGrid(0);
         const sizeMB = (picoVDBFile.getSize() / 1024 / 1024).toFixed(2);
@@ -459,9 +563,53 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
     function updateInput(deltaTime) {
         inputViews.time_delta[0] = deltaTime;
         inputViews.debug_iterations[0] = 0;
+        inputViews.frame_index[0] = frameIndex;
+        inputViews.sample_count[0] = snapMsaaSamples(shaderSettings.msaaSamples);
         camera.update(deltaTime, inputHandler());
         inputViews.camera_matrix.set(camera.matrix);
+        if (cameraMovedSinceLastFrame()) {
+            taaHistoryValid = false;
+        }
+        prevCameraMatrix.set(camera.matrix);
+        frameIndex += 1;
         device.queue.writeBuffer(inputBuffer, 0, inputValues);
+    }
+
+    function uploadTaaSettings() {
+        taaSettingsViews.blend[0] = shaderSettings.taaBlend;
+        taaSettingsViews.history_valid[0] = taaHistoryValid ? 1 : 0;
+        device.queue.writeBuffer(taaSettingsBuffer, 0, taaSettingsData);
+    }
+
+    function updateDisplayBindGroup() {
+        displayBindGroup = device.createBindGroup({
+            label: 'Display bind group',
+            layout: displayPipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: displaySourceTexture.createView() },
+                { binding: 1, resource: displaySampler },
+            ],
+        });
+    }
+
+    function swapTaaHistory() {
+        const resolved = taaResolvedTexture;
+        taaResolvedTexture = taaHistoryTexture;
+        taaHistoryTexture = resolved;
+        displaySourceTexture = taaResolvedTexture;
+
+        taaBindGroup = device.createBindGroup({
+            label: 'TAA bind group',
+            layout: taaBindGroupLayout,
+            entries: [
+                { binding: 0, resource: raytracedTexture.createView() },
+                { binding: 1, resource: taaHistoryTexture.createView() },
+                { binding: 2, resource: taaResolvedTexture.createView() },
+                { binding: 3, resource: { buffer: taaSettingsBuffer } },
+            ],
+        });
+        updateDisplayBindGroup();
+        taaHistoryValid = true;
     }
 
     const colorAttachment = {
@@ -496,6 +644,8 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
 
         const encoder = device.createCommandEncoder({ label: 'Command Encoder' });
 
+        uploadTaaSettings();
+
         const computePass = encoder.beginComputePass({ label: 'Compute pass' });
         computePass.setPipeline(computePipeline);
         computePass.setBindGroup(0, perFrameBindGroup);
@@ -503,6 +653,19 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
         computePass.setBindGroup(2, passBindGroup);
         computePass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8), 1);
         computePass.end();
+
+        if (shaderSettings.taaEnabled && taaBindGroup) {
+            const taaPass = encoder.beginComputePass({ label: 'TAA pass' });
+            taaPass.setPipeline(taaPipeline);
+            taaPass.setBindGroup(0, taaBindGroup);
+            taaPass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8), 1);
+            taaPass.end();
+            swapTaaHistory();
+        } else {
+            displaySourceTexture = raytracedTexture;
+            updateDisplayBindGroup();
+            taaHistoryValid = false;
+        }
 
         colorAttachment.view = context.getCurrentTexture().createView();
         const displayPass = encoder.beginRenderPass(renderPassDescriptor);
@@ -563,6 +726,12 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
             ) {
                 updateSkyFromSettings();
             }
+            if (partial.msaaSamples !== undefined) {
+                inputViews.sample_count[0] = snapMsaaSamples(shaderSettings.msaaSamples);
+            }
+            if (partial.taaEnabled !== undefined) {
+                resetTaaHistory();
+            }
             updateObjects();
         },
         resetCamera() {
@@ -570,6 +739,7 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
                 position: initialCameraPosition,
                 target: initialCameraTarget,
             });
+            resetTaaHistory();
         },
     };
 }
