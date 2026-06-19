@@ -25,6 +25,7 @@ export function createShaderControls(container, api) {
         api.setSettings({
             ...defaults,
             smokeColor: [...defaults.smokeColor],
+            volFogColor: [...defaults.volFogColor],
         });
         syncUIFromSettings();
     });
@@ -53,6 +54,40 @@ export function createShaderControls(container, api) {
     taaLabel.append(' TAA 有効');
     container.appendChild(taaLabel);
     inputs.set('taaEnabled', taaInput);
+
+    const volumeGroup = document.createElement('div');
+    volumeGroup.className = 'play-vdb-shader-group';
+    const volumeTitle = document.createElement('h3');
+    volumeTitle.className = 'play-vdb-shader-group-title';
+    volumeTitle.textContent = '体積レンダリング';
+    volumeGroup.appendChild(volumeTitle);
+
+    const volumeRow = document.createElement('div');
+    volumeRow.className = 'play-vdb-slider-row';
+    const volumeLabel = document.createElement('label');
+    volumeLabel.className = 'play-vdb-slider-label';
+    volumeLabel.textContent = '体積モード';
+    const volumeSelect = document.createElement('select');
+    volumeSelect.className = 'play-vdb-select';
+    /** @type {Array<{ value: import('./shader-settings.js').VolumeMode, label: string }>} */
+    const volumeOptions = [
+        { value: 'surface', label: 'サーフェス (SDF)' },
+        { value: 'fog', label: 'フォグボリューム' },
+        { value: 'sdf-as-density', label: '体積モード (SDF→密度)' },
+    ];
+    for (const opt of volumeOptions) {
+        const option = document.createElement('option');
+        option.value = opt.value;
+        option.textContent = opt.label;
+        volumeSelect.appendChild(option);
+    }
+    volumeSelect.addEventListener('change', () => {
+        api.setSettings({ volumeMode: /** @type {import('./shader-settings.js').VolumeMode} */ (volumeSelect.value) });
+    });
+    volumeRow.append(volumeLabel, volumeSelect);
+    volumeGroup.appendChild(volumeRow);
+    container.appendChild(volumeGroup);
+    inputs.set('volumeMode', volumeSelect);
 
     let currentGroup = '';
     let groupEl = null;
@@ -99,6 +134,15 @@ export function createShaderControls(container, api) {
             } else if (key === 'smokeColor') {
                 const s = api.getSettings();
                 api.setSettings({ smokeColor: [v, s.smokeColor[1], s.smokeColor[2]] });
+            } else if (key === 'volFogColorG') {
+                const s = api.getSettings();
+                api.setSettings({ volFogColor: [s.volFogColor[0], v, s.volFogColor[2]] });
+            } else if (key === 'volFogColorB') {
+                const s = api.getSettings();
+                api.setSettings({ volFogColor: [s.volFogColor[0], s.volFogColor[1], v] });
+            } else if (key === 'volFogColor') {
+                const s = api.getSettings();
+                api.setSettings({ volFogColor: [v, s.volFogColor[1], s.volFogColor[2]] });
             } else if (key === 'msaaSamples') {
                 const snapped = snapMsaaSamples(v);
                 slider.value = String(snapped);
@@ -132,6 +176,9 @@ export function createShaderControls(container, api) {
             if (def.key === 'smokeColor') v = s.smokeColor[0];
             else if (def.key === 'smokeColorG') v = s.smokeColor[1];
             else if (def.key === 'smokeColorB') v = s.smokeColor[2];
+            else if (def.key === 'volFogColor') v = s.volFogColor[0];
+            else if (def.key === 'volFogColorG') v = s.volFogColor[1];
+            else if (def.key === 'volFogColorB') v = s.volFogColor[2];
             else if (def.key === 'msaaSamples') v = snapMsaaSamples(s.msaaSamples);
             else v = s[def.key];
             slider.value = String(v);
@@ -142,6 +189,10 @@ export function createShaderControls(container, api) {
         if (heatmap) heatmap.checked = s.debugHeatmap;
         const taa = inputs.get('taaEnabled');
         if (taa) taa.checked = s.taaEnabled;
+        const volumeMode = inputs.get('volumeMode');
+        if (volumeMode instanceof HTMLSelectElement) {
+            volumeMode.value = s.volumeMode;
+        }
     }
 
     syncUIFromSettings();

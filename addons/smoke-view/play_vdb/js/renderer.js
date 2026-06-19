@@ -704,7 +704,11 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
         uploadPicoVDB,
         stopLoop,
         getShaderSettings() {
-            return { ...shaderSettings, smokeColor: [...shaderSettings.smokeColor] };
+            return {
+                ...shaderSettings,
+                smokeColor: [...shaderSettings.smokeColor],
+                volFogColor: [...shaderSettings.volFogColor],
+            };
         },
         /**
          * @param {Partial<import('./shader-settings.js').ShaderSettings>} partial
@@ -717,6 +721,9 @@ export async function createPlayVdbRenderer(canvas, callbacks = {}) {
                 smokeColor: partial.smokeColor
                     ? /** @type {[number, number, number]} */ ([...partial.smokeColor])
                     : shaderSettings.smokeColor,
+                volFogColor: partial.volFogColor
+                    ? /** @type {[number, number, number]} */ ([...partial.volFogColor])
+                    : shaderSettings.volFogColor,
             };
             uploadRenderSettings();
             if (

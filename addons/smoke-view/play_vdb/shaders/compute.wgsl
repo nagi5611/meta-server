@@ -24,7 +24,14 @@ struct RenderSettings {
     ground_roughness: f32,
     ground_metallic: f32,
     debug_heatmap: u32,
-    _pad: u32,
+    volume_mode: u32, // 0=surface, 1=fog, 2=sdf-as-density
+    _pad0: u32,
+    vol_fog_density_scale: f32,
+    vol_fog_extinction: f32,
+    vol_fog_color_r: f32,
+    vol_fog_color_g: f32,
+    vol_fog_color_b: f32,
+    vol_fog_step_scale: f32,
 }
 
 // --- Object types ---
@@ -67,6 +74,30 @@ struct Material { // 32
 @group(2) @binding(0) var output_texture: texture_storage_2d<rgba8unorm, write>;
 
 const MAX_DIST: f32 = 1e7;
+
+const VOLUME_MODE_SURFACE: u32 = 0u;
+const VOLUME_MODE_FOG: u32 = 1u;
+const VOLUME_MODE_SDF_AS_DENSITY: u32 = 2u;
+
+fn shouldUseFogMarch(grid: PicoVDBGrid) -> bool {
+    if (grid.gridType == GRID_TYPE_FOG_FLOAT) {
+        return true;
+    }
+    if (render_settings.volume_mode == VOLUME_MODE_SDF_AS_DENSITY) {
+        return grid.gridType == GRID_TYPE_SDF_FLOAT || grid.gridType == GRID_TYPE_SDF_UINT8;
+    }
+    return false;
+}
+
+fn shouldUseSurfaceIntersect(grid: PicoVDBGrid) -> bool {
+    if (grid.gridType == GRID_TYPE_FOG_FLOAT) {
+        return false;
+    }
+    if (render_settings.volume_mode == VOLUME_MODE_SDF_AS_DENSITY) {
+        return false;
+    }
+    return true;
+}
 
 struct Intersection {
     distance: f32,
@@ -150,9 +181,8 @@ fn intersect_scene(world_ray: Ray, iterations: ptr<function, u32>) -> Intersecti
         var hit_iterations = 0u;
         switch obj.object_type {
             case OBJECT_TYPE_VDB: {
-                // Skip fog grids during surface intersection — they use volumetric marching instead
                 let vdb_grid = picovdb_grids[obj.type_index];
-                if (vdb_grid.gridType != GRID_TYPE_FOG_FLOAT) {
+                if (shouldUseSurfaceIntersect(vdb_grid)) {
                     hit = intersect_picovdb(index_ray, obj.type_index, &hit_distance, &hit_normal, &hit_iterations);
                 }
             }
@@ -240,6 +270,45 @@ fn traceShadowRay(origin: vec3f, normal: vec3f) -> f32 {
         return 0.0;  // Fully shadowed
     }
     return 1.0;  // Fully lit
+}
+
+fn compositeVolumeFog(ray: Ray, color: vec3f) -> vec3f {
+    var out_color = color;
+    let sun_fac = 0.25 + 0.75 * max(dot(-ray.direction, skyState.sunDirection), 0.0);
+    let lit_fog_color = vec3f(
+        render_settings.vol_fog_color_r,
+        render_settings.vol_fog_color_g,
+        render_settings.vol_fog_color_b,
+    ) * sun_fac;
+
+    for (var i = 0i; i < i32(arrayLength(&objects)); i++) {
+        let obj = objects[i];
+        if (obj.object_type != OBJECT_TYPE_VDB) { continue; }
+        let fog_grid = picovdb_grids[obj.type_index];
+        if (!shouldUseFogMarch(fog_grid)) { continue; }
+
+        let idx_origin = (obj.transform * vec4f(ray.origin, 1.0)).xyz;
+        let idx_dir_unnorm = (obj.transform * vec4f(ray.direction, 0.0)).xyz;
+        let idx_direction = normalize(idx_dir_unnorm);
+
+        var fog_acc: PicoVDBReadAccessor;
+        picovdbReadAccessorInit(&fog_acc, obj.type_index);
+
+        let sdf_as_density = render_settings.volume_mode == VOLUME_MODE_SDF_AS_DENSITY
+            && (fog_grid.gridType == GRID_TYPE_SDF_FLOAT || fog_grid.gridType == GRID_TYPE_SDF_UINT8);
+        let fog_settings = PicoVDBFogSettings(
+            render_settings.vol_fog_density_scale,
+            render_settings.vol_fog_extinction,
+            lit_fog_color,
+            render_settings.vol_fog_step_scale,
+            select(0u, 1u, sdf_as_density),
+            0u,
+        );
+
+        let fog = picovdbFogMarch(&fog_acc, fog_grid, idx_origin, idx_direction, 0.0, 1e6, fog_settings);
+        out_color = fog.color + fog.transmittance * out_color;
+    }
+    return out_color;
 }
 
 fn applyFog(color: vec3f, distance: f32, rayDir: vec3f, fogDensity: f32) -> vec3f {
@@ -364,27 +433,11 @@ fn computeMain(@builtin(global_invocation_id) global_id: vec3u) {
         var sample_iterations: u32 = 0u;
         let hit = intersect_scene(ray, &sample_iterations);
         iterations += sample_iterations;
-        color += computeColor(ray, hit);
+        var sample_color = computeColor(ray, hit);
+        sample_color = compositeVolumeFog(ray, sample_color);
+        color += sample_color;
     }
     color /= f32(sample_count);
-
-    //// Fog volume compositing (HDR, before tone mapping)
-    //for (var i = 0i; i < i32(arrayLength(&objects)); i++) {
-    //    let obj = objects[i];
-    //    if (obj.object_type != OBJECT_TYPE_VDB) { continue; }
-    //    let fog_grid = picovdb_grids[obj.type_index];
-    //    if (fog_grid.gridType != GRID_TYPE_FOG_FLOAT) { continue; }
-
-    //    let idx_origin     = (obj.transform * vec4f(ray.origin, 1.0)).xyz;
-    //    let idx_dir_unnorm = (obj.transform * vec4f(ray.direction, 0.0)).xyz;
-    //    let idx_direction  = normalize(idx_dir_unnorm);
-
-    //    var fog_acc: PicoVDBReadAccessor;
-    //    picovdbReadAccessorInit(&fog_acc, u32(obj.type_index));
-
-    //    let fog = picovdbFogMarch(&fog_acc, fog_grid, idx_origin, idx_direction, 0.0, 1e6);
-    //    color = fog.color + fog.transmittance * color;
-    //}
 
     color = toneMapping(color);
     let invGamma = 1.0 / max(render_settings.gamma, 0.01);

@@ -778,3 +778,111 @@ fn picovdbVoxelIntersect(
 
     return result;
 }
+
+// ============================================================================
+// Fog volume ray marching (Beer–Lambert absorption + in-scatter)
+// ============================================================================
+
+struct PicoVDBFogSettings {
+    density_scale: f32,
+    extinction: f32,
+    color: vec3f,
+    step_scale: f32,
+    sdf_as_density: u32,
+    _pad: u32,
+}
+
+struct PicoVDBFogResult {
+    color: vec3f,
+    transmittance: f32,
+}
+
+// Sample scalar density from fog or SDF-as-density grid.
+fn picovdbSampleDensity(
+    acc: ptr<function, PicoVDBReadAccessor>,
+    grid: PicoVDBGrid,
+    pos: vec3f,
+    sdf_as_density: bool,
+) -> f32 {
+    let v = picovdbSampleTrilinear(acc, grid, pos);
+    if (sdf_as_density) {
+        return max(0.0, -v);
+    }
+    return max(0.0, v);
+}
+
+// Integrate optical depth along a ray segment through a fog grid using HDDA.
+fn picovdbFogMarch(
+    acc: ptr<function, PicoVDBReadAccessor>,
+    grid: PicoVDBGrid,
+    origin: vec3f,
+    direction: vec3f,
+    tmin: f32,
+    tmax: f32,
+    settings: PicoVDBFogSettings,
+) -> PicoVDBFogResult {
+    var result: PicoVDBFogResult;
+    result.color = vec3f(0.0);
+    result.transmittance = 1.0;
+
+    let direction_inv = 1.0 / direction;
+    var tmin_mut = tmin;
+    var tmax_mut = tmax;
+    let bbox_min = vec3f(grid.indexBoundsMin);
+    let bbox_max = vec3f(grid.indexBoundsMax + vec3i(1));
+    if (!picovdbHDDARayClip(bbox_min, bbox_max, origin, &tmin_mut, direction_inv, &tmax_mut)) {
+        return result;
+    }
+
+    let start_pos = origin + direction * tmin_mut;
+    let res0 = picovdbReadAccessorGetLevelIndex(acc, vec3i(floor(start_pos)), grid);
+    var hdda: PicoVDBHDDA;
+    picovdbHDDAInit(&hdda, origin, tmin_mut, direction, tmax_mut, direction_inv, picovdbDimForLevel[res0.level]);
+
+    var transmittance = 1.0;
+    var accum_color = vec3f(0.0);
+    let sdf_mode = settings.sdf_as_density != 0u;
+    let sub_steps = max(1u, u32(settings.step_scale));
+
+    for (var i = 0; i < 512; i++) {
+        let level_result = picovdbReadAccessorGetLevelIndex(acc, hdda.voxel, grid);
+        let target_dim = picovdbDimForLevel[level_result.level];
+
+        if (hdda.dim != target_dim) {
+            picovdbHDDAUpdate(&hdda, origin, target_dim, direction, direction_inv);
+            continue;
+        }
+
+        if (hdda.dim == 1) {
+            let t_exit = min(min(hdda.next.x, hdda.next.y), hdda.next.z);
+            let seg_len = t_exit - hdda.tmin;
+            if (seg_len > 0.0) {
+                let dt = seg_len / f32(sub_steps);
+                for (var s = 0u; s < sub_steps; s++) {
+                    let t_sample = hdda.tmin + (f32(s) + 0.5) * dt;
+                    let sample_pos = origin + direction * t_sample;
+                    let density = picovdbSampleDensity(acc, grid, sample_pos, sdf_mode) * settings.density_scale;
+                    let sigma = density * settings.extinction;
+                    let optical_depth = sigma * dt;
+                    let absorb = exp(-optical_depth);
+                    let scatter = (1.0 - absorb) * transmittance;
+                    accum_color += scatter * settings.color;
+                    transmittance *= absorb;
+                    if (transmittance < 0.001) {
+                        result.color = accum_color;
+                        result.transmittance = transmittance;
+                        return result;
+                    }
+                }
+            }
+        }
+
+        if (!picovdbHDDAStep(&hdda)) {
+            break;
+        }
+    }
+
+    result.color = accum_color;
+    result.transmittance = transmittance;
+    return result;
+}

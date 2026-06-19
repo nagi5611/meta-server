@@ -1,5 +1,7 @@
 // addons/smoke-view/play_vdb/js/shader-settings.js — シェーダー設定の定義と GPU バッファ書き込み
 
+/** @typedef {'surface' | 'fog' | 'sdf-as-density'} VolumeMode */
+
 /** @typedef {{
  *   exposure: number,
  *   gamma: number,
@@ -16,13 +18,25 @@
  *   groundRoughness: number,
  *   groundMetallic: number,
  *   debugHeatmap: boolean,
+ *   volumeMode: VolumeMode,
+ *   volFogDensityScale: number,
+ *   volFogExtinction: number,
+ *   volFogColor: [number, number, number],
+ *   volFogStepScale: number,
  *   taaEnabled: boolean,
  *   taaBlend: number,
  *   msaaSamples: number,
  * }} ShaderSettings */
 
-export const RENDER_SETTINGS_BYTE_LENGTH = 80;
+export const RENDER_SETTINGS_BYTE_LENGTH = 104;
 export const MSAA_SAMPLE_OPTIONS = [1, 2, 4];
+
+/** @type {Record<VolumeMode, number>} */
+export const VOLUME_MODE_TO_GPU = {
+    surface: 0,
+    fog: 1,
+    'sdf-as-density': 2,
+};
 
 /**
  * @param {number} value
@@ -52,6 +66,11 @@ export function createDefaultShaderSettings() {
         groundRoughness: 1,
         groundMetallic: 1,
         debugHeatmap: false,
+        volumeMode: 'surface',
+        volFogDensityScale: 1.0,
+        volFogExtinction: 2.0,
+        volFogColor: [0.35, 0.35, 0.38],
+        volFogStepScale: 2.0,
         taaEnabled: true,
         taaBlend: 0.1,
         msaaSamples: 1,
@@ -80,6 +99,12 @@ export const SHADER_SLIDER_DEFS = [
     { group: '煙マテリアル', key: 'smokeDenseMix', label: '濃さミックス', min: 0, max: 1, step: 0.01 },
     { group: '煙マテリアル', key: 'smokeDarkenMult', label: '暗さ係数', min: 0, max: 1, step: 0.01 },
     { group: '煙マテリアル', key: 'smokeBrightness', label: '明るさ', min: 0.1, max: 3, step: 0.05 },
+    { group: '体積フォグ', key: 'volFogColor', label: 'R', min: 0, max: 1, step: 0.01 },
+    { group: '体積フォグ', key: 'volFogColorG', label: 'G', min: 0, max: 1, step: 0.01 },
+    { group: '体積フォグ', key: 'volFogColorB', label: 'B', min: 0, max: 1, step: 0.01 },
+    { group: '体積フォグ', key: 'volFogDensityScale', label: '密度スケール', min: 0.01, max: 10, step: 0.01 },
+    { group: '体積フォグ', key: 'volFogExtinction', label: '減衰係数', min: 0.1, max: 20, step: 0.1 },
+    { group: '体積フォグ', key: 'volFogStepScale', label: 'サブステップ数', min: 1, max: 8, step: 1 },
     { group: '大気', key: 'fogStart', label: 'フォグ開始距離', min: 0, max: 50, step: 0.5 },
     { group: '大気', key: 'fogDensity', label: 'フォグ密度', min: 0, max: 0.1, step: 0.001 },
     { group: '大気', key: 'sunElevationDeg', label: '太陽高度 (°)', min: 0, max: 90, step: 1 },
@@ -115,7 +140,14 @@ export function writeRenderSettingsBuffer(buffer, settings) {
     f32[14] = settings.groundRoughness;
     f32[15] = settings.groundMetallic;
     u32[16] = settings.debugHeatmap ? 1 : 0;
-    u32[17] = 0;
+    u32[17] = VOLUME_MODE_TO_GPU[settings.volumeMode];
+    u32[18] = 0;
+    f32[19] = settings.volFogDensityScale;
+    f32[20] = settings.volFogExtinction;
+    f32[21] = settings.volFogColor[0];
+    f32[22] = settings.volFogColor[1];
+    f32[23] = settings.volFogColor[2];
+    f32[24] = settings.volFogStepScale;
 }
 
 /**
