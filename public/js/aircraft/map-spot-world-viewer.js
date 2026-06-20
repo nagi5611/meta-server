@@ -91,6 +91,53 @@ async function loadWorldModelEntry(config) {
 }
 
 /**
+ * prefab パーツに LOD rank を付与する（scene-manager と同等）
+ * @param {THREE.Object3D} model
+ * @param {object} config
+ */
+function applyPrefabPartLodRanks(model, config) {
+    const defRank = Number.isFinite(config.lodRank) ? Math.max(1, Math.floor(config.lodRank)) : 1;
+    const map =
+        config.lodPartRanks && typeof config.lodPartRanks === 'object' && !Array.isArray(config.lodPartRanks)
+            ? config.lodPartRanks
+            : {};
+    const byOrder = Array.isArray(config.lodRanks) && config.lodRanks.length > 0;
+    if (byOrder) {
+        let idx = 0;
+        const arr = config.lodRanks;
+        for (const ch of model.children) {
+            if (!ch.userData || !ch.userData.isPrefabPart) continue;
+            let r = idx < arr.length ? Number(arr[idx]) : Number(arr[arr.length - 1]);
+            if (!Number.isFinite(r) || r < 1) r = defRank;
+            ch.userData.prefabLodRank = Math.max(1, Math.floor(r));
+            idx++;
+        }
+        return;
+    }
+    model.traverse((ch) => {
+        if (!ch.userData || !ch.userData.isPrefabPart) return;
+        const path = ch.userData.prefabPartPath || '';
+        let r = map[path];
+        if (!Number.isFinite(r)) r = defRank;
+        ch.userData.prefabLodRank = Math.max(1, Math.floor(r));
+    });
+}
+
+/**
+ * 固定 LOD バンドのみ表示する
+ * @param {THREE.Object3D} root
+ * @param {number} band
+ */
+function applyFixedLodBand(root, band) {
+    const b = Math.max(1, Math.floor(band));
+    root.traverse((ch) => {
+        if (!ch.userData?.isPrefabPart) return;
+        const pr = ch.userData.prefabLodRank || 1;
+        ch.visible = pr === b;
+    });
+}
+
+/**
  * 正射影カメラを北固定トップダウンに合わせる
  * @param {THREE.OrthographicCamera} camera
  * @param {number} cx
@@ -128,7 +175,11 @@ export class AdminMapSpotWorldViewer {
         this._groundY = 0;
         this._north = { x: 0, z: -1 };
         this._viewHalfExtentM = 425;
-        this._renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        this._overlayMode = false;
+        this._layerOpacity = 1;
+        this._pickingEnabled = true;
+        this._lodBand = 1;
+        this._renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         this._renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         this._scene = new THREE.Scene();
         this._scene.background = new THREE.Color(0x87ceeb);
@@ -248,7 +299,7 @@ export class AdminMapSpotWorldViewer {
      * @param {PointerEvent} e
      */
     _onPointerUp(e) {
-        if (!this._pointerDown || !this.onSpotPick) return;
+        if (!this._pointerDown || !this.onSpotPick || !this._pickingEnabled) return;
         const dx = e.clientX - this._pointerDown.x;
         const dy = e.clientY - this._pointerDown.y;
         this._pointerDown = null;
@@ -306,20 +357,90 @@ export class AdminMapSpotWorldViewer {
     }
 
     /**
+     * 統合表示用にスポット群の中心へカメラを合わせる
+     * @param {{ x: number, z: number }[]} spots
+     * @param {number} [halfExtentM]
+     */
+    frameSpots(spots, halfExtentM) {
+        if (!spots.length) return;
+        let cx = 0;
+        let cz = 0;
+        for (const s of spots) {
+            cx += s.x;
+            cz += s.z;
+        }
+        cx /= spots.length;
+        cz /= spots.length;
+        if (typeof halfExtentM === 'number' && halfExtentM > 0) {
+            this._viewHalfExtentM = halfExtentM;
+        }
+        applyTopDownCamera(
+            this._camera,
+            cx,
+            cz,
+            this._groundY,
+            this._cameraHeightM,
+            this._north,
+            this._viewHalfExtentM
+        );
+        this._controls.target.set(cx, this._groundY, cz);
+        this._controls.update();
+        this._resize();
+    }
+
+    /**
+     * オーバーレイ表示（統合モード）の見た目を切り替える
+     * @param {boolean} overlay
+     * @param {number} [opacity]
+     */
+    setOverlayMode(overlay, opacity = 1) {
+        this._overlayMode = overlay;
+        this._layerOpacity = Math.min(1, Math.max(0.05, opacity));
+        if (overlay) {
+            this._scene.background = null;
+            this._renderer.setClearColor(0x000000, 0);
+            if (this._grid) this._grid.visible = false;
+        } else {
+            this._scene.background = new THREE.Color(0x87ceeb);
+            this._renderer.setClearColor(0x87ceeb, 1);
+            if (this._grid) this._grid.visible = true;
+        }
+        this._renderer.domElement.style.opacity = String(this._layerOpacity);
+    }
+
+    /**
+     * クリックによるスポット取得の有効/無効
+     * @param {boolean} enabled
+     */
+    setPickingEnabled(enabled) {
+        this._pickingEnabled = enabled;
+        this._renderer.domElement.style.cursor = enabled ? 'crosshair' : 'grab';
+    }
+
+    /**
      * @param {object} world
+     * @param {{ lodSystem?: object, lodBand?: number }} [opts]
      * @returns {Promise<{ loaded: number, total: number }>}
      */
-    async loadWorld(world) {
+    async loadWorld(world, opts = {}) {
         this._clearWorldRoot();
+        const lodBand = Math.max(1, Math.floor(opts.lodBand || this._lodBand || 1));
+        this._lodBand = lodBand;
         const models = Array.isArray(world?.models) ? world.models : [];
         const factories = models.map((cfg) => () => loadWorldModelEntry(cfg));
         const loaded = await runWithConcurrency(LOAD_CONCURRENCY, factories);
         let count = 0;
-        for (const m of loaded) {
-            if (m) {
-                this._worldRoot.add(m);
-                count += 1;
+        for (let i = 0; i < loaded.length; i++) {
+            const m = loaded[i];
+            const cfg = models[i];
+            if (!m) continue;
+            applyPrefabPartLodRanks(m, cfg);
+            if (String(cfg.lodId || '').trim()) {
+                m.userData.prefabLodRootMeta = { lodId: String(cfg.lodId).trim() };
             }
+            applyFixedLodBand(m, lodBand);
+            this._worldRoot.add(m);
+            count += 1;
         }
         const sp = world?.spawnPoint;
         if (typeof sp?.y === 'number' && Number.isFinite(sp.y)) {

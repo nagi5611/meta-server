@@ -26,6 +26,27 @@ export class AdminMapGooglePreview {
         this._config = null;
         /** @type {((lat: number, lng: number) => void)|null} */
         this.onSpotGeoPick = null;
+        /** @type {number} */
+        this._layerOpacity = 1;
+        /** @type {boolean} */
+        this._pickingEnabled = true;
+    }
+
+    /**
+     * レイヤー不透明度（統合表示用）
+     * @param {number} opacity 0–1
+     */
+    setLayerOpacity(opacity) {
+        this._layerOpacity = Math.min(1, Math.max(0.05, opacity));
+        if (this.mountEl) this.mountEl.style.opacity = String(this._layerOpacity);
+    }
+
+    /**
+     * クリックによる緯度経度取得の有効/無効
+     * @param {boolean} enabled
+     */
+    setPickingEnabled(enabled) {
+        this._pickingEnabled = enabled;
     }
 
     /**
@@ -60,11 +81,35 @@ export class AdminMapGooglePreview {
             fullscreenControl: false,
         });
         this._map.addListener('click', (ev) => {
+            if (!this._pickingEnabled) return;
             const lat = ev.latLng?.lat();
             const lng = ev.latLng?.lng();
             if (lat == null || lng == null) return;
             this.onSpotGeoPick?.(lat, lng);
         });
+    }
+
+    /**
+     * 地理的中心と半幅（m）で地図を合わせる（統合表示用）
+     * @param {{ lat: number, lng: number }} center
+     * @param {number} halfExtentM
+     * @param {object} [geo]
+     */
+    fitGeoExtent(center, halfExtentM, geo) {
+        if (!this._map) return;
+        const half = Math.max(halfExtentM, 80);
+        const latRad = (center.lat * Math.PI) / 180;
+        const dLat = half / 111320;
+        const cosLat = Math.cos(latRad);
+        const dLng = cosLat > 1e-6 ? half / (111320 * cosLat) : dLat;
+        const maps = window.google?.maps;
+        if (!maps) return;
+        const bounds = new maps.LatLngBounds(
+            { lat: center.lat - dLat, lng: center.lng - dLng },
+            { lat: center.lat + dLat, lng: center.lng + dLng }
+        );
+        this._map.fitBounds(bounds, 0);
+        if (geo?.mapType) this._map.setMapTypeId(geo.mapType);
     }
 
     _clearMarkers() {

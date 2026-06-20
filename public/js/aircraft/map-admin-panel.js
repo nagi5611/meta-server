@@ -1,7 +1,7 @@
 // public/js/aircraft/map-admin-panel.js — 飛行ミニマップ「Map定義」管理 UI
 
-import { AdminMapSpotWorldViewer } from './map-spot-world-viewer.js';
-import { AdminMapGooglePreview, fetchGoogleMapsApiKey } from './map-admin-google-preview.js';
+import { AdminMapSpotWorkbench } from './map-admin-spot-workbench.js';
+import { fetchGoogleMapsApiKey } from './map-admin-google-preview.js';
 import {
     MIN_GEO_CALIBRATION_SPOTS,
     countGeoCalibratedSpots,
@@ -17,10 +17,8 @@ let selectedWorldId = null;
 let draftMap = null;
 /** @type {string|null} */
 let selectedSpotId = null;
-/** @type {AdminMapSpotWorldViewer|null} */
-let spotViewer = null;
-/** @type {AdminMapGooglePreview|null} */
-let googlePreview = null;
+/** @type {AdminMapSpotWorkbench|null} */
+let spotWorkbench = null;
 /** @type {string|null} */
 let googleMapsApiKey = null;
 /** @type {Record<string, object>|null} */
@@ -145,7 +143,7 @@ function tryApplyGeoCalibration(showError = false) {
     draftMap.config = { ...cfg, geo: result.geo };
     syncGeoComputedPanel(result.geo);
     updateCalibrationStatus(result);
-    refreshGooglePreview();
+    refreshWorkbench();
     return true;
 }
 
@@ -243,12 +241,13 @@ function syncGeoForm(geo) {
 }
 
 /**
- * Google Maps プレビューを更新する
+ * ワークベンチ（メタバース / Google / 統合）を更新する
  */
-function refreshGooglePreview() {
-    if (!googlePreview) return;
+function refreshWorkbench() {
+    if (!spotWorkbench) return;
     const cfg = readConfigFromForm();
-    googlePreview.setConfig(cfg);
+    spotWorkbench.setConfig(cfg);
+    spotWorkbench.setSelectedSpotId(selectedSpotId);
 }
 
 /**
@@ -314,8 +313,7 @@ function syncMapFormFromDraft(map) {
     setNum('ac-map-icon-offset', cfg.aircraftIconOffsetDeg ?? 0);
     syncGeoForm(cfg.geo);
     renderSpotList();
-    if (spotViewer) spotViewer.setSpotMarkers(cfg.spots || []);
-    refreshGooglePreview();
+    refreshWorkbench();
 }
 
 /**
@@ -345,14 +343,14 @@ function renderSpotList() {
     if (!list) return;
     const spots = draftMap?.config?.spots || [];
     if (!spots.length) {
-        list.innerHTML = '<p class="hint">「スポット定義」でワールド上をクリックして追加</p>';
+        list.innerHTML = '<p class="hint">メタバース表示でクリックして追加、または「スポット追加」</p>';
         return;
     }
     list.innerHTML = spots
         .map((s) => {
             const geoLine = spotHasGeo(s)
                 ? `地図: ${s.lat?.toFixed(5)}, ${s.lng?.toFixed(5)}`
-                : '地図: 未設定（右プレビューでクリック）';
+                : '地図: 未設定（Google Map タブでクリック）';
             return (
                 `<button type="button" class="ac-map-spot-item${s.id === selectedSpotId ? ' is-selected' : ''}" data-spot-id="${s.id}">`
                 + `<span class="ac-map-spot-name">${escapeHtml(s.name)}</span>`
@@ -366,7 +364,7 @@ function renderSpotList() {
         btn.addEventListener('click', () => {
             selectedSpotId = btn.getAttribute('data-spot-id');
             renderSpotList();
-            googlePreview?.setSelectedSpotId?.(selectedSpotId);
+            spotWorkbench?.setSelectedSpotId(selectedSpotId);
         });
     });
 }
@@ -395,12 +393,84 @@ function nextSpotId() {
 }
 
 /**
+ * 選択ワールドをワークベンチへ読み込む
+ */
+async function loadWorkbenchWorld() {
+    if (!selectedWorldId || !spotWorkbench || !worldsCache) return;
+    const world = worldsCache[selectedWorldId];
+    if (!world) return;
+    spotWorkbench.setWorld(world);
+}
+
+/**
+ * メタバース上のクリックでスポット XZ を更新または追加する
+ * @param {number} x
+ * @param {number} z
+ */
+function handleSpotWorldPick(x, z) {
+    if (spotWorkbench?.getViewMode() === 'merged') return;
+    const nextCfg = readConfigFromForm();
+    if (selectedSpotId) {
+        const spot = nextCfg.spots.find((s) => s.id === selectedSpotId);
+        if (!spot) return;
+        spot.x = x;
+        spot.z = z;
+        if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
+        draftMap.config = nextCfg;
+        syncMapFormFromDraft(draftMap);
+        setMapStatus(`${spot.name}: X=${x.toFixed(1)} Z=${z.toFixed(1)}`);
+        return;
+    }
+    const name = window.prompt('スポット名', 'スポット');
+    if (name == null || !name.trim()) return;
+    const id = nextSpotId();
+    nextCfg.spots.push({ id, name: name.trim(), x, z });
+    if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
+    draftMap.config = nextCfg;
+    selectedSpotId = id;
+    syncMapFormFromDraft(draftMap);
+    setMapStatus(`スポット追加: ${name.trim()} (X=${x.toFixed(1)}, Z=${z.toFixed(1)})`);
+}
+
+/**
+ * Google Map 上のクリックで選択スポットの緯度経度を設定する
+ * @param {number} lat
+ * @param {number} lng
+ */
+function handleSpotGeoPick(lat, lng) {
+    if (spotWorkbench?.getViewMode() === 'merged') return;
+    if (!selectedSpotId || !draftMap?.config?.spots) {
+        setMapStatus('スポットを一覧で選択してから地図をクリックしてください', true);
+        return;
+    }
+    const spot = draftMap.config.spots.find((s) => s.id === selectedSpotId);
+    if (!spot) return;
+    spot.lat = lat;
+    spot.lng = lng;
+    const enabledEl = /** @type {HTMLInputElement|null} */ (
+        document.getElementById('ac-map-geo-enabled')
+    );
+    if (enabledEl && !enabledEl.checked) {
+        enabledEl.checked = true;
+        const panel = document.getElementById('ac-map-geo-fields');
+        if (panel) panel.style.display = 'block';
+    }
+    renderSpotList();
+    setMapStatus(`${spot.name}: 地図 ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+    if (countGeoCalibratedSpots(draftMap.config.spots) >= MIN_GEO_CALIBRATION_SPOTS) {
+        tryApplyGeoCalibration(false);
+    } else {
+        updateCalibrationStatus();
+        refreshWorkbench();
+    }
+}
+
+/**
  * @param {string} worldId
  */
 async function selectWorld(worldId) {
     selectedWorldId = worldId;
     selectedSpotId = null;
-    closeSpotModal();
     const sel = /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-map-world-select'));
     if (sel) sel.value = worldId;
     try {
@@ -411,6 +481,7 @@ async function selectWorld(worldId) {
         };
         syncMapFormFromDraft(draftMap);
         setMapStatus('');
+        await loadWorkbenchWorld();
     } catch (e) {
         setMapStatus(e instanceof Error ? e.message : String(e), true);
     }
@@ -482,87 +553,26 @@ async function saveMapDraft() {
 }
 
 /**
- * スポット定義ビューアを破棄する
+ * 新規スポットを一覧に追加する（座標は後からクリックで設定）
  */
-function disposeSpotViewer() {
-    if (spotViewer) {
-        spotViewer.dispose();
-        spotViewer = null;
+function addSpotFromButton() {
+    const name = window.prompt('スポット名', 'スポット');
+    if (name == null || !name.trim()) return;
+    const nextCfg = readConfigFromForm();
+    const id = nextSpotId();
+    const spots = nextCfg.spots;
+    let x = 0;
+    let z = 0;
+    if (spots.length) {
+        x = spots.reduce((s, p) => s + p.x, 0) / spots.length;
+        z = spots.reduce((s, p) => s + p.z, 0) / spots.length;
     }
-}
-
-/**
- * スポット定義モーダルを閉じる
- */
-function closeSpotModal() {
-    const modal = document.getElementById('ac-map-spot-modal');
-    if (modal) modal.hidden = true;
-    disposeSpotViewer();
-}
-
-/**
- * スポット定義モーダルを開きワールドを読み込む
- */
-async function openSpotDefinitionModal() {
-    if (!selectedWorldId) {
-        setMapStatus('ワールドを選択してください', true);
-        return;
-    }
-    if (!worldsCache) {
-        try {
-            worldsCache = await fetchJson('/admin/worlds');
-        } catch {
-            worldsCache = {};
-        }
-    }
-    const world = worldsCache?.[selectedWorldId];
-    if (!world) {
-        setMapStatus('ワールドデータが見つかりません', true);
-        return;
-    }
-    const modal = document.getElementById('ac-map-spot-modal');
-    const mount = document.getElementById('ac-map-spot-viewer-mount');
-    if (!modal || !mount) return;
-    disposeSpotViewer();
-    mount.innerHTML = '';
-    modal.hidden = false;
-    setMapStatus('ワールドを読み込み中…');
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const cfg = readConfigFromForm();
-    spotViewer = new AdminMapSpotWorldViewer(mount);
-    spotViewer.setViewOptions({
-        cameraHeightM: cfg.cameraHeightM,
-        groundRefY: cfg.groundRefY,
-        northDirection: cfg.northDirection,
-    });
-    spotViewer.setSpotMarkers(cfg.spots || []);
-    spotViewer.onSpotPick = (x, z) => {
-        const name = window.prompt('スポット名', 'スポット');
-        if (name == null || !name.trim()) return;
-        const nextCfg = readConfigFromForm();
-        const id = nextSpotId();
-        nextCfg.spots.push({
-            id,
-            name: name.trim(),
-            x,
-            z,
-        });
-        if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
-        draftMap.config = nextCfg;
-        selectedSpotId = id;
-        syncMapFormFromDraft(draftMap);
-        spotViewer?.setSpotMarkers(nextCfg.spots);
-        setMapStatus(`スポット追加: ${name.trim()} (X=${x.toFixed(1)}, Z=${z.toFixed(1)})`);
-    };
-    try {
-        const { loaded, total } = await spotViewer.loadWorld(world);
-        spotViewer.setSpotMarkers(readConfigFromForm().spots || []);
-        setMapStatus(
-            `クリックでスポット追加（モデル ${loaded}/${total} 件読込・ドラッグで移動）`
-        );
-    } catch (e) {
-        setMapStatus(e instanceof Error ? e.message : String(e), true);
-    }
+    nextCfg.spots.push({ id, name: name.trim(), x, z });
+    if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
+    draftMap.config = nextCfg;
+    selectedSpotId = id;
+    syncMapFormFromDraft(draftMap);
+    setMapStatus(`スポット追加: ${name.trim()} — メタバース表示で位置をクリック`);
 }
 
 /**
@@ -611,7 +621,7 @@ export function mountAircraftMapAdminPanel(root) {
                 </div>
                 <p id="ac-map-geo-calibration-status" class="status-text" role="status"></p>
                 <div id="ac-map-geo-fields">
-                    <p class="hint">①「スポット定義」でメタバース上に 3 点以上配置 → ②一覧でスポットを選択 → ③右の地図をクリックして緯度経度を設定 → ④補正を計算</p>
+                    <p class="hint">①メタバースタブで 3 点以上配置 → ②一覧でスポット選択 → ③Google Map タブで緯度経度 → ④補正を計算。3 点揃うと「統合」タブで重ね表示。</p>
                     <div class="field-row"><label class="prop-label" for="ac-map-geo-map-type">地図タイプ</label>
                         <select id="ac-map-geo-map-type" class="prop-input full">
                             <option value="satellite">衛星</option>
@@ -635,15 +645,15 @@ export function mountAircraftMapAdminPanel(root) {
                     </div>
                 </div>
                 <div class="ac-admin-actions">
-                    <button type="button" class="btn btn-secondary" id="ac-map-btn-spots">スポット定義</button>
+                    <button type="button" class="btn btn-secondary" id="ac-map-btn-spot-add">スポット追加</button>
                     <button type="button" class="btn btn-primary" id="ac-map-btn-save">保存</button>
                 </div>
                 <p id="ac-map-status" class="status-text" role="status"></p>
             </aside>
-            <section class="ac-map-admin-center">
-                <h3 class="section-subtitle">Google Maps プレビュー</h3>
-                <p class="hint">橙 = 登録した地図座標、緑 = 補正後の予測位置。スポット選択後に地図クリックで緯度経度を設定。</p>
-                <div id="ac-map-google-preview-mount" class="ac-map-google-preview-mount"></div>
+            <section class="ac-map-admin-center ac-map-admin-center-workbench">
+                <h3 class="section-subtitle">スポット定義</h3>
+                <p class="hint">メタバース / Google Map を切替。統合は地図座標 3 点以上＋補正済みで有効。LOD ありのワールドはツールバーで選択。</p>
+                <div id="ac-map-workbench-mount" class="ac-map-workbench-mount"></div>
             </section>
             <aside class="ac-map-admin-right ac-map-admin-right-wide">
                 <h3 class="section-subtitle">スポット一覧</h3>
@@ -653,15 +663,6 @@ export function mountAircraftMapAdminPanel(root) {
                 </div>
                 <div id="ac-map-spot-list" class="ac-map-spot-list"></div>
             </aside>
-        </div>
-        <div id="ac-map-spot-modal" class="ac-map-spot-modal" hidden>
-            <div class="ac-map-spot-modal-inner">
-                <header class="ac-map-spot-modal-header">
-                    <span>スポット定義 — ワールド上をクリック（XZ 座標）</span>
-                    <button type="button" class="btn btn-sm btn-secondary" id="ac-map-spot-close">閉じる</button>
-                </header>
-                <div id="ac-map-spot-viewer-mount" class="ac-map-spot-viewer-mount"></div>
-            </div>
         </div>
     `;
 
@@ -674,11 +675,11 @@ export function mountAircraftMapAdminPanel(root) {
         const v = /** @type {HTMLSelectElement} */ (e.target).value;
         const custom = document.getElementById('ac-map-north-custom');
         if (custom) custom.style.display = v === 'custom' ? 'block' : 'none';
-        refreshGooglePreview();
+        refreshWorkbench();
     });
 
     const previewOnChange = () => {
-        refreshGooglePreview();
+        refreshWorkbench();
         if (document.getElementById('ac-map-geo-enabled')?.checked) {
             tryApplyGeoCalibration(false);
         }
@@ -702,42 +703,18 @@ export function mountAircraftMapAdminPanel(root) {
         if (panel) {
             panel.style.display = /** @type {HTMLInputElement} */ (e.target).checked ? 'block' : 'none';
         }
-        refreshGooglePreview();
+        refreshWorkbench();
     });
 
-    const previewMount = document.getElementById('ac-map-google-preview-mount');
-    if (previewMount) {
+    const workbenchMount = document.getElementById('ac-map-workbench-mount');
+    if (workbenchMount) {
+        spotWorkbench = new AdminMapSpotWorkbench(workbenchMount);
+        spotWorkbench.onSpotWorldPick = handleSpotWorldPick;
+        spotWorkbench.onSpotGeoPick = handleSpotGeoPick;
         void fetchGoogleMapsApiKey().then((key) => {
             googleMapsApiKey = key;
-            googlePreview = new AdminMapGooglePreview(previewMount);
-            googlePreview.setApiKey(key);
-            googlePreview.onSpotGeoPick = (lat, lng) => {
-                if (!selectedSpotId || !draftMap?.config?.spots) {
-                    setMapStatus('スポットを一覧で選択してから地図をクリックしてください', true);
-                    return;
-                }
-                const spot = draftMap.config.spots.find((s) => s.id === selectedSpotId);
-                if (!spot) return;
-                spot.lat = lat;
-                spot.lng = lng;
-                const enabledEl = /** @type {HTMLInputElement|null} */ (
-                    document.getElementById('ac-map-geo-enabled')
-                );
-                if (enabledEl && !enabledEl.checked) {
-                    enabledEl.checked = true;
-                    const panel = document.getElementById('ac-map-geo-fields');
-                    if (panel) panel.style.display = 'block';
-                }
-                renderSpotList();
-                setMapStatus(`${spot.name}: 地図 ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-                if (countGeoCalibratedSpots(draftMap.config.spots) >= MIN_GEO_CALIBRATION_SPOTS) {
-                    tryApplyGeoCalibration(false);
-                } else {
-                    updateCalibrationStatus();
-                    refreshGooglePreview();
-                }
-            };
-            refreshGooglePreview();
+            spotWorkbench?.setApiKey(key);
+            refreshWorkbench();
         });
     }
 
@@ -761,12 +738,8 @@ export function mountAircraftMapAdminPanel(root) {
         void saveMapDraft();
     });
 
-    document.getElementById('ac-map-btn-spots')?.addEventListener('click', () => {
-        void openSpotDefinitionModal();
-    });
-
-    document.getElementById('ac-map-spot-close')?.addEventListener('click', () => {
-        closeSpotModal();
+    document.getElementById('ac-map-btn-spot-add')?.addEventListener('click', () => {
+        addSpotFromButton();
     });
 
     document.getElementById('ac-map-spot-delete')?.addEventListener('click', () => {
