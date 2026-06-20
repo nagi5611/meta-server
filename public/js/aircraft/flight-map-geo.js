@@ -129,3 +129,37 @@ export function latLngToWorldXz(lat, lng, geo, north) {
         z: (geo.anchorWorldZ || 0) + eastU * east.z + northU * north.z,
     };
 }
+
+/**
+ * 補正済み geo から全スポットの lat/lng をワールド XZ から算出する
+ * @param {object[]} spots
+ * @param {object|null|undefined} geo
+ * @param {{ x: number, z: number }} north
+ * @returns {object[]}
+ */
+export function projectSpotsGeoFromWorld(spots, geo, north) {
+    if (!isGeoMapReady(geo) || !Array.isArray(spots)) return spots;
+    return spots.map((spot) => {
+        if (!Number.isFinite(spot.x) || !Number.isFinite(spot.z)) return spot;
+        const ll = worldXzToLatLng(spot.x, spot.z, geo, north);
+        if (!ll) return spot;
+        return { ...spot, lat: ll.lat, lng: ll.lng };
+    });
+}
+
+/**
+ * 補正済み geo から全スポットの XZ を lat/lng から逆算する
+ * @param {object[]} spots
+ * @param {object|null|undefined} geo
+ * @param {{ x: number, z: number }} north
+ * @returns {object[]}
+ */
+export function projectSpotsWorldFromGeo(spots, geo, north) {
+    if (!isGeoMapReady(geo) || !Array.isArray(spots)) return spots;
+    return spots.map((spot) => {
+        if (!spotHasGeo(spot)) return spot;
+        const xz = latLngToWorldXz(spot.lat, spot.lng, geo, north);
+        if (!xz) return spot;
+        return { ...spot, x: xz.x, z: xz.z };
+    });
+}

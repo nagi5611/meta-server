@@ -743,6 +743,16 @@ body {
     pointer-events: none;
 }
 
+.aircraft-minimap-google-mount {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    overflow: hidden;
+    pointer-events: none;
+}
+
 .aircraft-minimap-canvas {
     display: block;
     width: 264px;

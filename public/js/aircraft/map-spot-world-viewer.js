@@ -172,6 +172,11 @@ export class AdminMapSpotWorldViewer {
         /** @type {THREE.Group} */
         this._spotMarkers = new THREE.Group();
         this._scene.add(this._spotMarkers);
+        /** @type {THREE.LineLoop|null} */
+        this._triangleLine = null;
+        /** @type {THREE.Group} */
+        this._spotLabels = new THREE.Group();
+        this._scene.add(this._spotLabels);
         /** @type {THREE.GridHelper|null} */
         this._grid = null;
         this._pickPlane = new THREE.Mesh(
@@ -429,31 +434,16 @@ export class AdminMapSpotWorldViewer {
     }
 
     /**
-     * Google Map オーバーレイ表示時（地形を上に載せる）
-     * @param {boolean} active
+     * @deprecated タブ切替に移行したため no-op
+     * @param {boolean} _active
      */
-    setMapOverlayActive(active) {
-        this._mapOverlayActive = active;
-        if (active) {
-            this._scene.background = null;
-            this._renderer.setClearColor(0x000000, 0);
-            if (this._grid) this._grid.visible = false;
-        } else {
-            this._scene.background = new THREE.Color(0x87ceeb);
-            this._renderer.setClearColor(0x87ceeb, 1);
-            if (this._grid) this._grid.visible = true;
-        }
-        this._renderer.domElement.style.opacity = '1';
-    }
+    setMapOverlayActive(_active) {}
 
     /**
-     * クリックを下の Google Map レイヤーへ通す
-     * @param {boolean} passthrough
+     * @deprecated タブ切替に移行したため no-op
+     * @param {boolean} _passthrough
      */
-    setPointerPassthrough(passthrough) {
-        this._pointerPassthrough = passthrough;
-        this._renderer.domElement.style.pointerEvents = passthrough ? 'none' : 'auto';
-    }
+    setPointerPassthrough(_passthrough) {}
 
     /**
      * @deprecated setMapOverlayActive を使用
@@ -520,6 +510,36 @@ export class AdminMapSpotWorldViewer {
     }
 
     /**
+     * スポットラベル用スプライトを生成する
+     * @param {string} text
+     * @returns {THREE.Sprite}
+     */
+    _makeLabelSprite(text) {
+        const canvas = document.createElement('canvas');
+        const size = 128;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.clearRect(0, 0, size, size);
+            ctx.fillStyle = 'rgba(0,0,0,0.65)';
+            ctx.beginPath();
+            ctx.arc(size / 2, size / 2, 44, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 42px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, size / 2, size / 2);
+        }
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+        const sprite = new THREE.Sprite(material);
+        sprite.scale.set(48, 48, 1);
+        return sprite;
+    }
+
+    /**
      * @param {{ id: string, name: string, x: number, z: number }[]} spots
      */
     setSpotMarkers(spots) {
@@ -529,13 +549,45 @@ export class AdminMapSpotWorldViewer {
             if (c.geometry) c.geometry.dispose();
             if (c.material) c.material.dispose();
         }
-        for (const spot of spots) {
+        while (this._spotLabels.children.length) {
+            const c = this._spotLabels.children[0];
+            this._spotLabels.remove(c);
+            if (c.material) {
+                c.material.map?.dispose();
+                c.material.dispose();
+            }
+        }
+        if (this._triangleLine) {
+            this._scene.remove(this._triangleLine);
+            this._triangleLine.geometry.dispose();
+            /** @type {THREE.Material} */ (this._triangleLine.material).dispose();
+            this._triangleLine = null;
+        }
+
+        for (let i = 0; i < spots.length; i++) {
+            const spot = spots[i];
             const geom = new THREE.CylinderGeometry(12, 12, 50, 16);
             const mat = new THREE.MeshStandardMaterial({ color: 0xf57c00, emissive: 0x442200 });
             const mesh = new THREE.Mesh(geom, mat);
             mesh.position.set(spot.x, this._groundY + 25, spot.z);
             mesh.userData.spotId = spot.id;
             this._spotMarkers.add(mesh);
+
+            if (i < 3) {
+                const label = this._makeLabelSprite(`A${i + 1}`);
+                label.position.set(spot.x, this._groundY + 65, spot.z);
+                this._spotLabels.add(label);
+            }
+        }
+
+        if (spots.length >= 3) {
+            const pts = spots.slice(0, 3).map(
+                (s) => new THREE.Vector3(s.x, this._groundY + 8, s.z)
+            );
+            const geom = new THREE.BufferGeometry().setFromPoints(pts);
+            const mat = new THREE.LineBasicMaterial({ color: 0xe53935, linewidth: 2 });
+            this._triangleLine = new THREE.LineLoop(geom, mat);
+            this._scene.add(this._triangleLine);
         }
     }
 

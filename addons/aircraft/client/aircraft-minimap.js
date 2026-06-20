@@ -1,13 +1,14 @@
-// addons/aircraft/client/aircraft-minimap.js — 操縦中の円形ミニマップ（3D俯瞰 + オーバーレイ）
+// addons/aircraft/client/aircraft-minimap.js — 操縦中の円形ミニマップ（geo時 Google 2D / それ以外 3D俯瞰）
 
 import * as THREE from 'three';
-import { parseFlightMapConfig } from '../../../lib/aircraft-server/flight-map-schema.js';
+import { parseFlightMapConfig, isGeoMapReady } from '../../../lib/aircraft-server/flight-map-schema.js';
 import {
     aircraftIconRotationRad,
     applyNorthUpOrthoCamera,
     viewHalfExtentM,
     worldXzToMinimapScreen,
 } from './flight-map-coords.js';
+import { GoogleMapFlightView } from './google-map-flight-view.js';
 
 const DEFAULT_SIZE_PX = 264;
 /** 352px 基準デザインからのスケール分母 */
@@ -44,6 +45,30 @@ export default class AircraftMinimap {
         this.mapConfig = null;
         /** 表示・描画解像度（px） */
         this.sizePx = DEFAULT_SIZE_PX;
+        /** @type {boolean} */
+        this._useGoogle = false;
+        /** @type {string|null} */
+        this._apiKey = null;
+        /** @type {HTMLElement|null} */
+        this.googleMount = null;
+        /** @type {GoogleMapFlightView|null} */
+        this._googleView = null;
+    }
+
+    /**
+     * @param {string|null|undefined} apiKey
+     */
+    setApiKey(apiKey) {
+        this._apiKey = String(apiKey || '').trim() || null;
+        this._googleView?.setApiKey(apiKey);
+    }
+
+    /**
+     * geo 有効時は Google 2D、それ以外は 3D
+     * @returns {boolean}
+     */
+    usesGoogleMap() {
+        return this._useGoogle;
     }
 
     /**
@@ -90,6 +115,10 @@ export default class AircraftMinimap {
      */
     adjustCameraHeight(factor) {
         if (!this.mapConfig || !Number.isFinite(factor) || factor <= 0) return false;
+        if (this._useGoogle && this._googleView) {
+            const delta = factor > 1 ? -1 : 1;
+            return this._googleView.adjustZoomOffset(delta);
+        }
         const cur = this.mapConfig.cameraHeightM ?? 500;
         const next = Math.min(
             CAMERA_HEIGHT_MAX_M,
@@ -164,15 +193,25 @@ export default class AircraftMinimap {
         north.className = 'aircraft-minimap-north';
         north.textContent = 'N';
 
+        const googleMount = document.createElement('div');
+        googleMount.className = 'aircraft-minimap-google-mount';
+        googleMount.style.display = 'none';
+
         root.appendChild(canvas3d);
         root.appendChild(canvasOverlay);
+        root.appendChild(googleMount);
         root.appendChild(north);
         document.body.appendChild(root);
 
         this.root = root;
         this.canvas3d = canvas3d;
         this.canvasOverlay = canvasOverlay;
+        this.googleMount = googleMount;
         this.ctxOverlay = canvasOverlay.getContext('2d');
+        this._googleView = new GoogleMapFlightView(googleMount, {
+            interactive: false,
+            showZoomControl: false,
+        });
         this._renderer = new THREE.WebGLRenderer({
             canvas: canvas3d,
             alpha: false,
@@ -201,17 +240,51 @@ export default class AircraftMinimap {
             return false;
         }
         this.mapConfig = JSON.parse(JSON.stringify(parsed.config));
+        const geoReady = isGeoMapReady(this.mapConfig.geo) && !!this._apiKey;
+        this._useGoogle = geoReady;
+        this._applyDisplayMode();
+        if (geoReady) {
+            this._googleView?.setApiKey(this._apiKey);
+            const ok = await this._googleView?.setMapConfig(this.mapConfig);
+            if (!ok) {
+                this._useGoogle = false;
+                this._applyDisplayMode();
+            } else if (this.root?.style.display !== 'none') {
+                await this._googleView?.ensureMap();
+                this._googleView?.resize();
+            }
+        }
         return true;
+    }
+
+    /**
+     * 3D / Google 表示モードを切り替える
+     */
+    _applyDisplayMode() {
+        const googleOn = this._useGoogle;
+        if (this.canvas3d) this.canvas3d.style.display = googleOn ? 'none' : 'block';
+        if (this.canvasOverlay) this.canvasOverlay.style.display = googleOn ? 'none' : 'block';
+        if (this.googleMount) this.googleMount.style.display = googleOn ? 'block' : 'none';
+        const northEl = this.root?.querySelector('.aircraft-minimap-north');
+        if (northEl instanceof HTMLElement) {
+            northEl.style.display = googleOn ? 'none' : 'block';
+        }
     }
 
     clearMap() {
         this.mapConfig = null;
+        this._useGoogle = false;
+        this._googleView?.clear();
+        this._applyDisplayMode();
     }
 
     show() {
         this.ensureDom();
         if (!this.root || !this.mapConfig) return;
         this.root.style.display = 'block';
+        if (this._useGoogle) {
+            void this._googleView?.ensureMap().then(() => this._googleView?.resize());
+        }
     }
 
     hide() {
@@ -335,6 +408,11 @@ export default class AircraftMinimap {
     update(state) {
         if (!state || !this.mapConfig || this.root?.style.display === 'none') return;
         this.ensureDom();
+
+        if (this._useGoogle && this._googleView) {
+            this._googleView.update(state);
+            return;
+        }
 
         const north = this.mapConfig.northDirection || { x: 0, z: -1 };
         const groundY = this.mapConfig.groundRefY ?? 0;

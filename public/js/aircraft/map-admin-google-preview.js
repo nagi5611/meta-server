@@ -1,10 +1,11 @@
-// public/js/aircraft/map-admin-google-preview.js — 俯瞰メタバース下層の Google Map オーバーレイ
+// public/js/aircraft/map-admin-google-preview.js — 管理画面用 Google Maps 2D（スタンドアロン）
 
 import { loadGoogleMapsApi } from './google-maps-loader.js';
 import { isGeoMapReady, spotHasGeo, worldXzToLatLng } from './flight-map-geo.js';
 
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
-const OVERLAY_OPACITY = 0.42;
+const TRIANGLE_STROKE = '#e53935';
+const TRIANGLE_FILL = 'rgba(229, 57, 53, 0.15)';
 
 /**
  * @param {object|null|undefined} geo
@@ -29,7 +30,25 @@ function readSavedOverlayView(geo) {
 }
 
 /**
- * 管理画面用 Google Maps（薄い下層オーバーレイ）
+ * スポットの地図上位置を決定する（補正済みは投影、未補正は手動 lat/lng）
+ * @param {object} spot
+ * @param {object|null|undefined} geo
+ * @param {{ x: number, z: number }} north
+ * @returns {{ lat: number, lng: number }|null}
+ */
+function spotMapPosition(spot, geo, north) {
+    if (isGeoMapReady(geo) && Number.isFinite(spot.x) && Number.isFinite(spot.z)) {
+        const projected = worldXzToLatLng(spot.x, spot.z, geo, north);
+        if (projected) return projected;
+    }
+    if (spotHasGeo(spot)) {
+        return { lat: spot.lat, lng: spot.lng };
+    }
+    return null;
+}
+
+/**
+ * 管理画面用 Google Maps（タブ内スタンドアロン）
  */
 export class AdminMapGooglePreview {
     /**
@@ -40,11 +59,9 @@ export class AdminMapGooglePreview {
         /** @type {google.maps.Map|null} */
         this._map = null;
         /** @type {google.maps.Marker[]} */
-        this._definedMarkers = [];
-        /** @type {google.maps.Marker[]} */
-        this._predictedMarkers = [];
-        /** @type {google.maps.Polyline[]} */
-        this._residualLines = [];
+        this._spotMarkers = [];
+        /** @type {google.maps.Polygon|null} */
+        this._trianglePolygon = null;
         /** @type {string|null} */
         this._apiKey = null;
         /** @type {object|null} */
@@ -58,18 +75,11 @@ export class AdminMapGooglePreview {
         /** @type {boolean} */
         this._pickingEnabled = false;
         /** @type {boolean} */
-        this._overlayVisible = false;
-        /** @type {boolean} */
-        this._overlayMode = false;
-        /** @type {boolean} */
-        this._mapInteractive = false;
+        this._mapInteractive = true;
         /** @type {boolean} */
         this._suppressViewSync = false;
         /** @type {boolean} */
         this._initialFitDone = false;
-        if (mountEl) {
-            mountEl.style.opacity = String(OVERLAY_OPACITY);
-        }
     }
 
     /**
@@ -88,24 +98,10 @@ export class AdminMapGooglePreview {
 
     /**
      * @param {object|null} config
-     * @param {{ overlayMode?: boolean }} [opts]
      */
-    setConfig(config, opts = {}) {
+    setConfig(config) {
         this._config = config;
-        this._overlayMode = opts.overlayMode === true;
         void this._syncFromConfig({ preserveView: true });
-    }
-
-    /**
-     * オーバーレイの表示/非表示
-     * @param {boolean} visible
-     */
-    setOverlayVisible(visible) {
-        this._overlayVisible = visible;
-        if (this.mountEl) {
-            this.mountEl.style.visibility = visible ? 'visible' : 'hidden';
-            this.mountEl.style.pointerEvents = visible && this._mapInteractive ? 'auto' : 'none';
-        }
     }
 
     /**
@@ -114,10 +110,6 @@ export class AdminMapGooglePreview {
      */
     setMapInteractive(interactive) {
         this._mapInteractive = interactive;
-        if (this.mountEl) {
-            this.mountEl.style.pointerEvents =
-                interactive && this._overlayVisible ? 'auto' : 'none';
-        }
         if (this._map) {
             this._map.setOptions({
                 gestureHandling: interactive ? 'greedy' : 'none',
@@ -137,10 +129,10 @@ export class AdminMapGooglePreview {
     }
 
     /**
-     * 初回オーバーレイ表示時の地図位置合わせ
+     * タブ表示時の初回フィット
      * @param {object|null} config
      */
-    async initialFitForOverlay(config) {
+    async initialFit(config) {
         await this._ensureMap();
         if (!this._map || !config) return;
         const saved = readSavedOverlayView(config.geo);
@@ -151,14 +143,21 @@ export class AdminMapGooglePreview {
         }
         if (this._initialFitDone) return;
         const spots = config.spots || [];
-        const geoPts = spots.filter((s) => spotHasGeo(s));
+        const north = config.northDirection || { x: 0, z: -1 };
+        const geo = config.geo;
         const maps = window.google?.maps;
         if (!maps) return;
-        if (geoPts.length >= 1) {
+        /** @type {google.maps.LatLngLiteral[]} */
+        const boundsPts = [];
+        for (const spot of spots.slice(0, 3)) {
+            const pos = spotMapPosition(spot, geo, north);
+            if (pos) boundsPts.push(pos);
+        }
+        if (boundsPts.length >= 1) {
             const bounds = new maps.LatLngBounds();
-            for (const s of geoPts) bounds.extend({ lat: s.lat, lng: s.lng });
+            for (const p of boundsPts) bounds.extend(p);
             this._suppressViewSync = true;
-            this._map.fitBounds(bounds, 40);
+            this._map.fitBounds(bounds, 48);
             this._suppressViewSync = false;
             this._emitMapView();
         } else {
@@ -174,6 +173,15 @@ export class AdminMapGooglePreview {
     applySavedView(geo) {
         const saved = readSavedOverlayView(geo);
         if (saved) this._applyView(saved);
+    }
+
+    /**
+     * 地図の resize を発火する
+     */
+    resize() {
+        if (this._map) {
+            window.google?.maps?.event?.trigger(this._map, 'resize');
+        }
     }
 
     /**
@@ -205,9 +213,9 @@ export class AdminMapGooglePreview {
             mapTypeId: 'satellite',
             tilt: 0,
             heading: 0,
-            gestureHandling: 'none',
-            draggable: false,
-            scrollwheel: false,
+            gestureHandling: 'greedy',
+            draggable: true,
+            scrollwheel: true,
             rotateControl: true,
             streetViewControl: false,
             fullscreenControl: false,
@@ -226,6 +234,7 @@ export class AdminMapGooglePreview {
             this._emitMapView();
         };
         this._map.addListener('idle', emitIfReady);
+        this.setMapInteractive(this._mapInteractive);
     }
 
     /**
@@ -246,12 +255,13 @@ export class AdminMapGooglePreview {
         if (view) this.onMapViewChange?.(view);
     }
 
-    _clearMarkers() {
-        for (const m of [...this._definedMarkers, ...this._predictedMarkers]) m.setMap(null);
-        for (const l of this._residualLines) l.setMap(null);
-        this._definedMarkers = [];
-        this._predictedMarkers = [];
-        this._residualLines = [];
+    _clearOverlays() {
+        for (const m of this._spotMarkers) m.setMap(null);
+        this._spotMarkers = [];
+        if (this._trianglePolygon) {
+            this._trianglePolygon.setMap(null);
+            this._trianglePolygon = null;
+        }
     }
 
     /**
@@ -269,94 +279,91 @@ export class AdminMapGooglePreview {
             this._map.setMapTypeId(geo.mapType);
         }
 
-        this._clearMarkers();
+        this._clearOverlays();
 
-        if (!this._overlayMode) {
-            /** @type {google.maps.LatLngLiteral[]} */
-            const boundsPts = [];
-            const geoReady = isGeoMapReady(geo);
-            for (const spot of spots) {
-                if (!spotHasGeo(spot)) continue;
-                const defined = { lat: spot.lat, lng: spot.lng };
-                boundsPts.push(defined);
-                const marker = new maps.Marker({
-                    map: this._map,
-                    position: defined,
-                    title: `${spot.name}（登録座標）`,
-                    icon: {
-                        path: maps.SymbolPath.CIRCLE,
-                        scale: 7,
-                        fillColor: '#f57c00',
-                        fillOpacity: 0.85,
-                        strokeColor: '#fff',
-                        strokeWeight: 2,
-                    },
-                    zIndex: 60,
-                });
-                this._definedMarkers.push(marker);
-                if (geoReady) {
-                    const predicted = worldXzToLatLng(spot.x, spot.z, geo, north);
-                    if (!predicted) continue;
-                    boundsPts.push(predicted);
-                    const predMarker = new maps.Marker({
-                        map: this._map,
-                        position: predicted,
-                        title: `${spot.name}（補正予測）`,
-                        icon: {
-                            path: maps.SymbolPath.CIRCLE,
-                            scale: 5,
-                            fillColor: '#43a047',
-                            fillOpacity: 0.75,
-                            strokeColor: '#fff',
-                            strokeWeight: 2,
-                        },
-                        zIndex: 55,
-                    });
-                    this._predictedMarkers.push(predMarker);
-                    const line = new maps.Polyline({
-                        map: this._map,
-                        path: [defined, predicted],
-                        strokeColor: '#ff5252',
-                        strokeOpacity: 0.7,
-                        strokeWeight: 2,
-                    });
-                    this._residualLines.push(line);
-                }
-            }
-            if (!opts.preserveView && boundsPts.length >= 1) {
-                const bounds = new maps.LatLngBounds();
-                for (const p of boundsPts) bounds.extend(p);
-                this._suppressViewSync = true;
-                this._map.fitBounds(bounds, 48);
-                this._suppressViewSync = false;
-            }
-            return;
-        }
-
-        // オーバーレイモード: 地図座標設定用に登録済みマーカーのみ薄く表示
-        for (const spot of spots) {
-            if (!spotHasGeo(spot)) continue;
+        /** @type {google.maps.LatLngLiteral[]} */
+        const trianglePath = [];
+        for (let i = 0; i < Math.min(3, spots.length); i++) {
+            const spot = spots[i];
+            const pos = spotMapPosition(spot, geo, north);
+            if (pos) trianglePath.push(pos);
+            const markerPos = pos || (spotHasGeo(spot) ? { lat: spot.lat, lng: spot.lng } : null);
+            if (!markerPos) continue;
+            const label = i < 3 ? `A${i + 1}` : spot.name?.slice(0, 8) || spot.id;
             const marker = new maps.Marker({
                 map: this._map,
-                position: { lat: spot.lat, lng: spot.lng },
+                position: markerPos,
                 title: spot.name,
-                opacity: 0.65,
+                label: {
+                    text: label,
+                    color: '#fff',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                },
                 icon: {
                     path: maps.SymbolPath.CIRCLE,
-                    scale: 6,
+                    scale: spot.id === this._selectedSpotId ? 8 : 7,
                     fillColor: spot.id === this._selectedSpotId ? '#1565c0' : '#f57c00',
-                    fillOpacity: 0.8,
+                    fillOpacity: 1,
                     strokeColor: '#fff',
                     strokeWeight: 2,
                 },
                 zIndex: spot.id === this._selectedSpotId ? 70 : 60,
             });
-            this._definedMarkers.push(marker);
+            this._spotMarkers.push(marker);
+        }
+
+        if (trianglePath.length >= 3) {
+            this._trianglePolygon = new maps.Polygon({
+                map: this._map,
+                paths: trianglePath,
+                strokeColor: TRIANGLE_STROKE,
+                strokeOpacity: 0.95,
+                strokeWeight: 3,
+                fillColor: TRIANGLE_FILL,
+                fillOpacity: 0.35,
+                zIndex: 40,
+            });
+        }
+
+        for (let i = 3; i < spots.length; i++) {
+            const spot = spots[i];
+            const pos = spotMapPosition(spot, geo, north);
+            if (!pos) continue;
+            const marker = new maps.Marker({
+                map: this._map,
+                position: pos,
+                title: spot.name,
+                label: {
+                    text: spot.name?.slice(0, 8) || spot.id,
+                    color: '#fff',
+                    fontSize: '10px',
+                    fontWeight: '600',
+                },
+                icon: {
+                    path: maps.SymbolPath.CIRCLE,
+                    scale: 6,
+                    fillColor: '#f57c00',
+                    fillOpacity: 1,
+                    strokeColor: '#fff',
+                    strokeWeight: 2,
+                },
+                zIndex: 55,
+            });
+            this._spotMarkers.push(marker);
+        }
+
+        if (!opts.preserveView && trianglePath.length >= 1 && !this._initialFitDone) {
+            const bounds = new maps.LatLngBounds();
+            for (const p of trianglePath) bounds.extend(p);
+            this._suppressViewSync = true;
+            this._map.fitBounds(bounds, 48);
+            this._suppressViewSync = false;
         }
     }
 
     dispose() {
-        this._clearMarkers();
+        this._clearOverlays();
         this._map = null;
         if (this.mountEl) this.mountEl.innerHTML = '';
     }

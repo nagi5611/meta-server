@@ -5087,13 +5087,6 @@ body.admin-dark .ac-admin-mode-btn.is-active {
     min-height: 420px;
     gap: 0;
 }
-.ac-map-admin-left {
-    width: 280px;
-    flex-shrink: 0;
-    border-right: 1px solid rgba(0, 0, 0, 0.1);
-    padding: 12px;
-    overflow: auto;
-}
 .ac-map-admin-center {
     flex: 1;
     min-width: 0;
@@ -5101,14 +5094,17 @@ body.admin-dark .ac-admin-mode-btn.is-active {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    overflow: auto;
+    overflow: hidden;
 }
 .ac-map-admin-right {
-    width: 240px;
+    width: 300px;
     flex-shrink: 0;
     border-left: 1px solid rgba(0, 0, 0, 0.1);
     padding: 12px;
     overflow: auto;
+}
+.ac-map-settings-panel {
+    width: 300px;
 }
 .ac-map-preview-wrap {
     flex: 1;
@@ -5166,11 +5162,11 @@ body.admin-dark .ac-admin-mode-btn.is-active {
         flex-direction: column;
         height: auto;
     }
-    .ac-map-admin-left,
-    .ac-map-admin-right {
+    .ac-map-admin-right,
+    .ac-map-settings-panel {
         width: 100%;
         border: none;
-        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        border-top: 1px solid rgba(0, 0, 0, 0.1);
     }
 }
 
@@ -5181,7 +5177,7 @@ body.admin-dark .ac-admin-mode-btn.is-active {
 
 .ac-map-workbench-mount {
     flex: 1;
-    min-height: 420px;
+    min-height: 480px;
     display: flex;
     flex-direction: column;
     border: 1px solid rgba(0, 0, 0, 0.12);
@@ -5194,6 +5190,62 @@ body.admin-dark .ac-admin-mode-btn.is-active {
     display: flex;
     flex-direction: column;
     min-height: 480px;
+    padding: 0;
+}
+
+.ac-map-view-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 10px 0;
+    background: rgba(0, 0, 0, 0.04);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
+}
+
+body.admin-dark .ac-map-view-tabs {
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.ac-map-view-tab {
+    padding: 8px 14px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    background: transparent;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.ac-map-view-tab.is-active {
+    background: #1565c0;
+    border-color: #1565c0;
+    color: #fff;
+}
+
+.ac-map-view-tab:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.ac-map-view-pane {
+    flex: 1;
+    min-height: 360px;
+    display: none;
+    position: relative;
+}
+
+.ac-map-view-pane.is-active {
+    display: flex;
+    flex-direction: column;
+}
+
+.ac-map-view-pane .ac-map-workbench-world,
+.ac-map-view-pane .ac-map-workbench-google {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 360px;
 }
 
 .ac-map-workbench-toolbar {
@@ -5259,40 +5311,14 @@ body.admin-dark .ac-map-workbench-toolbar {
     position: relative;
     flex: 1;
     min-height: 360px;
+    display: flex;
+    flex-direction: column;
 }
 
-.ac-map-workbench-layer {
-    position: absolute;
-    inset: 0;
-}
-
-.ac-map-workbench-google,
-.ac-map-workbench-world {
+.ac-map-workbench-world,
+.ac-map-workbench-google {
     width: 100%;
     height: 100%;
-}
-
-/* Google Map は下層、地形は上 */
-.ac-map-workbench-google {
-    z-index: 1;
-}
-
-.ac-map-workbench-world {
-    z-index: 2;
-}
-
-.ac-map-workbench-stage[data-google="off"] .ac-map-workbench-google {
-    visibility: hidden;
-    pointer-events: none;
-}
-
-.ac-map-workbench-stage[data-interaction="spots"] .ac-map-workbench-world {
-    pointer-events: auto;
-}
-
-.ac-map-workbench-stage[data-interaction="map"] .ac-map-workbench-world,
-.ac-map-workbench-stage[data-interaction="geo"] .ac-map-workbench-world {
-    pointer-events: none;
 }
 
 .ac-map-google-preview-mount {

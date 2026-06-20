@@ -7,6 +7,9 @@ import {
     countGeoCalibratedSpots,
     computeGeoCalibrationFromSpots,
     spotHasGeo,
+    isGeoMapReady,
+    projectSpotsGeoFromWorld,
+    projectSpotsWorldFromGeo,
 } from './flight-map-geo.js';
 
 /** @type {boolean} */
@@ -141,6 +144,11 @@ function tryApplyGeoCalibration(showError = false) {
     }
     if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
     draftMap.config = { ...cfg, geo: result.geo };
+    draftMap.config.spots = projectSpotsGeoFromWorld(
+        draftMap.config.spots,
+        result.geo,
+        cfg.northDirection
+    );
     syncGeoComputedPanel(result.geo);
     updateCalibrationStatus(result);
     refreshWorkbench();
@@ -174,20 +182,12 @@ function syncGeoComputedPanel(geo) {
  * @returns {object}
  */
 function readGeoFromForm() {
-    const num = (id, fallback) => {
-        const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
-        const v = el ? Number(el.value) : NaN;
-        return Number.isFinite(v) ? v : fallback;
-    };
     const enabled = /** @type {HTMLInputElement|null} */ (
         document.getElementById('ac-map-geo-enabled')
     )?.checked === true;
     const mapType =
         /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-map-geo-map-type'))
             ?.value || 'satellite';
-    const headingMode =
-        /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-map-geo-heading-mode'))
-            ?.value || 'trackUp';
     const base = draftMap?.config?.geo || defaultMapConfig().geo;
     return {
         enabled,
@@ -198,9 +198,9 @@ function readGeoFromForm() {
         metersPerWorldUnit: base.metersPerWorldUnit ?? 1,
         geoNorthOffsetDeg: base.geoNorthOffsetDeg ?? 0,
         mapType,
-        zoom: Math.round(num('ac-map-geo-zoom', 15)),
-        zoomOffset: Math.round(num('ac-map-geo-zoom-offset', 0)),
-        headingMode,
+        zoom: base.zoom ?? 15,
+        zoomOffset: base.zoomOffset ?? 0,
+        headingMode: base.headingMode ?? 'trackUp',
         overlayCenterLat: base.overlayCenterLat ?? null,
         overlayCenterLng: base.overlayCenterLng ?? null,
         overlayZoom: base.overlayZoom ?? null,
@@ -224,16 +224,10 @@ function syncGeoForm(geo) {
         document.getElementById('ac-map-geo-enabled')
     );
     if (enabledEl) enabledEl.checked = g.enabled === true;
-    setNum('ac-map-geo-zoom', g.zoom ?? 15);
-    setNum('ac-map-geo-zoom-offset', g.zoomOffset ?? 0);
     const mapTypeEl = /** @type {HTMLSelectElement|null} */ (
         document.getElementById('ac-map-geo-map-type')
     );
     if (mapTypeEl) mapTypeEl.value = g.mapType || 'satellite';
-    const headingEl = /** @type {HTMLSelectElement|null} */ (
-        document.getElementById('ac-map-geo-heading-mode')
-    );
-    if (headingEl) headingEl.value = g.headingMode || 'trackUp';
     const geoPanel = document.getElementById('ac-map-geo-fields');
     if (geoPanel) geoPanel.style.display = g.enabled ? 'block' : 'none';
     syncGeoComputedPanel(g);
@@ -254,7 +248,20 @@ function refreshWorkbench() {
     spotWorkbench.setSelectedSpotId(selectedSpotId);
     const geoOn = cfg.geo?.enabled === true;
     const spotCount = cfg.spots?.length || 0;
-    spotWorkbench.setGoogleOverlayEnabled(geoOn, { spotCount, silent: true });
+    spotWorkbench.setGoogleTabEnabled(geoOn, { spotCount, silent: true });
+}
+
+/**
+ * 補正済みならスポットの geo をワールド座標から再投影する
+ * @param {object} cfg
+ * @returns {object}
+ */
+function applyAutoGeoProjection(cfg) {
+    if (!isGeoMapReady(cfg.geo)) return cfg;
+    return {
+        ...cfg,
+        spots: projectSpotsGeoFromWorld(cfg.spots, cfg.geo, cfg.northDirection),
+    };
 }
 
 /**
@@ -316,18 +323,16 @@ function syncMapFormFromDraft(map) {
     };
     syncNorthForm(cfg.northDirection || { x: 0, z: -1 });
     setNum('ac-map-camera-height', cfg.cameraHeightM ?? 500);
-    setNum('ac-map-ground-y', cfg.groundRefY ?? 0);
-    setNum('ac-map-icon-offset', cfg.aircraftIconOffsetDeg ?? 0);
     syncGeoForm(cfg.geo);
     renderSpotList();
-    maybeDisableGoogleOverlayIfNeeded();
+    maybeDisableGoogleTabIfNeeded();
     refreshWorkbench();
 }
 
 /**
- * スポット不足時に Google Map オーバーレイをオフにする
+ * スポット不足時に Google タブをオフにする
  */
-function maybeDisableGoogleOverlayIfNeeded() {
+function maybeDisableGoogleTabIfNeeded() {
     const spots = draftMap?.config?.spots?.length || 0;
     if (spots >= MIN_GEO_CALIBRATION_SPOTS || !draftMap?.config?.geo?.enabled) return;
     draftMap.config.geo.enabled = false;
@@ -337,8 +342,7 @@ function maybeDisableGoogleOverlayIfNeeded() {
     if (enabledEl) enabledEl.checked = false;
     const panel = document.getElementById('ac-map-geo-fields');
     if (panel) panel.style.display = 'none';
-    spotWorkbench?.setGoogleOverlayEnabled(false, { spotCount: spots });
-    spotWorkbench?.setInteractionMode('spots');
+    spotWorkbench?.setGoogleTabEnabled(false, { spotCount: spots });
 }
 
 /**
@@ -350,11 +354,12 @@ function readConfigFromForm() {
         const v = el ? Number(el.value) : NaN;
         return Number.isFinite(v) ? v : fallback;
     };
+    const base = draftMap?.config || defaultMapConfig();
     return {
         northDirection: readNorthFromForm(),
         cameraHeightM: num('ac-map-camera-height', 500),
-        groundRefY: num('ac-map-ground-y', 0),
-        aircraftIconOffsetDeg: num('ac-map-icon-offset', 0),
+        groundRefY: base.groundRefY ?? 0,
+        aircraftIconOffsetDeg: base.aircraftIconOffsetDeg ?? 0,
         spots: draftMap?.config?.spots ? [...draftMap.config.spots] : [],
         geo: readGeoFromForm(),
     };
@@ -375,7 +380,7 @@ function renderSpotList() {
         .map((s) => {
             const geoLine = spotHasGeo(s)
                 ? `地図: ${s.lat?.toFixed(5)}, ${s.lng?.toFixed(5)}`
-                : '地図: 未設定（地図座標モードでクリック）';
+                : '地図: 未設定（Google タブでクリック）';
             return (
                 `<button type="button" class="ac-map-spot-item${s.id === selectedSpotId ? ' is-selected' : ''}" data-spot-id="${s.id}">`
                 + `<span class="ac-map-spot-name">${escapeHtml(s.name)}</span>`
@@ -433,7 +438,7 @@ async function loadWorkbenchWorld() {
  * @param {number} z
  */
 function handleSpotWorldPick(x, z) {
-    if (spotWorkbench?.getInteractionMode() !== 'spots') return;
+    if (spotWorkbench?.getActiveViewTab() !== 'metaverse') return;
     const nextCfg = readConfigFromForm();
     if (selectedSpotId) {
         const spot = nextCfg.spots.find((s) => s.id === selectedSpotId);
@@ -441,17 +446,17 @@ function handleSpotWorldPick(x, z) {
         spot.x = x;
         spot.z = z;
         if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
-        draftMap.config = nextCfg;
+        draftMap.config = applyAutoGeoProjection(nextCfg);
         syncMapFormFromDraft(draftMap);
         setMapStatus(`${spot.name}: X=${x.toFixed(1)} Z=${z.toFixed(1)}`);
         return;
     }
-    const name = window.prompt('スポット名', 'スポット');
+    const name = window.prompt('スポット名', `スポット ${nextCfg.spots.length + 1}`);
     if (name == null || !name.trim()) return;
     const id = nextSpotId();
     nextCfg.spots.push({ id, name: name.trim(), x, z });
     if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
-    draftMap.config = nextCfg;
+    draftMap.config = applyAutoGeoProjection(nextCfg);
     selectedSpotId = id;
     syncMapFormFromDraft(draftMap);
     setMapStatus(`スポット追加: ${name.trim()} (X=${x.toFixed(1)}, Z=${z.toFixed(1)})`);
@@ -463,15 +468,29 @@ function handleSpotWorldPick(x, z) {
  * @param {number} lng
  */
 function handleSpotGeoPick(lat, lng) {
-    if (spotWorkbench?.getInteractionMode() !== 'geo') return;
+    if (spotWorkbench?.getActiveViewTab() !== 'google') return;
     if (!selectedSpotId || !draftMap?.config?.spots) {
-        setMapStatus('スポットを一覧で選択し、「地図座標」モードで地図をクリックしてください', true);
+        setMapStatus('スポットを一覧で選択し、Google タブで地図をクリックしてください', true);
         return;
     }
-    const spot = draftMap.config.spots.find((s) => s.id === selectedSpotId);
+    const nextCfg = readConfigFromForm();
+    const spot = nextCfg.spots.find((s) => s.id === selectedSpotId);
     if (!spot) return;
     spot.lat = lat;
     spot.lng = lng;
+    if (isGeoMapReady(nextCfg.geo)) {
+        const projected = projectSpotsWorldFromGeo(
+            [spot],
+            nextCfg.geo,
+            nextCfg.northDirection
+        );
+        if (projected[0]) {
+            spot.x = projected[0].x;
+            spot.z = projected[0].z;
+        }
+    }
+    if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
+    draftMap.config = nextCfg;
     renderSpotList();
     setMapStatus(`${spot.name}: 地図 ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
     if (countGeoCalibratedSpots(draftMap.config.spots) >= MIN_GEO_CALIBRATION_SPOTS) {
@@ -493,10 +512,10 @@ function handleMapViewChange(view) {
 }
 
 /**
- * Google Map 表示チェックボックスの状態を反映する
+ * Google Map 有効チェックの状態を反映する
  * @param {boolean} enabled
  */
-function syncGoogleOverlayFromForm(enabled) {
+function syncGoogleTabFromForm(enabled) {
     const cfg = readConfigFromForm();
     const spotCount = cfg.spots?.length || 0;
     if (enabled && spotCount < MIN_GEO_CALIBRATION_SPOTS) {
@@ -505,20 +524,17 @@ function syncGoogleOverlayFromForm(enabled) {
         );
         if (enabledEl) enabledEl.checked = false;
         setMapStatus(
-            `Google Map 表示にはスポットが ${MIN_GEO_CALIBRATION_SPOTS} 点以上必要です`,
+            `Google Map にはスポットが ${MIN_GEO_CALIBRATION_SPOTS} 点以上必要です`,
             true
         );
-        spotWorkbench?.setGoogleOverlayEnabled(false, { spotCount });
+        spotWorkbench?.setGoogleTabEnabled(false, { spotCount });
         return;
     }
     if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
     draftMap.config = { ...cfg, geo: { ...cfg.geo, enabled } };
-    spotWorkbench?.setGoogleOverlayEnabled(enabled, { spotCount });
+    spotWorkbench?.setGoogleTabEnabled(enabled, { spotCount });
     if (enabled) {
-        spotWorkbench?.setInteractionMode('map');
-        setMapStatus('地図調整モード — 地図を動かして地形に合わせてください');
-    } else {
-        spotWorkbench?.setInteractionMode('spots');
+        setMapStatus('Google タブで先頭3点の地図座標を設定し、「補正を計算」を実行してください');
     }
     updateCalibrationStatus();
 }
@@ -592,6 +608,11 @@ async function saveMapDraft() {
             return;
         }
         config.geo = result.geo;
+        config.spots = projectSpotsGeoFromWorld(
+            config.spots,
+            result.geo,
+            config.northDirection
+        );
     }
     try {
         const j = await fetchJson(
@@ -642,9 +663,12 @@ export function mountAircraftMapAdminPanel(root) {
     mapMounted = true;
     root.innerHTML = `
         <div class="ac-map-admin-layout">
-            <aside class="ac-map-admin-left">
-                <h2 class="section-title">Map定義</h2>
-                <p class="hint">俯瞰でスポットを配置してから Google Map を重ねて位置合わせ。<strong>M キー</strong>飛行中の 2D マップは補正後に利用。</p>
+            <section class="ac-map-admin-center ac-map-admin-center-workbench">
+                <div id="ac-map-workbench-mount" class="ac-map-workbench-mount"></div>
+            </section>
+            <aside class="ac-map-admin-right ac-map-settings-panel">
+                <h2 class="section-title">map設定</h2>
+                <p class="hint">①メタバースで3点以上配置 → ②Google 有効 → ③Google タブで地図座標 → ④補正</p>
                 <div class="field-row">
                     <label class="prop-label" for="ac-map-world-select">対象ワールド</label>
                     <select id="ac-map-world-select" class="prop-input full"></select>
@@ -667,19 +691,14 @@ export function mountAircraftMapAdminPanel(root) {
                         <input type="number" id="ac-map-north-z" class="prop-input num" step="0.01" value="-1" /></div>
                 </div>
                 <div class="field-row"><label class="prop-label" for="ac-map-camera-height">カメラ高度 (m)</label>
-                    <input type="number" id="ac-map-camera-height" class="prop-input num" step="25" min="50" title="地面（基準Y）からの高さ。大きいほど広い範囲が見えます" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-map-ground-y">地面基準 Y</label>
-                    <input type="number" id="ac-map-ground-y" class="prop-input num" step="any" title="俯瞰カメラの注視点の高さ（通常は 0 またはスポーン付近）" /></div>
-                <div class="field-row"><label class="prop-label" for="ac-map-icon-offset">機体アイコン向き補正 (°)</label>
-                    <input type="number" id="ac-map-icon-offset" class="prop-input num" step="1" /></div>
-                <div class="prop-group-label">Google Maps 2D（M キー）— スポット補正</div>
+                    <input type="number" id="ac-map-camera-height" class="prop-input num" step="25" min="50" title="俯瞰の見える範囲" /></div>
+                <div class="prop-group-label">Google Maps 2D</div>
                 <div class="field-row">
-                    <label class="prop-label" for="ac-map-geo-enabled">Google Map 表示（オーバーレイ）</label>
+                    <label class="prop-label" for="ac-map-geo-enabled">Google Map 有効</label>
                     <input type="checkbox" id="ac-map-geo-enabled" class="prop-input" title="スポット3点以上で利用可能" />
                 </div>
                 <p id="ac-map-geo-calibration-status" class="status-text" role="status"></p>
                 <div id="ac-map-geo-fields">
-                <p class="hint">①俯瞰でスポットを3点以上配置 → ②「Google Map 表示」をオン → ③地図調整で合わせる → ④地図座標モードで各スポットの緯度経度 → ⑤補正を計算</p>
                     <div class="field-row"><label class="prop-label" for="ac-map-geo-map-type">地図タイプ</label>
                         <select id="ac-map-geo-map-type" class="prop-input full">
                             <option value="satellite">衛星</option>
@@ -687,39 +706,23 @@ export function mountAircraftMapAdminPanel(root) {
                             <option value="hybrid">ハイブリッド</option>
                             <option value="terrain">地形</option>
                         </select></div>
-                    <div class="field-row"><label class="prop-label" for="ac-map-geo-zoom">ズーム</label>
-                        <input type="number" id="ac-map-geo-zoom" class="prop-input num" min="1" max="22" step="1" value="15" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-map-geo-zoom-offset">ズーム微調整</label>
-                        <input type="number" id="ac-map-geo-zoom-offset" class="prop-input num" min="-8" max="8" step="1" value="0" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-map-geo-heading-mode">マップ回転</label>
-                        <select id="ac-map-geo-heading-mode" class="prop-input full">
-                            <option value="trackUp">機首上（track-up）</option>
-                            <option value="northUp">北固定（north-up）</option>
-                        </select></div>
                     <div id="ac-map-geo-computed" class="ac-map-geo-computed" hidden></div>
                     <div class="ac-admin-actions">
                         <button type="button" class="btn btn-secondary" id="ac-map-btn-calibrate">補正を計算</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="ac-map-spot-clear-geo">選択スポットの地図座標をクリア</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="ac-map-spot-clear-geo">選択の地図座標クリア</button>
                     </div>
                 </div>
+                <div class="prop-group-label">スポット一覧</div>
                 <div class="ac-admin-actions">
-                    <button type="button" class="btn btn-secondary" id="ac-map-btn-spot-add">スポット追加</button>
-                    <button type="button" class="btn btn-primary" id="ac-map-btn-save">保存</button>
-                </div>
-                <p id="ac-map-status" class="status-text" role="status"></p>
-            </aside>
-            <section class="ac-map-admin-center ac-map-admin-center-workbench">
-                <h3 class="section-subtitle">スポット定義（俯瞰）</h3>
-                <p class="hint">常に真上からの俯瞰。地形の上に薄い Google Map を重ねて位置合わせします。</p>
-                <div id="ac-map-workbench-mount" class="ac-map-workbench-mount"></div>
-            </section>
-            <aside class="ac-map-admin-right ac-map-admin-right-wide">
-                <h3 class="section-subtitle">スポット一覧</h3>
-                <div class="ac-admin-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" id="ac-map-btn-spot-add">スポット追加</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="ac-map-spot-rename">名前変更</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="ac-map-spot-delete">削除</button>
                 </div>
                 <div id="ac-map-spot-list" class="ac-map-spot-list"></div>
+                <div class="ac-admin-actions" style="margin-top:12px">
+                    <button type="button" class="btn btn-primary" id="ac-map-btn-save">保存</button>
+                </div>
+                <p id="ac-map-status" class="status-text" role="status"></p>
             </aside>
         </div>
     `;
@@ -742,25 +745,16 @@ export function mountAircraftMapAdminPanel(root) {
             tryApplyGeoCalibration(false);
         }
     };
-    for (const id of [
-        'ac-map-camera-height',
-        'ac-map-ground-y',
-        'ac-map-icon-offset',
-        'ac-map-north-x',
-        'ac-map-north-z',
-        'ac-map-geo-zoom',
-        'ac-map-geo-zoom-offset',
-    ]) {
+    for (const id of ['ac-map-camera-height', 'ac-map-north-x', 'ac-map-north-z']) {
         document.getElementById(id)?.addEventListener('input', previewOnChange);
     }
     document.getElementById('ac-map-geo-map-type')?.addEventListener('change', previewOnChange);
-    document.getElementById('ac-map-geo-heading-mode')?.addEventListener('change', previewOnChange);
 
     document.getElementById('ac-map-geo-enabled')?.addEventListener('change', (e) => {
         const checked = /** @type {HTMLInputElement} */ (e.target).checked;
         const panel = document.getElementById('ac-map-geo-fields');
         if (panel) panel.style.display = checked ? 'block' : 'none';
-        syncGoogleOverlayFromForm(checked);
+        syncGoogleTabFromForm(checked);
         refreshWorkbench();
     });
 

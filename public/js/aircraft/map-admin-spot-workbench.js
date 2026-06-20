@@ -1,10 +1,10 @@
-// public/js/aircraft/map-admin-spot-workbench.js — 俯瞰メタバース + 薄い Google Map オーバーレイ
+// public/js/aircraft/map-admin-spot-workbench.js — メタバース俯瞰 / Google 2D タブ切替ワークベンチ
 
 import { AdminMapSpotWorldViewer } from './map-spot-world-viewer.js';
 import { AdminMapGooglePreview } from './map-admin-google-preview.js';
 import { MIN_GEO_CALIBRATION_SPOTS } from './flight-map-geo.js';
 
-/** @typedef {'spots' | 'map' | 'geo'} MapWorkbenchInteraction */
+/** @typedef {'metaverse' | 'google'} MapViewTab */
 
 /**
  * ワールドの LOD バンド数（最大）
@@ -22,7 +22,6 @@ export function getWorldMaxLodBands(world) {
 }
 
 /**
- * Google オーバーレイ表示に必要なスポット数
  * @param {object|null|undefined} config
  * @returns {number}
  */
@@ -31,7 +30,7 @@ export function countWorldSpots(config) {
 }
 
 /**
- * 俯瞰メタバース上に Google Map を重ねるワークベンチ
+ * メタバース俯瞰と Google Map をタブで切り替えるワークベンチ
  */
 export class AdminMapSpotWorkbench {
     /**
@@ -48,9 +47,9 @@ export class AdminMapSpotWorkbench {
         /** @type {number} */
         this._lodBand = 1;
         /** @type {boolean} */
-        this._googleOverlayOn = false;
-        /** @type {MapWorkbenchInteraction} */
-        this._interaction = 'spots';
+        this._googleTabEnabled = false;
+        /** @type {MapViewTab} */
+        this._activeTab = 'metaverse';
         /** @type {AdminMapSpotWorldViewer|null} */
         this._worldViewer = null;
         /** @type {AdminMapGooglePreview|null} */
@@ -63,12 +62,11 @@ export class AdminMapSpotWorkbench {
         this.onMapViewChange = null;
 
         root.innerHTML = `
+            <div class="ac-map-view-tabs" role="tablist" aria-label="マップ表示">
+                <button type="button" class="ac-map-view-tab is-active" data-view-tab="metaverse" role="tab" aria-selected="true">メタバース上方俯瞰</button>
+                <button type="button" class="ac-map-view-tab" data-view-tab="google" role="tab" aria-selected="false" disabled title="スポット3点以上かつ Google Map 有効時に利用できます">Google Maps 2D</button>
+            </div>
             <div class="ac-map-workbench-toolbar">
-                <div class="ac-map-workbench-modes" role="group" aria-label="操作モード">
-                    <button type="button" class="ac-map-workbench-mode is-active" data-interaction="spots">スポット配置</button>
-                    <button type="button" class="ac-map-workbench-mode" data-interaction="map" disabled title="Google Map 表示をオンにすると利用できます">地図調整</button>
-                    <button type="button" class="ac-map-workbench-mode" data-interaction="geo" disabled title="Google Map 表示をオンにすると利用できます">地図座標</button>
-                </div>
                 <p class="ac-map-workbench-hint" id="ac-map-workbench-hint">俯瞰でクリックしてスポットを配置（3点以上）</p>
                 <div class="ac-map-workbench-toolbar-right">
                     <label class="ac-map-lod-label" id="ac-map-lod-label" hidden>
@@ -77,20 +75,22 @@ export class AdminMapSpotWorkbench {
                     </label>
                 </div>
             </div>
-            <div class="ac-map-workbench-stage" data-google="off" data-interaction="spots">
-                <div id="ac-map-workbench-google" class="ac-map-workbench-layer ac-map-workbench-google"></div>
-                <div id="ac-map-workbench-world" class="ac-map-workbench-layer ac-map-workbench-world"></div>
+            <div class="ac-map-workbench-stage">
+                <div id="ac-map-pane-metaverse" class="ac-map-view-pane is-active" data-view-pane="metaverse">
+                    <div id="ac-map-workbench-world" class="ac-map-workbench-world"></div>
+                </div>
+                <div id="ac-map-pane-google" class="ac-map-view-pane" data-view-pane="google" hidden>
+                    <div id="ac-map-workbench-google" class="ac-map-workbench-google"></div>
+                </div>
             </div>
         `;
 
-        this._stageEl = root.querySelector('.ac-map-workbench-stage');
         this._hintEl = root.querySelector('#ac-map-workbench-hint');
-        this._mapModeBtn = /** @type {HTMLButtonElement|null} */ (
-            root.querySelector('[data-interaction="map"]')
+        this._googleTabBtn = /** @type {HTMLButtonElement|null} */ (
+            root.querySelector('[data-view-tab="google"]')
         );
-        this._geoModeBtn = /** @type {HTMLButtonElement|null} */ (
-            root.querySelector('[data-interaction="geo"]')
-        );
+        this._metaversePane = root.querySelector('#ac-map-pane-metaverse');
+        this._googlePane = root.querySelector('#ac-map-pane-google');
         this._lodLabel = root.querySelector('#ac-map-lod-label');
         this._lodSelect = /** @type {HTMLSelectElement|null} */ (root.querySelector('#ac-map-lod-select'));
 
@@ -106,12 +106,12 @@ export class AdminMapSpotWorkbench {
             this._google.onMapViewChange = (view) => this.onMapViewChange?.(view);
         }
 
-        root.querySelectorAll('.ac-map-workbench-mode').forEach((btn) => {
+        root.querySelectorAll('.ac-map-view-tab').forEach((btn) => {
             btn.addEventListener('click', () => {
                 if (btn.hasAttribute('disabled')) return;
-                const mode = btn.getAttribute('data-interaction');
-                if (mode === 'spots' || mode === 'map' || mode === 'geo') {
-                    this.setInteractionMode(mode);
+                const tab = btn.getAttribute('data-view-tab');
+                if (tab === 'metaverse' || tab === 'google') {
+                    this.setActiveViewTab(tab);
                 }
             });
         });
@@ -124,7 +124,7 @@ export class AdminMapSpotWorkbench {
             }
         });
 
-        this._applyInteractionUi();
+        this._applyTabUi();
     }
 
     /**
@@ -156,8 +156,8 @@ export class AdminMapSpotWorkbench {
             northDirection: config?.northDirection,
         });
         this._worldViewer?.setSpotMarkers(config?.spots || []);
-        this._google?.setConfig(config, { overlayMode: geoOn });
-        this.setGoogleOverlayEnabled(geoOn, { spotCount, silent: true });
+        this._google?.setConfig(config);
+        this.setGoogleTabEnabled(geoOn, { spotCount, silent: true });
     }
 
     /**
@@ -166,103 +166,102 @@ export class AdminMapSpotWorkbench {
     setSelectedSpotId(spotId) {
         this._selectedSpotId = spotId;
         this._google?.setSelectedSpotId(spotId);
-        if (this._config && this._googleOverlayOn) {
-            this._google?.setConfig(this._config, { overlayMode: true });
+        if (this._config) {
+            this._google?.setConfig(this._config);
         }
     }
 
     /**
-     * Google Map オーバーレイの表示
+     * Google タブの有効化（geo 有効かつスポット3点以上）
      * @param {boolean} enabled
      * @param {{ spotCount?: number, silent?: boolean }} [opts]
      */
-    setGoogleOverlayEnabled(enabled, opts = {}) {
+    setGoogleTabEnabled(enabled, opts = {}) {
         const spotCount = opts.spotCount ?? countWorldSpots(this._config);
         const canEnable = enabled && spotCount >= MIN_GEO_CALIBRATION_SPOTS;
-        this._googleOverlayOn = canEnable;
+        this._googleTabEnabled = canEnable;
 
         if (enabled && spotCount < MIN_GEO_CALIBRATION_SPOTS && !opts.silent) {
             this._updateHint(
-                `Google Map 表示にはスポットが ${MIN_GEO_CALIBRATION_SPOTS} 点以上必要です（現在 ${spotCount}）`
+                `Google Map にはスポットが ${MIN_GEO_CALIBRATION_SPOTS} 点以上必要です（現在 ${spotCount}）`
             );
         }
 
-        if (this._mapModeBtn) {
-            this._mapModeBtn.disabled = !canEnable;
-        }
-        if (this._geoModeBtn) {
-            this._geoModeBtn.disabled = !canEnable;
-        }
-
-        if (this._stageEl) {
-            this._stageEl.dataset.google = canEnable ? 'on' : 'off';
+        if (this._googleTabBtn) {
+            this._googleTabBtn.disabled = !canEnable;
+            this._googleTabBtn.title = canEnable
+                ? 'Google Maps 2D 表示'
+                : `スポット ${MIN_GEO_CALIBRATION_SPOTS} 点以上かつ Google Map 有効時に利用できます`;
         }
 
-        this._worldViewer?.setMapOverlayActive(canEnable);
-        this._google?.setOverlayVisible(canEnable);
-
-        if (canEnable && !opts.silent) {
-            void this._google?.initialFitForOverlay(this._config);
-        }
-
-        if (!canEnable && this._interaction !== 'spots') {
-            this.setInteractionMode('spots');
+        if (!canEnable && this._activeTab === 'google') {
+            this.setActiveViewTab('metaverse');
         } else {
-            this._applyInteractionUi();
+            this._applyTabUi();
         }
     }
 
     /**
      * @returns {boolean}
      */
-    isGoogleOverlayEnabled() {
-        return this._googleOverlayOn;
+    isGoogleTabEnabled() {
+        return this._googleTabEnabled;
     }
 
     /**
-     * @param {MapWorkbenchInteraction} mode
+     * @param {MapViewTab} tab
      */
-    setInteractionMode(mode) {
-        if (mode !== 'spots' && !this._googleOverlayOn) return;
-        this._interaction = mode;
-        this._applyInteractionUi();
+    setActiveViewTab(tab) {
+        if (tab === 'google' && !this._googleTabEnabled) return;
+        this._activeTab = tab;
+        this._applyTabUi();
+        if (tab === 'google') {
+            void this._google?.initialFit(this._config);
+        }
     }
 
     /**
-     * @returns {MapWorkbenchInteraction}
+     * @returns {MapViewTab}
      */
-    getInteractionMode() {
-        return this._interaction;
+    getActiveViewTab() {
+        return this._activeTab;
     }
 
-    _applyInteractionUi() {
-        const mode = this._interaction;
-        this.root.querySelectorAll('.ac-map-workbench-mode').forEach((btn) => {
-            btn.classList.toggle('is-active', btn.getAttribute('data-interaction') === mode);
+    _applyTabUi() {
+        const tab = this._activeTab;
+        this.root.querySelectorAll('.ac-map-view-tab').forEach((btn) => {
+            const isActive = btn.getAttribute('data-view-tab') === tab;
+            btn.classList.toggle('is-active', isActive);
+            btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
         });
-        if (this._stageEl) {
-            this._stageEl.dataset.interaction = mode;
+
+        if (this._metaversePane) {
+            const show = tab === 'metaverse';
+            this._metaversePane.classList.toggle('is-active', show);
+            this._metaversePane.hidden = !show;
+        }
+        if (this._googlePane) {
+            const show = tab === 'google';
+            this._googlePane.classList.toggle('is-active', show);
+            this._googlePane.hidden = !show;
         }
 
-        const spotPick = mode === 'spots';
-        const mapActive = mode === 'map' || mode === 'geo';
-        this._worldViewer?.setPickingEnabled(spotPick);
-        this._worldViewer?.setPointerPassthrough(!spotPick);
-        this._google?.setMapInteractive(mapActive);
-        this._google?.setPickingEnabled(mode === 'geo');
+        const metaversePick = tab === 'metaverse';
+        this._worldViewer?.setPickingEnabled(metaversePick);
+        this._google?.setMapInteractive(tab === 'google');
+        this._google?.setPickingEnabled(tab === 'google');
 
-        if (mode === 'spots') {
+        if (tab === 'metaverse') {
             this._updateHint(
-                this._googleOverlayOn
-                    ? '俯瞰でスポットを配置・移動（ホイールで拡大縮小、ドラッグで移動）'
-                    : `俯瞰でクリックしてスポットを配置（${MIN_GEO_CALIBRATION_SPOTS} 点以上で Google Map をオンにできます）`
-            );
-        } else if (mode === 'map') {
-            this._updateHint(
-                '地図をドラッグ・ピンチで移動、Ctrl+ドラッグまたは右クリックで回転、ホイールで拡大縮小して地形に合わせます'
+                `俯瞰でクリックしてスポットを配置（${MIN_GEO_CALIBRATION_SPOTS} 点以上で Google タブが有効になります）`
             );
         } else {
-            this._updateHint('スポットを一覧で選択し、地図上の対応位置をクリックして緯度経度を設定');
+            this._updateHint(
+                'スポットを一覧で選択し、地図上をクリックして緯度経度を設定。補正後はメタバースの変更が自動反映されます'
+            );
+            if (this._google) {
+                this._google.resize();
+            }
         }
     }
 
@@ -300,11 +299,9 @@ export class AdminMapSpotWorkbench {
             lodBand: this._lodBand,
         });
         this._worldViewer.setSpotMarkers(cfg.spots || []);
-        this._worldViewer.setMapOverlayActive(this._googleOverlayOn);
     }
 
     /**
-     * 保存済みビューを Google Map に適用
      * @param {object} geo
      */
     applySavedMapView(geo) {

@@ -135,14 +135,19 @@ export default class AircraftManager {
      * Google Maps API キーを client-config から取得して googleMap に設定する
      */
     async ensureGoogleMapsApiKey() {
-        if (this.googleMap.hasApiKey()) return;
+        if (this.googleMap.hasApiKey()) {
+            this.minimap.setApiKey(this.googleMap.getApiKey());
+            return;
+        }
         if (!this._googleMapsApiKeyPromise) {
             this._googleMapsApiKeyPromise = (async () => {
                 try {
                     const res = await fetch('/api/client-config', { credentials: 'include' });
                     if (!res.ok) return;
                     const j = await res.json();
-                    this.googleMap.setApiKey(j.googleMapsApiKey || null);
+                    const key = j.googleMapsApiKey || null;
+                    this.googleMap.setApiKey(key);
+                    this.minimap.setApiKey(key);
                 } catch {
                     /* ignore */
                 }
@@ -177,11 +182,18 @@ export default class AircraftManager {
         e.preventDefault();
         const changed = e.shiftKey ? this.minimap.zoomOut() : this.minimap.zoomIn();
         if (changed) {
-            const heightM = this.minimap.getCameraHeightM();
-            if (heightM != null && this.googleMap.mapConfig) {
-                this.googleMap.mapConfig.cameraHeightM = heightM;
-                if (typeof this.googleMap.mapConfig.viewHalfExtentM === 'number') {
-                    delete this.googleMap.mapConfig.viewHalfExtentM;
+            if (this.minimap.usesGoogleMap() && this.googleMap.mapConfig?.geo) {
+                const offset = this.minimap.mapConfig?.geo?.zoomOffset ?? 0;
+                if (this.googleMap.mapConfig?.geo) {
+                    this.googleMap.mapConfig.geo.zoomOffset = offset;
+                }
+            } else {
+                const heightM = this.minimap.getCameraHeightM();
+                if (heightM != null && this.googleMap.mapConfig) {
+                    this.googleMap.mapConfig.cameraHeightM = heightM;
+                    if (typeof this.googleMap.mapConfig.viewHalfExtentM === 'number') {
+                        delete this.googleMap.mapConfig.viewHalfExtentM;
+                    }
                 }
             }
             this.updateMinimap(true);
@@ -328,6 +340,7 @@ export default class AircraftManager {
             }
             const j = await res.json();
             await this.ensureGoogleMapsApiKey();
+            this.minimap.setApiKey(this.googleMap.getApiKey());
             const ok = await this.minimap.setMap(j.map);
             const geoOk = await this.googleMap.setMap(j.map);
             if (ok && (this.isPiloting || this.isPassenger)) {
