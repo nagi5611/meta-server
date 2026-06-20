@@ -48,6 +48,8 @@ class UIManager {
         this._aircraftHudCamera = null;
         /** @type {ReturnType<typeof setTimeout>|null} */
         this._aircraftViewpointFlashTimer = null;
+        /** @type {ReturnType<typeof setTimeout>|null} */
+        this._aircraftAutopilotFlashTimer = null;
         /** @type {HTMLElement|null} */
         this.mobileInteractBtn = null;
         /** @type {(() => void)|null} */
@@ -741,6 +743,31 @@ class UIManager {
     }
 
     /**
+     * オートパイロット切替時に画面下部へ約2秒表示する
+     * @param {boolean} enabled
+     */
+    flashAircraftAutopilot(enabled) {
+        const label = enabled ? t('ui.aircraftAutopilotOn') : t('ui.aircraftAutopilotOff');
+        let el = document.getElementById('aircraft-autopilot-flash');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'aircraft-autopilot-flash';
+            el.className = 'aircraft-autopilot-flash';
+            el.setAttribute('aria-live', 'polite');
+            document.body.appendChild(el);
+        }
+        el.textContent = label;
+        el.classList.add('is-visible');
+        if (this._aircraftAutopilotFlashTimer) {
+            clearTimeout(this._aircraftAutopilotFlashTimer);
+        }
+        this._aircraftAutopilotFlashTimer = setTimeout(() => {
+            el.classList.remove('is-visible');
+            this._aircraftAutopilotFlashTimer = null;
+        }, 2000);
+    }
+
+    /**
      * 飛行機操縦中の計器表示（showAircraftHud 後・毎フレーム）
      * @param {{ speedMs: number, pitchDeg: number, yawDeg: number, rollDeg: number, omegaYaw: number, omegaPitch: number, omegaRoll: number, grounded: boolean, throttle?: number, engineRpm?: number, flapLabel?: string, vfeMs?: number, vfeWarn?: boolean }|null} snap
      */
@@ -807,6 +834,15 @@ class UIManager {
         if (this._aircraftViewpointFlashTimer) {
             clearTimeout(this._aircraftViewpointFlashTimer);
             this._aircraftViewpointFlashTimer = null;
+        }
+        const autopilotFlash = document.getElementById('aircraft-autopilot-flash');
+        if (autopilotFlash) {
+            autopilotFlash.classList.remove('is-visible');
+            autopilotFlash.textContent = '';
+        }
+        if (this._aircraftAutopilotFlashTimer) {
+            clearTimeout(this._aircraftAutopilotFlashTimer);
+            this._aircraftAutopilotFlashTimer = null;
         }
     }
 }

@@ -664,7 +664,8 @@ body {
 }
 
 #aircraft-hud .aircraft-hud-viewpoint.is-visible,
-.aircraft-viewpoint-flash.is-visible {
+.aircraft-viewpoint-flash.is-visible,
+.aircraft-autopilot-flash.is-visible {
     opacity: 1;
 }
 
@@ -680,6 +681,24 @@ body {
     color: rgba(255, 255, 255, 0.9);
     background: rgba(0, 0, 0, 0.45);
     border-radius: 4px;
+    backdrop-filter: blur(8px);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.aircraft-autopilot-flash {
+    position: fixed;
+    bottom: 48px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 104;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 6px;
     backdrop-filter: blur(8px);
     opacity: 0;
     transition: opacity 0.2s ease;
@@ -736,6 +755,63 @@ body {
     color: #e53935;
     text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
     line-height: 1;
+    pointer-events: none;
+}
+
+/* 飛行中 Google Maps 2D オーバーレイ（M キー） */
+.aircraft-google-map {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(4px);
+}
+
+.aircraft-google-map[hidden] {
+    display: none !important;
+}
+
+.aircraft-google-map-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px;
+    background: rgba(20, 28, 40, 0.92);
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.aircraft-google-map-title {
+    font-weight: 700;
+    font-size: 15px;
+}
+
+.aircraft-google-map-hint {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.aircraft-google-map-mount {
+    flex: 1;
+    min-height: 0;
+    margin: 0 12px 12px;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.aircraft-google-map-attribution {
+    position: absolute;
+    right: 20px;
+    bottom: 20px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(0, 0, 0, 0.45);
+    padding: 2px 8px;
+    border-radius: 4px;
     pointer-events: none;
 }
 

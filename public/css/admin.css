@@ -5179,6 +5179,15 @@ body.admin-dark .ac-admin-mode-btn.is-active {
     min-width: 280px;
 }
 
+.ac-map-google-preview-mount {
+    flex: 1;
+    min-height: 360px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #1a1a22;
+}
+
 .ac-map-spot-modal {
     position: fixed;
     inset: 0;

@@ -2,6 +2,8 @@
 
 本番（`NODE_ENV=production`）で `USE_S3_MODELS=1` のとき、サーバーはモデルをローカル `models/` に保存したうえで同一キーへ S3 にアップロードし、参照用の URL は CloudFront ドメインを使います。クライアントは短命の **署名付き HTTPS URL** で CDN を取得し、失敗時は **同一オリジン**の `/models/`（Socket 認証 Cookie または管理者 Basic）へフォールバックします。
 
+**同一オリジン配信の保護（`USE_S3_MODELS=1` 時）:** `/models`・`/plane`・`/avatars`・`/env` の GET は、許可 Host（`META_ASSET_ALLOWED_HOSTS` または `PROXY_SERVICE_DOMAIN`、未設定時は `metair.mmh-virtual.jp`）かつメタバース Socket 認証 Cookie（`/api/client-config` でゲスト含む）または管理 Basic のみ 200。URL 欄への直貼りや Cookie 無しの curl は 403。
+
 ## 必要な環境変数（アプリ）
 
 | 変数 | 説明 |
@@ -15,6 +17,8 @@
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront キーペアの ID |
 | `CLOUDFRONT_PRIVATE_KEY` | PEM 本文（改行は `\n` でも可）。または `CLOUDFRONT_PRIVATE_KEY_PATH` でファイルパス |
 | `CLOUDFRONT_SIGN_EXPIRES_SECONDS` | （任意）署名 URL 有効時間。既定 900 |
+| `META_ASSET_ALLOWED_HOSTS` | （任意）同一オリジン静的アセット GET を許可する Host（カンマ区切り）。未設定時は `PROXY_SERVICE_DOMAIN` → `metair.mmh-virtual.jp` |
+| `PROXY_SERVICE_DOMAIN` | metair 用 Node では `metair.mmh-virtual.jp` 等（`META_ASSET_ALLOWED_HOSTS` 未設定時の既定 Host） |
 
 EC2/ECS などでは `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` または IAM ロールで `s3:PutObject` / `s3:GetObject` / `s3:DeleteObject` が必要です。**起動時同期**は通常 **マニフェスト＋`GetObject`（マニフェスト1本）** で済みます。リモートにマニフェストがない初回など **レガシー同期**に落ちると、各ファイルの `HeadObject` のあと **孤児オブジェクト削除**用に **`s3:ListBucket`** を使います。`ListBucket` が IAM で拒否される場合も **起動は続行**し、孤児削除だけスキップしたうえでマニフェストを書きます（本体同期は MD5/Head で完了している前提）。
 

@@ -38,6 +38,7 @@ import { ensureWavSidecarForMp3Path, runChartBgmWavMigration, wavPathForMp3 } fr
 import { normalizeWorldsLod } from './public/js/world-lod-normalize.js';
 import { normalizeWorldsRod } from './public/js/world-rod-resolve.js';
 import { USE_S3_MODELS, isS3ModelsConfigComplete, isS3ModelsBucketConfigured, normalizedCdnBaseUrl, normalizedAvatarsS3KeyPrefix } from './config/s3-assets.js';
+import { REQUIRE_SESSION_FOR_STATIC_ASSETS, getAllowedAssetHosts, isAssetRequestHostAllowed } from './config/asset-access.js';
 import { insertVersionBeforeExt, createModelVersionToken } from './lib/model-upload-version.js';
 import {
     uploadLocalModelsPathsOrRollbackS3,
@@ -1417,13 +1418,33 @@ function isSocketAuthOrAdminBasic(req) {
 }
 
 /**
- * S3 モデル本番モード時: /models GET はメタバース Socket 認証 Cookie または管理者 Basic のみ（直リンク抑止）
+ * S3 モデル本番モード時: 許可ドメインかつ Socket 認証 Cookie または管理者 Basic（直リンク抑止）
  * @param {import('express').Request} req
  * @returns {boolean}
  */
 function metaverseModelsAccessAllowed(req) {
-    if (!USE_S3_MODELS) return true;
+    if (!REQUIRE_SESSION_FOR_STATIC_ASSETS) return true;
+    if (!isAssetRequestHostAllowed(req)) return false;
     return isSocketAuthOrAdminBasic(req);
+}
+
+/**
+ * 静的アセット GET が拒否されたときの 403 応答
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {'model'|'avatar'|'env'} kind
+ */
+function respondMetaverseStaticAssetForbidden(req, res, kind) {
+    if (!isAssetRequestHostAllowed(req)) {
+        return res.status(403).type('txt').send('このドメインからはアセットを取得できません');
+    }
+    const msg =
+        kind === 'avatar'
+            ? 'アバターは認証されたメタバースセッションからのみ取得できます'
+            : kind === 'env'
+              ? '環境マップは認証されたメタバースセッションからのみ取得できます'
+              : 'モデルは認証されたメタバースセッションからのみ取得できます';
+    return res.status(403).type('txt').send(msg);
 }
 
 /**
@@ -1873,31 +1894,37 @@ app.delete('/admin/addons/config', express.json(), (req, res) => {
 // Serve bootstrap-icons from node_modules (for admin.html etc.)
 app.use('/vendor/bootstrap-icons', express.static(path.join(__dirname, 'node_modules/bootstrap-icons/font')));
 
-// /models: アップロード先。本番 S3 モードでは Cookie / Basic 付きのみ配信
+// /models: アップロード先。本番 S3 モードでは許可ドメイン + Cookie / Basic のみ配信
 const modelsStaticMiddleware = express.static(MODELS_DIR);
 app.use('/models', (req, res, next) => {
-    if (USE_S3_MODELS && !metaverseModelsAccessAllowed(req)) {
-        return res.status(403).type('txt').send('モデルは認証されたメタバースセッションからのみ取得できます');
+    if (REQUIRE_SESSION_FOR_STATIC_ASSETS && !metaverseModelsAccessAllowed(req)) {
+        return respondMetaverseStaticAssetForbidden(req, res, 'model');
     }
     modelsStaticMiddleware(req, res, next);
 });
 const planeStaticMiddleware = express.static(PLANE_DIR);
 app.use('/plane', (req, res, next) => {
-    if (USE_S3_MODELS && !metaverseModelsAccessAllowed(req)) {
-        return res.status(403).type('txt').send('モデルは認証されたメタバースセッションからのみ取得できます');
+    if (REQUIRE_SESSION_FOR_STATIC_ASSETS && !metaverseModelsAccessAllowed(req)) {
+        return respondMetaverseStaticAssetForbidden(req, res, 'model');
     }
     planeStaticMiddleware(req, res, next);
 });
 const avatarsStaticMiddleware = express.static(AVATARS_DIR);
 app.use('/avatars', (req, res, next) => {
-    if (USE_S3_MODELS && !metaverseModelsAccessAllowed(req)) {
-        return res.status(403).type('txt').send('アバターは認証されたメタバースセッションからのみ取得できます');
+    if (REQUIRE_SESSION_FOR_STATIC_ASSETS && !metaverseModelsAccessAllowed(req)) {
+        return respondMetaverseStaticAssetForbidden(req, res, 'avatar');
     }
     avatarsStaticMiddleware(req, res, next);
 });
 app.use('/pdfs', express.static(PDFS_DIR));
 app.use('/images', express.static(IMAGES_DIR));
-app.use('/env', express.static(ENV_DIR));
+const envStaticMiddleware = express.static(ENV_DIR);
+app.use('/env', (req, res, next) => {
+    if (REQUIRE_SESSION_FOR_STATIC_ASSETS && !metaverseModelsAccessAllowed(req)) {
+        return respondMetaverseStaticAssetForbidden(req, res, 'env');
+    }
+    envStaticMiddleware(req, res, next);
+});
 if (isProductionBuild && fs.existsSync(DIST_ADDONS_DIR)) {
     app.use('/addons', express.static(DIST_ADDONS_DIR));
 }
@@ -6258,6 +6285,7 @@ app.get('/api/client-config', (req, res) => {
         chartFeaturesEnabled: CHART_FEATURES_ENABLED,
         moduleScriptOrigin: MODULE_SCRIPT_ORIGIN,
         planLoadConcurrency: PLAN_LOAD_CONCURRENCY,
+        googleMapsApiKey: String(process.env.GOOGLE_MAPS_API_KEY || '').trim() || null,
         assetModels: {
             mode: USE_S3_MODELS ? 'cdn' : 'local',
             cdnBaseUrl: USE_S3_MODELS ? normalizedCdnBaseUrl() : null,
@@ -7149,6 +7177,12 @@ function formatBytes(bytes) {
         if (PROXY_SERVICE_DOMAIN) {
             console.log(`PROXY_SERVICE_DOMAIN (this process): ${PROXY_SERVICE_DOMAIN}`);
         }
+    }
+    if (REQUIRE_SESSION_FOR_STATIC_ASSETS) {
+        const hosts = getAllowedAssetHosts();
+        console.log(
+            `[asset-access] static models/plane/avatars/env require session; allowed Host: ${hosts.length ? hosts.join(', ') : '(none — host check skipped)'}`
+        );
     }
     const lanIps = getLanIps();
     if (lanIps.length > 0) {

@@ -176,6 +176,23 @@ export default class AircraftController {
     }
 
     /**
+     * オートパイロットのオン・オフを切り替える
+     * @returns {boolean|null} 操縦中でなければ null
+     */
+    toggleAutopilot() {
+        const impl = this._impl();
+        if (!impl.slot) return null;
+        return impl.toggleAutopilot();
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    isAutopilotEnabled() {
+        return this._impl().isAutopilotEnabled();
+    }
+
+    /**
      * Easy 操縦向けタッチ入力（Hard では no-op）
      * @param {Record<string, boolean>} partialKeys
      */

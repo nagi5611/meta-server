@@ -15,6 +15,13 @@ import {
     viewpointAtIndex,
 } from './camera-viewpoint-runtime.js';
 import { viewpointIndexFromLegacyMode } from '../../../public/js/aircraft/camera-viewpoints.js';
+import {
+    createAircraftAutopilotState,
+    moveAircraftRootByVelocity,
+    resetAircraftAutopilot,
+    rotateAircraftRootByOmega,
+    snapshotAircraftAutopilot,
+} from './aircraft-autopilot.js';
 
 const LANDING_RAY_MAX = 500;
 const CLEARANCE_ABOVE_GROUND = 0.5;
@@ -99,6 +106,7 @@ export default class AircraftControllerEasy {
         this._lastGroundMinY = null;
         this._libAnim = null;
         this._libAnimLoadingFor = null;
+        this._autopilot = createAircraftAutopilotState();
     }
 
     /**
@@ -169,6 +177,7 @@ export default class AircraftControllerEasy {
         this._lastGroundMinY = null;
         this._libAnim = null;
         this._libAnimLoadingFor = null;
+        resetAircraftAutopilot(this._autopilot);
     }
 
     /**
@@ -594,12 +603,60 @@ export default class AircraftControllerEasy {
     }
 
     /**
+     * オートパイロットのオン・オフを切り替える
+     * @returns {boolean}
+     */
+    toggleAutopilot() {
+        if (!this.slot) return false;
+        this._autopilot.enabled = !this._autopilot.enabled;
+        if (this._autopilot.enabled) {
+            snapshotAircraftAutopilot(
+                this._autopilot,
+                this.velocity,
+                this._omegaYaw,
+                this._omegaPitch,
+                this._omegaRoll
+            );
+        }
+        return this._autopilot.enabled;
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    isAutopilotEnabled() {
+        return this._autopilot.enabled;
+    }
+
+    /**
+     * 記録済み速度・角速度で慣性飛行する
+     * @param {THREE.Object3D} root
+     * @param {number} dt
+     */
+    _updateAutopilotFrame(root, dt) {
+        const ap = this._autopilot;
+        this.velocity.copy(ap.velocity);
+        this._omegaYaw = ap.omegaYaw;
+        this._omegaPitch = ap.omegaPitch;
+        this._omegaRoll = ap.omegaRoll;
+        rotateAircraftRootByOmega(root, ap.omegaYaw, ap.omegaPitch, ap.omegaRoll, dt);
+        moveAircraftRootByVelocity(root, ap.velocity, dt, this._worldPos);
+        this._updateLibraryVisuals(dt);
+        this._updateCamera();
+    }
+
+    /**
      * @param {number} deltaTime
      */
     update(deltaTime) {
         if (!this.slot) return;
         const root = this.slot.root;
         const dt = Math.min(0.1, deltaTime);
+
+        if (this._autopilot.enabled) {
+            this._updateAutopilotFrame(root, dt);
+            return;
+        }
 
         const yawIn = (this._keyActive('yawR') ? 1 : 0) - (this._keyActive('yawL') ? 1 : 0);
         const pitchIn = (this._keyActive('pitchUp') ? 1 : 0) - (this._keyActive('pitchDn') ? 1 : 0);
@@ -824,6 +881,7 @@ export default class AircraftControllerEasy {
             omegaRoll: this._omegaRoll,
             viewpointName: vp?.name || vp?.id || '',
             grounded: this._aircraftGrounded,
+            autopilot: this._autopilot.enabled,
         };
     }
 

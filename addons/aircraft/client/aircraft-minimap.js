@@ -9,10 +9,12 @@ import {
     worldXzToMinimapScreen,
 } from './flight-map-coords.js';
 
-const SIZE_PX = 264;
-const RADIUS_PX = SIZE_PX / 2 - 5;
-/** 352px 基準デザインからのスケール */
-const UI_SCALE = SIZE_PX / 352;
+const DEFAULT_SIZE_PX = 264;
+const MIN_SIZE_PX = 160;
+const MAX_SIZE_PX = 440;
+const SIZE_STEP_PX = 22;
+/** 352px 基準デザインからのスケール分母 */
+const UI_DESIGN_BASE_PX = 352;
 
 /**
  * 飛行操縦中 HUD 右下の円形ミニマップ（3D ワールド俯瞰・North-up）
@@ -39,6 +41,68 @@ export default class AircraftMinimap {
         this._minimapClearColor = new THREE.Color(0x2a3545);
         /** @type {object|null} */
         this.mapConfig = null;
+        /** 表示・描画解像度（px） */
+        this.sizePx = DEFAULT_SIZE_PX;
+    }
+
+    /**
+     * 352px 基準 UI 要素のスケール
+     * @returns {number}
+     */
+    _uiScale() {
+        return this.sizePx / UI_DESIGN_BASE_PX;
+    }
+
+    /**
+     * 円形クリップ半径（px）
+     * @returns {number}
+     */
+    _radiusPx() {
+        return this.sizePx / 2 - 5;
+    }
+
+    /**
+     * sizePx を DOM・キャンバス・レンダラーへ反映する
+     */
+    _applySize() {
+        const size = this.sizePx;
+        if (this.root) {
+            this.root.style.width = `${size}px`;
+            this.root.style.height = `${size}px`;
+        }
+        for (const canvas of [this.canvas3d, this.canvasOverlay]) {
+            if (!canvas) continue;
+            canvas.width = size;
+            canvas.height = size;
+            canvas.style.width = `${size}px`;
+            canvas.style.height = `${size}px`;
+        }
+        if (this._renderer) {
+            this._renderer.setSize(size, size, false);
+        }
+    }
+
+    /**
+     * ミニマップ表示サイズを変更する
+     * @param {number} delta
+     * @returns {boolean}
+     */
+    adjustSize(delta) {
+        const next = Math.min(MAX_SIZE_PX, Math.max(MIN_SIZE_PX, this.sizePx + delta));
+        if (next === this.sizePx) return false;
+        this.sizePx = next;
+        this._applySize();
+        return true;
+    }
+
+    /** ミニマップを拡大する（;） */
+    enlarge() {
+        return this.adjustSize(SIZE_STEP_PX);
+    }
+
+    /** ミニマップを縮小する（:） */
+    shrink() {
+        return this.adjustSize(-SIZE_STEP_PX);
     }
 
     /**
@@ -71,13 +135,13 @@ export default class AircraftMinimap {
 
         const canvas3d = document.createElement('canvas');
         canvas3d.className = 'aircraft-minimap-3d';
-        canvas3d.width = SIZE_PX;
-        canvas3d.height = SIZE_PX;
+        canvas3d.width = this.sizePx;
+        canvas3d.height = this.sizePx;
 
         const canvasOverlay = document.createElement('canvas');
         canvasOverlay.className = 'aircraft-minimap-overlay';
-        canvasOverlay.width = SIZE_PX;
-        canvasOverlay.height = SIZE_PX;
+        canvasOverlay.width = this.sizePx;
+        canvasOverlay.height = this.sizePx;
 
         const north = document.createElement('span');
         north.className = 'aircraft-minimap-north';
@@ -98,9 +162,10 @@ export default class AircraftMinimap {
             antialias: true,
             powerPreference: 'low-power',
         });
-        this._renderer.setSize(SIZE_PX, SIZE_PX, false);
+        this._renderer.setSize(this.sizePx, this.sizePx, false);
         this._renderer.setPixelRatio(1);
         this._orthoCam = new THREE.OrthographicCamera(-500, 500, 500, -500, 1, 15000);
+        this._applySize();
     }
 
     /**
@@ -148,13 +213,14 @@ export default class AircraftMinimap {
      * @param {number} radius
      */
     _drawMarkerAtWorld(ctx, worldX, worldZ, groundY, camera, label, fillColor, radius) {
-        const screen = worldXzToMinimapScreen(worldX, worldZ, groundY, camera, SIZE_PX);
+        const size = this.sizePx;
+        const screen = worldXzToMinimapScreen(worldX, worldZ, groundY, camera, size);
         if (!screen) return;
-        const cx = SIZE_PX / 2;
-        const cy = SIZE_PX / 2;
+        const cx = size / 2;
+        const cy = size / 2;
         const px = screen.sx - cx;
         const py = screen.sy - cy;
-        if (Math.hypot(px, py) > RADIUS_PX - 4) return;
+        if (Math.hypot(px, py) > this._radiusPx() - 4) return;
         const sx = screen.sx;
         const sy = screen.sy;
         ctx.beginPath();
@@ -162,10 +228,11 @@ export default class AircraftMinimap {
         ctx.fillStyle = fillColor;
         ctx.fill();
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2 * UI_SCALE;
+        const uiScale = this._uiScale();
+        ctx.lineWidth = 2 * uiScale;
         ctx.stroke();
         ctx.fillStyle = 'rgba(255,255,255,0.95)';
-        ctx.font = `${Math.round(14 * UI_SCALE)}px sans-serif`;
+        ctx.font = `${Math.round(14 * uiScale)}px sans-serif`;
         ctx.textAlign = 'left';
         ctx.fillText(label, sx + radius + 2, sy + 3);
     }
@@ -179,10 +246,12 @@ export default class AircraftMinimap {
         const { yawDeg } = state;
         const north = this.mapConfig.northDirection || { x: 0, z: -1 };
         const groundY = this.mapConfig.groundRefY ?? 0;
-        const cx = SIZE_PX / 2;
-        const cy = SIZE_PX / 2;
+        const size = this.sizePx;
+        const cx = size / 2;
+        const cy = size / 2;
         const ctx = this.ctxOverlay;
-        ctx.clearRect(0, 0, SIZE_PX, SIZE_PX);
+        ctx.clearRect(0, 0, size, size);
+        const uiScale = this._uiScale();
 
         const spots = this.mapConfig.spots || [];
         for (const spot of spots) {
@@ -195,7 +264,7 @@ export default class AircraftMinimap {
                 this._orthoCam,
                 spot.name,
                 '#f57c00',
-                Math.round(10 * UI_SCALE)
+                Math.round(10 * uiScale)
             );
         }
 
@@ -210,7 +279,7 @@ export default class AircraftMinimap {
                 this._orthoCam,
                 ac.label,
                 '#42a5f5',
-                Math.round(8 * UI_SCALE)
+                Math.round(8 * uiScale)
             );
         }
 
@@ -232,7 +301,7 @@ export default class AircraftMinimap {
      * @param {CanvasRenderingContext2D} ctx
      */
     _drawOwnAircraftIcon(ctx) {
-        const s = UI_SCALE;
+        const s = this._uiScale();
         ctx.beginPath();
         ctx.moveTo(0, -16 * s);
         ctx.lineTo(11 * s, 12 * s);
@@ -285,7 +354,7 @@ export default class AircraftMinimap {
             const g = this.canvas3d.getContext('2d');
             if (g) {
                 g.fillStyle = '#1a2634';
-                g.fillRect(0, 0, SIZE_PX, SIZE_PX);
+                g.fillRect(0, 0, this.sizePx, this.sizePx);
             }
         }
 

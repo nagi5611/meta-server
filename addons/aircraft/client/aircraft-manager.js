@@ -7,6 +7,7 @@ import {
 } from '../../../public/js/aircraft/camera-viewpoints.js';
 import AircraftController from './aircraft-controller.js';
 import AircraftMinimap from './aircraft-minimap.js';
+import AircraftGoogleMap from './aircraft-google-map.js';
 import { AIRCRAFT_GROUNDED_EXIT_HEADROOM } from './aircraft-physics-defaults.js';
 
 const STORAGE_CAMERA = 'metaverse-aircraft-camera';
@@ -80,6 +81,9 @@ export default class AircraftManager {
         /** @type {(() => string|null)|null} */
         this._getCurrentWorldId = null;
         this.minimap = new AircraftMinimap();
+        this.googleMap = new AircraftGoogleMap();
+        /** @type {Promise<void>|null} */
+        this._googleMapsApiKeyPromise = null;
         this._minimapPosScratch = new THREE.Vector3();
         /** ミニマップ更新間隔（ms）。3D 正射影は重いため低 FPS で十分 */
         this._minimapUpdateIntervalMs = 500;
@@ -115,14 +119,65 @@ export default class AircraftManager {
                 this.updateMinimap(true);
             }
         });
+        void this.ensureGoogleMapsApiKey();
     }
 
     /**
      * 操縦・同乗 UI（HUD / ミニマップ）を隠す
      */
     _hideFlightUi() {
+        this.googleMap.hide();
         this.minimap.hide();
         this.uiManager.hideAircraftHud();
+    }
+
+    /**
+     * Google Maps API キーを client-config から取得して googleMap に設定する
+     */
+    async ensureGoogleMapsApiKey() {
+        if (this.googleMap.hasApiKey()) return;
+        if (!this._googleMapsApiKeyPromise) {
+            this._googleMapsApiKeyPromise = (async () => {
+                try {
+                    const res = await fetch('/api/client-config', { credentials: 'include' });
+                    if (!res.ok) return;
+                    const j = await res.json();
+                    this.googleMap.setApiKey(j.googleMapsApiKey || null);
+                } catch {
+                    /* ignore */
+                }
+            })();
+        }
+        await this._googleMapsApiKeyPromise;
+    }
+
+    /**
+     * M キーで Google Maps 2D オーバーレイを切り替える
+     * @param {KeyboardEvent} e
+     * @returns {boolean}
+     */
+    _handleGoogleMapKey(e) {
+        if (e.code !== 'KeyM' || e.repeat) return false;
+        if (!this.googleMap.isAvailable()) return false;
+        e.preventDefault();
+        const visible = this.googleMap.toggle();
+        if (visible) {
+            this.updateGoogleMap(true);
+        }
+        return true;
+    }
+
+    /**
+     * ミニマップサイズ変更（; 拡大 / : 縮小）
+     * @param {KeyboardEvent} e
+     * @returns {boolean}
+     */
+    _handleMinimapSizeKey(e) {
+        if (e.code !== 'Semicolon' || e.repeat) return false;
+        e.preventDefault();
+        const changed = e.shiftKey ? this.minimap.shrink() : this.minimap.enlarge();
+        if (changed) this.updateMinimap(true);
+        return true;
     }
 
     /**
@@ -250,6 +305,7 @@ export default class AircraftManager {
         if (!wid) {
             this.minimap.clearMap();
             this.minimap.hide();
+            this.googleMap.clearMap();
             return;
         }
         try {
@@ -257,17 +313,22 @@ export default class AircraftManager {
             if (!res.ok) {
                 this.minimap.clearMap();
                 this.minimap.hide();
+                this.googleMap.clearMap();
                 return;
             }
             const j = await res.json();
+            await this.ensureGoogleMapsApiKey();
             const ok = await this.minimap.setMap(j.map);
+            const geoOk = await this.googleMap.setMap(j.map);
             if (ok && (this.isPiloting || this.isPassenger)) {
                 this.minimap.show();
                 this.updateMinimap(true);
             } else if (!ok) this.minimap.hide();
+            if (!geoOk) this.googleMap.hide();
         } catch {
             this.minimap.clearMap();
             this.minimap.hide();
+            this.googleMap.clearMap();
         }
     }
 
@@ -331,6 +392,25 @@ export default class AircraftManager {
         if (!state) return;
         state.otherAircraft = this.getMinimapOtherAircraft();
         this.minimap.update(state);
+        this.updateGoogleMap();
+    }
+
+    /**
+     * Google Maps 2D オーバーレイを更新する
+     * @param {boolean} [force]
+     */
+    updateGoogleMap(force = false) {
+        if (!this.googleMap.isVisible()) return;
+        if (!force) {
+            const now = performance.now();
+            if (now - this._minimapLastUpdateMs < this._minimapUpdateIntervalMs) {
+                return;
+            }
+        }
+        const state = this.getMinimapState();
+        if (!state) return;
+        state.otherAircraft = this.getMinimapOtherAircraft();
+        this.googleMap.update(state);
     }
 
     /**
@@ -591,6 +671,8 @@ export default class AircraftManager {
         this._pilotKeyHandler = (e) => {
             if (!this.isPassenger) return;
             if (this.characterController.isInputActive()) return;
+            if (this._handleMinimapSizeKey(e)) return;
+            if (this._handleGoogleMapKey(e)) return;
             if (e.code === 'KeyF') {
                 e.preventDefault();
                 this.exitPassenger();
@@ -652,12 +734,21 @@ export default class AircraftManager {
         this._pilotKeyHandler = (e) => {
             if (!this.isPiloting) return;
             if (this.characterController.isInputActive()) return;
+            if (this._handleMinimapSizeKey(e)) return;
+            if (this._handleGoogleMapKey(e)) return;
             if (e.code === 'KeyF') {
                 e.preventDefault();
                 this.exitPiloting();
             } else if (e.code === 'KeyV') {
                 e.preventDefault();
                 this.toggleCameraMode();
+            } else if (e.code === 'KeyP') {
+                if (e.repeat) return;
+                e.preventDefault();
+                const enabled = this.aircraftController.toggleAutopilot();
+                if (enabled !== null) {
+                    this.uiManager.flashAircraftAutopilot(enabled);
+                }
             }
         };
         document.addEventListener('keydown', this._pilotKeyHandler);

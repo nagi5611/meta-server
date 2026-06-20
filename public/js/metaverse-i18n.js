@@ -455,6 +455,8 @@ export const METAVERSE_STRINGS = {
     'ui.aircraftCamera': { ja: '視点 (V)', en: 'View (V)', zh: '视角 (V)' },
     'ui.aircraftExitShort': { ja: 'F 降りる', en: 'F Exit', zh: 'F 下车' },
     'ui.aircraftCameraShort': { ja: 'V 視点', en: 'V View', zh: 'V 视角' },
+    'ui.aircraftAutopilotOn': { ja: 'Autopilot ON', en: 'Autopilot ON', zh: 'Autopilot ON' },
+    'ui.aircraftAutopilotOff': { ja: 'Autopilot OFF', en: 'Autopilot OFF', zh: 'Autopilot OFF' },
     'ui.aircraftVfeWarnShort': { ja: 'Vfe', en: 'Vfe', zh: 'Vfe' },
     'ui.aircraftGrounded': { ja: '接地', en: 'Ground', zh: '接地' },
     'ui.aircraftAirborne': { ja: '空中', en: 'Air', zh: '空中' },
