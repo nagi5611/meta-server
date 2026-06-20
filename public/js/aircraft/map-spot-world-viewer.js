@@ -186,9 +186,15 @@ export class AdminMapSpotWorldViewer {
         this._camera = new THREE.OrthographicCamera(-500, 500, 500, -500, 0.5, 20000);
         this._controls = new OrbitControls(this._camera, this._renderer.domElement);
         this._controls.enableDamping = true;
-        this._controls.enableRotate = true;
-        this._controls.maxPolarAngle = Math.PI / 2 - 0.02;
-        this._controls.minPolarAngle = 0.05;
+        this._controls.enableRotate = false;
+        this._controls.enablePan = true;
+        this._controls.enableZoom = true;
+        this._controls.screenSpacePanning = true;
+        // 真上からの俯瞰のみ（回転・チルト不可）
+        this._controls.minPolarAngle = Math.PI / 2;
+        this._controls.maxPolarAngle = Math.PI / 2;
+        this._mapOverlayActive = false;
+        this._pointerPassthrough = false;
         this._scene.add(new THREE.AmbientLight(0xffffff, 0.6));
         const dir = new THREE.DirectionalLight(0xffffff, 0.9);
         dir.position.set(120, 300, 80);
@@ -271,7 +277,8 @@ export class AdminMapSpotWorldViewer {
     _resize() {
         const w = Math.max(this.container.clientWidth, 320);
         const h = Math.max(this.container.clientHeight, 240);
-        const half = this._viewHalfExtentM;
+        const zoom = Math.max(this._camera.zoom, 0.01);
+        const half = this._viewHalfExtentM / zoom;
         const aspect = w / h;
         if (aspect >= 1) {
             this._camera.left = -half * aspect;
@@ -290,9 +297,21 @@ export class AdminMapSpotWorldViewer {
 
     _tick() {
         if (this._disposed) return;
+        this._enforceTopDown();
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
         this._raf = requestAnimationFrame(() => this._tick());
+    }
+
+    /** カメラを常に真上俯瞰に固定する */
+    _enforceTopDown() {
+        const t = this._controls.target;
+        const cx = t.x;
+        const cz = t.z;
+        const gy = this._groundY;
+        this._camera.position.set(cx, gy + this._cameraHeightM, cz);
+        this._camera.up.set(this._north.x, 0, this._north.z);
+        this._camera.lookAt(cx, gy, cz);
     }
 
     /**
@@ -389,14 +408,12 @@ export class AdminMapSpotWorldViewer {
     }
 
     /**
-     * オーバーレイ表示（統合モード）の見た目を切り替える
-     * @param {boolean} overlay
-     * @param {number} [opacity]
+     * Google Map オーバーレイ表示時（地形を上に載せる）
+     * @param {boolean} active
      */
-    setOverlayMode(overlay, opacity = 1) {
-        this._overlayMode = overlay;
-        this._layerOpacity = Math.min(1, Math.max(0.05, opacity));
-        if (overlay) {
+    setMapOverlayActive(active) {
+        this._mapOverlayActive = active;
+        if (active) {
             this._scene.background = null;
             this._renderer.setClearColor(0x000000, 0);
             if (this._grid) this._grid.visible = false;
@@ -405,7 +422,26 @@ export class AdminMapSpotWorldViewer {
             this._renderer.setClearColor(0x87ceeb, 1);
             if (this._grid) this._grid.visible = true;
         }
-        this._renderer.domElement.style.opacity = String(this._layerOpacity);
+        this._renderer.domElement.style.opacity = '1';
+    }
+
+    /**
+     * クリックを下の Google Map レイヤーへ通す
+     * @param {boolean} passthrough
+     */
+    setPointerPassthrough(passthrough) {
+        this._pointerPassthrough = passthrough;
+        this._renderer.domElement.style.pointerEvents = passthrough ? 'none' : 'auto';
+    }
+
+    /**
+     * @deprecated setMapOverlayActive を使用
+     */
+    setOverlayMode(overlay, opacity = 1) {
+        this.setMapOverlayActive(overlay);
+        if (overlay) {
+            this._renderer.domElement.style.opacity = String(opacity);
+        }
     }
 
     /**

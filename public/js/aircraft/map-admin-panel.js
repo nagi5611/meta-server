@@ -201,6 +201,10 @@ function readGeoFromForm() {
         zoom: Math.round(num('ac-map-geo-zoom', 15)),
         zoomOffset: Math.round(num('ac-map-geo-zoom-offset', 0)),
         headingMode,
+        overlayCenterLat: base.overlayCenterLat ?? null,
+        overlayCenterLng: base.overlayCenterLng ?? null,
+        overlayZoom: base.overlayZoom ?? null,
+        overlayHeading: base.overlayHeading ?? 0,
         calibrationSpotCount: base.calibrationSpotCount,
         calibrationResidualM: base.calibrationResidualM,
     };
@@ -248,6 +252,9 @@ function refreshWorkbench() {
     const cfg = readConfigFromForm();
     spotWorkbench.setConfig(cfg);
     spotWorkbench.setSelectedSpotId(selectedSpotId);
+    const geoOn = cfg.geo?.enabled === true;
+    const spotCount = cfg.spots?.length || 0;
+    spotWorkbench.setGoogleOverlayEnabled(geoOn, { spotCount, silent: true });
 }
 
 /**
@@ -313,7 +320,25 @@ function syncMapFormFromDraft(map) {
     setNum('ac-map-icon-offset', cfg.aircraftIconOffsetDeg ?? 0);
     syncGeoForm(cfg.geo);
     renderSpotList();
+    maybeDisableGoogleOverlayIfNeeded();
     refreshWorkbench();
+}
+
+/**
+ * スポット不足時に Google Map オーバーレイをオフにする
+ */
+function maybeDisableGoogleOverlayIfNeeded() {
+    const spots = draftMap?.config?.spots?.length || 0;
+    if (spots >= MIN_GEO_CALIBRATION_SPOTS || !draftMap?.config?.geo?.enabled) return;
+    draftMap.config.geo.enabled = false;
+    const enabledEl = /** @type {HTMLInputElement|null} */ (
+        document.getElementById('ac-map-geo-enabled')
+    );
+    if (enabledEl) enabledEl.checked = false;
+    const panel = document.getElementById('ac-map-geo-fields');
+    if (panel) panel.style.display = 'none';
+    spotWorkbench?.setGoogleOverlayEnabled(false, { spotCount: spots });
+    spotWorkbench?.setInteractionMode('spots');
 }
 
 /**
@@ -350,7 +375,7 @@ function renderSpotList() {
         .map((s) => {
             const geoLine = spotHasGeo(s)
                 ? `地図: ${s.lat?.toFixed(5)}, ${s.lng?.toFixed(5)}`
-                : '地図: 未設定（Google Map タブでクリック）';
+                : '地図: 未設定（地図座標モードでクリック）';
             return (
                 `<button type="button" class="ac-map-spot-item${s.id === selectedSpotId ? ' is-selected' : ''}" data-spot-id="${s.id}">`
                 + `<span class="ac-map-spot-name">${escapeHtml(s.name)}</span>`
@@ -408,7 +433,7 @@ async function loadWorkbenchWorld() {
  * @param {number} z
  */
 function handleSpotWorldPick(x, z) {
-    if (spotWorkbench?.getViewMode() === 'merged') return;
+    if (spotWorkbench?.getInteractionMode() !== 'spots') return;
     const nextCfg = readConfigFromForm();
     if (selectedSpotId) {
         const spot = nextCfg.spots.find((s) => s.id === selectedSpotId);
@@ -438,23 +463,15 @@ function handleSpotWorldPick(x, z) {
  * @param {number} lng
  */
 function handleSpotGeoPick(lat, lng) {
-    if (spotWorkbench?.getViewMode() === 'merged') return;
+    if (spotWorkbench?.getInteractionMode() !== 'geo') return;
     if (!selectedSpotId || !draftMap?.config?.spots) {
-        setMapStatus('スポットを一覧で選択してから地図をクリックしてください', true);
+        setMapStatus('スポットを一覧で選択し、「地図座標」モードで地図をクリックしてください', true);
         return;
     }
     const spot = draftMap.config.spots.find((s) => s.id === selectedSpotId);
     if (!spot) return;
     spot.lat = lat;
     spot.lng = lng;
-    const enabledEl = /** @type {HTMLInputElement|null} */ (
-        document.getElementById('ac-map-geo-enabled')
-    );
-    if (enabledEl && !enabledEl.checked) {
-        enabledEl.checked = true;
-        const panel = document.getElementById('ac-map-geo-fields');
-        if (panel) panel.style.display = 'block';
-    }
     renderSpotList();
     setMapStatus(`${spot.name}: 地図 ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
     if (countGeoCalibratedSpots(draftMap.config.spots) >= MIN_GEO_CALIBRATION_SPOTS) {
@@ -463,6 +480,47 @@ function handleSpotGeoPick(lat, lng) {
         updateCalibrationStatus();
         refreshWorkbench();
     }
+}
+
+/**
+ * 地図オーバーレイのパン・回転・ズームを draft に保存する
+ * @param {object} view
+ */
+function handleMapViewChange(view) {
+    if (!draftMap?.config) return;
+    const geo = { ...readGeoFromForm(), ...view };
+    draftMap.config = { ...readConfigFromForm(), geo };
+}
+
+/**
+ * Google Map 表示チェックボックスの状態を反映する
+ * @param {boolean} enabled
+ */
+function syncGoogleOverlayFromForm(enabled) {
+    const cfg = readConfigFromForm();
+    const spotCount = cfg.spots?.length || 0;
+    if (enabled && spotCount < MIN_GEO_CALIBRATION_SPOTS) {
+        const enabledEl = /** @type {HTMLInputElement|null} */ (
+            document.getElementById('ac-map-geo-enabled')
+        );
+        if (enabledEl) enabledEl.checked = false;
+        setMapStatus(
+            `Google Map 表示にはスポットが ${MIN_GEO_CALIBRATION_SPOTS} 点以上必要です`,
+            true
+        );
+        spotWorkbench?.setGoogleOverlayEnabled(false, { spotCount });
+        return;
+    }
+    if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
+    draftMap.config = { ...cfg, geo: { ...cfg.geo, enabled } };
+    spotWorkbench?.setGoogleOverlayEnabled(enabled, { spotCount });
+    if (enabled) {
+        spotWorkbench?.setInteractionMode('map');
+        setMapStatus('地図調整モード — 地図を動かして地形に合わせてください');
+    } else {
+        spotWorkbench?.setInteractionMode('spots');
+    }
+    updateCalibrationStatus();
 }
 
 /**
@@ -586,7 +644,7 @@ export function mountAircraftMapAdminPanel(root) {
         <div class="ac-map-admin-layout">
             <aside class="ac-map-admin-left">
                 <h2 class="section-title">Map定義</h2>
-                <p class="hint">ミニマップは<strong>3D俯瞰</strong>、<strong>M キー</strong>で Google Maps 2D。<strong>3つ以上</strong>のスポットでメタバースと地図を対応付けて自動補正します。</p>
+                <p class="hint">俯瞰でスポットを配置してから Google Map を重ねて位置合わせ。<strong>M キー</strong>飛行中の 2D マップは補正後に利用。</p>
                 <div class="field-row">
                     <label class="prop-label" for="ac-map-world-select">対象ワールド</label>
                     <select id="ac-map-world-select" class="prop-input full"></select>
@@ -616,12 +674,12 @@ export function mountAircraftMapAdminPanel(root) {
                     <input type="number" id="ac-map-icon-offset" class="prop-input num" step="1" /></div>
                 <div class="prop-group-label">Google Maps 2D（M キー）— スポット補正</div>
                 <div class="field-row">
-                    <label class="prop-label" for="ac-map-geo-enabled">Google Maps 2D を有効</label>
-                    <input type="checkbox" id="ac-map-geo-enabled" class="prop-input" />
+                    <label class="prop-label" for="ac-map-geo-enabled">Google Map 表示（オーバーレイ）</label>
+                    <input type="checkbox" id="ac-map-geo-enabled" class="prop-input" title="スポット3点以上で利用可能" />
                 </div>
                 <p id="ac-map-geo-calibration-status" class="status-text" role="status"></p>
                 <div id="ac-map-geo-fields">
-                    <p class="hint">①メタバースタブで 3 点以上配置 → ②一覧でスポット選択 → ③Google Map タブで緯度経度 → ④補正を計算。3 点揃うと「統合」タブで重ね表示。</p>
+                <p class="hint">①俯瞰でスポットを3点以上配置 → ②「Google Map 表示」をオン → ③地図調整で合わせる → ④地図座標モードで各スポットの緯度経度 → ⑤補正を計算</p>
                     <div class="field-row"><label class="prop-label" for="ac-map-geo-map-type">地図タイプ</label>
                         <select id="ac-map-geo-map-type" class="prop-input full">
                             <option value="satellite">衛星</option>
@@ -651,8 +709,8 @@ export function mountAircraftMapAdminPanel(root) {
                 <p id="ac-map-status" class="status-text" role="status"></p>
             </aside>
             <section class="ac-map-admin-center ac-map-admin-center-workbench">
-                <h3 class="section-subtitle">スポット定義</h3>
-                <p class="hint">メタバース / Google Map を切替。統合は地図座標 3 点以上＋補正済みで有効。LOD ありのワールドはツールバーで選択。</p>
+                <h3 class="section-subtitle">スポット定義（俯瞰）</h3>
+                <p class="hint">常に真上からの俯瞰。地形の上に薄い Google Map を重ねて位置合わせします。</p>
                 <div id="ac-map-workbench-mount" class="ac-map-workbench-mount"></div>
             </section>
             <aside class="ac-map-admin-right ac-map-admin-right-wide">
@@ -699,10 +757,10 @@ export function mountAircraftMapAdminPanel(root) {
     document.getElementById('ac-map-geo-heading-mode')?.addEventListener('change', previewOnChange);
 
     document.getElementById('ac-map-geo-enabled')?.addEventListener('change', (e) => {
+        const checked = /** @type {HTMLInputElement} */ (e.target).checked;
         const panel = document.getElementById('ac-map-geo-fields');
-        if (panel) {
-            panel.style.display = /** @type {HTMLInputElement} */ (e.target).checked ? 'block' : 'none';
-        }
+        if (panel) panel.style.display = checked ? 'block' : 'none';
+        syncGoogleOverlayFromForm(checked);
         refreshWorkbench();
     });
 
@@ -711,6 +769,7 @@ export function mountAircraftMapAdminPanel(root) {
         spotWorkbench = new AdminMapSpotWorkbench(workbenchMount);
         spotWorkbench.onSpotWorldPick = handleSpotWorldPick;
         spotWorkbench.onSpotGeoPick = handleSpotGeoPick;
+        spotWorkbench.onMapViewChange = handleMapViewChange;
         void fetchGoogleMapsApiKey().then((key) => {
             googleMapsApiKey = key;
             spotWorkbench?.setApiKey(key);

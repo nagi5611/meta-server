@@ -1,10 +1,35 @@
-// public/js/aircraft/map-admin-google-preview.js — Map定義の Google Maps キャリブレーションプレビュー
+// public/js/aircraft/map-admin-google-preview.js — 俯瞰メタバース下層の Google Map オーバーレイ
 
 import { loadGoogleMapsApi } from './google-maps-loader.js';
 import { isGeoMapReady, spotHasGeo, worldXzToLatLng } from './flight-map-geo.js';
 
+const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
+const OVERLAY_OPACITY = 0.42;
+
 /**
- * 管理画面用 Google Maps プレビュー（スポット対応・補正確認）
+ * @param {object|null|undefined} geo
+ * @returns {{ lat: number, lng: number, zoom: number, heading: number }|null}
+ */
+function readSavedOverlayView(geo) {
+    if (!geo || typeof geo !== 'object') return null;
+    const lat = typeof geo.overlayCenterLat === 'number' ? geo.overlayCenterLat : geo.anchorLat;
+    const lng = typeof geo.overlayCenterLng === 'number' ? geo.overlayCenterLng : geo.anchorLng;
+    const zoom =
+        typeof geo.overlayZoom === 'number' && geo.overlayZoom >= 1
+            ? geo.overlayZoom
+            : typeof geo.zoom === 'number'
+              ? geo.zoom
+              : null;
+    const heading =
+        typeof geo.overlayHeading === 'number' && Number.isFinite(geo.overlayHeading)
+            ? geo.overlayHeading
+            : 0;
+    if (lat == null || lng == null || zoom == null) return null;
+    return { lat, lng, zoom, heading };
+}
+
+/**
+ * 管理画面用 Google Maps（薄い下層オーバーレイ）
  */
 export class AdminMapGooglePreview {
     /**
@@ -24,29 +49,27 @@ export class AdminMapGooglePreview {
         this._apiKey = null;
         /** @type {object|null} */
         this._config = null;
+        /** @type {string|null} */
+        this._selectedSpotId = null;
         /** @type {((lat: number, lng: number) => void)|null} */
         this.onSpotGeoPick = null;
-        /** @type {number} */
-        this._layerOpacity = 1;
+        /** @type {((view: object) => void)|null} */
+        this.onMapViewChange = null;
         /** @type {boolean} */
-        this._pickingEnabled = true;
-    }
-
-    /**
-     * レイヤー不透明度（統合表示用）
-     * @param {number} opacity 0–1
-     */
-    setLayerOpacity(opacity) {
-        this._layerOpacity = Math.min(1, Math.max(0.05, opacity));
-        if (this.mountEl) this.mountEl.style.opacity = String(this._layerOpacity);
-    }
-
-    /**
-     * クリックによる緯度経度取得の有効/無効
-     * @param {boolean} enabled
-     */
-    setPickingEnabled(enabled) {
-        this._pickingEnabled = enabled;
+        this._pickingEnabled = false;
+        /** @type {boolean} */
+        this._overlayVisible = false;
+        /** @type {boolean} */
+        this._overlayMode = false;
+        /** @type {boolean} */
+        this._mapInteractive = false;
+        /** @type {boolean} */
+        this._suppressViewSync = false;
+        /** @type {boolean} */
+        this._initialFitDone = false;
+        if (mountEl) {
+            mountEl.style.opacity = String(OVERLAY_OPACITY);
+        }
     }
 
     /**
@@ -57,11 +80,115 @@ export class AdminMapGooglePreview {
     }
 
     /**
+     * @param {string|null} spotId
+     */
+    setSelectedSpotId(spotId) {
+        this._selectedSpotId = spotId;
+    }
+
+    /**
+     * @param {object|null} config
+     * @param {{ overlayMode?: boolean }} [opts]
+     */
+    setConfig(config, opts = {}) {
+        this._config = config;
+        this._overlayMode = opts.overlayMode === true;
+        void this._syncFromConfig({ preserveView: true });
+    }
+
+    /**
+     * オーバーレイの表示/非表示
+     * @param {boolean} visible
+     */
+    setOverlayVisible(visible) {
+        this._overlayVisible = visible;
+        if (this.mountEl) {
+            this.mountEl.style.visibility = visible ? 'visible' : 'hidden';
+            this.mountEl.style.pointerEvents = visible && this._mapInteractive ? 'auto' : 'none';
+        }
+    }
+
+    /**
+     * 地図操作（パン・回転・ズーム）の有効化
+     * @param {boolean} interactive
+     */
+    setMapInteractive(interactive) {
+        this._mapInteractive = interactive;
+        if (this.mountEl) {
+            this.mountEl.style.pointerEvents =
+                interactive && this._overlayVisible ? 'auto' : 'none';
+        }
+        if (this._map) {
+            this._map.setOptions({
+                gestureHandling: interactive ? 'greedy' : 'none',
+                draggable: interactive,
+                scrollwheel: interactive,
+                disableDoubleClickZoom: !interactive,
+            });
+        }
+    }
+
+    /**
+     * クリックで緯度経度を取得
+     * @param {boolean} enabled
+     */
+    setPickingEnabled(enabled) {
+        this._pickingEnabled = enabled;
+    }
+
+    /**
+     * 初回オーバーレイ表示時の地図位置合わせ
      * @param {object|null} config
      */
-    setConfig(config) {
-        this._config = config;
-        void this._syncFromConfig();
+    async initialFitForOverlay(config) {
+        await this._ensureMap();
+        if (!this._map || !config) return;
+        const saved = readSavedOverlayView(config.geo);
+        if (saved) {
+            this._applyView(saved);
+            this._initialFitDone = true;
+            return;
+        }
+        if (this._initialFitDone) return;
+        const spots = config.spots || [];
+        const geoPts = spots.filter((s) => spotHasGeo(s));
+        const maps = window.google?.maps;
+        if (!maps) return;
+        if (geoPts.length >= 1) {
+            const bounds = new maps.LatLngBounds();
+            for (const s of geoPts) bounds.extend({ lat: s.lat, lng: s.lng });
+            this._suppressViewSync = true;
+            this._map.fitBounds(bounds, 40);
+            this._suppressViewSync = false;
+            this._emitMapView();
+        } else {
+            this._applyView({ ...DEFAULT_CENTER, zoom: 15, heading: 0 });
+        }
+        this._initialFitDone = true;
+    }
+
+    /**
+     * 保存済みビューを適用
+     * @param {object|null|undefined} geo
+     */
+    applySavedView(geo) {
+        const saved = readSavedOverlayView(geo);
+        if (saved) this._applyView(saved);
+    }
+
+    /**
+     * @returns {object|null}
+     */
+    getMapView() {
+        if (!this._map) return null;
+        const c = this._map.getCenter();
+        if (!c) return null;
+        return {
+            overlayCenterLat: c.lat(),
+            overlayCenterLng: c.lng(),
+            overlayZoom: this._map.getZoom() ?? 15,
+            overlayHeading: this._map.getHeading() ?? 0,
+        };
     }
 
     async _ensureMap() {
@@ -73,12 +200,19 @@ export class AdminMapGooglePreview {
         const maps = await loadGoogleMapsApi(this._apiKey);
         this.mountEl.innerHTML = '';
         this._map = new maps.Map(this.mountEl, {
-            center: { lat: 35.6812, lng: 139.7671 },
-            zoom: 10,
+            center: DEFAULT_CENTER,
+            zoom: 15,
             mapTypeId: 'satellite',
-            gestureHandling: 'greedy',
+            tilt: 0,
+            heading: 0,
+            gestureHandling: 'none',
+            draggable: false,
+            scrollwheel: false,
+            rotateControl: true,
             streetViewControl: false,
             fullscreenControl: false,
+            mapTypeControl: false,
+            keyboardShortcuts: false,
         });
         this._map.addListener('click', (ev) => {
             if (!this._pickingEnabled) return;
@@ -87,29 +221,29 @@ export class AdminMapGooglePreview {
             if (lat == null || lng == null) return;
             this.onSpotGeoPick?.(lat, lng);
         });
+        const emitIfReady = () => {
+            if (this._suppressViewSync) return;
+            this._emitMapView();
+        };
+        this._map.addListener('idle', emitIfReady);
     }
 
     /**
-     * 地理的中心と半幅（m）で地図を合わせる（統合表示用）
-     * @param {{ lat: number, lng: number }} center
-     * @param {number} halfExtentM
-     * @param {object} [geo]
+     * @param {{ lat: number, lng: number, zoom: number, heading: number }} view
      */
-    fitGeoExtent(center, halfExtentM, geo) {
+    _applyView(view) {
         if (!this._map) return;
-        const half = Math.max(halfExtentM, 80);
-        const latRad = (center.lat * Math.PI) / 180;
-        const dLat = half / 111320;
-        const cosLat = Math.cos(latRad);
-        const dLng = cosLat > 1e-6 ? half / (111320 * cosLat) : dLat;
-        const maps = window.google?.maps;
-        if (!maps) return;
-        const bounds = new maps.LatLngBounds(
-            { lat: center.lat - dLat, lng: center.lng - dLng },
-            { lat: center.lat + dLat, lng: center.lng + dLng }
-        );
-        this._map.fitBounds(bounds, 0);
-        if (geo?.mapType) this._map.setMapTypeId(geo.mapType);
+        this._suppressViewSync = true;
+        this._map.setCenter({ lat: view.lat, lng: view.lng });
+        this._map.setZoom(view.zoom);
+        this._map.setHeading(view.heading);
+        this._map.setTilt(0);
+        this._suppressViewSync = false;
+    }
+
+    _emitMapView() {
+        const view = this.getMapView();
+        if (view) this.onMapViewChange?.(view);
     }
 
     _clearMarkers() {
@@ -120,7 +254,10 @@ export class AdminMapGooglePreview {
         this._residualLines = [];
     }
 
-    async _syncFromConfig() {
+    /**
+     * @param {{ preserveView?: boolean }} [opts]
+     */
+    async _syncFromConfig(opts = {}) {
         await this._ensureMap();
         if (!this._map || !this._config) return;
         const geo = this._config.geo;
@@ -134,72 +271,87 @@ export class AdminMapGooglePreview {
 
         this._clearMarkers();
 
-        /** @type {google.maps.LatLngLiteral[]} */
-        const boundsPts = [];
-        const geoReady = isGeoMapReady(geo);
-
-        for (const spot of spots) {
-            if (!spotHasGeo(spot)) continue;
-            const defined = { lat: spot.lat, lng: spot.lng };
-            boundsPts.push(defined);
-            const marker = new maps.Marker({
-                map: this._map,
-                position: defined,
-                title: `${spot.name}（登録座標）`,
-                label: {
-                    text: spot.name?.slice(0, 8) || spot.id,
-                    color: '#fff',
-                    fontSize: '10px',
-                },
-                icon: {
-                    path: maps.SymbolPath.CIRCLE,
-                    scale: 8,
-                    fillColor: '#f57c00',
-                    fillOpacity: 1,
-                    strokeColor: '#fff',
-                    strokeWeight: 2,
-                },
-                zIndex: 60,
-            });
-            this._definedMarkers.push(marker);
-
-            if (geoReady) {
-                const predicted = worldXzToLatLng(spot.x, spot.z, geo, north);
-                if (!predicted) continue;
-                boundsPts.push(predicted);
-                const predMarker = new maps.Marker({
+        if (!this._overlayMode) {
+            /** @type {google.maps.LatLngLiteral[]} */
+            const boundsPts = [];
+            const geoReady = isGeoMapReady(geo);
+            for (const spot of spots) {
+                if (!spotHasGeo(spot)) continue;
+                const defined = { lat: spot.lat, lng: spot.lng };
+                boundsPts.push(defined);
+                const marker = new maps.Marker({
                     map: this._map,
-                    position: predicted,
-                    title: `${spot.name}（補正予測）`,
+                    position: defined,
+                    title: `${spot.name}（登録座標）`,
                     icon: {
                         path: maps.SymbolPath.CIRCLE,
-                        scale: 6,
-                        fillColor: '#43a047',
-                        fillOpacity: 0.9,
+                        scale: 7,
+                        fillColor: '#f57c00',
+                        fillOpacity: 0.85,
                         strokeColor: '#fff',
                         strokeWeight: 2,
                     },
-                    zIndex: 55,
+                    zIndex: 60,
                 });
-                this._predictedMarkers.push(predMarker);
-                const line = new maps.Polyline({
-                    map: this._map,
-                    path: [defined, predicted],
-                    strokeColor: '#ff5252',
-                    strokeOpacity: 0.85,
-                    strokeWeight: 2,
-                });
-                this._residualLines.push(line);
+                this._definedMarkers.push(marker);
+                if (geoReady) {
+                    const predicted = worldXzToLatLng(spot.x, spot.z, geo, north);
+                    if (!predicted) continue;
+                    boundsPts.push(predicted);
+                    const predMarker = new maps.Marker({
+                        map: this._map,
+                        position: predicted,
+                        title: `${spot.name}（補正予測）`,
+                        icon: {
+                            path: maps.SymbolPath.CIRCLE,
+                            scale: 5,
+                            fillColor: '#43a047',
+                            fillOpacity: 0.75,
+                            strokeColor: '#fff',
+                            strokeWeight: 2,
+                        },
+                        zIndex: 55,
+                    });
+                    this._predictedMarkers.push(predMarker);
+                    const line = new maps.Polyline({
+                        map: this._map,
+                        path: [defined, predicted],
+                        strokeColor: '#ff5252',
+                        strokeOpacity: 0.7,
+                        strokeWeight: 2,
+                    });
+                    this._residualLines.push(line);
+                }
             }
+            if (!opts.preserveView && boundsPts.length >= 1) {
+                const bounds = new maps.LatLngBounds();
+                for (const p of boundsPts) bounds.extend(p);
+                this._suppressViewSync = true;
+                this._map.fitBounds(bounds, 48);
+                this._suppressViewSync = false;
+            }
+            return;
         }
 
-        if (boundsPts.length >= 1) {
-            const bounds = new maps.LatLngBounds();
-            for (const p of boundsPts) bounds.extend(p);
-            this._map.fitBounds(bounds, 48);
-        } else {
-            this._map.setCenter({ lat: 35.6812, lng: 139.7671 });
-            this._map.setZoom(10);
+        // オーバーレイモード: 地図座標設定用に登録済みマーカーのみ薄く表示
+        for (const spot of spots) {
+            if (!spotHasGeo(spot)) continue;
+            const marker = new maps.Marker({
+                map: this._map,
+                position: { lat: spot.lat, lng: spot.lng },
+                title: spot.name,
+                opacity: 0.65,
+                icon: {
+                    path: maps.SymbolPath.CIRCLE,
+                    scale: 6,
+                    fillColor: spot.id === this._selectedSpotId ? '#1565c0' : '#f57c00',
+                    fillOpacity: 0.8,
+                    strokeColor: '#fff',
+                    strokeWeight: 2,
+                },
+                zIndex: spot.id === this._selectedSpotId ? 70 : 60,
+            });
+            this._definedMarkers.push(marker);
         }
     }
 

@@ -1,13 +1,10 @@
-// public/js/aircraft/map-admin-spot-workbench.js — スポット定義（メタバース / Google / 統合）
+// public/js/aircraft/map-admin-spot-workbench.js — 俯瞰メタバース + 薄い Google Map オーバーレイ
 
 import { AdminMapSpotWorldViewer } from './map-spot-world-viewer.js';
 import { AdminMapGooglePreview } from './map-admin-google-preview.js';
-import {
-    MIN_GEO_CALIBRATION_SPOTS,
-    countGeoCalibratedSpots,
-} from './flight-map-geo.js';
+import { MIN_GEO_CALIBRATION_SPOTS } from './flight-map-geo.js';
 
-/** @typedef {'metaverse' | 'google' | 'merged'} MapWorkbenchMode */
+/** @typedef {'spots' | 'map' | 'geo'} MapWorkbenchInteraction */
 
 /**
  * ワールドの LOD バンド数（最大）
@@ -25,63 +22,16 @@ export function getWorldMaxLodBands(world) {
 }
 
 /**
- * 統合表示が可能か（地図座標付きスポットが 3 点以上）
+ * Google オーバーレイ表示に必要なスポット数
  * @param {object|null|undefined} config
- * @returns {boolean}
- */
-export function canShowMergedMapView(config) {
-    if (!config) return false;
-    return countGeoCalibratedSpots(config.spots || []) >= MIN_GEO_CALIBRATION_SPOTS;
-}
-
-/**
- * @param {object[]} spots
- * @returns {{ lat: number, lng: number }|null}
- */
-function centroidLatLng(spots) {
-    const geo = spots.filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number');
-    if (!geo.length) return null;
-    let lat = 0;
-    let lng = 0;
-    for (const s of geo) {
-        lat += s.lat;
-        lng += s.lng;
-    }
-    return { lat: lat / geo.length, lng: lng / geo.length };
-}
-
-/**
- * スポット群の地理的半幅（m）を概算する
- * @param {object[]} spots
  * @returns {number}
  */
-function geoHalfExtentFromSpots(spots) {
-    const geo = spots.filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number');
-    if (geo.length < 2) return 500;
-    const lats = geo.map((s) => s.lat);
-    const lngs = geo.map((s) => s.lng);
-    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
-    const northM = (Math.max(...lats) - Math.min(...lats)) * 111320;
-    const eastM =
-        (Math.max(...lngs) - Math.min(...lngs)) * 111320 * Math.cos((centerLat * Math.PI) / 180);
-    return Math.max(northM, eastM) * 0.55 + 80;
+export function countWorldSpots(config) {
+    return Array.isArray(config?.spots) ? config.spots.length : 0;
 }
 
 /**
- * スポット群のワールド XZ 半幅（m）を概算する
- * @param {object[]} spots
- * @returns {number}
- */
-function worldHalfExtentFromSpots(spots) {
-    if (!spots.length) return 500;
-    const xs = spots.map((s) => s.x);
-    const zs = spots.map((s) => s.z);
-    const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs));
-    return Math.max(span * 0.55 + 50, 100);
-}
-
-/**
- * メタバース / Google Map / 統合の切替ワークベンチ
+ * 俯瞰メタバース上に Google Map を重ねるワークベンチ
  */
 export class AdminMapSpotWorkbench {
     /**
@@ -89,8 +39,6 @@ export class AdminMapSpotWorkbench {
      */
     constructor(root) {
         this.root = root;
-        /** @type {MapWorkbenchMode} */
-        this._mode = 'metaverse';
         /** @type {object|null} */
         this._config = null;
         /** @type {object|null} */
@@ -99,6 +47,10 @@ export class AdminMapSpotWorkbench {
         this._selectedSpotId = null;
         /** @type {number} */
         this._lodBand = 1;
+        /** @type {boolean} */
+        this._googleOverlayOn = false;
+        /** @type {MapWorkbenchInteraction} */
+        this._interaction = 'spots';
         /** @type {AdminMapSpotWorldViewer|null} */
         this._worldViewer = null;
         /** @type {AdminMapGooglePreview|null} */
@@ -107,14 +59,17 @@ export class AdminMapSpotWorkbench {
         this.onSpotWorldPick = null;
         /** @type {((lat: number, lng: number) => void)|null} */
         this.onSpotGeoPick = null;
+        /** @type {((view: object) => void)|null} */
+        this.onMapViewChange = null;
 
         root.innerHTML = `
             <div class="ac-map-workbench-toolbar">
-                <div class="ac-map-workbench-tabs" role="tablist">
-                    <button type="button" class="ac-map-workbench-tab is-active" data-mode="metaverse" role="tab">メタバース</button>
-                    <button type="button" class="ac-map-workbench-tab" data-mode="google" role="tab">Google Map</button>
-                    <button type="button" class="ac-map-workbench-tab" data-mode="merged" role="tab" disabled title="地図座標付きスポット3点以上で有効">統合</button>
+                <div class="ac-map-workbench-modes" role="group" aria-label="操作モード">
+                    <button type="button" class="ac-map-workbench-mode is-active" data-interaction="spots">スポット配置</button>
+                    <button type="button" class="ac-map-workbench-mode" data-interaction="map" disabled title="Google Map 表示をオンにすると利用できます">地図調整</button>
+                    <button type="button" class="ac-map-workbench-mode" data-interaction="geo" disabled title="Google Map 表示をオンにすると利用できます">地図座標</button>
                 </div>
+                <p class="ac-map-workbench-hint" id="ac-map-workbench-hint">俯瞰でクリックしてスポットを配置（3点以上）</p>
                 <div class="ac-map-workbench-toolbar-right">
                     <label class="ac-map-lod-label" id="ac-map-lod-label" hidden>
                         LOD
@@ -122,15 +77,19 @@ export class AdminMapSpotWorkbench {
                     </label>
                 </div>
             </div>
-            <div class="ac-map-workbench-stage" data-mode="metaverse">
+            <div class="ac-map-workbench-stage" data-google="off" data-interaction="spots">
                 <div id="ac-map-workbench-google" class="ac-map-workbench-layer ac-map-workbench-google"></div>
                 <div id="ac-map-workbench-world" class="ac-map-workbench-layer ac-map-workbench-world"></div>
             </div>
         `;
 
         this._stageEl = root.querySelector('.ac-map-workbench-stage');
-        this._mergedTab = /** @type {HTMLButtonElement|null} */ (
-            root.querySelector('[data-mode="merged"]')
+        this._hintEl = root.querySelector('#ac-map-workbench-hint');
+        this._mapModeBtn = /** @type {HTMLButtonElement|null} */ (
+            root.querySelector('[data-interaction="map"]')
+        );
+        this._geoModeBtn = /** @type {HTMLButtonElement|null} */ (
+            root.querySelector('[data-interaction="geo"]')
         );
         this._lodLabel = root.querySelector('#ac-map-lod-label');
         this._lodSelect = /** @type {HTMLSelectElement|null} */ (root.querySelector('#ac-map-lod-select'));
@@ -144,14 +103,15 @@ export class AdminMapSpotWorkbench {
         if (googleMount) {
             this._google = new AdminMapGooglePreview(/** @type {HTMLElement} */ (googleMount));
             this._google.onSpotGeoPick = (lat, lng) => this.onSpotGeoPick?.(lat, lng);
+            this._google.onMapViewChange = (view) => this.onMapViewChange?.(view);
         }
 
-        root.querySelectorAll('.ac-map-workbench-tab').forEach((btn) => {
+        root.querySelectorAll('.ac-map-workbench-mode').forEach((btn) => {
             btn.addEventListener('click', () => {
                 if (btn.hasAttribute('disabled')) return;
-                const mode = btn.getAttribute('data-mode');
-                if (mode === 'metaverse' || mode === 'google' || mode === 'merged') {
-                    this.setViewMode(mode);
+                const mode = btn.getAttribute('data-interaction');
+                if (mode === 'spots' || mode === 'map' || mode === 'geo') {
+                    this.setInteractionMode(mode);
                 }
             });
         });
@@ -164,7 +124,7 @@ export class AdminMapSpotWorkbench {
             }
         });
 
-        this.setViewMode('metaverse');
+        this._applyInteractionUi();
     }
 
     /**
@@ -188,25 +148,16 @@ export class AdminMapSpotWorkbench {
      */
     setConfig(config) {
         this._config = config;
-        const mergedOk = canShowMergedMapView(config);
-        if (this._mergedTab) {
-            this._mergedTab.disabled = !mergedOk;
-            this._mergedTab.title = mergedOk
-                ? 'メタバースと Google Map を重ねて表示'
-                : `地図座標付きスポットが ${MIN_GEO_CALIBRATION_SPOTS} 点以上必要`;
-        }
+        const spotCount = countWorldSpots(config);
+        const geoOn = config?.geo?.enabled === true;
         this._worldViewer?.setViewOptions({
             cameraHeightM: config?.cameraHeightM,
             groundRefY: config?.groundRefY,
             northDirection: config?.northDirection,
         });
-        this._google?.setConfig(config);
         this._worldViewer?.setSpotMarkers(config?.spots || []);
-        if (this._mode === 'merged' && !mergedOk) {
-            this.setViewMode('google');
-        } else {
-            this._applyMergedSync();
-        }
+        this._google?.setConfig(config, { overlayMode: geoOn });
+        this.setGoogleOverlayEnabled(geoOn, { spotCount, silent: true });
     }
 
     /**
@@ -214,36 +165,112 @@ export class AdminMapSpotWorkbench {
      */
     setSelectedSpotId(spotId) {
         this._selectedSpotId = spotId;
+        this._google?.setSelectedSpotId(spotId);
+        if (this._config && this._googleOverlayOn) {
+            this._google?.setConfig(this._config, { overlayMode: true });
+        }
     }
 
     /**
-     * @param {MapWorkbenchMode} mode
+     * Google Map オーバーレイの表示
+     * @param {boolean} enabled
+     * @param {{ spotCount?: number, silent?: boolean }} [opts]
      */
-    setViewMode(mode) {
-        if (mode === 'merged' && !canShowMergedMapView(this._config)) return;
-        this._mode = mode;
-        this.root.querySelectorAll('.ac-map-workbench-tab').forEach((btn) => {
-            const m = btn.getAttribute('data-mode');
-            btn.classList.toggle('is-active', m === mode);
+    setGoogleOverlayEnabled(enabled, opts = {}) {
+        const spotCount = opts.spotCount ?? countWorldSpots(this._config);
+        const canEnable = enabled && spotCount >= MIN_GEO_CALIBRATION_SPOTS;
+        this._googleOverlayOn = canEnable;
+
+        if (enabled && spotCount < MIN_GEO_CALIBRATION_SPOTS && !opts.silent) {
+            this._updateHint(
+                `Google Map 表示にはスポットが ${MIN_GEO_CALIBRATION_SPOTS} 点以上必要です（現在 ${spotCount}）`
+            );
+        }
+
+        if (this._mapModeBtn) {
+            this._mapModeBtn.disabled = !canEnable;
+        }
+        if (this._geoModeBtn) {
+            this._geoModeBtn.disabled = !canEnable;
+        }
+
+        if (this._stageEl) {
+            this._stageEl.dataset.google = canEnable ? 'on' : 'off';
+        }
+
+        this._worldViewer?.setMapOverlayActive(canEnable);
+        this._google?.setOverlayVisible(canEnable);
+
+        if (canEnable && !opts.silent) {
+            void this._google?.initialFitForOverlay(this._config);
+        }
+
+        if (!canEnable && this._interaction !== 'spots') {
+            this.setInteractionMode('spots');
+        } else {
+            this._applyInteractionUi();
+        }
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    isGoogleOverlayEnabled() {
+        return this._googleOverlayOn;
+    }
+
+    /**
+     * @param {MapWorkbenchInteraction} mode
+     */
+    setInteractionMode(mode) {
+        if (mode !== 'spots' && !this._googleOverlayOn) return;
+        this._interaction = mode;
+        this._applyInteractionUi();
+    }
+
+    /**
+     * @returns {MapWorkbenchInteraction}
+     */
+    getInteractionMode() {
+        return this._interaction;
+    }
+
+    _applyInteractionUi() {
+        const mode = this._interaction;
+        this.root.querySelectorAll('.ac-map-workbench-mode').forEach((btn) => {
+            btn.classList.toggle('is-active', btn.getAttribute('data-interaction') === mode);
         });
         if (this._stageEl) {
-            this._stageEl.dataset.mode = mode;
+            this._stageEl.dataset.interaction = mode;
         }
-        const worldAlpha = mode === 'merged';
-        this._worldViewer?.setOverlayMode(worldAlpha, mode === 'merged' ? 0.48 : 1);
-        this._google?.setLayerOpacity(mode === 'merged' ? 0.52 : 1);
-        const pickWorld = mode === 'metaverse';
-        const pickGoogle = mode === 'google';
-        this._worldViewer?.setPickingEnabled(pickWorld);
-        this._google?.setPickingEnabled(pickGoogle);
-        this._applyMergedSync();
+
+        const spotPick = mode === 'spots';
+        const mapActive = mode === 'map' || mode === 'geo';
+        this._worldViewer?.setPickingEnabled(spotPick);
+        this._worldViewer?.setPointerPassthrough(!spotPick);
+        this._google?.setMapInteractive(mapActive);
+        this._google?.setPickingEnabled(mode === 'geo');
+
+        if (mode === 'spots') {
+            this._updateHint(
+                this._googleOverlayOn
+                    ? '俯瞰でスポットを配置・移動（ホイールで拡大縮小、ドラッグで移動）'
+                    : `俯瞰でクリックしてスポットを配置（${MIN_GEO_CALIBRATION_SPOTS} 点以上で Google Map をオンにできます）`
+            );
+        } else if (mode === 'map') {
+            this._updateHint(
+                '地図をドラッグ・ピンチで移動、Ctrl+ドラッグまたは右クリックで回転、ホイールで拡大縮小して地形に合わせます'
+            );
+        } else {
+            this._updateHint('スポットを一覧で選択し、地図上の対応位置をクリックして緯度経度を設定');
+        }
     }
 
     /**
-     * @returns {MapWorkbenchMode}
+     * @param {string} text
      */
-    getViewMode() {
-        return this._mode;
+    _updateHint(text) {
+        if (this._hintEl) this._hintEl.textContent = text;
     }
 
     _syncLodSelector() {
@@ -268,32 +295,20 @@ export class AdminMapSpotWorkbench {
     async _reloadWorldIfNeeded() {
         if (!this._worldViewer || !this._world) return;
         const cfg = this._config || {};
-        this._worldViewer.setViewOptions({
-            cameraHeightM: cfg.cameraHeightM,
-            groundRefY: cfg.groundRefY,
-            northDirection: cfg.northDirection,
-        });
         await this._worldViewer.loadWorld(this._world, {
             lodSystem: this._world.lodSystem,
             lodBand: this._lodBand,
         });
         this._worldViewer.setSpotMarkers(cfg.spots || []);
-        this._applyMergedSync();
+        this._worldViewer.setMapOverlayActive(this._googleOverlayOn);
     }
 
-    _applyMergedSync() {
-        if (this._mode !== 'merged' || !this._config) return;
-        const spots = this._config.spots || [];
-        const geoHalf = geoHalfExtentFromSpots(spots);
-        const worldHalf = worldHalfExtentFromSpots(spots);
-        const half = Math.max(geoHalf, worldHalf);
-        const center = centroidLatLng(spots);
-        if (center && this._google) {
-            this._google.fitGeoExtent(center, half, this._config.geo);
-        }
-        if (this._worldViewer) {
-            this._worldViewer.frameSpots(spots, half);
-        }
+    /**
+     * 保存済みビューを Google Map に適用
+     * @param {object} geo
+     */
+    applySavedMapView(geo) {
+        this._google?.applySavedView(geo);
     }
 
     dispose() {
