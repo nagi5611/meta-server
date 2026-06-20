@@ -1,10 +1,10 @@
 // public/js/aircraft/map-admin-google-preview.js — Map定義の Google Maps キャリブレーションプレビュー
 
 import { loadGoogleMapsApi } from './google-maps-loader.js';
-import { isGeoMapReady, latLngToWorldXz, worldXzToLatLng } from './flight-map-geo.js';
+import { isGeoMapReady, spotHasGeo, worldXzToLatLng } from './flight-map-geo.js';
 
 /**
- * 管理画面用 Google Maps プレビュー（アンカー・スポット・北方向の確認）
+ * 管理画面用 Google Maps プレビュー（スポット対応・補正確認）
  */
 export class AdminMapGooglePreview {
     /**
@@ -14,18 +14,18 @@ export class AdminMapGooglePreview {
         this.mountEl = mountEl;
         /** @type {google.maps.Map|null} */
         this._map = null;
-        /** @type {google.maps.Marker|null} */
-        this._anchorMarker = null;
         /** @type {google.maps.Marker[]} */
-        this._spotMarkers = [];
-        /** @type {google.maps.Polyline|null} */
-        this._northLine = null;
+        this._definedMarkers = [];
+        /** @type {google.maps.Marker[]} */
+        this._predictedMarkers = [];
+        /** @type {google.maps.Polyline[]} */
+        this._residualLines = [];
         /** @type {string|null} */
         this._apiKey = null;
         /** @type {object|null} */
         this._config = null;
         /** @type {((lat: number, lng: number) => void)|null} */
-        this.onAnchorPick = null;
+        this.onSpotGeoPick = null;
     }
 
     /**
@@ -36,16 +36,13 @@ export class AdminMapGooglePreview {
     }
 
     /**
-     * @param {object|null} config flight map config（northDirection, geo, spots 含む）
+     * @param {object|null} config
      */
     setConfig(config) {
         this._config = config;
         void this._syncFromConfig();
     }
 
-    /**
-     * @returns {Promise<void>}
-     */
     async _ensureMap() {
         if (this._map || !this.mountEl) return;
         if (!this._apiKey) {
@@ -54,10 +51,9 @@ export class AdminMapGooglePreview {
         }
         const maps = await loadGoogleMapsApi(this._apiKey);
         this.mountEl.innerHTML = '';
-        const center = { lat: 35.6812, lng: 139.7671 };
         this._map = new maps.Map(this.mountEl, {
-            center,
-            zoom: 14,
+            center: { lat: 35.6812, lng: 139.7671 },
+            zoom: 10,
             mapTypeId: 'satellite',
             gestureHandling: 'greedy',
             streetViewControl: false,
@@ -67,8 +63,16 @@ export class AdminMapGooglePreview {
             const lat = ev.latLng?.lat();
             const lng = ev.latLng?.lng();
             if (lat == null || lng == null) return;
-            this.onAnchorPick?.(lat, lng);
+            this.onSpotGeoPick?.(lat, lng);
         });
+    }
+
+    _clearMarkers() {
+        for (const m of [...this._definedMarkers, ...this._predictedMarkers]) m.setMap(null);
+        for (const l of this._residualLines) l.setMap(null);
+        this._definedMarkers = [];
+        this._predictedMarkers = [];
+        this._residualLines = [];
     }
 
     async _syncFromConfig() {
@@ -77,113 +81,91 @@ export class AdminMapGooglePreview {
         const geo = this._config.geo;
         const north = this._config.northDirection || { x: 0, z: -1 };
         const maps = window.google.maps;
+        const spots = this._config.spots || [];
 
         if (geo?.mapType) {
             this._map.setMapTypeId(geo.mapType);
         }
 
-        if (this._anchorMarker) this._anchorMarker.setMap(null);
-        if (this._northLine) this._northLine.setMap(null);
-        for (const m of this._spotMarkers) m.setMap(null);
-        this._spotMarkers = [];
+        this._clearMarkers();
 
-        if (!isGeoMapReady(geo)) {
-            this._map.setCenter({ lat: 35.6812, lng: 139.7671 });
-            this._map.setZoom(10);
-            return;
-        }
+        /** @type {google.maps.LatLngLiteral[]} */
+        const boundsPts = [];
+        const geoReady = isGeoMapReady(geo);
 
-        const anchorPos = { lat: geo.anchorLat, lng: geo.anchorLng };
-        this._map.setCenter(anchorPos);
-        this._map.setZoom(typeof geo.zoom === 'number' ? geo.zoom + (geo.zoomOffset || 0) : 15);
-
-        this._anchorMarker = new maps.Marker({
-            map: this._map,
-            position: anchorPos,
-            title: 'アンカー（ワールド原点対応）',
-            label: { text: 'A', color: '#fff', fontWeight: '700' },
-            icon: {
-                path: maps.SymbolPath.CIRCLE,
-                scale: 10,
-                fillColor: '#e53935',
-                fillOpacity: 1,
-                strokeColor: '#fff',
-                strokeWeight: 2,
-            },
-        });
-
-        const northEnd = worldXzToLatLng(
-            (geo.anchorWorldX || 0) + north.x * 200,
-            (geo.anchorWorldZ || 0) + north.z * 200,
-            geo,
-            north
-        );
-        if (northEnd) {
-            this._northLine = new maps.Polyline({
-                map: this._map,
-                path: [anchorPos, northEnd],
-                strokeColor: '#ffeb3b',
-                strokeWeight: 4,
-                strokeOpacity: 0.9,
-            });
-        }
-
-        for (const spot of this._config.spots || []) {
-            if (!Number.isFinite(spot.x) || !Number.isFinite(spot.z)) continue;
-            const pos = worldXzToLatLng(spot.x, spot.z, geo, north);
-            if (!pos) continue;
+        for (const spot of spots) {
+            if (!spotHasGeo(spot)) continue;
+            const defined = { lat: spot.lat, lng: spot.lng };
+            boundsPts.push(defined);
             const marker = new maps.Marker({
                 map: this._map,
-                position: pos,
-                title: `${spot.name} (X=${spot.x.toFixed(1)} Z=${spot.z.toFixed(1)})`,
+                position: defined,
+                title: `${spot.name}（登録座標）`,
                 label: {
-                    text: spot.name?.slice(0, 10) || spot.id,
+                    text: spot.name?.slice(0, 8) || spot.id,
                     color: '#fff',
                     fontSize: '10px',
                 },
                 icon: {
                     path: maps.SymbolPath.CIRCLE,
-                    scale: 7,
+                    scale: 8,
                     fillColor: '#f57c00',
                     fillOpacity: 1,
                     strokeColor: '#fff',
                     strokeWeight: 2,
                 },
+                zIndex: 60,
             });
-            this._spotMarkers.push(marker);
+            this._definedMarkers.push(marker);
+
+            if (geoReady) {
+                const predicted = worldXzToLatLng(spot.x, spot.z, geo, north);
+                if (!predicted) continue;
+                boundsPts.push(predicted);
+                const predMarker = new maps.Marker({
+                    map: this._map,
+                    position: predicted,
+                    title: `${spot.name}（補正予測）`,
+                    icon: {
+                        path: maps.SymbolPath.CIRCLE,
+                        scale: 6,
+                        fillColor: '#43a047',
+                        fillOpacity: 0.9,
+                        strokeColor: '#fff',
+                        strokeWeight: 2,
+                    },
+                    zIndex: 55,
+                });
+                this._predictedMarkers.push(predMarker);
+                const line = new maps.Polyline({
+                    map: this._map,
+                    path: [defined, predicted],
+                    strokeColor: '#ff5252',
+                    strokeOpacity: 0.85,
+                    strokeWeight: 2,
+                });
+                this._residualLines.push(line);
+            }
+        }
+
+        if (boundsPts.length >= 1) {
+            const bounds = new maps.LatLngBounds();
+            for (const p of boundsPts) bounds.extend(p);
+            this._map.fitBounds(bounds, 48);
+        } else {
+            this._map.setCenter({ lat: 35.6812, lng: 139.7671 });
+            this._map.setZoom(10);
         }
     }
 
-    /**
-     * クリック位置の緯度経度からワールド XZ を逆算して返す（参照用）
-     * @param {number} lat
-     * @param {number} lng
-     * @returns {{ x: number, z: number }|null}
-     */
-    latLngToWorld(lat, lng) {
-        if (!this._config?.geo) return null;
-        return latLngToWorldXz(
-            lat,
-            lng,
-            this._config.geo,
-            this._config.northDirection || { x: 0, z: -1 }
-        );
-    }
-
     dispose() {
-        if (this._anchorMarker) this._anchorMarker.setMap(null);
-        if (this._northLine) this._northLine.setMap(null);
-        for (const m of this._spotMarkers) m.setMap(null);
-        this._anchorMarker = null;
-        this._northLine = null;
-        this._spotMarkers = [];
+        this._clearMarkers();
         this._map = null;
         if (this.mountEl) this.mountEl.innerHTML = '';
     }
 }
 
 /**
- * client-config から Google Maps API キーを取得する
  * @returns {Promise<string|null>}
  */
 export async function fetchGoogleMapsApiKey() {

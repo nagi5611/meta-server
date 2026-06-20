@@ -2,6 +2,12 @@
 
 import { AdminMapSpotWorldViewer } from './map-spot-world-viewer.js';
 import { AdminMapGooglePreview, fetchGoogleMapsApiKey } from './map-admin-google-preview.js';
+import {
+    MIN_GEO_CALIBRATION_SPOTS,
+    countGeoCalibratedSpots,
+    computeGeoCalibrationFromSpots,
+    spotHasGeo,
+} from './flight-map-geo.js';
 
 /** @type {boolean} */
 let mapMounted = false;
@@ -26,6 +32,14 @@ const NORTH_PRESETS = {
     '+Z': { x: 0, z: 1 },
     '-X': { x: -1, z: 0 },
     '+X': { x: 1, z: 0 },
+};
+
+/** @type {Record<string, string>} */
+const CALIBRATION_ERROR_JA = {
+    geo_calibration_needs_3_spots: `地図座標付きスポットが ${MIN_GEO_CALIBRATION_SPOTS} つ以上必要です`,
+    geo_calibration_spots_collinear: 'スポットが一直線上です。離れた位置に置き直してください',
+    geo_calibration_solve_failed: '補正の計算に失敗しました',
+    geo_calibration_invalid_scale: '算出された縮尺が不正です',
 };
 
 /**
@@ -78,7 +92,87 @@ function defaultMapConfig() {
 }
 
 /**
- * フォームから geo 設定を読む
+ * 補正ステータス表示を更新する
+ * @param {object} [calibrationResult]
+ */
+function updateCalibrationStatus(calibrationResult) {
+    const el = document.getElementById('ac-map-geo-calibration-status');
+    if (!el) return;
+    const spots = draftMap?.config?.spots || [];
+    const n = countGeoCalibratedSpots(spots);
+    const enabled =
+        /** @type {HTMLInputElement|null} */ (document.getElementById('ac-map-geo-enabled'))
+            ?.checked === true;
+    if (!enabled) {
+        el.textContent = '';
+        return;
+    }
+    if (n < MIN_GEO_CALIBRATION_SPOTS) {
+        el.textContent = `地図座標付きスポット: ${n} / ${MIN_GEO_CALIBRATION_SPOTS}（あと ${MIN_GEO_CALIBRATION_SPOTS - n} つ必要）`;
+        el.style.color = '#c62828';
+        return;
+    }
+    if (calibrationResult?.ok) {
+        el.textContent =
+            `補正 OK — ${calibrationResult.spotCount} 点、平均誤差 ${calibrationResult.residualM.toFixed(1)} m`;
+        el.style.color = '#2e7d32';
+        return;
+    }
+    el.textContent = `地図座標付きスポット: ${n} 点 — 「補正を計算」を実行してください`;
+    el.style.color = '';
+}
+
+/**
+ * スポット 3 点以上から geo を算出して draft に反映する
+ * @param {boolean} [showError]
+ * @returns {boolean}
+ */
+function tryApplyGeoCalibration(showError = false) {
+    const cfg = readConfigFromForm();
+    if (!cfg.geo.enabled) {
+        updateCalibrationStatus();
+        return false;
+    }
+    const result = computeGeoCalibrationFromSpots(cfg.spots, cfg.northDirection, cfg.geo);
+    if (!result.ok) {
+        updateCalibrationStatus();
+        if (showError) {
+            setMapStatus(CALIBRATION_ERROR_JA[result.error] || result.error, true);
+        }
+        return false;
+    }
+    if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
+    draftMap.config = { ...cfg, geo: result.geo };
+    syncGeoComputedPanel(result.geo);
+    updateCalibrationStatus(result);
+    refreshGooglePreview();
+    return true;
+}
+
+/**
+ * 算出済み geo パラメータを読み取り専用パネルへ表示する
+ * @param {object|null|undefined} geo
+ */
+function syncGeoComputedPanel(geo) {
+    const panel = document.getElementById('ac-map-geo-computed');
+    if (!panel) return;
+    if (!geo?.anchorLat || !geo?.anchorLng) {
+        panel.hidden = true;
+        return;
+    }
+    panel.hidden = false;
+    panel.innerHTML =
+        `<p class="hint">自動補正結果（先頭の地図座標付きスポットを基準）</p>`
+        + `<dl class="ac-map-geo-computed-dl">`
+        + `<dt>基準 World</dt><dd>X=${geo.anchorWorldX?.toFixed(1)} Z=${geo.anchorWorldZ?.toFixed(1)}</dd>`
+        + `<dt>基準 緯度経度</dt><dd>${geo.anchorLat?.toFixed(6)}, ${geo.anchorLng?.toFixed(6)}</dd>`
+        + `<dt>縮尺</dt><dd>${geo.metersPerWorldUnit?.toFixed(4)} m / 単位</dd>`
+        + `<dt>北向き補正</dt><dd>${geo.geoNorthOffsetDeg?.toFixed(2)}°</dd>`
+        + `</dl>`;
+}
+
+/**
+ * フォームから geo 表示設定を読む（幾何パラメータは補正結果を draft から引き継ぐ）
  * @returns {object}
  */
 function readGeoFromForm() {
@@ -90,26 +184,27 @@ function readGeoFromForm() {
     const enabled = /** @type {HTMLInputElement|null} */ (
         document.getElementById('ac-map-geo-enabled')
     )?.checked === true;
-    const anchorLatRaw = num('ac-map-geo-anchor-lat', NaN);
-    const anchorLngRaw = num('ac-map-geo-anchor-lng', NaN);
     const mapType =
         /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-map-geo-map-type'))
             ?.value || 'satellite';
     const headingMode =
         /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-map-geo-heading-mode'))
             ?.value || 'trackUp';
+    const base = draftMap?.config?.geo || defaultMapConfig().geo;
     return {
         enabled,
-        anchorWorldX: num('ac-map-geo-anchor-world-x', 0),
-        anchorWorldZ: num('ac-map-geo-anchor-world-z', 0),
-        anchorLat: Number.isFinite(anchorLatRaw) ? anchorLatRaw : null,
-        anchorLng: Number.isFinite(anchorLngRaw) ? anchorLngRaw : null,
-        metersPerWorldUnit: Math.max(0.001, num('ac-map-geo-meters-per-unit', 1)),
-        geoNorthOffsetDeg: num('ac-map-geo-north-offset', 0),
+        anchorWorldX: base.anchorWorldX ?? 0,
+        anchorWorldZ: base.anchorWorldZ ?? 0,
+        anchorLat: base.anchorLat ?? null,
+        anchorLng: base.anchorLng ?? null,
+        metersPerWorldUnit: base.metersPerWorldUnit ?? 1,
+        geoNorthOffsetDeg: base.geoNorthOffsetDeg ?? 0,
         mapType,
         zoom: Math.round(num('ac-map-geo-zoom', 15)),
         zoomOffset: Math.round(num('ac-map-geo-zoom-offset', 0)),
         headingMode,
+        calibrationSpotCount: base.calibrationSpotCount,
+        calibrationResidualM: base.calibrationResidualM,
     };
 }
 
@@ -127,12 +222,6 @@ function syncGeoForm(geo) {
         document.getElementById('ac-map-geo-enabled')
     );
     if (enabledEl) enabledEl.checked = g.enabled === true;
-    setNum('ac-map-geo-anchor-world-x', g.anchorWorldX ?? 0);
-    setNum('ac-map-geo-anchor-world-z', g.anchorWorldZ ?? 0);
-    setNum('ac-map-geo-anchor-lat', g.anchorLat);
-    setNum('ac-map-geo-anchor-lng', g.anchorLng);
-    setNum('ac-map-geo-meters-per-unit', g.metersPerWorldUnit ?? 1);
-    setNum('ac-map-geo-north-offset', g.geoNorthOffsetDeg ?? 0);
     setNum('ac-map-geo-zoom', g.zoom ?? 15);
     setNum('ac-map-geo-zoom-offset', g.zoomOffset ?? 0);
     const mapTypeEl = /** @type {HTMLSelectElement|null} */ (
@@ -145,6 +234,12 @@ function syncGeoForm(geo) {
     if (headingEl) headingEl.value = g.headingMode || 'trackUp';
     const geoPanel = document.getElementById('ac-map-geo-fields');
     if (geoPanel) geoPanel.style.display = g.enabled ? 'block' : 'none';
+    syncGeoComputedPanel(g);
+    updateCalibrationStatus(
+        g.calibrationSpotCount >= MIN_GEO_CALIBRATION_SPOTS
+            ? { ok: true, spotCount: g.calibrationSpotCount, residualM: g.calibrationResidualM || 0 }
+            : undefined
+    );
 }
 
 /**
@@ -254,18 +349,24 @@ function renderSpotList() {
         return;
     }
     list.innerHTML = spots
-        .map(
-            (s) =>
-                `<button type="button" class="ac-map-spot-item${s.id === selectedSpotId ? ' is-selected' : ''}" data-spot-id="${s.id}">` +
-                `<span class="ac-map-spot-name">${escapeHtml(s.name)}</span>` +
-                `<span class="ac-map-spot-coord">X=${s.x.toFixed(1)} Z=${s.z.toFixed(1)}</span>` +
-                `</button>`
-        )
+        .map((s) => {
+            const geoLine = spotHasGeo(s)
+                ? `地図: ${s.lat?.toFixed(5)}, ${s.lng?.toFixed(5)}`
+                : '地図: 未設定（右プレビューでクリック）';
+            return (
+                `<button type="button" class="ac-map-spot-item${s.id === selectedSpotId ? ' is-selected' : ''}" data-spot-id="${s.id}">`
+                + `<span class="ac-map-spot-name">${escapeHtml(s.name)}</span>`
+                + `<span class="ac-map-spot-coord">メタバース X=${s.x.toFixed(1)} Z=${s.z.toFixed(1)}</span>`
+                + `<span class="ac-map-spot-geo${spotHasGeo(s) ? ' is-set' : ''}">${escapeHtml(geoLine)}</span>`
+                + `</button>`
+            );
+        })
         .join('');
     list.querySelectorAll('[data-spot-id]').forEach((btn) => {
         btn.addEventListener('click', () => {
             selectedSpotId = btn.getAttribute('data-spot-id');
             renderSpotList();
+            googlePreview?.setSelectedSpotId?.(selectedSpotId);
         });
     });
 }
@@ -351,6 +452,18 @@ async function reloadWorldSelect() {
 async function saveMapDraft() {
     if (!selectedWorldId || !draftMap) return;
     const config = readConfigFromForm();
+    if (config.geo.enabled) {
+        const result = computeGeoCalibrationFromSpots(
+            config.spots,
+            config.northDirection,
+            config.geo
+        );
+        if (!result.ok) {
+            setMapStatus(CALIBRATION_ERROR_JA[result.error] || result.error, true);
+            return;
+        }
+        config.geo = result.geo;
+    }
     try {
         const j = await fetchJson(
             `/admin/addons/aircraft/flight-maps/${encodeURIComponent(selectedWorldId)}`,
@@ -463,7 +576,7 @@ export function mountAircraftMapAdminPanel(root) {
         <div class="ac-map-admin-layout">
             <aside class="ac-map-admin-left">
                 <h2 class="section-title">Map定義</h2>
-                <p class="hint">ミニマップは<strong>3D俯瞰</strong>、<strong>M キー</strong>で Google Maps 2D を表示。縮尺・向きは下のジオリファレンスで調整します。</p>
+                <p class="hint">ミニマップは<strong>3D俯瞰</strong>、<strong>M キー</strong>で Google Maps 2D。<strong>3つ以上</strong>のスポットでメタバースと地図を対応付けて自動補正します。</p>
                 <div class="field-row">
                     <label class="prop-label" for="ac-map-world-select">対象ワールド</label>
                     <select id="ac-map-world-select" class="prop-input full"></select>
@@ -491,25 +604,14 @@ export function mountAircraftMapAdminPanel(root) {
                     <input type="number" id="ac-map-ground-y" class="prop-input num" step="any" title="俯瞰カメラの注視点の高さ（通常は 0 またはスポーン付近）" /></div>
                 <div class="field-row"><label class="prop-label" for="ac-map-icon-offset">機体アイコン向き補正 (°)</label>
                     <input type="number" id="ac-map-icon-offset" class="prop-input num" step="1" /></div>
-                <div class="prop-group-label">Google Maps ジオリファレンス（M キー 2D マップ）</div>
+                <div class="prop-group-label">Google Maps 2D（M キー）— スポット補正</div>
                 <div class="field-row">
                     <label class="prop-label" for="ac-map-geo-enabled">Google Maps 2D を有効</label>
                     <input type="checkbox" id="ac-map-geo-enabled" class="prop-input" />
                 </div>
+                <p id="ac-map-geo-calibration-status" class="status-text" role="status"></p>
                 <div id="ac-map-geo-fields">
-                    <p class="hint">アンカー: ワールド座標と緯度経度の対応点。右プレビューをクリックで緯度経度を設定。</p>
-                    <div class="field-row"><label class="prop-label" for="ac-map-geo-anchor-world-x">アンカー World X</label>
-                        <input type="number" id="ac-map-geo-anchor-world-x" class="prop-input num" step="any" value="0" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-map-geo-anchor-world-z">アンカー World Z</label>
-                        <input type="number" id="ac-map-geo-anchor-world-z" class="prop-input num" step="any" value="0" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-map-geo-anchor-lat">アンカー 緯度</label>
-                        <input type="number" id="ac-map-geo-anchor-lat" class="prop-input num" step="any" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-map-geo-anchor-lng">アンカー 経度</label>
-                        <input type="number" id="ac-map-geo-anchor-lng" class="prop-input num" step="any" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-map-geo-meters-per-unit">縮尺 (m / ワールド単位)</label>
-                        <input type="number" id="ac-map-geo-meters-per-unit" class="prop-input num" step="any" min="0.001" value="1" title="1 ワールド単位が何メートルか" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-map-geo-north-offset">北向き補正 (°)</label>
-                        <input type="number" id="ac-map-geo-north-offset" class="prop-input num" step="0.1" title="ゲーム北と地理北のずれ。プレビューの黄線で確認" /></div>
+                    <p class="hint">①「スポット定義」でメタバース上に 3 点以上配置 → ②一覧でスポットを選択 → ③右の地図をクリックして緯度経度を設定 → ④補正を計算</p>
                     <div class="field-row"><label class="prop-label" for="ac-map-geo-map-type">地図タイプ</label>
                         <select id="ac-map-geo-map-type" class="prop-input full">
                             <option value="satellite">衛星</option>
@@ -526,6 +628,11 @@ export function mountAircraftMapAdminPanel(root) {
                             <option value="trackUp">機首上（track-up）</option>
                             <option value="northUp">北固定（north-up）</option>
                         </select></div>
+                    <div id="ac-map-geo-computed" class="ac-map-geo-computed" hidden></div>
+                    <div class="ac-admin-actions">
+                        <button type="button" class="btn btn-secondary" id="ac-map-btn-calibrate">補正を計算</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="ac-map-spot-clear-geo">選択スポットの地図座標をクリア</button>
+                    </div>
                 </div>
                 <div class="ac-admin-actions">
                     <button type="button" class="btn btn-secondary" id="ac-map-btn-spots">スポット定義</button>
@@ -535,7 +642,7 @@ export function mountAircraftMapAdminPanel(root) {
             </aside>
             <section class="ac-map-admin-center">
                 <h3 class="section-subtitle">Google Maps プレビュー</h3>
-                <p class="hint">赤 A = アンカー、黄線 = ゲーム北方向（200m）、橙 = スポット。クリックでアンカー緯度経度を設定。</p>
+                <p class="hint">橙 = 登録した地図座標、緑 = 補正後の予測位置。スポット選択後に地図クリックで緯度経度を設定。</p>
                 <div id="ac-map-google-preview-mount" class="ac-map-google-preview-mount"></div>
             </section>
             <aside class="ac-map-admin-right ac-map-admin-right-wide">
@@ -570,19 +677,18 @@ export function mountAircraftMapAdminPanel(root) {
         refreshGooglePreview();
     });
 
-    const previewOnChange = () => refreshGooglePreview();
+    const previewOnChange = () => {
+        refreshGooglePreview();
+        if (document.getElementById('ac-map-geo-enabled')?.checked) {
+            tryApplyGeoCalibration(false);
+        }
+    };
     for (const id of [
         'ac-map-camera-height',
         'ac-map-ground-y',
         'ac-map-icon-offset',
         'ac-map-north-x',
         'ac-map-north-z',
-        'ac-map-geo-anchor-world-x',
-        'ac-map-geo-anchor-world-z',
-        'ac-map-geo-anchor-lat',
-        'ac-map-geo-anchor-lng',
-        'ac-map-geo-meters-per-unit',
-        'ac-map-geo-north-offset',
         'ac-map-geo-zoom',
         'ac-map-geo-zoom-offset',
     ]) {
@@ -605,15 +711,15 @@ export function mountAircraftMapAdminPanel(root) {
             googleMapsApiKey = key;
             googlePreview = new AdminMapGooglePreview(previewMount);
             googlePreview.setApiKey(key);
-            googlePreview.onAnchorPick = (lat, lng) => {
-                const latEl = /** @type {HTMLInputElement|null} */ (
-                    document.getElementById('ac-map-geo-anchor-lat')
-                );
-                const lngEl = /** @type {HTMLInputElement|null} */ (
-                    document.getElementById('ac-map-geo-anchor-lng')
-                );
-                if (latEl) latEl.value = String(lat);
-                if (lngEl) lngEl.value = String(lng);
+            googlePreview.onSpotGeoPick = (lat, lng) => {
+                if (!selectedSpotId || !draftMap?.config?.spots) {
+                    setMapStatus('スポットを一覧で選択してから地図をクリックしてください', true);
+                    return;
+                }
+                const spot = draftMap.config.spots.find((s) => s.id === selectedSpotId);
+                if (!spot) return;
+                spot.lat = lat;
+                spot.lng = lng;
                 const enabledEl = /** @type {HTMLInputElement|null} */ (
                     document.getElementById('ac-map-geo-enabled')
                 );
@@ -622,12 +728,34 @@ export function mountAircraftMapAdminPanel(root) {
                     const panel = document.getElementById('ac-map-geo-fields');
                     if (panel) panel.style.display = 'block';
                 }
-                refreshGooglePreview();
-                setMapStatus(`アンカー緯度経度: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+                renderSpotList();
+                setMapStatus(`${spot.name}: 地図 ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+                if (countGeoCalibratedSpots(draftMap.config.spots) >= MIN_GEO_CALIBRATION_SPOTS) {
+                    tryApplyGeoCalibration(false);
+                } else {
+                    updateCalibrationStatus();
+                    refreshGooglePreview();
+                }
             };
             refreshGooglePreview();
         });
     }
+
+    document.getElementById('ac-map-btn-calibrate')?.addEventListener('click', () => {
+        if (tryApplyGeoCalibration(true)) {
+            setMapStatus('スポット補正を計算しました');
+        }
+    });
+
+    document.getElementById('ac-map-spot-clear-geo')?.addEventListener('click', () => {
+        if (!selectedSpotId || !draftMap?.config?.spots) return;
+        const spot = draftMap.config.spots.find((s) => s.id === selectedSpotId);
+        if (!spot) return;
+        delete spot.lat;
+        delete spot.lng;
+        syncMapFormFromDraft(draftMap);
+        setMapStatus(`${spot.name} の地図座標をクリアしました`);
+    });
 
     document.getElementById('ac-map-btn-save')?.addEventListener('click', () => {
         void saveMapDraft();
