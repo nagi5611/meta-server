@@ -1,11 +1,7 @@
 // public/js/aircraft/map-admin-google-preview.js — Map定義の Google Maps キャリブレーションプレビュー
 
-import { loadGoogleMapsApi } from '../../../addons/aircraft/client/google-maps-loader.js';
-import {
-    latLngToWorldXz,
-    worldXzToLatLng,
-} from '../../../addons/aircraft/client/flight-map-coords.js';
-import { isGeoMapReady } from '../../../lib/aircraft-server/flight-map-schema.js';
+import { loadGoogleMapsApi } from './google-maps-loader.js';
+import { isGeoMapReady, latLngToWorldXz, worldXzToLatLng } from './flight-map-geo.js';
 
 /**
  * 管理画面用 Google Maps プレビュー（アンカー・スポット・北方向の確認）

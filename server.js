@@ -115,6 +115,8 @@ const STATIC_DIR = path.join(__dirname, isProductionBuild ? 'dist' : 'public');
 const DIST_JS_DIR = path.join(__dirname, 'dist', 'js');
 const DIST_CSS_DIR = path.join(__dirname, 'dist', 'css');
 const DIST_ADDONS_DIR = path.join(__dirname, 'dist', 'addons');
+const DIST_LIB_AIRCRAFT_SERVER_DIR = path.join(__dirname, 'dist', 'lib', 'aircraft-server');
+const LIB_AIRCRAFT_SERVER_DIR = path.join(__dirname, 'lib', 'aircraft-server');
 
 /**
  * ENABLE_CHART_FEATURES: 太鼓・譜面・譜面BGM・admin 譜面編集。未設定時は有効。0 / false / off / no で無効。
@@ -1929,6 +1931,10 @@ if (isProductionBuild && fs.existsSync(DIST_ADDONS_DIR)) {
     app.use('/addons', express.static(DIST_ADDONS_DIR));
 }
 app.use('/addons', express.static(path.join(__dirname, 'addons')));
+if (isProductionBuild && fs.existsSync(DIST_LIB_AIRCRAFT_SERVER_DIR)) {
+    app.use('/lib/aircraft-server', express.static(DIST_LIB_AIRCRAFT_SERVER_DIR));
+}
+app.use('/lib/aircraft-server', express.static(LIB_AIRCRAFT_SERVER_DIR));
 if (CHART_FEATURES_ENABLED) {
     app.use('/chart-bgm', express.static(CHART_BGM_DIR, {
         setHeaders: (res, filePath) => {

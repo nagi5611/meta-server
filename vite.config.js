@@ -51,6 +51,10 @@ function copyPublicAssets() {
             copyDirRecursive(path.join(publicDir, 'instance'), path.join(distDir, 'instance'));
             copyDirRecursive(path.join(publicDir, 'pre_xr'), path.join(distDir, 'pre_xr'));
             copyDirRecursive(addonsDir, path.join(distDir, 'addons'));
+            copyDirRecursive(
+                path.join(cwd, 'lib', 'aircraft-server'),
+                path.join(distDir, 'lib', 'aircraft-server')
+            );
 
             for (const htmlName of ['admin.html', 'sw.js']) {
                 const src = path.join(publicDir, htmlName);
