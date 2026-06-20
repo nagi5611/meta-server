@@ -168,15 +168,25 @@ export default class AircraftManager {
     }
 
     /**
-     * ミニマップサイズ変更（; 拡大 / : 縮小）
+     * ミニマップ俯瞰高度の変更（; 寄り / : 引き）
      * @param {KeyboardEvent} e
      * @returns {boolean}
      */
     _handleMinimapSizeKey(e) {
         if (e.code !== 'Semicolon' || e.repeat) return false;
         e.preventDefault();
-        const changed = e.shiftKey ? this.minimap.shrink() : this.minimap.enlarge();
-        if (changed) this.updateMinimap(true);
+        const changed = e.shiftKey ? this.minimap.zoomOut() : this.minimap.zoomIn();
+        if (changed) {
+            const heightM = this.minimap.getCameraHeightM();
+            if (heightM != null && this.googleMap.mapConfig) {
+                this.googleMap.mapConfig.cameraHeightM = heightM;
+                if (typeof this.googleMap.mapConfig.viewHalfExtentM === 'number') {
+                    delete this.googleMap.mapConfig.viewHalfExtentM;
+                }
+            }
+            this.updateMinimap(true);
+            if (this.googleMap.isVisible()) this.updateGoogleMap(true);
+        }
         return true;
     }
 

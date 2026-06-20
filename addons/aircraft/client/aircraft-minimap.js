@@ -10,11 +10,12 @@ import {
 } from './flight-map-coords.js';
 
 const DEFAULT_SIZE_PX = 264;
-const MIN_SIZE_PX = 160;
-const MAX_SIZE_PX = 440;
-const SIZE_STEP_PX = 22;
 /** 352px 基準デザインからのスケール分母 */
 const UI_DESIGN_BASE_PX = 352;
+const CAMERA_HEIGHT_MIN_M = 80;
+const CAMERA_HEIGHT_MAX_M = 20000;
+/** 1 キー操作あたりの高度倍率（見える範囲はほぼ比例） */
+const CAMERA_HEIGHT_ZOOM_FACTOR = 1.15;
 
 /**
  * 飛行操縦中 HUD 右下の円形ミニマップ（3D ワールド俯瞰・North-up）
@@ -83,26 +84,42 @@ export default class AircraftMinimap {
     }
 
     /**
-     * ミニマップ表示サイズを変更する
-     * @param {number} delta
+     * 俯瞰カメラ高度を変更し、見える範囲を広げる／狭める
+     * @param {number} factor 1 より大きいと高度アップ（引き）、小さいと降下（寄り）
      * @returns {boolean}
      */
-    adjustSize(delta) {
-        const next = Math.min(MAX_SIZE_PX, Math.max(MIN_SIZE_PX, this.sizePx + delta));
-        if (next === this.sizePx) return false;
-        this.sizePx = next;
-        this._applySize();
+    adjustCameraHeight(factor) {
+        if (!this.mapConfig || !Number.isFinite(factor) || factor <= 0) return false;
+        const cur = this.mapConfig.cameraHeightM ?? 500;
+        const next = Math.min(
+            CAMERA_HEIGHT_MAX_M,
+            Math.max(CAMERA_HEIGHT_MIN_M, cur * factor)
+        );
+        if (Math.abs(next - cur) < 0.5) return false;
+        this.mapConfig.cameraHeightM = Math.round(next);
+        if (typeof this.mapConfig.viewHalfExtentM === 'number') {
+            delete this.mapConfig.viewHalfExtentM;
+        }
         return true;
     }
 
-    /** ミニマップを拡大する（;） */
-    enlarge() {
-        return this.adjustSize(SIZE_STEP_PX);
+    /** 見える範囲を狭める（;）— カメラを下げる */
+    zoomIn() {
+        return this.adjustCameraHeight(1 / CAMERA_HEIGHT_ZOOM_FACTOR);
     }
 
-    /** ミニマップを縮小する（:） */
-    shrink() {
-        return this.adjustSize(-SIZE_STEP_PX);
+    /** 見える範囲を広げる（:）— カメラを上げる */
+    zoomOut() {
+        return this.adjustCameraHeight(CAMERA_HEIGHT_ZOOM_FACTOR);
+    }
+
+    /**
+     * 現在の俯瞰カメラ高度（m）
+     * @returns {number|null}
+     */
+    getCameraHeightM() {
+        if (!this.mapConfig) return null;
+        return this.mapConfig.cameraHeightM ?? 500;
     }
 
     /**
