@@ -1,7 +1,6 @@
 // public/js/aircraft/map-spot-world-viewer.js — Map定義用 3D ワールドビューア（クリックで XZ スポット）
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { loadPrefabGroupFromManifest } from '/js/prefab-load-shared.js';
@@ -138,31 +137,6 @@ function applyFixedLodBand(root, band) {
 }
 
 /**
- * 正射影カメラを北固定トップダウンに合わせる
- * @param {THREE.OrthographicCamera} camera
- * @param {number} cx
- * @param {number} cz
- * @param {number} groundY
- * @param {number} cameraHeightM
- * @param {{ x: number, z: number }} north
- * @param {number} halfExtentM
- */
-function applyTopDownCamera(camera, cx, cz, groundY, cameraHeightM, north, halfExtentM) {
-    const half = Math.max(halfExtentM, 50);
-    camera.left = -half;
-    camera.right = half;
-    camera.top = half;
-    camera.bottom = -half;
-    camera.near = 0.5;
-    camera.far = Math.max(cameraHeightM + 10000, 15000);
-    camera.position.set(cx, groundY + cameraHeightM, cz);
-    camera.up.set(north.x, 0, north.z);
-    camera.lookAt(cx, groundY, cz);
-    camera.updateProjectionMatrix();
-    camera.updateMatrixWorld(true);
-}
-
-/**
  * Map定義 — ワールド上クリックでスポット XZ を取得するビューア
  */
 export class AdminMapSpotWorldViewer {
@@ -184,15 +158,8 @@ export class AdminMapSpotWorldViewer {
         this._scene = new THREE.Scene();
         this._scene.background = new THREE.Color(0x87ceeb);
         this._camera = new THREE.OrthographicCamera(-500, 500, 500, -500, 0.5, 20000);
-        this._controls = new OrbitControls(this._camera, this._renderer.domElement);
-        this._controls.enableDamping = true;
-        this._controls.enableRotate = false;
-        this._controls.enablePan = true;
-        this._controls.enableZoom = true;
-        this._controls.screenSpacePanning = true;
-        // 真上からの俯瞰のみ（回転・チルト不可）
-        this._controls.minPolarAngle = Math.PI / 2;
-        this._controls.maxPolarAngle = Math.PI / 2;
+        this._centerX = 0;
+        this._centerZ = 0;
         this._mapOverlayActive = false;
         this._pointerPassthrough = false;
         this._scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -218,13 +185,24 @@ export class AdminMapSpotWorldViewer {
         this._raf = 0;
         this._disposed = false;
         this._pointerDown = null;
+        /** @type {boolean} */
+        this._didPan = false;
         /** @type {((x: number, z: number) => void)|null} */
         this.onSpotPick = null;
         this._boundResize = () => this._resize();
         this._boundPointerDown = (e) => {
-            this._pointerDown = { x: e.clientX, y: e.clientY };
+            if (e.button !== 0) return;
+            this._pointerDown = {
+                x: e.clientX,
+                y: e.clientY,
+                centerX: this._centerX,
+                centerZ: this._centerZ,
+            };
+            this._didPan = false;
         };
+        this._boundPointerMove = (e) => this._onPointerMove(e);
         this._boundPointerUp = (e) => this._onPointerUp(e);
+        this._boundWheel = (e) => this._onWheel(e);
         container.appendChild(this._renderer.domElement);
         const canvas = this._renderer.domElement;
         canvas.style.display = 'block';
@@ -235,7 +213,11 @@ export class AdminMapSpotWorldViewer {
         this._resizeObserver.observe(container);
         window.addEventListener('resize', this._boundResize);
         canvas.addEventListener('pointerdown', this._boundPointerDown);
+        canvas.addEventListener('pointermove', this._boundPointerMove);
         canvas.addEventListener('pointerup', this._boundPointerUp);
+        canvas.addEventListener('pointercancel', this._boundPointerUp);
+        canvas.addEventListener('wheel', this._boundWheel, { passive: false });
+        this._applyTopDownView();
         requestAnimationFrame(() => this._resize());
         this._tick();
     }
@@ -297,32 +279,86 @@ export class AdminMapSpotWorldViewer {
 
     _tick() {
         if (this._disposed) return;
-        this._enforceTopDown();
-        this._controls.update();
+        this._applyTopDownView();
         this._renderer.render(this._scene, this._camera);
         this._raf = requestAnimationFrame(() => this._tick());
     }
 
-    /** カメラを常に真上俯瞰に固定する */
-    _enforceTopDown() {
-        const t = this._controls.target;
-        const cx = t.x;
-        const cz = t.z;
+    /** 北固定・真上俯瞰のカメラ姿勢を適用する（正射影範囲は _resize が担当） */
+    _applyTopDownView() {
+        const cx = this._centerX;
+        const cz = this._centerZ;
         const gy = this._groundY;
         this._camera.position.set(cx, gy + this._cameraHeightM, cz);
         this._camera.up.set(this._north.x, 0, this._north.z);
         this._camera.lookAt(cx, gy, cz);
+        this._camera.near = 0.5;
+        this._camera.far = Math.max(this._cameraHeightM + 10000, 15000);
+        this._camera.updateMatrixWorld(true);
+    }
+
+    /**
+     * 画面ピクセル移動量をワールド XZ 移動量へ変換する
+     * @param {number} dxPx
+     * @param {number} dyPx
+     * @param {number} viewWidthPx
+     * @param {number} viewHeightPx
+     * @returns {{ dx: number, dz: number }}
+     */
+    _screenDeltaToWorldXZ(dxPx, dyPx, viewWidthPx, viewHeightPx) {
+        const zoom = Math.max(this._camera.zoom, 0.01);
+        const halfY = this._viewHalfExtentM / zoom;
+        const aspect = viewWidthPx / Math.max(viewHeightPx, 1);
+        const halfX = aspect >= 1 ? halfY * aspect : halfY;
+        const scaleX = (2 * halfX) / Math.max(viewWidthPx, 1);
+        const scaleY = (2 * halfY) / Math.max(viewHeightPx, 1);
+        const east = { x: this._north.z, z: -this._north.x };
+        const worldDx = dxPx * scaleX;
+        const worldDy = dyPx * scaleY;
+        return {
+            dx: east.x * worldDx - this._north.x * worldDy,
+            dz: east.z * worldDx - this._north.z * worldDy,
+        };
+    }
+
+    /**
+     * @param {PointerEvent} e
+     */
+    _onPointerMove(e) {
+        if (!this._pointerDown) return;
+        const dx = e.clientX - this._pointerDown.x;
+        const dy = e.clientY - this._pointerDown.y;
+        if (Math.hypot(dx, dy) <= 6) return;
+        this._didPan = true;
+        const rect = this._renderer.domElement.getBoundingClientRect();
+        const delta = this._screenDeltaToWorldXZ(-dx, -dy, rect.width, rect.height);
+        this._centerX = this._pointerDown.centerX + delta.dx;
+        this._centerZ = this._pointerDown.centerZ + delta.dz;
+    }
+
+    /**
+     * @param {WheelEvent} e
+     */
+    _onWheel(e) {
+        e.preventDefault();
+        const factor = e.deltaY > 0 ? 1.12 : 1 / 1.12;
+        const next = this._viewHalfExtentM * factor;
+        this._viewHalfExtentM = Math.min(8000, Math.max(50, next));
+        this._resize();
     }
 
     /**
      * @param {PointerEvent} e
      */
     _onPointerUp(e) {
-        if (!this._pointerDown || !this.onSpotPick || !this._pickingEnabled) return;
-        const dx = e.clientX - this._pointerDown.x;
-        const dy = e.clientY - this._pointerDown.y;
+        if (!this._pointerDown) return;
+        if (this._didPan) {
+            this._pointerDown = null;
+            this._didPan = false;
+            return;
+        }
         this._pointerDown = null;
-        if (Math.hypot(dx, dy) > 6) return;
+        if (!this.onSpotPick || !this._pickingEnabled) return;
 
         const rect = this._renderer.domElement.getBoundingClientRect();
         if (rect.width < 1 || rect.height < 1) return;
@@ -362,17 +398,10 @@ export class AdminMapSpotWorldViewer {
             this._groundY = gy;
             this._updateGrid();
         }
-        applyTopDownCamera(
-            this._camera,
-            cx,
-            cz,
-            gy,
-            this._cameraHeightM,
-            this._north,
-            this._viewHalfExtentM
-        );
-        this._controls.target.set(cx, gy, cz);
-        this._controls.update();
+        this._centerX = cx;
+        this._centerZ = cz;
+        this._applyTopDownView();
+        this._resize();
     }
 
     /**
@@ -393,17 +422,9 @@ export class AdminMapSpotWorldViewer {
         if (typeof halfExtentM === 'number' && halfExtentM > 0) {
             this._viewHalfExtentM = halfExtentM;
         }
-        applyTopDownCamera(
-            this._camera,
-            cx,
-            cz,
-            this._groundY,
-            this._cameraHeightM,
-            this._north,
-            this._viewHalfExtentM
-        );
-        this._controls.target.set(cx, this._groundY, cz);
-        this._controls.update();
+        this._centerX = cx;
+        this._centerZ = cz;
+        this._applyTopDownView();
         this._resize();
     }
 
@@ -524,14 +545,17 @@ export class AdminMapSpotWorldViewer {
         cancelAnimationFrame(this._raf);
         this._resizeObserver?.disconnect();
         window.removeEventListener('resize', this._boundResize);
-        this._renderer.domElement.removeEventListener('pointerdown', this._boundPointerDown);
-        this._renderer.domElement.removeEventListener('pointerup', this._boundPointerUp);
+        const canvas = this._renderer.domElement;
+        canvas.removeEventListener('pointerdown', this._boundPointerDown);
+        canvas.removeEventListener('pointermove', this._boundPointerMove);
+        canvas.removeEventListener('pointerup', this._boundPointerUp);
+        canvas.removeEventListener('pointercancel', this._boundPointerUp);
+        canvas.removeEventListener('wheel', this._boundWheel);
         this._clearWorldRoot();
         if (this._grid) {
             this._grid.geometry.dispose();
             this._grid.material.dispose();
         }
-        this._controls.dispose();
         this._renderer.dispose();
         if (this._renderer.domElement.parentNode) {
             this._renderer.domElement.parentNode.removeChild(this._renderer.domElement);
