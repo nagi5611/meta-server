@@ -142,7 +142,7 @@ export function adminPlaneProxyUrl(planeRelativePath, adminBase) {
 /**
  * マニフェスト URL から JSON を取得
  * @param {string} manifestPath
- * @param {{ adminPlaneProxyBase?: string }} [opts] adminPlaneProxyBase 指定時、plane/ パスは /admin/plane-asset 経由（Basic 配下）
+ * @param {{ adminPlaneProxyBase?: string, signal?: AbortSignal }} [opts] adminPlaneProxyBase 指定時、plane/ パスは /admin/plane-asset 経由（Basic 配下）
  * @returns {Promise<object>}
  */
 export async function fetchPrefabManifestJson(manifestPath, opts = {}) {
@@ -173,7 +173,7 @@ export async function fetchPrefabManifestJson(manifestPath, opts = {}) {
             credentials = 'omit';
         }
     }
-    const mRes = await fetch(u, { credentials });
+    const mRes = await fetch(u, { credentials, signal: opts.signal });
     if (!mRes.ok) {
         throw new Error(`マニフェストの取得に失敗: ${manifestPath}（HTTP ${mRes.status}）`);
     }
@@ -196,6 +196,55 @@ export function gltfLoaderPathAndFile(fullUrl) {
 }
 
 /**
+ * @param {string} resolved
+ * @returns {'include' | 'omit'}
+ */
+function fetchCredentialsForResolvedUrl(resolved) {
+    let credentials = 'omit';
+    if (typeof window !== 'undefined') {
+        try {
+            const abs = resolved.startsWith('http://') || resolved.startsWith('https://')
+                ? new URL(resolved)
+                : new URL(resolved, window.location.origin);
+            if (abs.origin === window.location.origin) {
+                credentials = 'include';
+            }
+        } catch {
+            credentials = 'omit';
+        }
+    }
+    return credentials;
+}
+
+/**
+ * fetch + parseAsync で GLB を読み込む（AbortSignal 対応）
+ * @param {string} resolved
+ * @param {() => import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader} createGLTFLoader
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<import('three/examples/jsm/loaders/GLTFLoader.js').GLTF>}
+ */
+async function loadGltfViaFetch(resolved, createGLTFLoader, signal) {
+    if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+    }
+    const res = await fetch(resolved, {
+        credentials: fetchCredentialsForResolvedUrl(resolved),
+        signal,
+    });
+    if (!res.ok) {
+        throw new Error(`GLB の取得に失敗: ${resolved}（HTTP ${res.status}）`);
+    }
+    const buffer = await res.arrayBuffer();
+    if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+    }
+    const loader = createGLTFLoader();
+    const isHttpsAbs = /^https:\/\//i.test(resolved);
+    const resourcePath = isHttpsAbs ? resolved : gltfLoaderPathAndFile(resolved).dirUrl;
+    return loader.parseAsync(buffer, resourcePath);
+}
+
+/**
  * マニフェストの単一パーツ GLB を読み込む
  * @param {object} options
  * @param {ReturnType<typeof normalizePrefabManifest>} options.manifest
@@ -203,6 +252,7 @@ export function gltfLoaderPathAndFile(fullUrl) {
  * @param {() => import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader} options.createGLTFLoader
  * @param {(name: string, xhr: ProgressEvent) => void} [options.onXhrProgress]
  * @param {string} [options.adminPlaneProxyBase]
+ * @param {AbortSignal} [options.signal]
  * @returns {Promise<import('three').Object3D>}
  */
 export async function loadSinglePrefabPartGlb({
@@ -211,6 +261,7 @@ export async function loadSinglePrefabPartGlb({
     createGLTFLoader,
     onXhrProgress,
     adminPlaneProxyBase,
+    signal,
 }) {
     const part = manifest.parts[partIndex];
     if (!part) {
@@ -225,6 +276,17 @@ export async function loadSinglePrefabPartGlb({
         resolved = buildEncodedModelUrlFromPath(filePath);
     } else {
         resolved = await resolveModelAssetHref(filePath);
+    }
+
+    if (signal) {
+        const gltf = await loadGltfViaFetch(resolved, createGLTFLoader, signal);
+        const root = gltf.scene;
+        const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
+        if (anims.length) root.userData.gltfClips = anims;
+        root.userData.prefabGroupId = manifest.prefabGroupId;
+        root.userData.prefabPartPath = filePath;
+        root.userData.isPrefabPart = true;
+        return root;
     }
 
     return new Promise((resolve, reject) => {
@@ -264,6 +326,7 @@ export async function loadSinglePrefabPartGlb({
  * @param {string} [options.adminPlaneProxyBase] 指定時、plane/ で始まるマニフェスト・パーツは /admin/plane-asset 経由で取得（管理画面 Basic）
  * @param {number[]} [options.partIndices] 指定時はそのインデックスのパーツのみ読込
  * @param {ReturnType<typeof normalizePrefabManifest>} [options.cachedManifest] manifestPath の fetch を省略
+ * @param {AbortSignal} [options.signal] 指定時 fetch を中断可能
  * @returns {Promise<{ group: import('three').Group, manifest: ReturnType<typeof normalizePrefabManifest>, totalTris: number }>}
  */
 export async function loadPrefabGroupFromManifest({
@@ -275,10 +338,16 @@ export async function loadPrefabGroupFromManifest({
     adminPlaneProxyBase,
     partIndices,
     cachedManifest,
+    signal,
 }) {
     const man = cachedManifest
         ? cachedManifest
-        : normalizePrefabManifest(await fetchPrefabManifestJson(manifestPath, { adminPlaneProxyBase }));
+        : normalizePrefabManifest(
+              await fetchPrefabManifestJson(manifestPath, { adminPlaneProxyBase, signal })
+          );
+    if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+    }
     if (!man.parts.length) {
         throw new Error('prefab マニフェストに .glb パーツがありません');
     }
@@ -297,11 +366,15 @@ export async function loadPrefabGroupFromManifest({
     const partCount = indices.length;
 
     const factories = indices.map((partIdx, loadOrder) => async () => {
+        if (signal?.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+        }
         return loadSinglePrefabPartGlb({
             manifest: man,
             partIndex: partIdx,
             createGLTFLoader,
             adminPlaneProxyBase,
+            signal,
             onXhrProgress: (name, xhr) => {
                 onXhrProgress?.(name, xhr, loadOrder, partCount);
             },

@@ -29,14 +29,17 @@ function createGLTFLoader() {
  * @template T
  * @param {number} concurrency
  * @param {Array<() => Promise<T>>} factories
+ * @param {{ isStale?: () => boolean }} [opts]
  * @returns {Promise<T[]>}
  */
-async function runWithConcurrency(concurrency, factories) {
+async function runWithConcurrency(concurrency, factories, opts = {}) {
+    const isStale = opts.isStale;
     const n = factories.length;
     const results = new Array(n);
     let cursor = 0;
     async function worker() {
         while (true) {
+            if (isStale?.()) break;
             const i = cursor++;
             if (i >= n) break;
             results[i] = await factories[i]();
@@ -48,10 +51,76 @@ async function runWithConcurrency(concurrency, factories) {
 }
 
 /**
+ * Object3D 配下の GPU リソースを破棄する
+ * @param {THREE.Object3D} root
+ */
+function disposeObject3D(root) {
+    root.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+            const mats = Array.isArray(o.material) ? o.material : [o.material];
+            for (const m of mats) {
+                m.map?.dispose();
+                m.dispose();
+            }
+        }
+    });
+}
+
+/**
+ * @param {string} resolved
+ * @returns {'include' | 'omit'}
+ */
+function fetchCredentialsForUrl(resolved) {
+    let credentials = 'omit';
+    if (typeof window !== 'undefined') {
+        try {
+            const abs = resolved.startsWith('http://') || resolved.startsWith('https://')
+                ? new URL(resolved)
+                : new URL(resolved, window.location.origin);
+            if (abs.origin === window.location.origin) {
+                credentials = 'include';
+            }
+        } catch {
+            credentials = 'omit';
+        }
+    }
+    return credentials;
+}
+
+/**
+ * @param {string} url
+ * @param {() => GLTFLoader} createGLTFLoader
+ * @param {AbortSignal} signal
+ * @returns {Promise<import('three/examples/jsm/loaders/GLTFLoader.js').GLTF>}
+ */
+async function loadGltfViaFetch(url, createGLTFLoader, signal) {
+    if (signal.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+    }
+    const res = await fetch(url, { credentials: fetchCredentialsForUrl(url), signal });
+    if (!res.ok) {
+        throw new Error(`GLB fetch failed: ${url} (${res.status})`);
+    }
+    const buffer = await res.arrayBuffer();
+    if (signal.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+    }
+    const loader = createGLTFLoader();
+    const isHttpsAbs = /^https:\/\//i.test(url);
+    const last = url.lastIndexOf('/');
+    const resourcePath = isHttpsAbs ? url : last >= 0 ? url.slice(0, last + 1) : '/';
+    return loader.parseAsync(buffer, resourcePath);
+}
+
+/**
  * @param {object} config
+ * @param {{ signal: AbortSignal, isStale: () => boolean }} ctx
  * @returns {Promise<THREE.Object3D|null>}
  */
-async function loadWorldModelEntry(config) {
+async function loadWorldModelEntry(config, ctx) {
+    const { signal, isStale } = ctx;
+    if (signal.aborted || isStale()) return null;
     const pfm = String(config.prefabManifest || '').trim();
     const path = String(config.path || '').trim();
     if (!pfm && !path) return null;
@@ -64,13 +133,22 @@ async function loadWorldModelEntry(config) {
                 manifestPath: pfm,
                 createGLTFLoader,
                 adminPlaneProxyBase: planeProxy,
+                signal,
             });
+            if (isStale()) {
+                disposeObject3D(group);
+                return null;
+            }
             model = group;
         } else {
             const url = await resolveModelAssetHref(path);
-            model = await new Promise((resolve, reject) => {
-                createGLTFLoader().load(url, (gltf) => resolve(gltf.scene), undefined, reject);
-            });
+            if (isStale()) return null;
+            const gltf = await loadGltfViaFetch(url, createGLTFLoader, signal);
+            if (isStale()) {
+                disposeObject3D(gltf.scene);
+                return null;
+            }
+            model = gltf.scene;
         }
         const pos = config.position || { x: 0, y: 0, z: 0 };
         const rot = config.rotation || { x: 0, y: 0, z: 0 };
@@ -84,6 +162,9 @@ async function loadWorldModelEntry(config) {
         model.scale.set(scale.x, scale.y, scale.z);
         return model;
     } catch (e) {
+        if (signal.aborted || isStale() || (e instanceof DOMException && e.name === 'AbortError')) {
+            return null;
+        }
         console.warn('[MapSpotViewer] model load failed', pfm || path, e);
         return null;
     }
@@ -189,6 +270,10 @@ export class AdminMapSpotWorldViewer {
         this._pointer = new THREE.Vector2();
         this._raf = 0;
         this._disposed = false;
+        /** @type {number} */
+        this._worldLoadToken = 0;
+        /** @type {AbortController|null} */
+        this._loadAbortController = null;
         this._pointerDown = null;
         /** @type {boolean} */
         this._didPan = false;
@@ -465,17 +550,47 @@ export class AdminMapSpotWorldViewer {
     }
 
     /**
+     * 進行中のワールド読込を中断し、シーン上のモデルを破棄する
+     */
+    abortWorldLoad() {
+        if (this._loadAbortController) {
+            this._loadAbortController.abort();
+            this._loadAbortController = null;
+        }
+        this._worldLoadToken++;
+        this._clearWorldRoot();
+    }
+
+    /**
      * @param {object} world
      * @param {{ lodSystem?: object, lodBand?: number }} [opts]
-     * @returns {Promise<{ loaded: number, total: number }>}
+     * @returns {Promise<{ loaded: number, total: number, cancelled?: boolean }>}
      */
     async loadWorld(world, opts = {}) {
-        this._clearWorldRoot();
+        this.abortWorldLoad();
+        const token = this._worldLoadToken;
+        const ac = new AbortController();
+        this._loadAbortController = ac;
+        const signal = ac.signal;
+        const isStale = () => this._disposed || token !== this._worldLoadToken || signal.aborted;
+
         const lodBand = Math.max(1, Math.floor(opts.lodBand || this._lodBand || 1));
         this._lodBand = lodBand;
         const models = Array.isArray(world?.models) ? world.models : [];
-        const factories = models.map((cfg) => () => loadWorldModelEntry(cfg));
-        const loaded = await runWithConcurrency(LOAD_CONCURRENCY, factories);
+        const ctx = { signal, isStale };
+        const factories = models.map(
+            (cfg) => () => (isStale() ? Promise.resolve(null) : loadWorldModelEntry(cfg, ctx))
+        );
+        const loaded = await runWithConcurrency(LOAD_CONCURRENCY, factories, { isStale });
+
+        if (isStale()) {
+            for (const m of loaded) {
+                if (m) disposeObject3D(m);
+            }
+            this._loadAbortController = null;
+            return { loaded: 0, total: models.length, cancelled: true };
+        }
+
         let count = 0;
         for (let i = 0; i < loaded.length; i++) {
             const m = loaded[i];
@@ -496,6 +611,7 @@ export class AdminMapSpotWorldViewer {
         }
         this._frameWorldContent();
         this._resize();
+        this._loadAbortController = null;
         return { loaded: count, total: models.length };
     }
 
@@ -503,9 +619,7 @@ export class AdminMapSpotWorldViewer {
         while (this._worldRoot.children.length) {
             const c = this._worldRoot.children[0];
             this._worldRoot.remove(c);
-            c.traverse((o) => {
-                if (o.geometry) o.geometry.dispose();
-            });
+            disposeObject3D(c);
         }
     }
 
@@ -594,6 +708,7 @@ export class AdminMapSpotWorldViewer {
     dispose() {
         if (this._disposed) return;
         this._disposed = true;
+        this.abortWorldLoad();
         cancelAnimationFrame(this._raf);
         this._resizeObserver?.disconnect();
         window.removeEventListener('resize', this._boundResize);

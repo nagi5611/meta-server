@@ -54,6 +54,8 @@ export class AdminMapSpotWorkbench {
         this._worldViewer = null;
         /** @type {AdminMapGooglePreview|null} */
         this._google = null;
+        /** @type {number} */
+        this._worldLoadToken = 0;
         /** @type {((x: number, z: number) => void)|null} */
         this.onSpotWorldPick = null;
         /** @type {((lat: number, lng: number) => void)|null} */
@@ -147,7 +149,40 @@ export class AdminMapSpotWorkbench {
     setWorld(world) {
         this._world = world;
         this._syncLodSelector();
-        void this._reloadWorldIfNeeded();
+    }
+
+    /**
+     * 進行中の 3D ワールド読込を中断する
+     */
+    cancelWorldLoad() {
+        this._worldLoadToken++;
+        this._worldViewer?.abortWorldLoad();
+    }
+
+    /**
+     * キャッシュ済みワールド定義を 3D ビューアへ読み込む（切替時は旧読込を破棄）
+     * @param {string} worldId
+     * @param {object} world
+     * @returns {Promise<{ cancelled: boolean }>}
+     */
+    async loadWorldFromCache(worldId, world) {
+        const token = ++this._worldLoadToken;
+        this._worldViewer?.abortWorldLoad();
+        this._world = world;
+        this._syncLodSelector();
+        if (!this._worldViewer || !world) {
+            return { cancelled: true };
+        }
+        const cfg = this._config || {};
+        await this._worldViewer.loadWorld(world, {
+            lodSystem: world.lodSystem,
+            lodBand: this._lodBand,
+        });
+        if (token !== this._worldLoadToken) {
+            return { cancelled: true };
+        }
+        this._worldViewer.setSpotMarkers(cfg.spots || []);
+        return { cancelled: false };
     }
 
     /**
@@ -299,13 +334,8 @@ export class AdminMapSpotWorkbench {
     }
 
     async _reloadWorldIfNeeded() {
-        if (!this._worldViewer || !this._world) return;
-        const cfg = this._config || {};
-        await this._worldViewer.loadWorld(this._world, {
-            lodSystem: this._world.lodSystem,
-            lodBand: this._lodBand,
-        });
-        this._worldViewer.setSpotMarkers(cfg.spots || []);
+        if (!this._world) return;
+        await this.loadWorldFromCache('', this._world);
     }
 
     /**
@@ -316,6 +346,7 @@ export class AdminMapSpotWorkbench {
     }
 
     dispose() {
+        this.cancelWorldLoad();
         this._worldViewer?.dispose();
         this._google?.dispose();
         this._worldViewer = null;

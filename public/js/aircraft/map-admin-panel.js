@@ -479,7 +479,8 @@ async function loadWorkbenchWorld() {
     if (!selectedWorldId || !spotWorkbench || !worldsCache) return;
     const world = worldsCache[selectedWorldId];
     if (!world) return;
-    spotWorkbench.setWorld(world);
+    const worldId = selectedWorldId;
+    await spotWorkbench.loadWorldFromCache(worldId, world);
 }
 
 /**
@@ -617,20 +618,25 @@ function syncGoogleTabFromForm(enabled) {
  * @param {string} worldId
  */
 async function selectWorld(worldId) {
+    spotWorkbench?.cancelWorldLoad();
+    const requestedId = worldId;
     selectedWorldId = worldId;
     selectedSpotId = null;
     const sel = /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-map-world-select'));
     if (sel) sel.value = worldId;
     try {
         const j = await fetchJson(`/admin/addons/aircraft/flight-maps/${encodeURIComponent(worldId)}`);
+        if (selectedWorldId !== requestedId) return;
         draftMap = j.map || {
             worldId,
             config: defaultMapConfig(),
         };
         syncMapFormFromDraft(draftMap);
         setMapStatus('');
+        if (selectedWorldId !== requestedId) return;
         await loadWorkbenchWorld();
     } catch (e) {
+        if (selectedWorldId !== requestedId) return;
         setMapStatus(e instanceof Error ? e.message : String(e), true);
     }
 }
