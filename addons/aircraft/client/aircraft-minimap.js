@@ -132,12 +132,12 @@ export default class AircraftMinimap {
         return true;
     }
 
-    /** 見える範囲を狭める（;）— カメラを下げる */
+    /** 見える範囲を狭める（; 拡大）— カメラを下げる */
     zoomIn() {
         return this.adjustCameraHeight(1 / CAMERA_HEIGHT_ZOOM_FACTOR);
     }
 
-    /** 見える範囲を広げる（:）— カメラを上げる */
+    /** 見える範囲を広げる（: 縮小）— カメラを上げる */
     zoomOut() {
         return this.adjustCameraHeight(CAMERA_HEIGHT_ZOOM_FACTOR);
     }

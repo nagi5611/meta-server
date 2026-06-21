@@ -173,14 +173,25 @@ export default class AircraftManager {
     }
 
     /**
-     * ミニマップ俯瞰高度の変更（; 寄り / : 引き）
+     * ミニマップ俯瞰高度の変更（; 拡大 / : 縮小）
+     * JIS では : が Shift なしのため e.key で判定する
      * @param {KeyboardEvent} e
      * @returns {boolean}
      */
     _handleMinimapSizeKey(e) {
-        if (e.code !== 'Semicolon' || e.repeat) return false;
+        if (e.repeat || e.isComposing) return false;
+
+        let zoom = null;
+        if (e.key === ';') {
+            zoom = 'in';
+        } else if (e.key === ':') {
+            zoom = 'out';
+        } else {
+            return false;
+        }
+
         e.preventDefault();
-        const changed = e.shiftKey ? this.minimap.zoomOut() : this.minimap.zoomIn();
+        const changed = zoom === 'in' ? this.minimap.zoomIn() : this.minimap.zoomOut();
         if (changed) {
             if (this.minimap.usesGoogleMap() && this.googleMap.mapConfig?.geo) {
                 const offset = this.minimap.mapConfig?.geo?.zoomOffset ?? 0;
