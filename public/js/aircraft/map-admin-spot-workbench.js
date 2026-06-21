@@ -58,6 +58,10 @@ export class AdminMapSpotWorkbench {
         this.onSpotWorldPick = null;
         /** @type {((lat: number, lng: number) => void)|null} */
         this.onSpotGeoPick = null;
+        /** @type {((spotId: string, lat: number, lng: number) => void)|null} */
+        this.onSpotGeoMove = null;
+        /** @type {((spotId: string) => void)|null} */
+        this.onSpotSelect = null;
         /** @type {((view: object) => void)|null} */
         this.onMapViewChange = null;
 
@@ -103,6 +107,9 @@ export class AdminMapSpotWorkbench {
         if (googleMount) {
             this._google = new AdminMapGooglePreview(/** @type {HTMLElement} */ (googleMount));
             this._google.onSpotGeoPick = (lat, lng) => this.onSpotGeoPick?.(lat, lng);
+            this._google.onSpotGeoMove = (spotId, lat, lng) =>
+                this.onSpotGeoMove?.(spotId, lat, lng);
+            this._google.onSpotSelect = (spotId) => this.onSpotSelect?.(spotId);
             this._google.onMapViewChange = (view) => this.onMapViewChange?.(view);
         }
 
@@ -257,7 +264,7 @@ export class AdminMapSpotWorkbench {
             );
         } else {
             this._updateHint(
-                'スポットを一覧で選択し、地図上をクリックして緯度経度を設定。補正後はメタバースの変更が自動反映されます'
+                'マーカーをドラッグして位置調整。未配置のスポットは一覧で選択して地図をクリック'
             );
             if (this._google) {
                 this._google.resize();

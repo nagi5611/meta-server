@@ -9,7 +9,7 @@ import {
     spotHasGeo,
     isGeoMapReady,
     projectSpotsGeoFromWorld,
-    projectSpotsWorldFromGeo,
+    projectSpotGeoFromWorld,
 } from './flight-map-geo.js';
 
 /** @type {boolean} */
@@ -126,9 +126,10 @@ function updateCalibrationStatus(calibrationResult) {
 /**
  * スポット 3 点以上から geo を算出して draft に反映する
  * @param {boolean} [showError]
+ * @param {{ preserveMapView?: boolean }} [opts]
  * @returns {boolean}
  */
-function tryApplyGeoCalibration(showError = false) {
+function tryApplyGeoCalibration(showError = false, opts = {}) {
     const cfg = readConfigFromForm();
     if (!cfg.geo.enabled) {
         updateCalibrationStatus();
@@ -143,16 +144,64 @@ function tryApplyGeoCalibration(showError = false) {
         return false;
     }
     if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
-    draftMap.config = { ...cfg, geo: result.geo };
-    draftMap.config.spots = projectSpotsGeoFromWorld(
-        draftMap.config.spots,
-        result.geo,
-        cfg.northDirection
-    );
-    syncGeoComputedPanel(result.geo);
+    const geoWithView = opts.preserveMapView
+        ? preserveMapViewFromGeo(result.geo, cfg.geo)
+        : applyMapViewAfterCalibration(result.geo, cfg.spots);
+    draftMap.config = {
+        ...cfg,
+        geo: geoWithView,
+        spots: projectSpotsGeoFromWorld(cfg.spots, result.geo, cfg.northDirection, {
+            preserveManualGeo: true,
+        }),
+    };
+    syncGeoComputedPanel(geoWithView);
     updateCalibrationStatus(result);
     refreshWorkbench();
+    if (!opts.preserveMapView) {
+        spotWorkbench?.applySavedMapView(geoWithView);
+    }
     return true;
+}
+
+/**
+ * 補正パラメータを更新しつつ、地図のパン・回転・ズームは維持する
+ * @param {object} newGeo
+ * @param {object|null|undefined} prevGeo
+ * @returns {object}
+ */
+function preserveMapViewFromGeo(newGeo, prevGeo) {
+    if (!prevGeo || typeof prevGeo !== 'object') return newGeo;
+    const out = { ...newGeo };
+    if (typeof prevGeo.overlayCenterLat === 'number') out.overlayCenterLat = prevGeo.overlayCenterLat;
+    if (typeof prevGeo.overlayCenterLng === 'number') out.overlayCenterLng = prevGeo.overlayCenterLng;
+    if (typeof prevGeo.overlayZoom === 'number') out.overlayZoom = prevGeo.overlayZoom;
+    if (typeof prevGeo.overlayHeading === 'number') out.overlayHeading = prevGeo.overlayHeading;
+    return out;
+}
+
+/**
+ * 補正後: 手動地点は維持し、地図ビューの向き（heading）で整合させる
+ * @param {object} geo
+ * @param {object[]} spots
+ * @returns {object}
+ */
+function applyMapViewAfterCalibration(geo, spots) {
+    const out = { ...geo };
+    const manual = spots.filter((s) => spotHasGeo(s));
+    if (manual.length >= 1) {
+        let sumLat = 0;
+        let sumLng = 0;
+        for (const s of manual) {
+            sumLat += s.lat;
+            sumLng += s.lng;
+        }
+        out.overlayCenterLat = sumLat / manual.length;
+        out.overlayCenterLng = sumLng / manual.length;
+    }
+    if (typeof out.geoNorthOffsetDeg === 'number' && Number.isFinite(out.geoNorthOffsetDeg)) {
+        out.overlayHeading = out.geoNorthOffsetDeg;
+    }
+    return out;
 }
 
 /**
@@ -168,7 +217,7 @@ function syncGeoComputedPanel(geo) {
     }
     panel.hidden = false;
     panel.innerHTML =
-        `<p class="hint">自動補正結果（先頭の地図座標付きスポットを基準）</p>`
+        `<p class="hint">手動の地図座標は維持されます。向きは地図回転（heading）で合わせます。</p>`
         + `<dl class="ac-map-geo-computed-dl">`
         + `<dt>基準 World</dt><dd>X=${geo.anchorWorldX?.toFixed(1)} Z=${geo.anchorWorldZ?.toFixed(1)}</dd>`
         + `<dt>基準 緯度経度</dt><dd>${geo.anchorLat?.toFixed(6)}, ${geo.anchorLng?.toFixed(6)}</dd>`
@@ -252,16 +301,17 @@ function refreshWorkbench() {
 }
 
 /**
- * 補正済みならスポットの geo をワールド座標から再投影する
+ * 補正済みなら、メタバースで動かした1点だけ lat/lng を再投影する
  * @param {object} cfg
+ * @param {string} spotId
  * @returns {object}
  */
-function applyAutoGeoProjection(cfg) {
-    if (!isGeoMapReady(cfg.geo)) return cfg;
-    return {
-        ...cfg,
-        spots: projectSpotsGeoFromWorld(cfg.spots, cfg.geo, cfg.northDirection),
-    };
+function applyAutoGeoProjectionForSpot(cfg, spotId) {
+    if (!isGeoMapReady(cfg.geo) || !spotId) return cfg;
+    const spots = cfg.spots.map((s) =>
+        s.id === spotId ? projectSpotGeoFromWorld(s, cfg.geo, cfg.northDirection) : s
+    );
+    return { ...cfg, spots };
 }
 
 /**
@@ -446,7 +496,7 @@ function handleSpotWorldPick(x, z) {
         spot.x = x;
         spot.z = z;
         if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
-        draftMap.config = applyAutoGeoProjection(nextCfg);
+        draftMap.config = applyAutoGeoProjectionForSpot(nextCfg, selectedSpotId);
         syncMapFormFromDraft(draftMap);
         setMapStatus(`${spot.name}: X=${x.toFixed(1)} Z=${z.toFixed(1)}`);
         return;
@@ -456,10 +506,40 @@ function handleSpotWorldPick(x, z) {
     const id = nextSpotId();
     nextCfg.spots.push({ id, name: name.trim(), x, z });
     if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
-    draftMap.config = applyAutoGeoProjection(nextCfg);
+    draftMap.config = applyAutoGeoProjectionForSpot(nextCfg, id);
     selectedSpotId = id;
     syncMapFormFromDraft(draftMap);
     setMapStatus(`スポット追加: ${name.trim()} (X=${x.toFixed(1)}, Z=${z.toFixed(1)})`);
+}
+
+/**
+ * スポットの地図座標を更新する（クリック配置・ドラッグ共通）
+ * @param {string} spotId
+ * @param {number} lat
+ * @param {number} lng
+ * @param {{ select?: boolean }} [opts]
+ */
+function updateSpotGeo(spotId, lat, lng, opts = {}) {
+    if (spotWorkbench?.getActiveViewTab() !== 'google') return;
+    const nextCfg = readConfigFromForm();
+    const spot = nextCfg.spots.find((s) => s.id === spotId);
+    if (!spot) return;
+    spot.lat = lat;
+    spot.lng = lng;
+    if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
+    draftMap.config = nextCfg;
+    if (opts.select !== false && selectedSpotId !== spotId) {
+        selectedSpotId = spotId;
+        spotWorkbench?.setSelectedSpotId(selectedSpotId);
+    }
+    renderSpotList();
+    setMapStatus(`${spot.name}: 地図 ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+    if (countGeoCalibratedSpots(draftMap.config.spots) >= MIN_GEO_CALIBRATION_SPOTS) {
+        tryApplyGeoCalibration(false, { preserveMapView: true });
+    } else {
+        updateCalibrationStatus();
+        refreshWorkbench();
+    }
 }
 
 /**
@@ -468,37 +548,31 @@ function handleSpotWorldPick(x, z) {
  * @param {number} lng
  */
 function handleSpotGeoPick(lat, lng) {
-    if (spotWorkbench?.getActiveViewTab() !== 'google') return;
     if (!selectedSpotId || !draftMap?.config?.spots) {
-        setMapStatus('スポットを一覧で選択し、Google タブで地図をクリックしてください', true);
+        setMapStatus('スポットを一覧で選択し、地図上をクリックしてください', true);
         return;
     }
-    const nextCfg = readConfigFromForm();
-    const spot = nextCfg.spots.find((s) => s.id === selectedSpotId);
-    if (!spot) return;
-    spot.lat = lat;
-    spot.lng = lng;
-    if (isGeoMapReady(nextCfg.geo)) {
-        const projected = projectSpotsWorldFromGeo(
-            [spot],
-            nextCfg.geo,
-            nextCfg.northDirection
-        );
-        if (projected[0]) {
-            spot.x = projected[0].x;
-            spot.z = projected[0].z;
-        }
-    }
-    if (!draftMap) draftMap = { worldId: selectedWorldId, config: defaultMapConfig() };
-    draftMap.config = nextCfg;
+    updateSpotGeo(selectedSpotId, lat, lng, { select: false });
+}
+
+/**
+ * Google Map 上でマーカーをドラッグしてスポット位置を調整する
+ * @param {string} spotId
+ * @param {number} lat
+ * @param {number} lng
+ */
+function handleSpotGeoMove(spotId, lat, lng) {
+    updateSpotGeo(spotId, lat, lng);
+}
+
+/**
+ * Google Map 上のマーカークリックでスポットを選択する
+ * @param {string} spotId
+ */
+function handleSpotSelect(spotId) {
+    selectedSpotId = spotId;
     renderSpotList();
-    setMapStatus(`${spot.name}: 地図 ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-    if (countGeoCalibratedSpots(draftMap.config.spots) >= MIN_GEO_CALIBRATION_SPOTS) {
-        tryApplyGeoCalibration(false);
-    } else {
-        updateCalibrationStatus();
-        refreshWorkbench();
-    }
+    spotWorkbench?.setSelectedSpotId(selectedSpotId);
 }
 
 /**
@@ -607,11 +681,15 @@ async function saveMapDraft() {
             setMapStatus(CALIBRATION_ERROR_JA[result.error] || result.error, true);
             return;
         }
-        config.geo = result.geo;
+        config.geo = preserveMapViewFromGeo(
+            applyMapViewAfterCalibration(result.geo, config.spots),
+            readGeoFromForm()
+        );
         config.spots = projectSpotsGeoFromWorld(
             config.spots,
             result.geo,
-            config.northDirection
+            config.northDirection,
+            { preserveManualGeo: true }
         );
     }
     try {
@@ -763,6 +841,8 @@ export function mountAircraftMapAdminPanel(root) {
         spotWorkbench = new AdminMapSpotWorkbench(workbenchMount);
         spotWorkbench.onSpotWorldPick = handleSpotWorldPick;
         spotWorkbench.onSpotGeoPick = handleSpotGeoPick;
+        spotWorkbench.onSpotGeoMove = handleSpotGeoMove;
+        spotWorkbench.onSpotSelect = handleSpotSelect;
         spotWorkbench.onMapViewChange = handleMapViewChange;
         void fetchGoogleMapsApiKey().then((key) => {
             googleMapsApiKey = key;
@@ -773,7 +853,7 @@ export function mountAircraftMapAdminPanel(root) {
 
     document.getElementById('ac-map-btn-calibrate')?.addEventListener('click', () => {
         if (tryApplyGeoCalibration(true)) {
-            setMapStatus('スポット補正を計算しました');
+            setMapStatus('補正完了 — 地図上の選択位置はそのまま、向きを合わせました');
         }
     });
 

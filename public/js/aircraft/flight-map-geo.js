@@ -131,20 +131,39 @@ export function latLngToWorldXz(lat, lng, geo, north) {
 }
 
 /**
- * 補正済み geo から全スポットの lat/lng をワールド XZ から算出する
+ * 補正済み geo からスポットの lat/lng をワールド XZ から算出する
  * @param {object[]} spots
  * @param {object|null|undefined} geo
  * @param {{ x: number, z: number }} north
+ * @param {{ preserveManualGeo?: boolean }} [opts] true なら手動設定済み lat/lng は上書きしない
  * @returns {object[]}
  */
-export function projectSpotsGeoFromWorld(spots, geo, north) {
+export function projectSpotsGeoFromWorld(spots, geo, north, opts = {}) {
+    const preserveManualGeo = opts.preserveManualGeo !== false;
     if (!isGeoMapReady(geo) || !Array.isArray(spots)) return spots;
     return spots.map((spot) => {
+        if (preserveManualGeo && spotHasGeo(spot)) return spot;
         if (!Number.isFinite(spot.x) || !Number.isFinite(spot.z)) return spot;
         const ll = worldXzToLatLng(spot.x, spot.z, geo, north);
         if (!ll) return spot;
         return { ...spot, lat: ll.lat, lng: ll.lng };
     });
+}
+
+/**
+ * 1 スポットの lat/lng をワールド XZ から算出する（メタバース上で移動した点用）
+ * @param {object} spot
+ * @param {object|null|undefined} geo
+ * @param {{ x: number, z: number }} north
+ * @returns {object}
+ */
+export function projectSpotGeoFromWorld(spot, geo, north) {
+    if (!isGeoMapReady(geo) || !Number.isFinite(spot.x) || !Number.isFinite(spot.z)) {
+        return spot;
+    }
+    const ll = worldXzToLatLng(spot.x, spot.z, geo, north);
+    if (!ll) return spot;
+    return { ...spot, lat: ll.lat, lng: ll.lng };
 }
 
 /**

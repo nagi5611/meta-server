@@ -30,19 +30,18 @@ function readSavedOverlayView(geo) {
 }
 
 /**
- * スポットの地図上位置を決定する（補正済みは投影、未補正は手動 lat/lng）
+ * スポットの地図上位置（手動 lat/lng を優先 — 補正後もクリック位置を維持）
  * @param {object} spot
  * @param {object|null|undefined} geo
  * @param {{ x: number, z: number }} north
  * @returns {{ lat: number, lng: number }|null}
  */
 function spotMapPosition(spot, geo, north) {
-    if (isGeoMapReady(geo) && Number.isFinite(spot.x) && Number.isFinite(spot.z)) {
-        const projected = worldXzToLatLng(spot.x, spot.z, geo, north);
-        if (projected) return projected;
-    }
     if (spotHasGeo(spot)) {
         return { lat: spot.lat, lng: spot.lng };
+    }
+    if (isGeoMapReady(geo) && Number.isFinite(spot.x) && Number.isFinite(spot.z)) {
+        return worldXzToLatLng(spot.x, spot.z, geo, north);
     }
     return null;
 }
@@ -60,6 +59,8 @@ export class AdminMapGooglePreview {
         this._map = null;
         /** @type {google.maps.Marker[]} */
         this._spotMarkers = [];
+        /** @type {{ marker: google.maps.Marker, spotId: string }[]} */
+        this._spotMarkerEntries = [];
         /** @type {google.maps.Polygon|null} */
         this._trianglePolygon = null;
         /** @type {string|null} */
@@ -70,6 +71,10 @@ export class AdminMapGooglePreview {
         this._selectedSpotId = null;
         /** @type {((lat: number, lng: number) => void)|null} */
         this.onSpotGeoPick = null;
+        /** @type {((spotId: string, lat: number, lng: number) => void)|null} */
+        this.onSpotGeoMove = null;
+        /** @type {((spotId: string) => void)|null} */
+        this.onSpotSelect = null;
         /** @type {((view: object) => void)|null} */
         this.onMapViewChange = null;
         /** @type {boolean} */
@@ -117,6 +122,9 @@ export class AdminMapGooglePreview {
                 scrollwheel: interactive,
                 disableDoubleClickZoom: !interactive,
             });
+        }
+        for (const { marker } of this._spotMarkerEntries) {
+            marker.setDraggable(interactive);
         }
     }
 
@@ -258,10 +266,56 @@ export class AdminMapGooglePreview {
     _clearOverlays() {
         for (const m of this._spotMarkers) m.setMap(null);
         this._spotMarkers = [];
+        this._spotMarkerEntries = [];
         if (this._trianglePolygon) {
             this._trianglePolygon.setMap(null);
             this._trianglePolygon = null;
         }
+    }
+
+    /**
+     * @param {object} spot
+     * @param {{ lat: number, lng: number }} markerPos
+     * @param {string} label
+     * @param {boolean} isSelected
+     * @param {number} zIndex
+     * @param {number} scale
+     * @returns {google.maps.Marker}
+     */
+    _createSpotMarker(spot, markerPos, label, isSelected, zIndex, scale) {
+        const maps = window.google.maps;
+        const marker = new maps.Marker({
+            map: this._map,
+            position: markerPos,
+            title: spot.name,
+            draggable: this._mapInteractive,
+            label: {
+                text: label,
+                color: '#fff',
+                fontSize: isSelected ? '11px' : '10px',
+                fontWeight: isSelected ? '700' : '600',
+            },
+            icon: {
+                path: maps.SymbolPath.CIRCLE,
+                scale,
+                fillColor: isSelected ? '#1565c0' : '#f57c00',
+                fillOpacity: 1,
+                strokeColor: '#fff',
+                strokeWeight: 2,
+            },
+            zIndex,
+        });
+        marker.addListener('click', () => {
+            this.onSpotSelect?.(spot.id);
+        });
+        marker.addListener('dragend', () => {
+            const pos = marker.getPosition();
+            if (!pos) return;
+            this.onSpotGeoMove?.(spot.id, pos.lat(), pos.lng());
+        });
+        this._spotMarkers.push(marker);
+        this._spotMarkerEntries.push({ marker, spotId: spot.id });
+        return marker;
     }
 
     /**
@@ -285,32 +339,19 @@ export class AdminMapGooglePreview {
         const trianglePath = [];
         for (let i = 0; i < Math.min(3, spots.length); i++) {
             const spot = spots[i];
-            const pos = spotMapPosition(spot, geo, north);
-            if (pos) trianglePath.push(pos);
-            const markerPos = pos || (spotHasGeo(spot) ? { lat: spot.lat, lng: spot.lng } : null);
+            const markerPos = spotMapPosition(spot, geo, north);
+            if (markerPos) trianglePath.push(markerPos);
             if (!markerPos) continue;
             const label = i < 3 ? `A${i + 1}` : spot.name?.slice(0, 8) || spot.id;
-            const marker = new maps.Marker({
-                map: this._map,
-                position: markerPos,
-                title: spot.name,
-                label: {
-                    text: label,
-                    color: '#fff',
-                    fontSize: '11px',
-                    fontWeight: '700',
-                },
-                icon: {
-                    path: maps.SymbolPath.CIRCLE,
-                    scale: spot.id === this._selectedSpotId ? 8 : 7,
-                    fillColor: spot.id === this._selectedSpotId ? '#1565c0' : '#f57c00',
-                    fillOpacity: 1,
-                    strokeColor: '#fff',
-                    strokeWeight: 2,
-                },
-                zIndex: spot.id === this._selectedSpotId ? 70 : 60,
-            });
-            this._spotMarkers.push(marker);
+            const isSelected = spot.id === this._selectedSpotId;
+            this._createSpotMarker(
+                spot,
+                markerPos,
+                label,
+                isSelected,
+                isSelected ? 70 : 60,
+                isSelected ? 8 : 7
+            );
         }
 
         if (trianglePath.length >= 3) {
@@ -330,27 +371,14 @@ export class AdminMapGooglePreview {
             const spot = spots[i];
             const pos = spotMapPosition(spot, geo, north);
             if (!pos) continue;
-            const marker = new maps.Marker({
-                map: this._map,
-                position: pos,
-                title: spot.name,
-                label: {
-                    text: spot.name?.slice(0, 8) || spot.id,
-                    color: '#fff',
-                    fontSize: '10px',
-                    fontWeight: '600',
-                },
-                icon: {
-                    path: maps.SymbolPath.CIRCLE,
-                    scale: 6,
-                    fillColor: '#f57c00',
-                    fillOpacity: 1,
-                    strokeColor: '#fff',
-                    strokeWeight: 2,
-                },
-                zIndex: 55,
-            });
-            this._spotMarkers.push(marker);
+            this._createSpotMarker(
+                spot,
+                pos,
+                spot.name?.slice(0, 8) || spot.id,
+                spot.id === this._selectedSpotId,
+                55,
+                6
+            );
         }
 
         if (!opts.preserveView && trianglePath.length >= 1 && !this._initialFitDone) {
