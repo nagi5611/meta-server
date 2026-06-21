@@ -1,11 +1,18 @@
 // public/js/aircraft/flight-map-geo.js — ジオリファレンス変換・スポット補正（/js 配信）
 
-export {
+import {
     MIN_GEO_CALIBRATION_SPOTS,
     countGeoCalibratedSpots,
     computeGeoCalibrationFromSpots,
     spotHasGeo,
 } from '/lib/aircraft-server/flight-map-geo-calibration.js';
+
+export {
+    MIN_GEO_CALIBRATION_SPOTS,
+    countGeoCalibratedSpots,
+    computeGeoCalibrationFromSpots,
+    spotHasGeo,
+};
 
 const METERS_PER_DEG_LAT = 111320;
 
