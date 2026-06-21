@@ -373,6 +373,7 @@ function syncMapFormFromDraft(map) {
     };
     syncNorthForm(cfg.northDirection || { x: 0, z: -1 });
     setNum('ac-map-camera-height', cfg.cameraHeightM ?? 500);
+    setNum('ac-map-aircraft-icon-offset', cfg.aircraftIconOffsetDeg ?? 0);
     syncGeoForm(cfg.geo);
     renderSpotList();
     maybeDisableGoogleTabIfNeeded();
@@ -409,7 +410,10 @@ function readConfigFromForm() {
         northDirection: readNorthFromForm(),
         cameraHeightM: num('ac-map-camera-height', 500),
         groundRefY: base.groundRefY ?? 0,
-        aircraftIconOffsetDeg: base.aircraftIconOffsetDeg ?? 0,
+        aircraftIconOffsetDeg: Math.max(
+            -180,
+            Math.min(180, num('ac-map-aircraft-icon-offset', base.aircraftIconOffsetDeg ?? 0))
+        ),
         spots: draftMap?.config?.spots ? [...draftMap.config.spots] : [],
         geo: readGeoFromForm(),
     };
@@ -776,6 +780,12 @@ export function mountAircraftMapAdminPanel(root) {
                 </div>
                 <div class="field-row"><label class="prop-label" for="ac-map-camera-height">カメラ高度 (m)</label>
                     <input type="number" id="ac-map-camera-height" class="prop-input num" step="25" min="50" title="俯瞰の見える範囲" /></div>
+                <div class="field-row">
+                    <label class="prop-label" for="ac-map-aircraft-icon-offset">プレイヤーアイコン向き補正 (°)</label>
+                    <input type="number" id="ac-map-aircraft-icon-offset" class="prop-input num" step="1" min="-180" max="180" value="0"
+                        title="飛行方向とミニマップ矢印のずれを補正（時計回りが＋）" />
+                </div>
+                <p class="hint ac-map-icon-offset-hint">操縦中の矢印が進行方向とずれる場合に調整。保存後に飛行テストしてください。</p>
                 <div class="prop-group-label">Google Maps 2D</div>
                 <div class="field-row">
                     <label class="prop-label" for="ac-map-geo-enabled">Google Map 有効</label>
@@ -829,7 +839,7 @@ export function mountAircraftMapAdminPanel(root) {
             tryApplyGeoCalibration(false);
         }
     };
-    for (const id of ['ac-map-camera-height', 'ac-map-north-x', 'ac-map-north-z']) {
+    for (const id of ['ac-map-camera-height', 'ac-map-north-x', 'ac-map-north-z', 'ac-map-aircraft-icon-offset']) {
         document.getElementById(id)?.addEventListener('input', previewOnChange);
     }
     document.getElementById('ac-map-geo-map-type')?.addEventListener('change', previewOnChange);

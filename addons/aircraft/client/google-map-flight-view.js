@@ -261,16 +261,28 @@ export class GoogleMapFlightView {
         const pos = worldXzToLatLng(state.worldX, state.worldZ, geo, north);
         if (!pos) return;
 
-        const bearing = worldYawToGeoBearing(
+        const iconOffset = this.mapConfig.aircraftIconOffsetDeg || 0;
+        const mapBearing = worldYawToGeoBearing(
             state.yawDeg,
             north,
             geo.geoNorthOffsetDeg || 0,
-            this.mapConfig.aircraftIconOffsetDeg || 0
+            0
         );
+        const iconBearing = worldYawToGeoBearing(
+            state.yawDeg,
+            north,
+            geo.geoNorthOffsetDeg || 0,
+            iconOffset
+        );
+
+        const headingMode = geo.headingMode || 'trackUp';
+        const markerRotation =
+            headingMode === 'trackUp' ? iconOffset : iconBearing;
+        const mapHeading = headingMode === 'trackUp' ? mapBearing : 0;
 
         if (this._aircraftMarker) {
             this._aircraftMarker.setPosition(pos);
-            this._aircraftMarker.setIcon(this._aircraftSymbolIcon(bearing));
+            this._aircraftMarker.setIcon(this._aircraftSymbolIcon(markerRotation));
         }
 
         this._map.setCenter(pos);
@@ -279,11 +291,8 @@ export class GoogleMapFlightView {
             this._map.setZoom(zoom);
         }
 
-        const headingMode = geo.headingMode || 'trackUp';
-        if (headingMode === 'trackUp' && this._map.setHeading) {
-            this._map.setHeading(bearing);
-        } else if (this._map.setHeading) {
-            this._map.setHeading(0);
+        if (this._map.setHeading) {
+            this._map.setHeading(mapHeading);
         }
 
         for (const m of this._otherMarkers) m.setMap(null);
