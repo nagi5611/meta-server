@@ -33,7 +33,18 @@
                 <button type="button" class="pre-xr-mode-btn" data-loco-mode="smooth">スムーズ</button>
                 <button type="button" class="pre-xr-mode-btn" data-loco-mode="teleport">テレポート</button>
             </div>
-            <p class="pre-xr-hint">左スティック: 移動 / 右スティック左右: スナップ / 左グリップ: ジャンプ / 右トリガー離し: テレポート</p>
+            <p class="pre-xr-hint">左スティック: 移動 / 右スティック左右: スナップ / 右 A: ジャンプ / 右トリガー離し: テレポート</p>
+        </section>
+
+        <section id="pre-xr-vr-menu-panel" class="pre-xr-panel">
+            <h2>VR クイックメニュー検証</h2>
+            <div id="pre-xr-vr-menu-state" class="pre-xr-mono">—</div>
+            <div id="pre-xr-y-button" class="pre-xr-mono">—</div>
+            <div id="pre-xr-vr-font" class="pre-xr-mono">フォント: 検査中…</div>
+            <div class="pre-xr-btn-row">
+                <button type="button" id="pre-xr-menu-toggle-btn" class="pre-xr-mode-btn">メニュー手動トグル</button>
+            </div>
+            <p class="pre-xr-hint">左手 Y（buttons[5]）で 3D テストバー表示。DOM オーバーレイに入力状態が出ます（HMD 内でも可視）。</p>
         </section>
 
         <section id="pre-xr-events" class="pre-xr-panel pre-xr-panel--scroll">

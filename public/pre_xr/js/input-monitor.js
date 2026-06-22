@@ -88,6 +88,8 @@ export class InputMonitor {
             `移動 vec: x=${loco.moveX.toFixed(2)} y=${loco.moveY.toFixed(2)} mag=${loco.moveMag.toFixed(2)}`,
             `スナップ X: ${loco.snapX.toFixed(2)}`,
             `左グリップ: ${loco.leftGrip ? 'ON' : 'off'}`,
+            `左手 Y[5]: ${loco.leftY ? 'ON' : 'off'}`,
+            `押下ボタン: ${loco.ySummary || '—'}`,
             `軸ペア: [${loco.axisTag}] raw=${loco.rawHypot.toFixed(2)}`,
             `gamepad付きソース: ${loco.hasMoveGamepad ? 'あり' : 'なし'}`
         ];

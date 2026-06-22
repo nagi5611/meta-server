@@ -114,3 +114,23 @@
     padding: 0;
     margin: 0;
 }
+
+/* VR クイックメニュー診断 HUD（dom-overlay 内・Quest で可視） */
+.vr-quick-menu-debug {
+    position: fixed;
+    left: 8px;
+    top: 8px;
+    z-index: 10004;
+    max-width: min(420px, 92vw);
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(12, 16, 24, 0.92);
+    border: 1px solid rgba(255, 193, 7, 0.65);
+    color: #ffe082;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: pre-line;
+    pointer-events: none;
+    font-family: ui-monospace, Consolas, monospace;
+}

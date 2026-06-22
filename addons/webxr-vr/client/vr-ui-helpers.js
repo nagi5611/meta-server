@@ -3,9 +3,32 @@
 import * as THREE from 'three';
 import ThreeMeshUI from 'three-mesh-ui';
 import { t } from '../../../public/js/metaverse-i18n.js';
+import fontJsonUrl from './assets/font-msdf/Roboto-msdf.json?url';
+import fontTextureUrl from './assets/font-msdf/Roboto-msdf.png?url';
 
-export const FONT_JSON = '/addons/webxr-vr/client/assets/font-msdf/Roboto-msdf.json';
-export const FONT_TEXTURE = '/addons/webxr-vr/client/assets/font-msdf/Roboto-msdf.png';
+/** Vite ビルド時はハッシュ付き URL、開発時も確実に解決 */
+export const FONT_JSON = fontJsonUrl;
+export const FONT_TEXTURE = fontTextureUrl;
+
+/** @type {'unknown'|'ok'|'fail'} */
+let fontProbeStatus = 'unknown';
+
+/**
+ * MSDF フォントの取得可否を検査
+ * @returns {Promise<'ok'|'fail'>}
+ */
+export async function probeFontAssets() {
+    if (fontProbeStatus === 'ok' || fontProbeStatus === 'fail') {
+        return fontProbeStatus;
+    }
+    try {
+        const res = await fetch(FONT_JSON, { method: 'HEAD' });
+        fontProbeStatus = res.ok ? 'ok' : 'fail';
+    } catch {
+        fontProbeStatus = 'fail';
+    }
+    return fontProbeStatus;
+}
 
 /** @typedef {'admin'|'mic'|'speaker'|'chat'|'stamp'|'help'|'restart'|'settings'|'logout'|'close'|'confirm-yes'|'confirm-no'|'chat-send'|'chat-input'|'settings-prev'|'settings-next'|'lang-ja'|'lang-en'|'lang-zh'|'admin-invisible'|'admin-fly'|'admin-speed'|'stamp-emoji'} VrMenuActionId */
 

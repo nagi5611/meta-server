@@ -4,6 +4,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { XRControllerModelFactory } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js';
 import { InputMonitor } from './input-monitor.js';
 import { PreXrLocomotion } from './locomotion.js';
+import { VrMenuHarness } from './vr-menu-harness.js';
 
 const THREE_CDN = '0.160.0';
 
@@ -220,6 +221,16 @@ async function main() {
         onLog: (msg) => monitor.logEvent(msg)
     });
 
+    const vrMenuHarness = new VrMenuHarness({
+        renderer,
+        camera,
+        stateEl: document.getElementById('pre-xr-vr-menu-state'),
+        yEl: document.getElementById('pre-xr-y-button'),
+        fontEl: document.getElementById('pre-xr-vr-font'),
+        toggleBtn: document.getElementById('pre-xr-menu-toggle-btn'),
+        onLog: (msg) => monitor.logEvent(msg),
+    });
+
     document.querySelectorAll('[data-loco-mode]').forEach((btn) => {
         btn.addEventListener('click', () => {
             const mode = btn.getAttribute('data-loco-mode');
@@ -259,12 +270,14 @@ async function main() {
 
     renderer.xr.addEventListener('sessionstart', () => {
         locomotion.attach();
+        vrMenuHarness.attach();
         desktopHud.hidden = true;
         refSpaceLabel = 'local-floor (希望)';
         monitor.logEvent('sessionstart');
     });
     renderer.xr.addEventListener('sessionend', () => {
         locomotion.detach();
+        vrMenuHarness.detach();
         camera.position.set(0, 1.6, 4);
         camera.rotation.set(0, 0, 0);
         desktopHud.hidden = false;
@@ -308,10 +321,13 @@ async function main() {
                 moveMag: inp.moveMag,
                 snapX: inp.snapX,
                 leftGrip: inp.leftGrip,
+                leftY: inp.leftY,
+                ySummary: inp.ySummary,
                 axisTag: inp.axisTag,
                 rawHypot: inp.rawHypot,
                 hasMoveGamepad: inp.hasMoveGamepad
             });
+            vrMenuHarness.update(true);
         } else if (!presenting) {
             monitor.updateInputPanel([]);
             monitor.updateLocoPanel({
@@ -321,10 +337,13 @@ async function main() {
                 moveMag: 0,
                 snapX: 0,
                 leftGrip: false,
+                leftY: false,
+                ySummary: '—',
                 axisTag: '—',
                 rawHypot: 0,
                 hasMoveGamepad: false
             });
+            vrMenuHarness.update(false);
         }
 
         renderer.render(scene, camera);

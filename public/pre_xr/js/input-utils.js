@@ -154,12 +154,28 @@ export function readSessionInputs(session, stickDeadzone = 0.14) {
         leftGrip = !!(b1 && b1.pressed);
     }
 
+    let leftY = false;
+    let ySummary = '押下なし';
+    const yPressed = [];
+    for (const entry of sources) {
+        const gp = entry.gp;
+        if (!gp?.buttons) continue;
+        for (let bi = 0; bi < gp.buttons.length; bi++) {
+            if (!gp.buttons[bi]?.pressed) continue;
+            yPressed.push(`${entry.src.handedness || '?'}[${bi}]`);
+            if (entry.src.handedness === 'left' && bi === 5) leftY = true;
+        }
+    }
+    if (yPressed.length) ySummary = yPressed.join(', ');
+
     return {
         moveX,
         moveY,
         moveMag,
         snapX,
         leftGrip,
+        leftY,
+        ySummary,
         rawHypot,
         axisTag,
         hasMoveGamepad,

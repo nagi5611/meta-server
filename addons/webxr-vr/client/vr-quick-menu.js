@@ -2,9 +2,10 @@
 
 import * as THREE from 'three';
 import ThreeMeshUI from 'three-mesh-ui';
-import { pollLeftYButtonEdge } from './vr-quick-menu-input.js';
+import { pollLeftYButtonEdge, inspectYButton } from './vr-quick-menu-input.js';
 import { VrUiRaycast } from './vr-ui-raycast.js';
 import { VrMenuActions } from './vr-menu-actions.js';
+import { VrQuickMenuDebugHud } from './vr-quick-menu-debug.js';
 import { VrChatPanel } from './vr-chat-panel.js';
 import { VrStampPanel } from './vr-stamp-panel.js';
 import { VrSettingsPanel } from './vr-settings-panel.js';
@@ -16,6 +17,7 @@ import {
     createRow,
     getFontOpts,
     VR_UI_COLORS,
+    probeFontAssets,
 } from './vr-ui-helpers.js';
 import { t } from '../../../public/js/metaverse-i18n.js';
 
@@ -59,12 +61,17 @@ export class VrQuickMenu {
         /** @type {ActivePanelId} */
         this._activePanel = null;
         this._prevYPressed = false;
-        this._yawOnly = new THREE.Euler(0, 0, 0, 'YXZ');
+        this._headEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+        this._fontStatus = 'unknown';
+        this._lastYDetail = '—';
         this._menuItems = /** @type {Map<string, import('three-mesh-ui').Block>} */ (new Map());
+
+        this.debugHud = new VrQuickMenuDebugHud(domOverlayRoot);
 
         this.root = new THREE.Group();
         this.root.name = 'vr-quick-menu-root';
         this.root.visible = false;
+        this.root.renderOrder = 1000;
 
         this.cameraAnchor = new THREE.Group();
         this.cameraAnchor.name = 'vr-quick-menu-anchor';
@@ -146,9 +153,13 @@ export class VrQuickMenu {
         this.camera.add(this.root);
         this.root.visible = false;
         this._attached = true;
+        void probeFontAssets().then((s) => {
+            this._fontStatus = s;
+        });
         this.actions.warnIfVideoStreamingInVr();
         this.app.menuManager?.setVrImmersiveActive?.(true);
         this._set2dUiHidden(true);
+        ThreeMeshUI.update();
     }
 
     detach() {
@@ -189,6 +200,7 @@ export class VrQuickMenu {
             this._syncAdminVisibility();
             this._syncToggleStates();
             this.raycast.setTarget(this.root, true);
+            ThreeMeshUI.update();
         }
     }
 
@@ -478,14 +490,24 @@ export class VrQuickMenu {
     }
 
     /**
-     * カメラのヨー（水平回転）のみ追従
+     * カメラのピッチ/ロールを打ち消し、メニューを水平に保つ
      */
-    _syncCameraYaw() {
+    _syncMenuOrientation() {
         if (!this._attached || !this._mainVisible) return;
-        this._yawOnly.setFromQuaternion(this.camera.quaternion);
-        this._yawOnly.x = 0;
-        this._yawOnly.z = 0;
-        this.cameraAnchor.quaternion.setFromEuler(this._yawOnly);
+        this._headEuler.setFromQuaternion(this.camera.quaternion, 'YXZ');
+        this.cameraAnchor.rotation.set(-this._headEuler.x, 0, -this._headEuler.z);
+    }
+
+    _updateDebugHud(yPressed, yEdge) {
+        this.debugHud?.update({
+            presenting: !!this.renderer.xr.isPresenting,
+            attached: this._attached,
+            menuVisible: this._mainVisible,
+            yPressed,
+            yEdge,
+            fontStatus: this._fontStatus,
+            yDetail: this._lastYDetail,
+        });
     }
 
     /**
@@ -495,17 +517,21 @@ export class VrQuickMenu {
         if (!this._attached || !this.renderer.xr.isPresenting) return;
 
         const session = this.renderer.xr.getSession();
-        const { pressed, edge } = pollLeftYButtonEdge(session, this._prevYPressed);
+        const yInsp = inspectYButton(session);
+        const { pressed, edge, detail } = pollLeftYButtonEdge(session, this._prevYPressed);
         this._prevYPressed = pressed;
+        this._lastYDetail = `${detail} | ${yInsp.summary}`;
         if (edge) {
             this._toggleMain();
         }
 
-        this._syncCameraYaw();
+        this._syncMenuOrientation();
+        this._updateDebugHud(pressed, edge);
     }
 
     dispose() {
         window.removeEventListener('metaverse-locale-changed', this._onLocaleChanged);
+        this.debugHud?.dispose();
         this.detach();
         this.chatPanel.dispose();
         this.stampPanel.dispose();
