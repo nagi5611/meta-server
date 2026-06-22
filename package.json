@@ -9,7 +9,7 @@
         "start:prod": "cross-env NODE_ENV=production node server.js",
         "dev": "concurrently \"nodemon server.js\" \"wait-on http://localhost:3000 --timeout 30000 && vite\"",
         "dev:vcdebug": "concurrently \"cross-env VC_DEBUG_STATS=1 nodemon server.js\" \"wait-on http://localhost:3000 --timeout 30000 && vite\"",
-        "build": "vite build",
+        "build": "node scripts/ensure-build-deps.mjs && vite build",
         "preview": "vite preview",
         "test:nfc-spawn": "node --test addons/nfc-spawn/test/*.test.js",
         "test:webxr-vr": "node --test addons/webxr-vr/test/*.test.js"

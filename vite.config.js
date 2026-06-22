@@ -2,6 +2,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { defineConfig } from 'vite';
 
+const projectRoot = path.resolve(process.cwd());
+const threeMeshUiEntry = path.join(projectRoot, 'node_modules/three-mesh-ui/build/three-mesh-ui.module.js');
+
 /**
  * ディレクトリを再帰コピー（ファイルのみ。シンボリックリンクは辿らない）
  * @param {string} srcDir
@@ -69,6 +72,11 @@ function copyPublicAssets() {
 
 export default defineConfig({
     root: 'public',
+    resolve: {
+        alias: fs.existsSync(threeMeshUiEntry)
+            ? { 'three-mesh-ui': threeMeshUiEntry }
+            : {},
+    },
     plugins: [copyPublicAssets()],
     server: {
         port: 3001,
