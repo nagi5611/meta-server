@@ -51,6 +51,7 @@ registerFrameUpdate((app, deltaTime) => {
     if (app._vrQuickMenu && app.sceneManager?.getRenderer?.()?.xr?.isPresenting) {
         app._vrQuickMenu.update(deltaTime);
         ThreeMeshUI.update();
+        app._vrQuickMenu.updateRaycast();
     }
 }, { order: 15 });
 

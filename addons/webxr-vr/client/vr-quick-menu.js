@@ -46,7 +46,7 @@ export class VrQuickMenu {
         this.domOverlayRoot = domOverlayRoot;
 
         this.actions = new VrMenuActions(app);
-        this.raycast = new VrUiRaycast(renderer);
+        this.raycast = new VrUiRaycast(renderer, scene);
         this.raycast.wireControllers();
         this.raycast.onSelect = (action, payload) => {
             void this._handleSelect(action, payload);
@@ -508,6 +508,11 @@ export class VrQuickMenu {
             fontStatus: this._fontStatus,
             yDetail: this._lastYDetail,
         });
+    }
+
+    /** レイポインター・ホバー（ThreeMeshUI.update の後に呼ぶ） */
+    updateRaycast() {
+        this.raycast.update();
     }
 
     /**
