@@ -3,6 +3,7 @@
 import './webxr-vr.css';
 import { registerClientInit, registerFrameUpdate } from '../../../lib/client-addon-registry.js';
 import { initWebXrVrSubsystem } from './init.js';
+import { ThreeMeshUI } from './vr-quick-menu.js';
 
 /** @type {boolean|null} */
 let enabledCache = null;
@@ -45,5 +46,12 @@ registerFrameUpdate((app, deltaTime) => {
         app._webxrVrRig.sync(app.characterController);
     }
 }, { order: 10 });
+
+registerFrameUpdate((app, deltaTime) => {
+    if (app._vrQuickMenu && app.sceneManager?.getRenderer?.()?.xr?.isPresenting) {
+        app._vrQuickMenu.update(deltaTime);
+        ThreeMeshUI.update();
+    }
+}, { order: 15 });
 
 console.info('[addon:webxr-vr] client registered');

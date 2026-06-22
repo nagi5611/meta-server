@@ -2,12 +2,28 @@
 
 Meta Quest 等向け **WebXR VR（`immersive-vr`）** 機能を提供します。コアから L3 分離されたオプション拡張です。
 
+## VR クイックメニュー（three-mesh-ui）
+
+Meta Quest 等の VR 没入中、左手 **Y ボタン**で画面下部に 3D メニューを表示します。
+
 ## 機能
 
 - VR 入室ボタン（`local-floor` / `dom-overlay`）
 - スムーズ移動・スナップターン・テレポート・ジャンプ
 - 没入中のグラフィック品質自動低下（FPS 優先）
 - DOM Overlay 上のロコモーションモード切替 UI
+- **VR クイックメニュー**（Mic / Spk / チャット / スタンプ / 設定 / ヘルプ / リスタート / 退出）
+- メニュー表示中はテレポート無効
+
+## 操作（VR）
+
+| 操作 | 入力 |
+|------|------|
+| メニュー表示/非表示 | 左手 Y ボタン |
+| メニュー内タップ | コントローラー トリガー（select） |
+| チャット入力 | チャットパネル「タップして入力」→ Quest システムキーボード |
+
+要件詳細: [docs/xr/vr-quick-menu-requirements.md](../../docs/xr/vr-quick-menu-requirements.md)
 
 ## 有効化
 

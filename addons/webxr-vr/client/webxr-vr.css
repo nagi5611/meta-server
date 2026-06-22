@@ -91,3 +91,26 @@
 #metaverse-vr-button {
     z-index: 10000 !important;
 }
+
+/* VR 没入中は 2D メニュー・チャットを非表示 */
+.vr-immersive-hide-2d #menu-bar,
+.vr-immersive-hide-2d #chat-container {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* Quest システムキーボード用ブリッジ */
+.vr-chat-kb-bridge {
+    position: fixed;
+    left: 8px;
+    bottom: 8px;
+    width: 1px;
+    height: 1px;
+    opacity: 0.01;
+    z-index: 10003;
+    pointer-events: auto;
+    resize: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+}

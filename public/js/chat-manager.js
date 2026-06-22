@@ -60,6 +60,9 @@ class ChatManager {
         /** @type {((playerId: string) => boolean)|null} */
         this._playerBlockedCheck = null;
 
+        /** @type {Set<() => void>} */
+        this._messageListeners = new Set();
+
         this.init();
     }
 
@@ -295,6 +298,7 @@ class ChatManager {
                 minute: '2-digit',
             });
         }
+        this._notifyMessagesChanged();
     }
 
     /**
@@ -337,6 +341,7 @@ class ChatManager {
         this.chatMessages.appendChild(messageDiv);
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
         messageDiv.style.opacity = '1';
+        this._notifyMessagesChanged();
         return messageDiv;
     }
 
@@ -363,6 +368,7 @@ class ChatManager {
                 : t('chat.sendFailedBubble');
         badge.textContent = txt;
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+        this._notifyMessagesChanged();
     }
 
     sendMessage(message) {
@@ -538,6 +544,7 @@ class ChatManager {
             messageDiv.style.transition = 'opacity 0.3s ease';
             messageDiv.style.opacity = '1';
         });
+        this._notifyMessagesChanged();
     }
 
     addSystemMessage(message) {
@@ -551,6 +558,7 @@ class ChatManager {
         messageDiv.appendChild(messageText);
         this.chatMessages.appendChild(messageDiv);
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+        this._notifyMessagesChanged();
     }
 
     extractMentions(message) {
@@ -775,6 +783,7 @@ class ChatManager {
     }
 
     destroy() {
+        this._messageListeners.clear();
         // Cleanup
         this.playerEmojis.forEach(data => {
             if (data.timeoutId) {
@@ -790,6 +799,50 @@ class ChatManager {
 
         this.playerEmojis.clear();
         this.emojiDivs.clear();
+    }
+
+    _notifyMessagesChanged() {
+        for (const fn of this._messageListeners) {
+            try {
+                fn();
+            } catch (e) {
+                console.warn('[Chat] message listener error:', e);
+            }
+        }
+    }
+
+    /**
+     * チャット DOM 更新時にコールバック
+     * @param {() => void} fn
+     * @returns {() => void} unsubscribe
+     */
+    onMessagesChanged(fn) {
+        if (typeof fn !== 'function') return () => {};
+        this._messageListeners.add(fn);
+        return () => this._messageListeners.delete(fn);
+    }
+
+    /**
+     * VR パネル用メッセージスナップショット
+     * @returns {{ header: string, text: string, isOwn: boolean, isSystem: boolean }[]}
+     */
+    getMessagesSnapshot() {
+        if (!this.chatMessages) return [];
+        return Array.from(this.chatMessages.querySelectorAll('.chat-message')).map((el) => {
+            const headerEl = el.querySelector('.message-header');
+            let header = '';
+            if (headerEl) {
+                header = headerEl.childNodes[0]?.textContent?.trim() || headerEl.textContent?.trim() || '';
+            }
+            const textEl = el.querySelector('.message-text');
+            const text = textEl?.textContent?.trim() || '';
+            return {
+                header,
+                text,
+                isOwn: el.classList.contains('my-message'),
+                isSystem: el.classList.contains('system-message'),
+            };
+        });
     }
 }
 

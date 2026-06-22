@@ -81,6 +81,8 @@ class MenuManager {
         this.onAdminFlyChange = null;
         this.onAdminSpeedChange = null;
         this.onViewModeChange = null;
+        /** VR 没入中はビデオモーダル等をブロック */
+        this._vrImmersiveActive = false;
 
         // Settings
         this.settings = {
@@ -238,6 +240,7 @@ class MenuManager {
     }
     
     openVideoModal() {
+        if (this._vrImmersiveActive) return;
         this.videoModal?.classList.add('visible');
         this.videoErrorEl.style.display = 'none';
         const mode = document.querySelector('input[name="video-mode"]:checked')?.value || 'camera';
@@ -1090,6 +1093,243 @@ class MenuManager {
             notification.style.opacity = '0';
             setTimeout(() => notification.remove(), 300);
         }, 4000);
+    }
+
+    /** VR 没入状態（webxr-vr アドオンから設定） */
+    setVrImmersiveActive(active) {
+        this._vrImmersiveActive = !!active;
+        if (this._vrImmersiveActive) {
+            this.closeVideoModal();
+            this.closeSettings();
+            this.closeHelpModal();
+            this.closeLogoutModal();
+            this.closeRestartModal();
+        }
+    }
+
+    getMicMuted() {
+        return this.isMicMuted;
+    }
+
+    getSpeakerMuted() {
+        return this.isSpeakerMuted;
+    }
+
+    getSettings() {
+        return { ...this.settings };
+    }
+
+    isAdminVisible() {
+        if (!this.adminMenuBtn) return false;
+        return this.adminMenuBtn.style.display !== 'none';
+    }
+
+    getAdminToggles() {
+        return {
+            invisible: !!this.adminInvisibleToggle?.checked,
+            fly: !!this.adminFlyToggle?.checked,
+            speed: !!this.adminSpeedToggle?.checked,
+        };
+    }
+
+    setAdminInvisible(enabled) {
+        if (this.adminInvisibleToggle) {
+            this.adminInvisibleToggle.checked = !!enabled;
+            this.adminInvisibleToggle.dispatchEvent(new Event('change'));
+        } else if (typeof this.onAdminInvisibleChange === 'function') {
+            this.onAdminInvisibleChange(!!enabled);
+        }
+    }
+
+    setAdminFly(enabled) {
+        if (this.adminFlyToggle) {
+            this.adminFlyToggle.checked = !!enabled;
+            this.adminFlyToggle.dispatchEvent(new Event('change'));
+        } else if (typeof this.onAdminFlyChange === 'function') {
+            this.onAdminFlyChange(!!enabled);
+        }
+    }
+
+    setAdminSpeed(enabled) {
+        if (this.adminSpeedToggle) {
+            this.adminSpeedToggle.checked = !!enabled;
+            this.adminSpeedToggle.dispatchEvent(new Event('change'));
+        } else if (typeof this.onAdminSpeedChange === 'function') {
+            this.onAdminSpeedChange(!!enabled);
+        }
+    }
+
+    /**
+     * VR 設定パネルから設定を変更
+     * @param {string} key
+     * @param {unknown} value
+     */
+    applySetting(key, value) {
+        switch (key) {
+            case 'language': {
+                const loc = normalizeMetaverseLocale(String(value)) || 'ja';
+                this.settings.language = loc;
+                this.saveSettings();
+                setMetaverseLocale(loc);
+                const langEl = document.getElementById('language');
+                if (langEl) langEl.value = loc;
+                window.dispatchEvent(new CustomEvent('metaverse-locale-changed', { detail: { locale: loc } }));
+                break;
+            }
+            case 'micVolume': {
+                const v = Math.max(0, Math.min(100, Number(value)));
+                this.settings.micVolume = v;
+                document.getElementById('micVolume').value = String(v);
+                document.getElementById('micVolumeValue').textContent = v * 3;
+                this.saveSettings();
+                if (this.voiceChatManager) this.voiceChatManager.setMicVolume(v);
+                if (this.settingsMicTestGainNode) {
+                    this.settingsMicTestGainNode.gain.value = (v / 100) * 3;
+                }
+                break;
+            }
+            case 'speakerVolume': {
+                const v = Math.max(0, Math.min(100, Number(value)));
+                this.settings.speakerVolume = v;
+                document.getElementById('speakerVolume').value = String(v);
+                document.getElementById('speakerVolumeValue').textContent = String(v);
+                this.saveSettings();
+                break;
+            }
+            case 'micDevice': {
+                this.settings.micDevice = String(value || '');
+                document.getElementById('micDevice').value = this.settings.micDevice;
+                this.saveSettings();
+                if (this.voiceChatManager) this.voiceChatManager.setMicDevice(this.settings.micDevice);
+                break;
+            }
+            case 'speakerDevice': {
+                this.settings.speakerDevice = String(value || '');
+                document.getElementById('speakerDevice').value = this.settings.speakerDevice;
+                this.saveSettings();
+                if (this.voiceChatManager) this.voiceChatManager.setSpeakerDevice(this.settings.speakerDevice);
+                break;
+            }
+            case 'visualMode': {
+                this.settings.visualMode = value === 'highContrast' ? 'highContrast' : 'standard';
+                const el = document.getElementById('highContrastToggle');
+                if (el) el.checked = this.settings.visualMode === 'highContrast';
+                this.saveSettings();
+                this.sceneManager?.applyGraphicsSettings(this.settings);
+                this.playerManager?.applyVisualMode(this.settings.visualMode);
+                break;
+            }
+            case 'graphicsTier': {
+                if (value === 'high' || value === 'medium' || value === 'low') {
+                    this.settings.graphicsTier = value;
+                    const el = document.getElementById('graphicsTier');
+                    if (el) el.value = value;
+                    this.saveSettings();
+                    this.sceneManager?.applyGraphicsSettings(this.settings);
+                }
+                break;
+            }
+            case 'toneMappingExposure': {
+                this.settings.toneMappingExposure = Number(value);
+                const span = document.getElementById('toneMappingExposureValue');
+                if (span) span.textContent = Number(this.settings.toneMappingExposure).toFixed(2);
+                const input = document.getElementById('toneMappingExposure');
+                if (input) input.value = String(this.settings.toneMappingExposure);
+                this.saveSettings();
+                this.sceneManager?.applyGraphicsSettings(this.settings);
+                break;
+            }
+            case 'viewDistanceM': {
+                this.settings.viewDistanceM = clampViewDistanceM(Number(value));
+                const slider = document.getElementById('viewDistanceM');
+                const snappedPos = viewDistanceSliderPosFromM(this.settings.viewDistanceM);
+                if (slider) slider.value = String(snappedPos);
+                const span = document.getElementById('viewDistanceMValue');
+                if (span) span.textContent = String(Math.round(this.settings.viewDistanceM));
+                this.saveSettings();
+                this.sceneManager?.applyGraphicsSettings(this.settings);
+                break;
+            }
+            case 'showViewRangeSpheres': {
+                this.settings.showViewRangeSpheres = !!value;
+                const el = document.getElementById('showViewRangeSpheres');
+                if (el) el.checked = this.settings.showViewRangeSpheres;
+                this.saveSettings();
+                this.sceneManager?.applyGraphicsSettings(this.settings);
+                break;
+            }
+            case 'developerMode': {
+                this.settings.developerMode = !!value;
+                const el = document.getElementById('developerModeToggle');
+                if (el) el.checked = this.settings.developerMode;
+                this.saveSettings();
+                break;
+            }
+            case 'proMode': {
+                this.settings.proMode = !!value;
+                const el = document.getElementById('proModeToggle');
+                if (el) el.checked = this.settings.proMode;
+                this.saveSettings();
+                this.applyProMode();
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    /**
+     * VR 用オーディオデバイス一覧
+     * @returns {Promise<{ mics: { deviceId: string, label: string }[], speakers: { deviceId: string, label: string }[] }>}
+     */
+    async getAudioDevices() {
+        /** @type {{ deviceId: string, label: string }[]} */
+        const mics = [];
+        /** @type {{ deviceId: string, label: string }[]} */
+        const speakers = [];
+        try {
+            await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            let micN = 1;
+            let spkN = 1;
+            for (const device of devices) {
+                if (device.kind === 'audioinput') {
+                    mics.push({
+                        deviceId: device.deviceId,
+                        label: device.label || t('menu.micFallbackNumbered', { n: micN++ }),
+                    });
+                } else if (device.kind === 'audiooutput') {
+                    speakers.push({
+                        deviceId: device.deviceId,
+                        label: device.label || t('menu.speakerFallbackNumbered', { n: spkN++ }),
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn('[Menu] getAudioDevices failed:', e);
+        }
+        return { mics, speakers };
+    }
+
+    /**
+     * VR ヘルプパネル用テキスト行
+     * @returns {string[]}
+     */
+    getHelpLinesForVr() {
+        const keys = [
+            'help.pcBasicTitle',
+            'help.pcBasic1',
+            'help.pcBasic3Html',
+            'help.mediaTitle',
+            'help.media4',
+            'help.settingsTitle',
+            'help.settings1',
+            'help.settings2',
+            'help.settings3',
+            'help.adminTitle',
+            'help.admin1Html',
+        ];
+        return keys.map((k) => t(k).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
     }
 }
 

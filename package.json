@@ -11,7 +11,8 @@
         "dev:vcdebug": "concurrently \"cross-env VC_DEBUG_STATS=1 nodemon server.js\" \"wait-on http://localhost:3000 --timeout 30000 && vite\"",
         "build": "vite build",
         "preview": "vite preview",
-        "test:nfc-spawn": "node --test addons/nfc-spawn/test/*.test.js"
+        "test:nfc-spawn": "node --test addons/nfc-spawn/test/*.test.js",
+        "test:webxr-vr": "node --test addons/webxr-vr/test/*.test.js"
     },
     "keywords": [
         "metaverse",
@@ -54,7 +55,8 @@
         "socket.io": "^4.7.2",
         "socket.io-client": "^4.8.1",
         "three": "^0.160.0",
-        "three-mesh-bvh": "^0.9.3"
+        "three-mesh-bvh": "^0.9.3",
+        "three-mesh-ui": "^6.5.4"
     },
     "devDependencies": {
         "concurrently": "^9.1.2",

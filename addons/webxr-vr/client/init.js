@@ -4,6 +4,7 @@ import { createMetaverseVRButton } from './vr-entry-button.js';
 import WebXRLocomotion from './webxr-locomotion.js';
 import { XrPlayerRig } from './xr-player-rig.js';
 import { WebXrMovementDelegate } from './movement-delegate.js';
+import { VrQuickMenu } from './vr-quick-menu.js';
 import {
     registerMovementDelegate,
     registerInputGuard,
@@ -70,6 +71,7 @@ export function initWebXrVrSubsystem(app) {
         movementDelegate,
         xrPlayerRig,
         domOverlayRoot: overlayRoot || null,
+        getQuickMenuVisible: () => !!app._vrQuickMenu?.isMainVisible?.(),
         onVrSessionStart: () => {
             const vm = app.menuManager.settings.viewMode;
             app._viewModeBeforeVr = (vm === 'first' || vm === 'third') ? vm : 'third';
@@ -84,10 +86,51 @@ export function initWebXrVrSubsystem(app) {
         }
     });
 
+    let vrQuickMenu = null;
+    try {
+        vrQuickMenu = new VrQuickMenu({
+            app,
+            renderer,
+            camera: app.sceneManager.getCamera(),
+            scene: app.sceneManager.getScene(),
+            domOverlayRoot: overlayRoot || null,
+        });
+        app._vrQuickMenu = vrQuickMenu;
+
+        const origSessionStart = webxrLocomotion.onVrSessionStart;
+        webxrLocomotion.onVrSessionStart = () => {
+            if (origSessionStart) origSessionStart();
+            try {
+                vrQuickMenu?.attach();
+            } catch (e) {
+                console.error('[VR QuickMenu] attach failed:', e);
+            }
+        };
+
+        const origSessionEnd = webxrLocomotion.onVrSessionEnd;
+        webxrLocomotion.onVrSessionEnd = () => {
+            try {
+                vrQuickMenu?.detach();
+            } catch (e) {
+                console.error('[VR QuickMenu] detach failed:', e);
+            }
+            if (origSessionEnd) origSessionEnd();
+        };
+    } catch (e) {
+        console.error('[VR QuickMenu] init failed (VR locomotion continues):', e);
+        app._vrQuickMenu = null;
+    }
+
     app._webxrVrLocomotion = webxrLocomotion;
     app._webxrVrRig = xrPlayerRig;
 
     app._webxrVrDispose = () => {
+        try {
+            app._vrQuickMenu?.dispose();
+        } catch (e) {
+            console.error('[VR QuickMenu] dispose:', e);
+        }
+        app._vrQuickMenu = null;
         webxrLocomotion.dispose();
         xrPlayerRig.dispose();
         registerMovementDelegate(null);

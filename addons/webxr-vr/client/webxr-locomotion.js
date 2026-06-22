@@ -65,6 +65,7 @@ export default class WebXRLocomotion {
      * @param {WebXrMovementDelegate} opts.movementDelegate
      * @param {import('./xr-player-rig.js').XrPlayerRig|null} [opts.xrPlayerRig]
      * @param {HTMLElement|null} [opts.domOverlayRoot]
+     * @param {() => boolean} [opts.getQuickMenuVisible]
      * @param {() => void} [opts.onVrSessionStart]
      * @param {() => void} [opts.onVrSessionEnd]
      */
@@ -76,6 +77,7 @@ export default class WebXRLocomotion {
         movementDelegate,
         xrPlayerRig = null,
         domOverlayRoot = null,
+        getQuickMenuVisible = null,
         onVrSessionStart = null,
         onVrSessionEnd = null
     }) {
@@ -86,6 +88,7 @@ export default class WebXRLocomotion {
         this.movementDelegate = movementDelegate;
         this.xrPlayerRig = xrPlayerRig || null;
         this.domOverlayRoot = domOverlayRoot;
+        this.getQuickMenuVisible = typeof getQuickMenuVisible === 'function' ? getQuickMenuVisible : null;
         this.onVrSessionStart = typeof onVrSessionStart === 'function' ? onVrSessionStart : null;
         this.onVrSessionEnd = typeof onVrSessionEnd === 'function' ? onVrSessionEnd : null;
 
@@ -413,6 +416,7 @@ export default class WebXRLocomotion {
      * @param {number} controllerIndex
      */
     _tryTeleportFromController(controllerIndex) {
+        if (this.getQuickMenuVisible?.()) return;
         const mode = this.locomotionMode;
         if (mode === 'smooth') return;
         if (this._teleportCooldown > 0) return;
