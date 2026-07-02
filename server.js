@@ -20,6 +20,13 @@ import { parse as parseCookieHeader } from 'cookie';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { signSocketAuthToken, verifySocketAuthToken, SOCKET_AUTH_TOKEN_MAX_AGE_MS } from './lib/socket-auth-token.js';
+import {
+    benchMaintenanceSocketMiddleware,
+    applyBenchBotSocketData,
+    setMediasoupReadyChecker,
+    peekBenchToken,
+} from './lib/bench-maintenance.js';
+import { recordTickEmit } from './lib/bench-tick-metrics.js';
 import { moderateChatMessage, moderateUsername, getModerationSystemPromptsForAdmin } from './lib/chat-moderation.js';
 import { findNgPhraseMatch, getChatNgWords, saveChatNgWords } from './lib/chat-ng-words.js';
 import {
@@ -2005,10 +2012,17 @@ function peekAdminToken(token) {
     return !!(expiry && Date.now() < expiry);
 }
 
+io.use((socket, next) => {
+    benchMaintenanceSocketMiddleware(socket, next, { peekAdminToken });
+});
+
 if (isSocketGuestDisabled()) {
     io.use((socket, next) => {
         const adminToken = socket.handshake.auth?.adminToken;
         if (peekAdminToken(adminToken)) {
+            return next();
+        }
+        if (peekBenchToken(socket.handshake.auth?.benchToken)) {
             return next();
         }
         const t = getSocketAuthTokenFromHandshake(socket);
@@ -2885,6 +2899,8 @@ function cleanupTaikoMpOnDisconnect(ioSrv, socketId) {
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
+    applyBenchBotSocketData(socket);
+
     // Verify admin token and user role if provided
     const adminToken = socket.handshake.auth?.adminToken;
     if (consumeAdminToken(adminToken)) {
@@ -2895,7 +2911,11 @@ io.on('connection', (socket) => {
         socket.data.isAdmin = false;
         const verified = verifySocketAuthToken(getSocketAuthTokenFromHandshake(socket));
         socket.data.role = verified ? verified.role : undefined; // guest は undefined
-        console.log(`Player connected: ${socket.id}`);
+        if (socket.data.isBenchBot) {
+            console.log(`Player connected as bench bot (run ${socket.data.benchRunId}): ${socket.id}`);
+        } else {
+            console.log(`Player connected: ${socket.id}`);
+        }
     }
 
     // Initialize traffic stats
@@ -3422,9 +3442,12 @@ io.on('connection', (socket) => {
                 const wcfg = worldsData[currentRoom];
                 const effTier = socket.data.effectivePerfTier || 'high';
 
-                const skipAssist = !!player.pilotingAircraftId || !!player.passengeringAircraftId;
+                const skipAssist =
+                    !!player.pilotingAircraftId ||
+                    !!player.passengeringAircraftId ||
+                    !!socket.data.isBenchBot;
 
-                if (!player.isAdmin && !inGrace && effTier === 'low' && !skipAssist) {
+                if (!player.isAdmin && !socket.data.isBenchBot && !inGrace && effTier === 'low' && !skipAssist) {
                     const low = applyLowTierPositionChecks(
                         pos,
                         player.serverLowAssistPrev,
@@ -3439,7 +3462,7 @@ io.on('connection', (socket) => {
                     }
                 }
 
-                if (!player.isAdmin && !inGrace && !skipAssist) {
+                if (!player.isAdmin && !socket.data.isBenchBot && !inGrace && !skipAssist) {
                     const clamped = clampPlayerFeetYForWorld(wcfg, pos.y);
                     if (clamped.changed) {
                         pos.y = clamped.y;
@@ -3447,7 +3470,7 @@ io.on('connection', (socket) => {
                     }
                 }
 
-                if (!player.isAdmin) {
+                if (!player.isAdmin && !socket.data.isBenchBot) {
                     player.serverLowAssistPrev = { x: pos.x, y: pos.y, z: pos.z };
                     player.serverLowAssistAt = Date.now();
                 }
@@ -4832,6 +4855,7 @@ setInterval(() => {
         
         // Broadcast to all players in this room
         io.to(roomId).emit('players-update', snapshot);
+        recordTickEmit(roomId);
     });
 }, 33);
 
@@ -7126,6 +7150,9 @@ function formatBytes(bytes) {
     await createWorkers();
     await createPdfWorkers();
     await createVideoVcWorkers();
+    setMediasoupReadyChecker(
+        () => workers.length > 0 && pdfWorkers.length > 0 && videoVcWorkers.length > 0
+    );
 
     if (USE_S3_MODELS && isS3ModelsBucketConfigured()) {
         try {

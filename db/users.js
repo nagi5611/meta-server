@@ -1,4 +1,5 @@
 // db/users.js - SQLite user storage for students and teachers
+import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import path from 'path';
@@ -40,6 +41,14 @@ export function initDb() {
             display_name TEXT NOT NULL,
             created_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS bench_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            display_name TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_bench_users_run_id ON bench_users(run_id);
     `);
 
     console.log('[DB] SQLite users.db initialized');
@@ -145,4 +154,60 @@ export function deleteTeacher(id) {
     if (!db) return false;
     const result = db.prepare('DELETE FROM teachers WHERE id = ?').run(id);
     return result.changes > 0;
+}
+
+/**
+ * ベンチ run 用一時ユーザーを作成する
+ * @param {string} runId
+ * @param {number} count
+ * @returns {Array<{ id: number, username: string, displayName: string }>}
+ */
+export function createBenchUsers(runId, count) {
+    if (!db) throw new Error('Database not initialized');
+    const rid = String(runId || '').trim();
+    if (!rid) throw new Error('runId required');
+    const n = Math.max(0, Math.min(200, Math.floor(count)));
+    const hash = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), BCRYPT_ROUNDS);
+    const insert = db.prepare(
+        'INSERT INTO bench_users (run_id, username, display_name) VALUES (?, ?, ?)'
+    );
+    /** @type {Array<{ id: number, username: string, displayName: string }>} */
+    const created = [];
+    const tx = db.transaction(() => {
+        for (let i = 0; i < n; i++) {
+            const username = `bench-${rid}-${i + 1}`;
+            const displayName = username;
+            const result = insert.run(rid, username, displayName);
+            created.push({
+                id: Number(result.lastInsertRowid),
+                username,
+                displayName,
+            });
+        }
+    });
+    tx();
+    return created;
+}
+
+/**
+ * run に紐づく bench ユーザーを削除する
+ * @param {string} runId
+ * @returns {number} deleted count
+ */
+export function deleteBenchUsers(runId) {
+    if (!db) return 0;
+    const rid = String(runId || '').trim();
+    if (!rid) return 0;
+    const result = db.prepare('DELETE FROM bench_users WHERE run_id = ?').run(rid);
+    return result.changes;
+}
+
+/**
+ * bench_users の件数（db-sqlite ベンチ用）
+ * @returns {number}
+ */
+export function countBenchUsers() {
+    if (!db) return 0;
+    const row = db.prepare('SELECT COUNT(*) AS c FROM bench_users').get();
+    return row?.c ?? 0;
 }

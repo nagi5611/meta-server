@@ -476,6 +476,14 @@ class NetworkManager {
             }
         });
 
+        this.socket.on('bench-maintenance-warning', (data) => {
+            const msg =
+                data && data.message
+                    ? data.message
+                    : '現在ベンチマーク実行中です。接続は維持されます。';
+            alert(msg);
+        });
+
         // Handle admin kick
         this.socket.on('admin-kicked', async (data) => {
             const message = data && data.message ? data.message : t('net.kicked');
