@@ -88,9 +88,10 @@ async function main() {
                 const metrics = await runSocketBotPool({
                     serverUrl: server,
                     benchToken: job.benchToken,
+                    runId: job.runId,
                     botCount: job.botCount,
                     worlds: job.worlds,
-                    durationMs: 90_000,
+                    durationMs: 120_000,
                 });
                 await postJson(
                     server,
@@ -104,12 +105,12 @@ async function main() {
                     percent: 100,
                 });
             } else if (job.phase === 'audio-vc') {
-                const worldId = (job.worlds && job.worlds[0]) || 'default';
                 const metrics = await runMediasoupBotPool({
                     serverUrl: server,
                     benchToken: job.benchToken,
+                    runId: job.runId,
                     vcBotCount: job.vcBotCount || 10,
-                    worldId,
+                    worlds: job.worlds,
                     pdfPath: job.pdfPath,
                     durationMs: 60_000,
                 });

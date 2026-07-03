@@ -1,4 +1,6 @@
 // addons/meta-benchR1/server.js
+import fs from 'node:fs';
+import express from 'express';
 import { STORAGE_PATHS } from '../../config/storage-paths.js';
 import path from 'node:path';
 import { HOOKS } from '../../lib/hook-registry.js';

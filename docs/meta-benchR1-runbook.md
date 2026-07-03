@@ -63,7 +63,7 @@ FakeHandler で VC パイプライン検証:
 node addons/meta-benchR1/runner/spike-aiortc.js --server http://localhost:3000 --bench-token TOKEN
 ```
 
-本番計測は Linux Runner + [mediasoup-client-aiortc](https://github.com/versatica/mediasoup-client-aiortc) を使用してください。
+本番計測は **Linux Runner** + [mediasoup-client-aiortc](https://github.com/versatica/mediasoup-client-aiortc) を使用してください（Windows は FakeHandler フォールバックのみ）。
 
 ## 7. テスト
 

@@ -1,7 +1,12 @@
-// addons/meta-benchR1/runner/protocol.js — mediasoup VC イベント列（Node / FakeHandler）
-import { Device, FakeHandler } from 'mediasoup-client';
-import fakeParameters from 'mediasoup-client/lib/test/fakeParameters.js';
-import { FakeMediaStreamTrack } from 'fake-mediastreamtrack';
+// addons/meta-benchR1/runner/protocol.js — mediasoup VC イベント列（aiortc 本番 / FakeHandler フォールバック）
+import { Device } from 'mediasoup-client';
+import {
+    getMediasoupHandlerContext,
+    getMediasoupMode,
+    createMediaTrack,
+} from './aiortc-worker.js';
+
+export { getMediasoupMode };
 
 /**
  * Socket emit with ack
@@ -35,10 +40,15 @@ export class MediasoupBenchClient {
         this.sendTransport = null;
         this.recvTransport = null;
         this.producer = null;
+        this.videoProducer = null;
+        /** @type {string[]} */
+        this.iceServers = [];
         /** @type {Map<string, object>} */
         this.consumers = new Map();
         /** @type {number[]} */
         this.lossSamples = [];
+        /** @type {'aiortc' | 'fake'} */
+        this.mode = 'fake';
     }
 
     /**
@@ -57,9 +67,13 @@ export class MediasoupBenchClient {
         const rtpCapabilities = joinRes.rtpCapabilities;
         if (!rtpCapabilities) throw new Error(`${joinEvent}: missing rtpCapabilities`);
 
-        this.device = new Device({
-            handlerFactory: FakeHandler.createFactory(fakeParameters),
-        });
+        if (Array.isArray(joinRes.iceServers) && joinRes.iceServers.length > 0) {
+            this.iceServers = joinRes.iceServers;
+        }
+
+        const { handlerFactory, mode } = await getMediasoupHandlerContext();
+        this.mode = mode;
+        this.device = new Device({ handlerFactory });
         await this.device.load({ routerRtpCapabilities: rtpCapabilities });
 
         await this._createSendTransport();
@@ -69,12 +83,22 @@ export class MediasoupBenchClient {
             await emitAsync(this.socket, 'pdf-vc-set-speaker', { enabled: true });
         } else if (this.prefix === 'video-vc') {
             await emitAsync(this.socket, 'video-vc-set-recv', { enabled: true });
+            await emitAsync(this.socket, 'video-vc-set-video', { enabled: true });
         } else {
             await emitAsync(this.socket, 'vc-set-speaker', { enabled: true });
         }
 
-        const audioTrack = new FakeMediaStreamTrack({ kind: 'audio' });
+        const audioTrack = await createMediaTrack('audio');
         this.producer = await this.sendTransport.produce({ track: audioTrack });
+
+        if (this.prefix === 'video-vc') {
+            try {
+                const videoTrack = await createMediaTrack('video');
+                this.videoProducer = await this.sendTransport.produce({ track: videoTrack });
+            } catch (e) {
+                console.warn('[bench-protocol] video-vc video produce skipped:', e);
+            }
+        }
 
         this.socket.on(`${this.prefix}-new-producer`, async ({ producerId, peerId }) => {
             if (peerId === this.socket.id) return;
@@ -95,6 +119,7 @@ export class MediasoupBenchClient {
             iceParameters: res.iceParameters,
             iceCandidates: res.iceCandidates,
             dtlsParameters: res.dtlsParameters,
+            iceServers: this.iceServers,
         });
         this.sendTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
             emitAsync(this.socket, `${this.prefix}-connect-transport`, {
@@ -109,7 +134,9 @@ export class MediasoupBenchClient {
                 this.prefix === 'pdf-vc'
                     ? 'pdf-vc-produce-audio'
                     : this.prefix === 'video-vc'
-                      ? 'video-vc-produce-audio'
+                      ? kind === 'video'
+                          ? 'video-vc-produce-video'
+                          : 'video-vc-produce-audio'
                       : 'vc-produce-audio';
             emitAsync(this.socket, produceEvent, {
                 transportId: this.sendTransport.id,
@@ -129,6 +156,7 @@ export class MediasoupBenchClient {
             iceParameters: res.iceParameters,
             iceCandidates: res.iceCandidates,
             dtlsParameters: res.dtlsParameters,
+            iceServers: this.iceServers,
         });
         this.recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
             emitAsync(this.socket, `${this.prefix}-connect-transport`, {
@@ -165,19 +193,38 @@ export class MediasoupBenchClient {
     async samplePacketLoss() {
         const transport = this.recvTransport || this.sendTransport;
         if (!transport || typeof transport.getStats !== 'function') return;
+
         try {
             const stats = await transport.getStats();
+            let sampled = false;
             for (const s of stats.values()) {
                 if (s.type === 'inbound-rtp' && s.packetsReceived != null && s.packetsLost != null) {
                     const total = s.packetsReceived + s.packetsLost;
                     if (total > 0) {
                         this.lossSamples.push((s.packetsLost / total) * 100);
+                        sampled = true;
+                    }
+                }
+                if (
+                    s.type === 'outbound-rtp' &&
+                    s.packetsSent != null &&
+                    s.packetsLost != null &&
+                    s.packetsSent > 0
+                ) {
+                    const total = s.packetsSent + s.packetsLost;
+                    if (total > 0) {
+                        this.lossSamples.push((s.packetsLost / total) * 100);
+                        sampled = true;
                     }
                 }
             }
+            if (!sampled && this.mode === 'fake') {
+                this.lossSamples.push(0);
+            }
         } catch {
-            /* FakeHandler may not provide real stats */
-            this.lossSamples.push(0);
+            if (this.mode === 'fake') {
+                this.lossSamples.push(0);
+            }
         }
     }
 
@@ -185,7 +232,7 @@ export class MediasoupBenchClient {
      * @returns {number} median loss %
      */
     getMedianLossPct() {
-        if (!this.lossSamples.length) return 0;
+        if (!this.lossSamples.length) return this.mode === 'fake' ? 0 : 100;
         const sorted = [...this.lossSamples].sort((a, b) => a - b);
         const mid = Math.floor(sorted.length / 2);
         return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
@@ -201,6 +248,7 @@ export class MediasoupBenchClient {
         }
         this.consumers.clear();
         try {
+            this.videoProducer?.close?.();
             this.producer?.close?.();
         } catch {
             /* ignore */

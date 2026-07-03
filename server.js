@@ -3309,7 +3309,10 @@ io.on('connection', (socket) => {
         }
 
         const needsNameModeration =
-            !socket.data.isAdmin && socket.data.role == null && trimmed !== 'Guest';
+            !socket.data.isAdmin &&
+            !socket.data.isBenchBot &&
+            socket.data.role == null &&
+            trimmed !== 'Guest';
 
         if (needsNameModeration) {
             if (trimmed.length < 2 || trimmed.length > 20) {
@@ -3320,6 +3323,16 @@ io.on('connection', (socket) => {
                 socket.disconnect(true);
                 return;
             }
+        } else if (socket.data.isBenchBot && (trimmed.length < 2 || trimmed.length > 64)) {
+            socket.emit('username-rejected', {
+                error: 'invalid_username',
+                message: 'ベンチ bot ユーザー名が不正です。',
+            });
+            socket.disconnect(true);
+            return;
+        }
+
+        if (needsNameModeration) {
             const ngNameLiteral = findNgPhraseMatch(trimmed);
             if (ngNameLiteral) {
                 socket.emit('username-rejected', {

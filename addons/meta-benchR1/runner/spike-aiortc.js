@@ -1,14 +1,12 @@
 #!/usr/bin/env node
-// addons/meta-benchR1/runner/spike-aiortc.js — M4-0: VC join→produce→consume 1 本（FakeHandler フォールバック）
+// addons/meta-benchR1/runner/spike-aiortc.js — M4-0: VC join→produce→consume（aiortc 本番パス）
 /**
- * 本番計測は mediasoup-client-aiortc が必須（Linux Runner 推奨）。
- * このスクリプトは FakeHandler でパイプライン検証用。
- *
  * Usage:
  *   node spike-aiortc.js --server http://localhost:3000 --bench-token TOKEN
  */
 import { io } from 'socket.io-client';
-import { MediasoupBenchClient } from './protocol.js';
+import { MediasoupBenchClient, getMediasoupMode } from './protocol.js';
+import { closeMediasoupWorker } from './aiortc-worker.js';
 
 function parseArgs(argv) {
     /** @type {Record<string, string>} */
@@ -31,22 +29,27 @@ async function main() {
         transports: ['websocket'],
         auth: { benchToken },
     });
-    await new Promise((resolve, reject) => {
-        socket.once('connect', resolve);
-        socket.once('connect_error', reject);
-    });
-    console.log('[spike] connected', socket.id);
 
-    const client = new MediasoupBenchClient(socket, 'vc');
-    await client.join({ roomId: 'default' });
-    console.log('[spike] vc join + produce OK (FakeHandler)');
+    try {
+        await new Promise((resolve, reject) => {
+            socket.once('connect', resolve);
+            socket.once('connect_error', reject);
+        });
+        console.log('[spike] connected', socket.id, 'handler=', getMediasoupMode());
 
-    await client.samplePacketLoss();
-    console.log('[spike] stats sample loss%=', client.getMedianLossPct());
+        const client = new MediasoupBenchClient(socket, 'vc');
+        await client.join({ roomId: 'default' });
+        console.log('[spike] vc join + produce OK (mode=', getMediasoupMode(), ')');
 
-    await client.close();
-    socket.disconnect();
-    console.log('[spike] done — aiortc 本番は mediasoup-client-aiortc を別途検証すること');
+        await client.samplePacketLoss();
+        console.log('[spike] stats sample loss%=', client.getMedianLossPct());
+
+        await client.close();
+    } finally {
+        socket.disconnect();
+        await closeMediasoupWorker();
+        console.log('[spike] done');
+    }
 }
 
 main().catch((e) => {
