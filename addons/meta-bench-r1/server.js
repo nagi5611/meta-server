@@ -21,6 +21,7 @@ import {
     startRun,
     abortRun,
     getRunPublic,
+    listRunsPublic,
     evaluatePreflight,
     ingestRunnerMetrics,
 } from './lib/run-orchestrator.js';
@@ -123,6 +124,12 @@ export default {
                     const failures = e && e.failures ? e.failures : [e instanceof Error ? e.message : String(e)];
                     res.status(400).json({ ok: false, failures });
                 }
+            });
+
+            app.get('/admin/addons/meta-bench-r1/runs', (req, res) => {
+                const limit = parseInt(String(req.query.limit ?? '30'), 10);
+                const runs = listRunsPublic(db, Number.isFinite(limit) ? limit : 30);
+                res.json({ ok: true, runs });
             });
 
             app.get('/admin/addons/meta-bench-r1/runs/:id', (req, res) => {

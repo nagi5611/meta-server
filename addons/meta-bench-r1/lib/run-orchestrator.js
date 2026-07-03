@@ -174,18 +174,50 @@ export function abortRun(db, runId) {
 export function getRunPublic(db, runId) {
     const row = getRunRow(db, runId);
     if (!row) return null;
-    return {
+    return rowToPublicRun(row, { includeMetrics: true });
+}
+
+/**
+ * 管理画面用: 過去ベンチ run の一覧（新しい順）
+ * @param {import('better-sqlite3').Database} db
+ * @param {number} [limit]
+ */
+export function listRunsPublic(db, limit = 30) {
+    const n = Math.max(1, Math.min(100, Number(limit) || 30));
+    const rows = db
+        .prepare(
+            `SELECT id, status, phase, bot_count, scores_json, metrics_json, report_filename, error_message, started_at, finished_at, created_at
+             FROM bench_runs
+             ORDER BY COALESCE(started_at, created_at) DESC
+             LIMIT ?`
+        )
+        .all(n);
+    return rows.map((row) => rowToPublicRun(row, { includeMetrics: false }));
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @param {{ includeMetrics?: boolean }} [opts]
+ */
+function rowToPublicRun(row, opts = {}) {
+    const scores = row.scores_json ? JSON.parse(String(row.scores_json)) : null;
+    const run = {
         id: row.id,
         status: row.status,
         phase: row.phase,
         botCount: row.bot_count,
-        scores: row.scores_json ? JSON.parse(row.scores_json) : null,
-        metrics: row.metrics_json ? JSON.parse(row.metrics_json) : null,
+        scores,
+        overallScore: scores ? overallScore(scores) : null,
         reportFilename: row.report_filename,
         errorMessage: row.error_message,
         startedAt: row.started_at,
         finishedAt: row.finished_at,
+        createdAt: row.created_at,
     };
+    if (opts.includeMetrics !== false && row.metrics_json) {
+        run.metrics = JSON.parse(String(row.metrics_json));
+    }
+    return run;
 }
 
 /**

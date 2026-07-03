@@ -62,7 +62,7 @@
         "three-mesh-ui": "^6.5.4"
     },
     "optionalDependencies": {
-        "mediasoup-client-aiortc": "^3.14.7"
+        "mediasoup-client-aiortc": "^3.16.1"
     },
     "devDependencies": {
         "concurrently": "^9.1.2",
