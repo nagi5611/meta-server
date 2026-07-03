@@ -6,6 +6,7 @@
  *   socketId: string | null,
  *   lastHeartbeatAt: number,
  *   recommendedMaxBots: number,
+ *   hostInfo?: object | null,
  * }} RunnerEntry
  */
 
@@ -33,7 +34,7 @@ function isEntryLive(entry, maxAgeMs = 30_000) {
 }
 
 /**
- * @param {{ name: string, recommendedMaxBots?: number, socketId?: string | null }} info
+ * @param {{ name: string, recommendedMaxBots?: number, socketId?: string | null, hostInfo?: object | null }} info
  */
 export function registerRunner(info) {
     const displayName = String(info.name || 'runner').trim() || 'runner';
@@ -47,6 +48,10 @@ export function registerRunner(info) {
             typeof info.recommendedMaxBots === 'number' && info.recommendedMaxBots > 0
                 ? Math.floor(info.recommendedMaxBots)
                 : (prev?.recommendedMaxBots ?? 50),
+        hostInfo:
+            info.hostInfo && typeof info.hostInfo === 'object'
+                ? { ...info.hostInfo }
+                : (prev?.hostInfo ?? null),
     });
 }
 
@@ -175,6 +180,34 @@ export function getRunnerStatusByName(name, maxAgeMs = 30_000) {
         lastHeartbeatAt: entry.lastHeartbeatAt,
         recommendedMaxBots: entry.recommendedMaxBots,
         socketId: entry.socketId,
+        hostInfo: entry.hostInfo ?? null,
+    };
+}
+
+/**
+ * レポート用 Runner スナップショット
+ * @param {string} [name]
+ * @returns {object | null}
+ */
+export function buildRunnerReportInfo(name) {
+    const entry = name ? getRunnerByName(name) : null;
+    if (!entry) {
+        const n = String(name || '').trim();
+        return n ? { name: n, missing: true } : null;
+    }
+    const hi = entry.hostInfo && typeof entry.hostInfo === 'object' ? entry.hostInfo : {};
+    return {
+        name: entry.name,
+        recommendedMaxBots: entry.recommendedMaxBots,
+        hostname: hi.hostname,
+        cpuModel: hi.cpuModel,
+        cpuCores: hi.cpuCores,
+        totalMemGb: hi.totalMemGb,
+        platform: hi.platform,
+        nodeVersion: hi.nodeVersion,
+        arch: hi.arch,
+        mediasoupMode: hi.mediasoupMode,
+        collectedAt: hi.collectedAt,
     };
 }
 

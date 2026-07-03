@@ -35,7 +35,7 @@ import {
     clampScore,
 } from './scoring.js';
 import { buildBenchReportHtml, benchReportFilename } from './report-html.js';
-import { getRunnerStatusByName } from './runner-registry.js';
+import { getRunnerStatusByName, buildRunnerReportInfo } from './runner-registry.js';
 import {
     normalizeBenchPhases,
     isBenchPhaseEnabled,
@@ -275,6 +275,7 @@ async function executeRun(db, runId, opts, ctrl) {
         runnerName,
         phases,
         phaseLabels: BENCH_PHASE_DEFS.filter((p) => phases.includes(p.id)).map((p) => p.label),
+        runner: buildRunnerReportInfo(runnerName),
     };
 
     let cpuBefore = null;
@@ -470,6 +471,16 @@ async function executeRun(db, runId, opts, ctrl) {
         }
 
         const catalog = getAddonCatalogSnapshot();
+        const runnerInfo = buildRunnerReportInfo(runnerName) || (runnerName ? { name: runnerName } : null);
+        if (runnerInfo) {
+            const rawAv = runnerMetrics.audioVc?.raw;
+            if (rawAv?.handlerMode) runnerInfo.mediasoupMode = rawAv.handlerMode;
+            if (runnerMetrics.mvConnect) {
+                runnerInfo.mvConnectPingP95Ms = runnerMetrics.mvConnect.pingP95Ms;
+                runnerInfo.mvConnectRetainPct = runnerMetrics.mvConnect.retainPct;
+            }
+            metrics.runner = runnerInfo;
+        }
         const meta = {
             cpuModel: os.cpus()[0]?.model,
             cpuCores: os.cpus().length,
@@ -479,6 +490,7 @@ async function executeRun(db, runId, opts, ctrl) {
             coreVersion: opts.config?.coreVersion,
             loadedAddons: catalog.addons.filter((a) => a.enabled).map((a) => a.id),
             runnerName,
+            runner: runnerInfo,
             phases,
         };
 

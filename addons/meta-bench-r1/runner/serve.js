@@ -16,6 +16,7 @@ import {
     isRunnerDebug,
 } from './debug.js';
 import { buildSocketIoOptions } from './socket-client-options.js';
+import { collectRunnerHostInfo } from './host-info.js';
 
 /**
  * @param {string[]} argv
@@ -109,7 +110,15 @@ async function main() {
         }
     }
 
-    const registerBody = { name, recommendedMaxBots: maxBots };
+    const registerBody = {
+        name,
+        recommendedMaxBots: maxBots,
+        hostInfo: collectRunnerHostInfo({
+            name,
+            recommendedMaxBots: maxBots,
+            mediasoupMode: os.platform() === 'win32' ? 'fake' : getMediasoupMode(),
+        }),
+    };
     if (args.pairing) registerBody.pairingCode = String(args.pairing);
     else if (args.secret) registerBody.runnerSecret = String(args.secret);
     else {

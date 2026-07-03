@@ -73,6 +73,28 @@ export function buildBenchReportHtml(data) {
             : '';
 
     const addons = (meta.loadedAddons || []).join(', ') || '-';
+    const runner = meta.runner || metrics?.runner || (meta.runnerName ? { name: meta.runnerName } : null);
+
+    const runnerBlock = runner
+        ? `<div class="card" style="margin-bottom:1.25rem">
+      <h2 class="section-title">Runner 情報</h2>
+      <div class="server-grid">
+        <div class="server-item"><span class="k">名前</span><span class="v">${escapeHtml(String(runner.name ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">ホスト名</span><span class="v">${escapeHtml(String(runner.hostname ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">CPU</span><span class="v">${escapeHtml(String(runner.cpuModel ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">コア数</span><span class="v">${escapeHtml(String(runner.cpuCores ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">RAM</span><span class="v">${runner.totalMemGb != null ? `${escapeHtml(String(runner.totalMemGb))} GB` : '—'}</span></div>
+        <div class="server-item"><span class="k">OS</span><span class="v">${escapeHtml(String(runner.platform ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">Node</span><span class="v">${escapeHtml(String(runner.nodeVersion ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">arch</span><span class="v">${escapeHtml(String(runner.arch ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">WebRTC モード</span><span class="v">${escapeHtml(formatRunnerMediasoupMode(runner.mediasoupMode))}</span></div>
+        <div class="server-item"><span class="k">推奨 max bots</span><span class="v">${escapeHtml(String(runner.recommendedMaxBots ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">mv-connect ping P95</span><span class="v">${runner.mvConnectPingP95Ms != null ? `${escapeHtml(String(Math.round(runner.mvConnectPingP95Ms)))} ms` : '—'}</span></div>
+        <div class="server-item"><span class="k">mv-connect 維持率</span><span class="v">${runner.mvConnectRetainPct != null ? `${escapeHtml(String(Math.round(runner.mvConnectRetainPct)))}%` : '—'}</span></div>
+      </div>
+      ${runner.missing ? '<p class="tick-diagnosis">Runner 登録時のホスト情報がありません（古い Runner または登録前にベンチ開始した可能性があります）。</p>' : ''}
+    </div>`
+        : '';
 
     const tick = metrics?.tick;
     const tickDebug = tick?.debug;
@@ -369,6 +391,8 @@ export function buildBenchReportHtml(data) {
       </div>
     </div>
 
+    ${runnerBlock}
+
     ${tickBlock}
 
     ${failureBlock}
@@ -378,6 +402,17 @@ export function buildBenchReportHtml(data) {
   </div>
 </body>
 </html>`;
+}
+
+/**
+ * @param {unknown} mode
+ * @returns {string}
+ */
+function formatRunnerMediasoupMode(mode) {
+    if (mode === 'aiortc') return 'aiortc（本番 WebRTC）';
+    if (mode === 'fake') return 'FakeHandler（参考値）';
+    if (mode == null || mode === 'unknown') return '—';
+    return String(mode);
 }
 
 /**

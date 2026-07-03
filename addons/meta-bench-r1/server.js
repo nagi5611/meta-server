@@ -187,6 +187,10 @@ export default {
                 registerRunner({
                     name,
                     recommendedMaxBots: Number.isFinite(recommendedMaxBots) ? recommendedMaxBots : 50,
+                    hostInfo:
+                        req.body?.hostInfo && typeof req.body.hostInfo === 'object'
+                            ? req.body.hostInfo
+                            : null,
                 });
                 res.json({ ok: true, runner: getRunnerStatus(), runners: listRunners() });
             });
