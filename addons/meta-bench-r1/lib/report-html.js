@@ -32,6 +32,7 @@ export function buildBenchReportHtml(data) {
         scores = {},
         overall,
         meta = {},
+        metrics = {},
         failures = [],
         notes = [],
     } = data;
@@ -72,6 +73,30 @@ export function buildBenchReportHtml(data) {
             : '';
 
     const addons = (meta.loadedAddons || []).join(', ') || '-';
+
+    const tick = metrics?.tick;
+    const tickDebug = tick?.debug;
+    const tickDiag = tick?.diagnosis;
+    const tickBlock =
+        tickDebug || tick
+            ? `<div class="card" style="margin-bottom:1.25rem">
+      <h2 class="section-title">TPS 計測診断</h2>
+      <div class="server-grid">
+        <div class="server-item"><span class="k">minTickPerSec</span><span class="v">${escapeHtml(String(tick?.minTickPerSec ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">ルーム別 TPS</span><span class="v"><code>${escapeHtml(JSON.stringify(tick?.byRoom ?? {}))}</code></span></div>
+        <div class="server-item"><span class="k">hookInstalled</span><span class="v">${escapeHtml(String(tickDebug?.hookInstalled ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">hookCalls</span><span class="v">${escapeHtml(String(tickDebug?.totalHookCalls ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">recorded</span><span class="v">${escapeHtml(String(tickDebug?.totalRecordedEmits ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">skipped (sampling off)</span><span class="v">${escapeHtml(String(tickDebug?.skippedNotSampling ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">sampling</span><span class="v">${escapeHtml(String(tickDebug?.sampling ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">maintenance</span><span class="v">${escapeHtml(String(tickDebug?.maintenanceActive ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">secondsSampled</span><span class="v">${escapeHtml(String(tickDebug?.secondsSampled ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">pid</span><span class="v">${escapeHtml(String(tickDebug?.pid ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">activeRunId</span><span class="v">${escapeHtml(String(tickDebug?.activeRunId ?? '—'))}</span></div>
+      </div>
+      ${tickDiag ? `<p class="tick-diagnosis">${escapeHtml(tickDiag)}</p>` : ''}
+    </div>`
+            : '';
 
     return `<!DOCTYPE html>
 <html lang="ja">
@@ -272,6 +297,14 @@ export function buildBenchReportHtml(data) {
     .alert-error { background: var(--bad-bg); border: 1px solid #ffcdd2; color: #b71c1c; }
     .alert-warn { background: var(--mid-bg); border: 1px solid #ffe0b2; color: #e65100; }
     .alert-ok { background: var(--good-bg); border: 1px solid #c8e6c9; color: var(--good); }
+    .tick-diagnosis {
+      margin: 1rem 0 0;
+      padding: 0.75rem 1rem;
+      background: var(--mid-bg);
+      border-radius: 8px;
+      font-size: 0.85rem;
+      color: #e65100;
+    }
     .footer-note {
       margin-top: 1.5rem;
       padding: 0.85rem 1rem;
@@ -334,6 +367,8 @@ export function buildBenchReportHtml(data) {
         <div class="server-item" style="grid-column:1/-1"><span class="k">有効 addon</span><span class="v">${escapeHtml(addons)}</span></div>
       </div>
     </div>
+
+    ${tickBlock}
 
     ${failureBlock}
     ${noteBlock}

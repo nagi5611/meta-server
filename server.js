@@ -27,7 +27,7 @@ import {
     peekBenchToken,
 } from './lib/bench-maintenance.js';
 import { peekBenchRunnerSecret } from './lib/bench-runner-auth.js';
-import { recordTickEmit } from './lib/bench-tick-metrics.js';
+import { recordTickEmit, registerTickHookInstalled } from './lib/bench-tick-metrics.js';
 import { lookupIpLocation } from './lib/ip-geolocation.js';
 import { moderateChatMessage, moderateUsername, getModerationSystemPromptsForAdmin } from './lib/chat-moderation.js';
 import { findNgPhraseMatch, getChatNgWords, saveChatNgWords } from './lib/chat-ng-words.js';
@@ -4879,6 +4879,7 @@ setInterval(() => {
         recordTickEmit(roomId);
     });
 }, 33);
+registerTickHookInstalled();
 
 // ============================
 // Admin: API Endpoints

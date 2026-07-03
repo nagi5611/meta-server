@@ -15,6 +15,7 @@ import {
     stopTickSampling,
     getTickMetricsSnapshot,
     getTheoreticalMaxTps,
+    diagnoseTickMetrics,
 } from '../../../lib/bench-tick-metrics.js';
 import { getAddonCatalogSnapshot } from '../../../lib/plugin-bootstrap.js';
 import { createBenchUsers, deleteBenchUsers } from '../../../db/users.js';
@@ -280,11 +281,22 @@ async function executeRun(db, runId, opts, ctrl) {
     let cpuRatio = 0;
 
     try {
+        console.log('[meta-bench-r1] executeRun start', {
+            runId,
+            phases,
+            needsRunner,
+            needsTick,
+            needsBenchUsers,
+            runnerName,
+            ioRef: !!ioRef,
+            pid: process.pid,
+        });
+
         if (needsRunner || needsTick) {
             setBenchMaintenance({ active: true, runId, io: ioRef });
         }
         if (needsTick) {
-            startTickSampling();
+            startTickSampling(runId);
         }
         patchRun(db, runId, { phase: 'maintenance-on' });
 
@@ -314,13 +326,26 @@ async function executeRun(db, runId, opts, ctrl) {
                     const tickSnap = getTickMetricsSnapshot();
                     metrics.tick = tickSnap;
                     scores['mv-tps'] = scoreMvTps(tickSnap.minTickPerSec, getTheoreticalMaxTps());
+                    console.log('[meta-bench-r1] socket-bots tick snapshot', {
+                        runId,
+                        minTickPerSec: tickSnap.minTickPerSec,
+                        byRoom: tickSnap.byRoom,
+                        debug: tickSnap.debug,
+                        diagnosis: tickSnap.diagnosis,
+                        pid: process.pid,
+                    });
                     if (tickSnap.minTickPerSec <= 0) {
                         const dbg = tickSnap.debug || {};
+                        const diagnosis =
+                            tickSnap.diagnosis ||
+                            diagnoseTickMetrics(dbg, tickSnap.byRoom || {});
                         failures.push(
-                            `TPS 計測データなし (recorded=${dbg.totalRecordedEmits ?? 0}, ` +
-                                `sampling=${dbg.samplingActive}, maintenance=${dbg.maintenanceActive}, ` +
-                                `seconds=${dbg.secondsSampled ?? 0})`
+                            `TPS 計測データなし: ${diagnosis} ` +
+                                `(hookCalls=${dbg.totalHookCalls ?? 0}, recorded=${dbg.totalRecordedEmits ?? 0}, ` +
+                                `skipped=${dbg.skippedNotSampling ?? 0}, sampling=${dbg.sampling}, ` +
+                                `hookInstalled=${dbg.hookInstalled}, pid=${dbg.pid ?? process.pid})`
                         );
+                        notes.push(`TPS診断: ${diagnosis}`);
                         if (status === 'completed') status = 'partial';
                     }
                     if (cpuBefore) {
@@ -467,6 +492,7 @@ async function executeRun(db, runId, opts, ctrl) {
             scores,
             overall,
             meta,
+            metrics,
             failures,
             notes,
         });
