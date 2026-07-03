@@ -2,4 +2,4 @@
 import '../../../addons/sample-echo/client/admin.js';
 import '../../../addons/admin-reboot/client/admin.js';
 import '../../../addons/nfc-spawn/client/admin.js';
-import '../../../addons/meta-benchR1/client/admin.js';
+import '../../../addons/meta-bench-r1/client/admin.js';

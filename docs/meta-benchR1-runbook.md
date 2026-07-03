@@ -1,19 +1,19 @@
-# meta-benchR1 運用手順書
+# meta-bench-r1 運用手順書
 
 ベンチマーク実行前に毎回この手順を実施してください（要件 §4.2 / D-13）。
 
 ## 1. addon 準備
 
-1. 管理画面 → **アドオン** で `meta-benchR1` **以外をすべて無効化**
-2. `meta-benchR1` のみ **有効化**
+1. 管理画面 → **アドオン** で `meta-bench-r1` **以外をすべて無効化**
+2. `meta-bench-r1` のみ **有効化**
 3. **Node プロセスを再起動**（[addons-restart-policy.md](../addons-restart-policy.md)）
 4. 管理画面 → **ベンチR1** でプリフライト（P-07）が合格することを確認
 
-P-07 不合格時の表示例: 「読み込み addon が meta-benchR1 のみではありません」→ 他 addon を無効化して再起動。
+P-07 不合格時の表示例: 「読み込み addon が meta-bench-r1 のみではありません」→ 他 addon を無効化して再起動。
 
 ## 2. 設定
 
-`addons/meta-benchR1/config.json`（`config.json.example` をコピー）:
+`addons/meta-bench-r1/config.json`（`config.json.example` をコピー）:
 
 | キー | 説明 |
 |------|------|
@@ -29,7 +29,7 @@ P-07 不合格時の表示例: 「読み込み addon が meta-benchR1 のみで�
 ## 3. Bench Runner 起動（手元 PC）
 
 ```bash
-cd addons/meta-benchR1/runner
+cd addons/meta-bench-r1/runner
 node serve.js --server https://your-meta-server.example --secret YOUR_RUNNER_SECRET --name my-pc --max-bots 50
 ```
 
@@ -60,7 +60,7 @@ Runner は 30 秒以内に heartbeat を送ります。管理画面の Runner �
 FakeHandler で VC パイプライン検証:
 
 ```bash
-node addons/meta-benchR1/runner/spike-aiortc.js --server http://localhost:3000 --bench-token TOKEN
+node addons/meta-bench-r1/runner/spike-aiortc.js --server http://localhost:3000 --bench-token TOKEN
 ```
 
 本番計測は **Linux Runner** + [mediasoup-client-aiortc](https://github.com/versatica/mediasoup-client-aiortc) を使用してください（Windows は FakeHandler フォールバックのみ）。
@@ -68,5 +68,5 @@ node addons/meta-benchR1/runner/spike-aiortc.js --server http://localhost:3000 -
 ## 7. テスト
 
 ```bash
-npm run test:meta-benchR1
+npm run test:meta-bench-r1
 ```

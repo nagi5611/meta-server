@@ -1,4 +1,4 @@
-// addons/meta-benchR1/lib/report-html.js — 日本語 HTML レポート
+// addons/meta-bench-r1/lib/report-html.js — 日本語 HTML レポート
 import os from 'node:os';
 
 /**
@@ -50,7 +50,7 @@ export function buildBenchReportHtml(data) {
   </style>
 </head>
 <body>
-  <h1>meta-benchR1 ベンチレポート</h1>
+  <h1>meta-bench-r1 ベンチレポート</h1>
   <p class="meta">runId: ${escapeHtml(runId)} / ステータス: ${escapeHtml(status)}</p>
   <p class="meta">開始: ${formatTs(startedAt)} / 終了: ${formatTs(finishedAt)}</p>
   <h2>総合スコア（参考）</h2>
