@@ -26,6 +26,7 @@ import {
     setMediasoupReadyChecker,
     peekBenchToken,
 } from './lib/bench-maintenance.js';
+import { peekBenchRunnerSecret } from './lib/bench-runner-auth.js';
 import { recordTickEmit } from './lib/bench-tick-metrics.js';
 import { lookupIpLocation } from './lib/ip-geolocation.js';
 import { moderateChatMessage, moderateUsername, getModerationSystemPromptsForAdmin } from './lib/chat-moderation.js';
@@ -2014,13 +2015,16 @@ function peekAdminToken(token) {
 }
 
 io.use((socket, next) => {
-    benchMaintenanceSocketMiddleware(socket, next, { peekAdminToken });
+    benchMaintenanceSocketMiddleware(socket, next, { peekAdminToken, peekBenchRunnerSecret });
 });
 
 if (isSocketGuestDisabled()) {
     io.use((socket, next) => {
         const adminToken = socket.handshake.auth?.adminToken;
         if (peekAdminToken(adminToken)) {
+            return next();
+        }
+        if (peekBenchRunnerSecret(socket.handshake.auth)) {
             return next();
         }
         if (peekBenchToken(socket.handshake.auth?.benchToken)) {

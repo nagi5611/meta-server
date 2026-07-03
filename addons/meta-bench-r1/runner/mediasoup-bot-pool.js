@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import { MediasoupBenchClient, getMediasoupMode } from './protocol.js';
 import { closeMediasoupWorker } from './aiortc-worker.js';
 import { runnerDebug, runnerInfo, runnerWarn, formatError } from './debug.js';
+import { buildSocketIoOptions } from './socket-client-options.js';
 
 const STATS_INTERVAL_MS = 1000;
 const CONNECT_STAGGER_MS = 200;
@@ -111,11 +112,7 @@ export async function runMediasoupBotPool(opts) {
  */
 async function createBenchSocket(serverUrl, benchToken, runId, index, worldId, suffix = '') {
     const label = `vc-bot-${index + 1}${suffix}`;
-    const socket = io(serverUrl, {
-        transports: ['websocket'],
-        auth: { benchToken },
-        reconnection: false,
-    });
+    const socket = io(serverUrl, buildSocketIoOptions(serverUrl, { benchToken }, { reconnection: false }));
     await waitConnect(socket, label);
     runnerDebug('vc-pool', `${label} connected`, { socketId: socket.id, worldId });
     socket.emit('set-username', `bench-${runId}-${index + 1}${suffix}`);

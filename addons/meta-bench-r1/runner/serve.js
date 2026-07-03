@@ -11,7 +11,9 @@ import {
     runnerError,
     formatError,
     maskSecret,
+    isRunnerDebug,
 } from './debug.js';
+import { buildSocketIoOptions } from './socket-client-options.js';
 
 /**
  * @param {string[]} argv
@@ -121,12 +123,13 @@ async function main() {
         );
     }, 25_000);
 
-    const socket = io(server, {
-        transports: ['websocket'],
-        auth: args.secret ? { runnerSecret: String(args.secret) } : {},
-        reconnection: true,
-        reconnectionAttempts: 10,
-    });
+    const socket = io(
+        server,
+        buildSocketIoOptions(server, args.secret ? { runnerSecret: String(args.secret) } : {}, {
+            reconnection: true,
+            reconnectionAttempts: 10,
+        })
+    );
 
     socket.io.on('error', (e) => runnerError('socket', 'io engine error', formatError(e)));
     socket.io.on('reconnect_attempt', (n) => runnerDebug('socket', `reconnect attempt #${n}`));
@@ -151,6 +154,15 @@ async function main() {
 
     socket.on('connect_error', (e) => {
         runnerError('socket', 'connect_error', formatError(e));
+        if (isRunnerDebug() && e && typeof e === 'object') {
+            const detail = /** @type {Record<string, unknown>} */ (e);
+            runnerDebug('socket', 'connect_error detail', {
+                message: detail.message,
+                data: detail.data,
+                description: detail.description,
+                type: detail.type,
+            });
+        }
     });
 
     socket.on('addon:meta-bench-r1:job', async (job) => {

@@ -132,10 +132,12 @@ node addons/meta-bench-r1/runner/serve.js \
 接続失敗時は `[runner:error:...]` や `[runner:warn:...]` が出ます。例:
 
 ```
-[runner:error:main] register failed — Runner はサーバーに登録されていません | HTTP 401
-[runner:error:socket] connect_error websocket error
+[runner:error:socket] connect_error AUTH_REQUIRED | data={"code":"..."}
+[runner:debug:socket] connect_error detail { message, data, ... }
 [runner:warn:socket-pool] bot 3 failed bot-3: connect timeout (15s)
 ```
+
+`connect_error` が続く場合は **サーバー側のデプロイ**（`server.js` の runnerSecret 対応）が古い可能性があります。Node 再起動後に再試行してください。
 
 **ペアリングコード方式**（`runnerSecret` を Runner 側に書きたくない場合）:
 
@@ -162,6 +164,7 @@ node addons/meta-bench-r1/runner/serve.js \
 | 表示 | 意味 | 対処 |
 |------|------|------|
 | Runner が未接続… | P-01 | ステップ 1 の `serve.js` を起動・URL/secret 確認 |
+| Runner の Socket.IO が未接続… | P-01b | `--debug` で `connect_error` を確認。サーバー再起動（`runnerSecret` 対応版） |
 | 別のベンチ run が実行中 | P-02 | 前回 run の完了を待つか **中止** |
 | ベンチメンテナンスモードが ON | P-03 | 前回が異常終了した可能性。サーバー再起動で解除 |
 | レポート保存先の空き容量… | P-04 | ディスク空き 50MB 以上 |

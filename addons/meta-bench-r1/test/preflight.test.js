@@ -10,13 +10,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 process.env.META_SRC_DIRECTORY = repoRoot;
 
 const { runPreflightChecks } = await import('../lib/preflight.js');
-const { registerRunner } = await import('../lib/runner-registry.js');
+const { registerRunner, attachRunnerSocket } = await import('../lib/runner-registry.js');
 const { setMediasoupReadyChecker } = await import('../../../lib/bench-maintenance.js');
 
 describe('preflight', () => {
     beforeEach(() => {
         setMediasoupReadyChecker(() => true);
         registerRunner({ name: 'test-runner', recommendedMaxBots: 20 });
+        attachRunnerSocket('test-socket-id');
     });
 
     it('fails when bot count exceeds recommended max', () => {
@@ -29,6 +30,19 @@ describe('preflight', () => {
         });
         assert.equal(result.ok, false);
         assert.ok(result.failures.some((f) => f.includes('推奨 max')));
+    });
+
+    it('fails when runner socket is not attached', () => {
+        registerRunner({ name: 'test-runner', recommendedMaxBots: 20 });
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-pf-'));
+        const result = runPreflightChecks({
+            db: { prepare: () => ({ get: () => ({}) }) },
+            reportsDir: dir,
+            botCount: 10,
+            hasActiveRun: false,
+        });
+        assert.equal(result.ok, false);
+        assert.ok(result.failures.some((f) => f.includes('Socket.IO')));
     });
 
     it('fails when another run is active', () => {

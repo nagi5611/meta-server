@@ -5,6 +5,7 @@ import { STORAGE_PATHS } from '../../config/storage-paths.js';
 import path from 'node:path';
 import { HOOKS } from '../../lib/hook-registry.js';
 import { verifyBenchToken } from '../../lib/bench-maintenance.js';
+import { setBenchRunnerSecret } from '../../lib/bench-runner-auth.js';
 import {
     registerRunner,
     heartbeatRunner,
@@ -56,6 +57,8 @@ export default {
                 : typeof ctx.config.runnerSecret === 'string'
                   ? ctx.config.runnerSecret
                   : '';
+
+        setBenchRunnerSecret(runnerSecret);
 
         const defaultBotCount =
             typeof ctx.config.defaultBotCount === 'number' ? ctx.config.defaultBotCount : 50;

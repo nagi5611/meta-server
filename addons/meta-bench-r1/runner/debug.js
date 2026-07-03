@@ -55,8 +55,12 @@ export function runnerError(tag, ...args) {
  */
 export function formatError(err) {
     if (err instanceof Error) {
-        const parts = [err.message];
-        if (err.cause) parts.push(`cause=${formatError(err.cause)}`);
+        const e = /** @type {Error & { data?: unknown; description?: unknown; type?: string }} */ (err);
+        const parts = [e.message];
+        if (e.data != null) parts.push(`data=${JSON.stringify(e.data)}`);
+        if (e.description != null) parts.push(`description=${String(e.description)}`);
+        if (e.type) parts.push(`type=${e.type}`);
+        if (e.cause) parts.push(`cause=${formatError(e.cause)}`);
         return parts.join(' | ');
     }
     return String(err);

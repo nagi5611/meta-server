@@ -1,6 +1,7 @@
 // addons/meta-bench-r1/runner/socket-bot-pool.js — Socket.IO 負荷 bot プール
 import { io } from 'socket.io-client';
 import { runnerDebug, runnerInfo, runnerWarn, formatError } from './debug.js';
+import { buildSocketIoOptions } from './socket-client-options.js';
 
 const CONNECT_STAGGER_MS = 50;
 const UPDATE_HZ = 30;
@@ -99,11 +100,7 @@ async function runSingleBot(opts) {
     /** @type {number[]} */
     const pings = [];
 
-    const socket = io(serverUrl, {
-        transports: ['websocket'],
-        auth: { benchToken },
-        reconnection: false,
-    });
+    const socket = io(serverUrl, buildSocketIoOptions(serverUrl, { benchToken }, { reconnection: false }));
 
     try {
         await waitConnect(socket, `bot-${index + 1}`);

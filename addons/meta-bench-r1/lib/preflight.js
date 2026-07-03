@@ -17,8 +17,14 @@ export function runPreflightChecks(opts) {
     /** @type {string[]} */
     const failures = [];
 
+    const runner = getRunnerStatus();
+
     if (!isRunnerConnected(30_000)) {
         failures.push('Bench Runner が未接続、または最終 heartbeat が 30 秒を超えています。');
+    } else if (!runner.socketId) {
+        failures.push(
+            'Bench Runner の Socket.IO が未接続です（HTTP heartbeat のみ）。Runner ログで connect_error を確認してください。'
+        );
     }
 
     if (hasActiveRun) {
@@ -48,7 +54,6 @@ export function runPreflightChecks(opts) {
         failures.push('mediasoup / VC 系が起動していません。サーバログを確認してください。');
     }
 
-    const runner = getRunnerStatus();
     if (runner.recommendedMaxBots != null && botCount > runner.recommendedMaxBots) {
         failures.push(
             `bot 数 ${botCount} が Runner の推奨 max ${runner.recommendedMaxBots} を超えています。`
