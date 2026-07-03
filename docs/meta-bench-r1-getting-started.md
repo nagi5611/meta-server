@@ -175,7 +175,7 @@ node addons/meta-bench-r1/runner/serve.js \
 
 ## ステップ 3: ベンチ開始
 
-1. **bot 数** を入力（既定 50。Runner の `--max-bots` 以下にすること）
+1. **bot 数** を入力（既定 **25**。弱いサーバー・モバイル回線の Runner では 20 前後から試す。Runner の `--max-bots` 以下にすること）
 2. **ベンチ開始** をクリック
 3. 画面下部のステータスが `phase: ...` と変わっていく（最大約 6 分でタイムアウト）
 4. 完了後 **レポートを開く** リンクから HTML を確認
@@ -226,6 +226,27 @@ Runner のターミナルには `[runner] job socket-bots` / `audio-vc` が出�
 - Runner がジョブ実行中に落ちていないか（ターミナルログ）
 - 本番から手元 PC への Socket がブロックされていないか
 - VC 系は Windows Runner では FakeHandler のみのため、本番同等の計測は **Linux Runner + aiortc** 推奨
+
+### mv-connect の ping が極端に高い（数万 ms）
+
+- Runner とサーバー間の **ネットワーク RTT** がそのまま入ります（4G / モバイル回線、VPN、遠隔地など）
+- サーバー過負荷（bot 数過多・CPU 弱い）でも ping コールバックが遅延します
+- まず bot 数を **20〜25** に下げて再計測。Runner は可能なら **サーバーと同じ LAN / 有線** が理想
+
+### audio-vc を本番同等で計測したい（P1）
+
+Linux（Ubuntu 等）で Runner を起動すると `mediasoup-client-aiortc` が使えます:
+
+```bash
+node addons/meta-bench-r1/runner/serve.js \
+  --server https://<your-host> \
+  --secret <runnerSecret> \
+  --name linux-runner \
+  --max-bots 25 \
+  --debug
+```
+
+ログに `using mediasoup-client-aiortc` が出れば本番 WebRTC パスです。Windows は FakeHandler（参考値）になります。
 
 ### addon が読み込まれない（`id must be kebab-case`）
 

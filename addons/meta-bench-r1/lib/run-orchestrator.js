@@ -256,6 +256,10 @@ async function executeRun(db, runId, opts, ctrl) {
         await sleep(PHASE_MS.socketBots);
         if (ctrl.abort) throw new Error('aborted');
 
+        const tickSnap = getTickMetricsSnapshot();
+        metrics.tick = tickSnap;
+        scores['mv-tps'] = scoreMvTps(tickSnap.minTickPerSec, getTheoreticalMaxTps());
+
         patchRun(db, runId, { phase: 'db-sqlite' });
         const dbResult = runDbSqliteBenchmark(addonDbPath);
         metrics.dbSqlite = dbResult;
@@ -270,11 +274,6 @@ async function executeRun(db, runId, opts, ctrl) {
             pdfPath: opts.pdfPath,
         });
         await sleep(PHASE_MS.audioVc);
-
-        const tickSnap = getTickMetricsSnapshot();
-        metrics.tick = tickSnap;
-        const maxTps = getTheoreticalMaxTps();
-        scores['mv-tps'] = scoreMvTps(tickSnap.minTickPerSec, maxTps);
 
         const row = getRunRow(db, runId);
         const runnerMetrics = row?.metrics_json ? JSON.parse(row.metrics_json) : {};

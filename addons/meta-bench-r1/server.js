@@ -61,7 +61,7 @@ export default {
         setBenchRunnerSecret(runnerSecret);
 
         const defaultBotCount =
-            typeof ctx.config.defaultBotCount === 'number' ? ctx.config.defaultBotCount : 50;
+            typeof ctx.config.defaultBotCount === 'number' ? ctx.config.defaultBotCount : 25;
 
         const benchPdfPath =
             typeof ctx.config.benchPdfPath === 'string'

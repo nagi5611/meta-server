@@ -1,4 +1,4 @@
-// addons/meta-benchR1/runner/aiortc-worker.js — mediasoup-client-aiortc 共有 Worker
+// addons/meta-bench-r1/runner/aiortc-worker.js — mediasoup-client-aiortc 共有 Worker
 import os from 'node:os';
 
 /** @type {import('mediasoup-client-aiortc').Worker | null} */
@@ -61,11 +61,10 @@ export async function ensureMediasoupWorker() {
  */
 async function initFakeHandler(reason) {
     mode = 'fake';
-    const { FakeHandler } = await import('mediasoup-client');
-    const fakeParameters = (await import('mediasoup-client/lib/test/fakeParameters.js')).default;
-    handlerFactory = FakeHandler.createFactory(fakeParameters);
+    const { FakeHandler, testFakeParameters } = await import('mediasoup-client');
+    handlerFactory = FakeHandler.createFactory(testFakeParameters);
     console.warn(
-        `[bench-protocol] FakeHandler fallback (${reason}). audio-vc packetLoss is not production-grade.`
+        `[bench-protocol] FakeHandler fallback (${reason}). audio-vc packetLoss is not production-grade; use Linux Runner for aiortc.`
     );
 }
 

@@ -31,6 +31,12 @@ export async function runMediasoupBotPool(opts) {
     const n = Math.min(vcBotCount, 10);
     const worldId = worlds[Math.floor(Math.random() * worlds.length)] || 'default';
     runnerInfo('vc-pool', 'start', { n, worldId, pdfPath, durationMs, mode: getMediasoupMode() });
+    if (getMediasoupMode() === 'fake') {
+        runnerWarn(
+            'vc-pool',
+            'FakeHandler モード（Windows 等）。packetLoss は参考値。本番相当は Linux Runner + mediasoup-client-aiortc を推奨。'
+        );
+    }
     /** @type {import('socket.io-client').Socket[]} */
     const sockets = [];
     /** @type {MediasoupBenchClient[]} */

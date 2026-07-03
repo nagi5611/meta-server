@@ -79,7 +79,7 @@ function ensurePanelDom() {
                 <div class="bench-r1-card card-like">
                     <h3>ベンチ実行</h3>
                     <label class="bench-r1-label">bot 数
-                        <input type="number" id="bench-r1-bot-count" class="bench-r1-input" min="1" max="200" value="50" />
+                        <input type="number" id="bench-r1-bot-count" class="bench-r1-input" min="1" max="200" value="25" />
                     </label>
                     <div class="bench-r1-actions">
                         <button type="button" class="btn btn-secondary" id="bench-r1-preflight">プリフライト</button>
@@ -228,7 +228,7 @@ function bindEvents() {
     });
 
     document.getElementById('bench-r1-preflight')?.addEventListener('click', async () => {
-        const botCount = parseInt(String(document.getElementById('bench-r1-bot-count')?.value || '50'), 10);
+        const botCount = parseInt(String(document.getElementById('bench-r1-bot-count')?.value || '25'), 10);
         showFailures([]);
         try {
             const j = await apiFetch(`${API}/preflight?botCount=${botCount}`);
@@ -246,7 +246,7 @@ function bindEvents() {
     });
 
     document.getElementById('bench-r1-start')?.addEventListener('click', async () => {
-        const botCount = parseInt(String(document.getElementById('bench-r1-bot-count')?.value || '50'), 10);
+        const botCount = parseInt(String(document.getElementById('bench-r1-bot-count')?.value || '25'), 10);
         showFailures([]);
         setRunStatus('開始中…');
         try {
