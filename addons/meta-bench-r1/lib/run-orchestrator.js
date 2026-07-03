@@ -325,16 +325,17 @@ async function executeRun(db, runId, opts, ctrl) {
                 sleep(PHASE_MS.socketBots).then(() => {
                     const tickSnap = getTickMetricsSnapshot();
                     metrics.tick = tickSnap;
-                    scores['mv-tps'] = scoreMvTps(tickSnap.minTickPerSec, getTheoreticalMaxTps());
+                    scores['mv-tps'] = scoreMvTps(tickSnap.avgTickPerSec, getTheoreticalMaxTps());
                     console.log('[meta-bench-r1] socket-bots tick snapshot', {
                         runId,
+                        avgTickPerSec: tickSnap.avgTickPerSec,
                         minTickPerSec: tickSnap.minTickPerSec,
                         byRoom: tickSnap.byRoom,
                         debug: tickSnap.debug,
                         diagnosis: tickSnap.diagnosis,
                         pid: process.pid,
                     });
-                    if (tickSnap.minTickPerSec <= 0) {
+                    if (tickSnap.avgTickPerSec <= 0) {
                         const dbg = tickSnap.debug || {};
                         const diagnosis =
                             tickSnap.diagnosis ||

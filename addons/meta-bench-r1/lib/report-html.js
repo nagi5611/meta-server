@@ -82,8 +82,9 @@ export function buildBenchReportHtml(data) {
             ? `<div class="card" style="margin-bottom:1.25rem">
       <h2 class="section-title">TPS 計測診断</h2>
       <div class="server-grid">
-        <div class="server-item"><span class="k">minTickPerSec</span><span class="v">${escapeHtml(String(tick?.minTickPerSec ?? '—'))}</span></div>
-        <div class="server-item"><span class="k">ルーム別 TPS</span><span class="v"><code>${escapeHtml(JSON.stringify(tick?.byRoom ?? {}))}</code></span></div>
+        <div class="server-item"><span class="k">avgTickPerSec（スコア用）</span><span class="v">${escapeHtml(String(tick?.avgTickPerSec ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">minTickPerSec（参考）</span><span class="v">${escapeHtml(String(tick?.minTickPerSec ?? '—'))}</span></div>
+        <div class="server-item"><span class="k">ルーム別平均 TPS</span><span class="v"><code>${escapeHtml(JSON.stringify(tick?.byRoom ?? {}))}</code></span></div>
         <div class="server-item"><span class="k">hookInstalled</span><span class="v">${escapeHtml(String(tickDebug?.hookInstalled ?? '—'))}</span></div>
         <div class="server-item"><span class="k">hookCalls</span><span class="v">${escapeHtml(String(tickDebug?.totalHookCalls ?? '—'))}</span></div>
         <div class="server-item"><span class="k">recorded</span><span class="v">${escapeHtml(String(tickDebug?.totalRecordedEmits ?? '—'))}</span></div>

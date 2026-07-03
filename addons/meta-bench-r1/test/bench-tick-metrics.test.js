@@ -16,7 +16,7 @@ test('recordTickEmit counts only while sampling is active', () => {
     setBenchMaintenance({ active: false });
     recordTickEmit('lobby');
     let snap = getTickMetricsSnapshot();
-    assert.equal(snap.minTickPerSec, 0);
+    assert.equal(snap.avgTickPerSec, 0);
     assert.equal(snap.debug.totalRecordedEmits, 0);
     assert.ok(snap.debug.skippedNotSampling >= 1);
 
@@ -25,12 +25,29 @@ test('recordTickEmit counts only while sampling is active', () => {
     startTickSampling('test-run');
     for (let i = 0; i < 35; i++) recordTickEmit('lobby');
     snap = getTickMetricsSnapshot();
-    assert.ok(snap.minTickPerSec >= 30);
+    assert.ok(snap.avgTickPerSec >= 30);
     assert.equal(snap.byRoom.lobby, 35);
     assert.equal(snap.debug.totalRecordedEmits, 35);
     assert.equal(snap.debug.hookInstalled, true);
     stopTickSampling();
     setBenchMaintenance({ active: false });
+});
+
+test('avgTickPerSec uses mean not worst second', () => {
+    stopTickSampling();
+    registerTickHookInstalled();
+    startTickSampling('avg-test');
+    // 1秒目: 11 tick, 2秒目: 30 tick（バケットを進める）
+    for (let i = 0; i < 11; i++) recordTickEmit('lobby');
+    const bucketStart = Date.now();
+    while (Date.now() - bucketStart < 1000) {
+        /* wait for next second bucket */
+    }
+    for (let i = 0; i < 30; i++) recordTickEmit('lobby');
+    const snap = getTickMetricsSnapshot();
+    assert.equal(snap.minTickPerSec, 11);
+    assert.ok(snap.avgTickPerSec >= 20, `expected avg >= 20, got ${snap.avgTickPerSec}`);
+    stopTickSampling();
 });
 
 test('diagnoseTickMetrics explains skip-not-sampling', () => {
