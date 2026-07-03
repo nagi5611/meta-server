@@ -114,15 +114,27 @@ node addons/meta-bench-r1/runner/serve.js \
   --server https://<your-host> \
   --secret <config.json の runnerSecret と同じ値> \
   --name my-laptop \
-  --max-bots 50
+  --max-bots 50 \
+  --debug
 ```
+
+`--debug` を付けると接続失敗・ジョブ進行・各 bot の状態など詳細ログが出ます。トラブル時は必ず付けて起動してください。通常運用では省略可。
 
 成功時のログ例:
 
 ```
-[runner] registered
-[runner] socket connected <socket-id>
-[runner] attach { ok: true }
+[runner:main] 2026-07-03T09:00:00.000Z starting { server, name, maxBots, debug: true }
+[runner:main] 2026-07-03T09:00:00.100Z registered { runner: ... }
+[runner:socket] 2026-07-03T09:00:00.200Z connected { id: '<socket-id>', transport: 'websocket' }
+[runner:socket] 2026-07-03T09:00:00.250Z runner-attach ok { ok: true }
+```
+
+接続失敗時は `[runner:error:...]` や `[runner:warn:...]` が出ます。例:
+
+```
+[runner:error:main] register failed — Runner はサーバーに登録されていません | HTTP 401
+[runner:error:socket] connect_error websocket error
+[runner:warn:socket-pool] bot 3 failed bot-3: connect timeout (15s)
 ```
 
 **ペアリングコード方式**（`runnerSecret` を Runner 側に書きたくない場合）:
@@ -137,7 +149,7 @@ node addons/meta-bench-r1/runner/serve.js \
 **ベンチR1** パネル → **Runner 状態を更新**
 
 - **接続中** と表示されれば OK
-- **未接続** のときは Runner のターミナルログ・ファイアウォール・URL を確認
+- **未接続** のときは Runner のターミナルログ・ファイアウォール・URL を確認（`--debug` 推奨）
 
 ---
 

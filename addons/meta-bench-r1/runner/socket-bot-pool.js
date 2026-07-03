@@ -1,5 +1,6 @@
-// addons/meta-benchR1/runner/socket-bot-pool.js — Socket.IO 負荷 bot プール（要件 §7.3）
+// addons/meta-bench-r1/runner/socket-bot-pool.js — Socket.IO 負荷 bot プール
 import { io } from 'socket.io-client';
+import { runnerDebug, runnerInfo, runnerWarn, formatError } from './debug.js';
 
 const CONNECT_STAGGER_MS = 50;
 const UPDATE_HZ = 30;
@@ -26,11 +27,16 @@ export async function runSocketBotPool(opts) {
         durationMs = MAX_BOT_LIFETIME_MS,
     } = opts;
 
+    runnerInfo('socket-pool', 'start', { botCount, runId, worlds, durationMs });
+
     /** @type {Promise<{ connected: boolean, retentionRatio: number, pings: number[] }>[]} */
     const botTasks = [];
 
     for (let i = 0; i < botCount; i++) {
         if (i > 0) await sleep(CONNECT_STAGGER_MS);
+        if (i > 0 && i % 10 === 0) {
+            runnerDebug('socket-pool', `spawning bot ${i + 1}/${botCount}`);
+        }
         botTasks.push(
             runSingleBot({
                 serverUrl,
@@ -48,19 +54,36 @@ export async function runSocketBotPool(opts) {
     const pings = [];
     let connected = 0;
     let retentionSum = 0;
+    let failed = 0;
 
-    for (const result of settled) {
+    for (let i = 0; i < settled.length; i++) {
+        const result = settled[i];
         if (result.status === 'fulfilled' && result.value.connected) {
             connected++;
             retentionSum += result.value.retentionRatio;
             pings.push(...result.value.pings);
+            runnerDebug('socket-pool', `bot ${i + 1} ok`, {
+                pings: result.value.pings.length,
+                retention: result.value.retentionRatio,
+            });
+        } else {
+            failed++;
+            const reason =
+                result.status === 'rejected'
+                    ? formatError(result.reason)
+                    : result.value?.error || 'connect failed';
+            if (failed <= 5 || failed % 10 === 0) {
+                runnerWarn('socket-pool', `bot ${i + 1} failed`, reason);
+            }
         }
     }
 
     const retainPct = connected > 0 ? (retentionSum / connected) * 100 : 0;
     const pingP95Ms = percentile(pings, 95);
 
-    return { connected, requested: botCount, retainPct, pingP95Ms };
+    const summary = { connected, requested: botCount, failed, retainPct, pingP95Ms, pingSamples: pings.length };
+    runnerInfo('socket-pool', 'done', summary);
+    return summary;
 }
 
 /**
@@ -83,7 +106,8 @@ async function runSingleBot(opts) {
     });
 
     try {
-        await waitConnect(socket);
+        await waitConnect(socket, `bot-${index + 1}`);
+        runnerDebug('socket-bot', `bot ${index + 1} connected`, { id: socket.id, worldId, username });
         socket.emit('set-username', username);
         await changeWorld(socket, worldId);
 
@@ -133,8 +157,8 @@ async function runSingleBot(opts) {
         const retentionRatio = Math.min(1, sessionMs / plannedMs);
 
         return { connected: true, retentionRatio, pings };
-    } catch {
-        return { connected: false, retentionRatio: 0, pings };
+    } catch (e) {
+        return { connected: false, retentionRatio: 0, pings, error: formatError(e) };
     } finally {
         socket.disconnect();
     }
@@ -167,17 +191,19 @@ function measurePing(socket, pings) {
 
 /**
  * @param {import('socket.io-client').Socket} socket
+ * @param {string} [label]
  */
-function waitConnect(socket) {
+function waitConnect(socket, label = 'socket') {
     return new Promise((resolve, reject) => {
-        const to = setTimeout(() => reject(new Error('connect timeout')), 15_000);
+        const to = setTimeout(() => reject(new Error(`${label}: connect timeout (15s)`)), 15_000);
         socket.once('connect', () => {
             clearTimeout(to);
             resolve(undefined);
         });
         socket.once('connect_error', (e) => {
             clearTimeout(to);
-            reject(e);
+            const msg = e?.message || e?.description || String(e);
+            reject(new Error(`${label}: ${msg}`));
         });
     });
 }

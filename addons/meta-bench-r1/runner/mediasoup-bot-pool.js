@@ -1,7 +1,8 @@
-// addons/meta-benchR1/runner/mediasoup-bot-pool.js — VC / PDF VC / Video VC bot
+// addons/meta-bench-r1/runner/mediasoup-bot-pool.js — VC / PDF VC / Video VC bot
 import { io } from 'socket.io-client';
 import { MediasoupBenchClient, getMediasoupMode } from './protocol.js';
 import { closeMediasoupWorker } from './aiortc-worker.js';
+import { runnerDebug, runnerInfo, runnerWarn, formatError } from './debug.js';
 
 const STATS_INTERVAL_MS = 1000;
 const CONNECT_STAGGER_MS = 200;
@@ -28,6 +29,7 @@ export async function runMediasoupBotPool(opts) {
     } = opts;
     const n = Math.min(vcBotCount, 10);
     const worldId = worlds[Math.floor(Math.random() * worlds.length)] || 'default';
+    runnerInfo('vc-pool', 'start', { n, worldId, pdfPath, durationMs, mode: getMediasoupMode() });
     /** @type {import('socket.io-client').Socket[]} */
     const sockets = [];
     /** @type {MediasoupBenchClient[]} */
@@ -39,26 +41,33 @@ export async function runMediasoupBotPool(opts) {
 
     try {
         for (let i = 0; i < n; i++) {
-            const socket = await createBenchSocket(serverUrl, benchToken, runId, i, worldId);
-            sockets.push(socket);
+            runnerDebug('vc-pool', `bot ${i + 1}/${n} connecting`);
+            try {
+                const socket = await createBenchSocket(serverUrl, benchToken, runId, i, worldId);
+                sockets.push(socket);
 
-            const voice = new MediasoupBenchClient(socket, 'vc');
-            await voice.join({ roomId: worldId });
-            voiceClients.push(voice);
+                const voice = new MediasoupBenchClient(socket, 'vc');
+                await voice.join({ roomId: worldId });
+                voiceClients.push(voice);
+                runnerDebug('vc-pool', `bot ${i + 1} voice joined`, { mode: voice.mode });
 
-            const pdfSocket =
-                i === 0 ? socket : await createBenchSocket(serverUrl, benchToken, runId, i, worldId, '-pdf');
-            if (pdfSocket !== socket) sockets.push(pdfSocket);
-            const pdf = new MediasoupBenchClient(pdfSocket, 'pdf-vc');
-            await pdf.join({ pdfPath });
-            pdfClients.push(pdf);
+                const pdfSocket =
+                    i === 0 ? socket : await createBenchSocket(serverUrl, benchToken, runId, i, worldId, '-pdf');
+                if (pdfSocket !== socket) sockets.push(pdfSocket);
+                const pdf = new MediasoupBenchClient(pdfSocket, 'pdf-vc');
+                await pdf.join({ pdfPath });
+                pdfClients.push(pdf);
 
-            const videoSocket =
-                i === 0 ? socket : await createBenchSocket(serverUrl, benchToken, runId, i, worldId, '-vid');
-            if (videoSocket !== socket && !sockets.includes(videoSocket)) sockets.push(videoSocket);
-            const video = new MediasoupBenchClient(videoSocket, 'video-vc');
-            await video.join({ roomId: worldId });
-            videoClients.push(video);
+                const videoSocket =
+                    i === 0 ? socket : await createBenchSocket(serverUrl, benchToken, runId, i, worldId, '-vid');
+                if (videoSocket !== socket && !sockets.includes(videoSocket)) sockets.push(videoSocket);
+                const video = new MediasoupBenchClient(videoSocket, 'video-vc');
+                await video.join({ roomId: worldId });
+                videoClients.push(video);
+            } catch (e) {
+                runnerWarn('vc-pool', `bot ${i + 1} setup failed`, formatError(e));
+                throw e;
+            }
 
             if (i < n - 1) await sleep(CONNECT_STAGGER_MS);
         }
@@ -75,12 +84,14 @@ export async function runMediasoupBotPool(opts) {
         const pdfLoss = median(pdfClients.map((c) => c.getMedianLossPct()));
         const videoLoss = median(videoClients.map((c) => c.getMedianLossPct()));
 
-        return {
+        const result = {
             voiceLossPct: voiceLoss,
             pdfLossPct: pdfLoss,
             videoLossPct: videoLoss,
             handlerMode: getMediasoupMode(),
         };
+        runnerInfo('vc-pool', 'done', result);
+        return result;
     } finally {
         for (const c of [...voiceClients, ...pdfClients, ...videoClients]) {
             await c.close();
@@ -99,12 +110,14 @@ export async function runMediasoupBotPool(opts) {
  * @param {string} [suffix]
  */
 async function createBenchSocket(serverUrl, benchToken, runId, index, worldId, suffix = '') {
+    const label = `vc-bot-${index + 1}${suffix}`;
     const socket = io(serverUrl, {
         transports: ['websocket'],
         auth: { benchToken },
         reconnection: false,
     });
-    await waitConnect(socket);
+    await waitConnect(socket, label);
+    runnerDebug('vc-pool', `${label} connected`, { socketId: socket.id, worldId });
     socket.emit('set-username', `bench-${runId}-${index + 1}${suffix}`);
     socket.emit('change-world', { worldId }, () => {});
     return socket;
@@ -112,17 +125,19 @@ async function createBenchSocket(serverUrl, benchToken, runId, index, worldId, s
 
 /**
  * @param {import('socket.io-client').Socket} socket
+ * @param {string} [label]
  */
-function waitConnect(socket) {
+function waitConnect(socket, label = 'vc-socket') {
     return new Promise((resolve, reject) => {
-        const to = setTimeout(() => reject(new Error('connect timeout')), 15_000);
+        const to = setTimeout(() => reject(new Error(`${label}: connect timeout (15s)`)), 15_000);
         socket.once('connect', () => {
             clearTimeout(to);
             resolve(undefined);
         });
         socket.once('connect_error', (e) => {
             clearTimeout(to);
-            reject(e);
+            const msg = e?.message || e?.description || String(e);
+            reject(new Error(`${label}: ${msg}`));
         });
     });
 }

@@ -1,10 +1,11 @@
-// addons/meta-benchR1/runner/protocol.js — mediasoup VC イベント列（aiortc 本番 / FakeHandler フォールバック）
+// addons/meta-bench-r1/runner/protocol.js — mediasoup VC イベント列（aiortc 本番 / FakeHandler フォールバック）
 import { Device } from 'mediasoup-client';
 import {
     getMediasoupHandlerContext,
     getMediasoupMode,
     createMediaTrack,
 } from './aiortc-worker.js';
+import { runnerDebug, runnerWarn } from './debug.js';
 
 export { getMediasoupMode };
 
@@ -15,13 +16,24 @@ export { getMediasoupMode };
  * @param {object} payload
  */
 function emitAsync(socket, event, payload = {}) {
+    runnerDebug('protocol', `emit ${event}`, { keys: Object.keys(payload) });
     return new Promise((resolve, reject) => {
         socket.emit(event, payload, (res) => {
-            if (!res) return reject(new Error(`${event}: empty response`));
-            if (res.error) return reject(new Error(res.error));
+            if (!res) {
+                runnerWarn('protocol', `${event}: empty response`);
+                return reject(new Error(`${event}: empty response`));
+            }
+            if (res.error) {
+                runnerWarn('protocol', `${event}: server error`, res.error);
+                return reject(new Error(res.error));
+            }
+            runnerDebug('protocol', `${event} ok`);
             resolve(res);
         });
-        setTimeout(() => reject(new Error(`${event}: timeout`)), 30_000);
+        setTimeout(() => {
+            runnerWarn('protocol', `${event}: timeout (30s)`);
+            reject(new Error(`${event}: timeout`));
+        }, 30_000);
     });
 }
 
@@ -63,16 +75,19 @@ export class MediasoupBenchClient {
                 ? { pdfPath: opts.pdfPath || '/pdfs/bench-sample.pdf' }
                 : { roomId: opts.roomId || 'default' };
 
+        runnerDebug('protocol', `${this.prefix} join start`, joinPayload);
         const joinRes = await emitAsync(this.socket, joinEvent, joinPayload);
         const rtpCapabilities = joinRes.rtpCapabilities;
         if (!rtpCapabilities) throw new Error(`${joinEvent}: missing rtpCapabilities`);
 
         if (Array.isArray(joinRes.iceServers) && joinRes.iceServers.length > 0) {
             this.iceServers = joinRes.iceServers;
+            runnerDebug('protocol', `${this.prefix} iceServers`, { count: joinRes.iceServers.length });
         }
 
         const { handlerFactory, mode } = await getMediasoupHandlerContext();
         this.mode = mode;
+        runnerDebug('protocol', `${this.prefix} handler`, { mode });
         this.device = new Device({ handlerFactory });
         await this.device.load({ routerRtpCapabilities: rtpCapabilities });
 
@@ -90,13 +105,15 @@ export class MediasoupBenchClient {
 
         const audioTrack = await createMediaTrack('audio');
         this.producer = await this.sendTransport.produce({ track: audioTrack });
+        runnerDebug('protocol', `${this.prefix} audio produced`, { producerId: this.producer?.id });
 
         if (this.prefix === 'video-vc') {
             try {
                 const videoTrack = await createMediaTrack('video');
                 this.videoProducer = await this.sendTransport.produce({ track: videoTrack });
+                runnerDebug('protocol', 'video-vc video produced', { producerId: this.videoProducer?.id });
             } catch (e) {
-                console.warn('[bench-protocol] video-vc video produce skipped:', e);
+                runnerWarn('protocol', 'video-vc video produce skipped', e);
             }
         }
 
@@ -104,10 +121,12 @@ export class MediasoupBenchClient {
             if (peerId === this.socket.id) return;
             try {
                 await this._consume(producerId);
+                runnerDebug('protocol', `${this.prefix} consumed`, { producerId, peerId });
             } catch (e) {
-                console.warn(`[bench-protocol] consume failed:`, e);
+                runnerWarn('protocol', `${this.prefix} consume failed`, { producerId, error: e });
             }
         });
+        runnerDebug('protocol', `${this.prefix} join complete`);
     }
 
     async _createSendTransport() {
