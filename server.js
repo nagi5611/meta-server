@@ -23,6 +23,7 @@ import { signSocketAuthToken, verifySocketAuthToken, SOCKET_AUTH_TOKEN_MAX_AGE_M
 import {
     benchMaintenanceSocketMiddleware,
     applyBenchBotSocketData,
+    emitBenchMaintenanceStatusToSocket,
     setMediasoupReadyChecker,
     peekBenchToken,
 } from './lib/bench-maintenance.js';
@@ -2905,6 +2906,7 @@ function cleanupTaikoMpOnDisconnect(ioSrv, socketId) {
 // Socket.io connection handling
 io.on('connection', (socket) => {
     applyBenchBotSocketData(socket);
+    emitBenchMaintenanceStatusToSocket(socket);
 
     // Verify admin token and user role if provided
     const adminToken = socket.handshake.auth?.adminToken;

@@ -42,6 +42,22 @@ body {
     font-weight: 600;
 }
 
+.bench-running-banner {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: #b45309;
+    background: #fff7ed;
+    border: 1px solid #fbbf24;
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin-bottom: 10px;
+}
+
+.bench-running-banner[hidden] {
+    display: none !important;
+}
+
 #info-stats p {
     font-size: 12px;
     margin: 4px 0;
@@ -153,10 +169,12 @@ body {
 }
 
 .player-list {
+    --player-list-row-height: 38px;
+    --player-list-gap: 4px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    max-height: 360px;
+    gap: var(--player-list-gap);
+    max-height: calc(6 * var(--player-list-row-height) + 5 * var(--player-list-gap));
     overflow-y: auto;
     overflow-x: hidden;
     padding-right: 6px;
@@ -2651,6 +2669,21 @@ a.admin-menu-link:hover {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    .mobile-bench-banner {
+        display: inline-block;
+        margin-right: 6px;
+        padding: 1px 6px;
+        border-radius: 6px;
+        font-weight: 700;
+        color: #fff7ed;
+        background: #d97706;
+        vertical-align: middle;
+    }
+
+    .mobile-bench-banner[hidden] {
+        display: none !important;
     }
 
     /* メニュートグル: 右上 */

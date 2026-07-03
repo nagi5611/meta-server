@@ -22,6 +22,16 @@ export const METAVERSE_STRINGS = {
         zh: '按 V 开始观看 / Shift+单击或 U 解除鼠标锁定',
     },
     'info.pingTitle': { ja: 'サーバー応答時間', en: 'Server latency', zh: '服务器延迟' },
+    'info.benchRunning': {
+        ja: 'ベンチマーク実行中',
+        en: 'Benchmark in progress',
+        zh: '正在运行基准测试',
+    },
+    'info.benchRunningShort': {
+        ja: 'ベンチ実行中',
+        en: 'Benchmark',
+        zh: '基准测试中',
+    },
 
     'admin.playerInfoTitle': { ja: 'プレイヤー情報', en: 'Player info', zh: '玩家信息' },
     'admin.closeTitle': { ja: '閉じる', en: 'Close', zh: '关闭' },

@@ -54,6 +54,10 @@ class UIManager {
         this.mobileInteractBtn = null;
         /** @type {(() => void)|null} */
         this._mobileInteractAction = null;
+        /** @type {HTMLElement|null} */
+        this.benchRunningBanner = null;
+        /** @type {HTMLElement|null} */
+        this.mobileBenchBanner = null;
         this.init();
     }
 
@@ -208,6 +212,8 @@ class UIManager {
         this.worldLoadPct = document.getElementById('world-load-pct');
 
         this.menuBar = document.getElementById('menu-bar');
+        this.benchRunningBanner = document.getElementById('bench-running-banner');
+        this.mobileBenchBanner = document.getElementById('mobile-bench-banner');
 
         this.mobileInteractBtn = document.getElementById('mobile-interact-btn');
         if (this.mobileInteractBtn && !this.mobileInteractBtn.dataset.wiredInteract) {
@@ -477,6 +483,24 @@ class UIManager {
         const countElement = document.getElementById('player-count');
         if (countElement) {
             countElement.textContent = count;
+        }
+    }
+
+    /**
+     * ベンチマーク実行中バナーの表示切替（左上 info / モバイル info）
+     * @param {boolean} active
+     * @param {string} [message]
+     */
+    setBenchRunningBanner(active, message) {
+        const text = (message && String(message).trim()) || t('info.benchRunning');
+        const shortText = t('info.benchRunningShort');
+        if (this.benchRunningBanner) {
+            this.benchRunningBanner.textContent = text;
+            this.benchRunningBanner.hidden = !active;
+        }
+        if (this.mobileBenchBanner) {
+            this.mobileBenchBanner.textContent = shortText;
+            this.mobileBenchBanner.hidden = !active;
         }
     }
 

@@ -286,6 +286,9 @@ class MetaverseApp {
         this.networkManager.setLocalPlayerBlockedCheck((id) => this.playerBlockList.has(id));
         this.networkManager.currentWorld = initialWorldId;
         this.networkManager.onAdminTp = (data) => this.onAdminTp(data);
+        this.networkManager.onBenchMaintenanceStatus = (data) => {
+            this.uiManager.setBenchRunningBanner(!!(data && data.active), data?.message);
+        };
         this.setupClientPerfObservers();
         this.networkManager.setPerfPayloadGetter(() => this.getPerfPayloadForPing());
         this.networkManager.setPostConnectHandler(async () => {

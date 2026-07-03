@@ -63,6 +63,8 @@ class NetworkManager {
         this._isLocalPlayerBlocked = null;
         /** player-update 操縦時カメラ姿勢用 */
         this._pilotSendQuatScratch = new THREE.Quaternion();
+        /** @type {((data: { active?: boolean, message?: string, runId?: string|null }) => void)|null} */
+        this.onBenchMaintenanceStatus = null;
         /** @type {Map<string, boolean>} 前 tick の飛行機搭乗状態（降機検知用） */
         this._remoteAircraftOccupied = new Map();
         /** 表示距離内ワールド表示完了までリモートアバター GLB 読み込みを遅延 */
@@ -476,7 +478,23 @@ class NetworkManager {
             }
         });
 
+        this.socket.on('bench-maintenance-status', (data) => {
+            if (this.onBenchMaintenanceStatus) {
+                this.onBenchMaintenanceStatus(data);
+            }
+        });
+
         this.socket.on('bench-maintenance-warning', (data) => {
+            if (this.onBenchMaintenanceStatus) {
+                this.onBenchMaintenanceStatus({
+                    active: true,
+                    message:
+                        data && data.message
+                            ? data.message
+                            : undefined,
+                });
+                return;
+            }
             const msg =
                 data && data.message
                     ? data.message

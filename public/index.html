@@ -45,11 +45,13 @@
     <div id="immersive-overlay-root" class="immersive-overlay-root">
     <!-- モバイル用コンパクト info (768px以下で表示) -->
     <div id="mobile-info" class="mobile-info" aria-hidden="true">
+        <span id="mobile-bench-banner" class="mobile-bench-banner" hidden data-i18n="info.benchRunningShort">ベンチ実行中</span>
         <span id="mobile-world-name">-</span> | <span id="mobile-position">0,0,0</span> | <span id="mobile-player-count">0</span>
     </div>
 
     <div id="info">
         <h1 data-i18n="info.appTitle">松山南高校 みんなでメタ</h1>
+        <div id="bench-running-banner" class="bench-running-banner" hidden role="status" data-i18n="info.benchRunning">ベンチマーク実行中</div>
         <div id="info-stats">
             <p><span data-i18n="info.worldLabel"></span> <span id="world-name">-</span></p>
             <p><span data-i18n="info.positionLabel"></span> <span id="position-display">0, 0, 0</span></p>
