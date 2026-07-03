@@ -10,7 +10,9 @@ import {
     registerRunner,
     heartbeatRunner,
     attachRunnerSocket,
+    detachRunnerSocket,
     getRunnerStatus,
+    listRunners,
     createPairingCode,
     getPairingCode,
     consumePairingCode,
@@ -29,6 +31,7 @@ import { scorePacketLoss, scoreVoiceMatch } from './lib/scoring.js';
 import {
     normalizeBenchPdfPath,
 } from './lib/bench-pdf-path.js';
+import { BENCH_PHASE_DEFS, normalizeBenchPhases } from './lib/bench-phases.js';
 
 const JSON_LIMIT = '64kb';
 
@@ -94,7 +97,11 @@ export default {
             const jsonMw = express.json({ limit: JSON_LIMIT });
 
             app.get('/admin/addons/meta-bench-r1/runner/status', (_req, res) => {
-                res.json({ ok: true, runner: getRunnerStatus() });
+                res.json({ ok: true, runners: listRunners(), runner: getRunnerStatus() });
+            });
+
+            app.get('/admin/addons/meta-bench-r1/phases', (_req, res) => {
+                res.json({ ok: true, phases: BENCH_PHASE_DEFS });
             });
 
             app.get('/admin/addons/meta-bench-r1/runner/pairing-code', (_req, res) => {
@@ -105,19 +112,31 @@ export default {
 
             app.get('/admin/addons/meta-bench-r1/preflight', (req, res) => {
                 const botCount = parseInt(String(req.query.botCount || defaultBotCount), 10);
-                const result = evaluatePreflight(db, Number.isFinite(botCount) ? botCount : defaultBotCount);
-                res.json({ ok: result.ok, failures: result.failures });
+                const runnerName = typeof req.query.runnerName === 'string' ? req.query.runnerName : '';
+                const phases = normalizeBenchPhases(
+                    typeof req.query.phases === 'string' ? req.query.phases.split(',') : undefined
+                );
+                const result = evaluatePreflight(db, Number.isFinite(botCount) ? botCount : defaultBotCount, {
+                    runnerName,
+                    phases,
+                });
+                res.json({ ok: result.ok, failures: result.failures, phases: result.phases });
             });
 
             app.post('/admin/addons/meta-bench-r1/runs', jsonMw, async (req, res) => {
                 try {
                     const botCount = parseInt(String(req.body?.botCount ?? defaultBotCount), 10);
+                    const runnerName =
+                        typeof req.body?.runnerName === 'string' ? req.body.runnerName.trim() : '';
+                    const phases = normalizeBenchPhases(req.body?.phases);
                     const worlds = worldsReader();
                     const run = await startRun(db, {
                         botCount: Number.isFinite(botCount) ? botCount : defaultBotCount,
                         worlds,
                         pdfPath: benchPdfPath,
                         config: { ...ctx.config, coreVersion: ctx.coreVersion },
+                        runnerName,
+                        phases,
                     });
                     res.status(201).json({ ok: true, ...run });
                 } catch (e) {
@@ -169,7 +188,7 @@ export default {
                     name,
                     recommendedMaxBots: Number.isFinite(recommendedMaxBots) ? recommendedMaxBots : 50,
                 });
-                res.json({ ok: true, runner: getRunnerStatus() });
+                res.json({ ok: true, runner: getRunnerStatus(), runners: listRunners() });
             });
 
             app.post(`${ctx.paths.httpBasePath}/runner/heartbeat`, jsonMw, (req, res) => {
@@ -177,7 +196,9 @@ export default {
                 if (!runnerSecret || !safeEqualSecret(secret, runnerSecret)) {
                     return res.status(403).json({ ok: false, error: 'unauthorized' });
                 }
-                if (!heartbeatRunner()) {
+                const runnerName =
+                    typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+                if (!heartbeatRunner(runnerName || undefined)) {
                     return res.status(404).json({ ok: false, error: 'runner_not_registered' });
                 }
                 res.json({ ok: true });
@@ -228,8 +249,21 @@ export default {
                         if (typeof ack === 'function') ack({ ok: false, error: 'unauthorized' });
                         return;
                     }
-                    attachRunnerSocket(socket.id);
-                    if (typeof ack === 'function') ack({ ok: true });
+                    const runnerName =
+                        typeof payload?.name === 'string' ? payload.name.trim() : '';
+                    if (!runnerName) {
+                        if (typeof ack === 'function') ack({ ok: false, error: 'missing_runner_name' });
+                        return;
+                    }
+                    if (!attachRunnerSocket(runnerName, socket.id)) {
+                        if (typeof ack === 'function') ack({ ok: false, error: 'runner_not_registered' });
+                        return;
+                    }
+                    if (typeof ack === 'function') ack({ ok: true, name: runnerName });
+                });
+
+                socket.on('disconnect', () => {
+                    detachRunnerSocket(socket.id);
                 });
 
                 socket.on('addon:meta-bench-r1:progress', (payload) => {

@@ -34,7 +34,13 @@ import {
     clampScore,
 } from './scoring.js';
 import { buildBenchReportHtml, benchReportFilename } from './report-html.js';
-import { getRunnerStatus } from './runner-registry.js';
+import { getRunnerStatusByName } from './runner-registry.js';
+import {
+    normalizeBenchPhases,
+    isBenchPhaseEnabled,
+    scoreKeysForPhases,
+    BENCH_PHASE_DEFS,
+} from './bench-phases.js';
 
 const RUN_TIMEOUT_MS = 6 * 60 * 1000;
 const PHASE_MS = {
@@ -115,24 +121,29 @@ function patchRun(db, runId, patch) {
 /**
  * @param {import('better-sqlite3').Database} db
  * @param {number} botCount
+ * @param {{ runnerName?: string, phases?: string[] }} [extra]
  */
-export function evaluatePreflight(db, botCount) {
+export function evaluatePreflight(db, botCount, extra = {}) {
     const hasActive = !!getActiveRunRow(db);
     return runPreflightChecks({
         db,
         reportsDir,
         botCount,
         hasActiveRun: hasActive,
+        runnerName: extra.runnerName,
+        phases: extra.phases,
     });
 }
 
 /**
  * @param {import('better-sqlite3').Database} db
- * @param {{ botCount: number, worlds: string[], pdfPath: string, config: Record<string, unknown> }} opts
+ * @param {{ botCount: number, worlds: string[], pdfPath: string, config: Record<string, unknown>, runnerName?: string, phases?: string[] }} opts
  */
 export async function startRun(db, opts) {
     const botCount = opts.botCount;
-    const pre = evaluatePreflight(db, botCount);
+    const phases = normalizeBenchPhases(opts.phases);
+    const runnerName = typeof opts.runnerName === 'string' ? opts.runnerName.trim() : '';
+    const pre = evaluatePreflight(db, botCount, { runnerName, phases });
     if (!pre.ok) {
         const err = new Error(pre.failures.join('\n'));
         err.failures = pre.failures;
@@ -150,11 +161,11 @@ export async function startRun(db, opts) {
     const runControl = { abort: false, benchToken };
     activeRuns.set(runId, runControl);
 
-    executeRun(db, runId, opts, runControl).catch((e) => {
+    executeRun(db, runId, { ...opts, phases, runnerName }, runControl).catch((e) => {
         console.error('[meta-bench-r1] run error:', e);
     });
 
-    return { runId, benchToken };
+    return { runId, benchToken, phases, runnerName };
 }
 
 /**
@@ -245,6 +256,12 @@ async function executeRun(db, runId, opts, ctrl) {
         ctrl.abort = true;
     }, RUN_TIMEOUT_MS);
 
+    const phases = normalizeBenchPhases(opts.phases);
+    const runnerName = opts.runnerName;
+    const needsRunner = isBenchPhaseEnabled(phases, 'socket-bots') || isBenchPhaseEnabled(phases, 'audio-vc');
+    const needsBenchUsers = isBenchPhaseEnabled(phases, 'socket-bots');
+    const needsTick = isBenchPhaseEnabled(phases, 'socket-bots');
+
     /** @type {Record<string, number | null>} */
     const scores = {};
     /** @type {string[]} */
@@ -253,89 +270,138 @@ async function executeRun(db, runId, opts, ctrl) {
     const notes = [];
     let status = 'completed';
     const startedAt = Date.now();
-    const metrics = {};
+    const metrics = {
+        runnerName,
+        phases,
+        phaseLabels: BENCH_PHASE_DEFS.filter((p) => phases.includes(p.id)).map((p) => p.label),
+    };
+
+    let cpuBefore = null;
+    let cpuRatio = 0;
 
     try {
-        setBenchMaintenance({ active: true, runId, io: ioRef });
-        startTickSampling();
+        if (needsRunner) {
+            setBenchMaintenance({ active: true, runId, io: ioRef });
+        }
+        if (needsTick) {
+            startTickSampling();
+        }
         patchRun(db, runId, { phase: 'maintenance-on' });
 
-        createBenchUsers(runId, opts.botCount);
+        if (needsBenchUsers) {
+            createBenchUsers(runId, opts.botCount);
+        }
 
-        dispatchRunnerJob(runId, ctrl.benchToken, {
-            phase: 'socket-bots',
-            botCount: opts.botCount,
-            worlds: opts.worlds,
-            pdfPath: opts.pdfPath,
-        });
+        /** @type {Promise<void>[]} */
+        const parallelWaits = [];
 
-        patchRun(db, runId, { phase: 'hw-cpu-mem' });
-        const cpuBefore = process.cpuUsage(cpuBaseline || undefined);
-        const [cpuResult, memResult] = await Promise.all([
-            runHwCpuBenchmark(PHASE_MS.hw),
-            runHwMemBenchmark(),
-        ]);
-        metrics.hwCpu = cpuResult;
-        metrics.hwMem = memResult;
+        if (isBenchPhaseEnabled(phases, 'socket-bots')) {
+            dispatchRunnerJob(
+                runId,
+                ctrl.benchToken,
+                {
+                    phase: 'socket-bots',
+                    botCount: opts.botCount,
+                    worlds: opts.worlds,
+                    pdfPath: opts.pdfPath,
+                },
+                runnerName
+            );
+            cpuBefore = process.cpuUsage(cpuBaseline || undefined);
+            patchRun(db, runId, { phase: 'socket-bots' });
+            parallelWaits.push(
+                sleep(PHASE_MS.socketBots).then(() => {
+                    const tickSnap = getTickMetricsSnapshot();
+                    metrics.tick = tickSnap;
+                    scores['mv-tps'] = scoreMvTps(tickSnap.minTickPerSec, getTheoreticalMaxTps());
+                    if (cpuBefore) {
+                        const cpuDuring = process.cpuUsage(cpuBefore);
+                        cpuRatio =
+                            (cpuDuring.user + cpuDuring.system) /
+                            Math.max(1, PHASE_MS.socketBots * 1000 * os.cpus().length);
+                    }
+                })
+            );
+        }
 
-        const cpuRatio =
-            (cpuBefore.user + cpuBefore.system) /
-            Math.max(1, PHASE_MS.hw * 1000 * os.cpus().length);
-        scores['hw-cpu'] = scoreHwCpu(cpuResult.opsPerSec);
-        scores['hw-mem'] = scoreHwMem(memResult);
+        if (isBenchPhaseEnabled(phases, 'hw')) {
+            patchRun(db, runId, { phase: 'hw-cpu-mem' });
+            if (!cpuBefore) cpuBefore = process.cpuUsage(cpuBaseline || undefined);
+            parallelWaits.push(
+                Promise.all([runHwCpuBenchmark(PHASE_MS.hw), runHwMemBenchmark()]).then(
+                    ([cpuResult, memResult]) => {
+                        metrics.hwCpu = cpuResult;
+                        metrics.hwMem = memResult;
+                        scores['hw-cpu'] = scoreHwCpu(cpuResult.opsPerSec);
+                        scores['hw-mem'] = scoreHwMem(memResult);
+                        if (!isBenchPhaseEnabled(phases, 'socket-bots') && cpuBefore) {
+                            const cpuDuring = process.cpuUsage(cpuBefore);
+                            cpuRatio =
+                                (cpuDuring.user + cpuDuring.system) /
+                                Math.max(1, PHASE_MS.hw * 1000 * os.cpus().length);
+                        }
+                    }
+                )
+            );
+        }
 
-        patchRun(db, runId, { phase: 'socket-bots' });
-        await sleep(PHASE_MS.socketBots);
-        if (ctrl.abort) throw new Error('aborted');
+        if (parallelWaits.length) {
+            await Promise.all(parallelWaits);
+            if (ctrl.abort) throw new Error('aborted');
+        }
 
-        const tickSnap = getTickMetricsSnapshot();
-        metrics.tick = tickSnap;
-        scores['mv-tps'] = scoreMvTps(tickSnap.minTickPerSec, getTheoreticalMaxTps());
+        if (isBenchPhaseEnabled(phases, 'db-sqlite')) {
+            patchRun(db, runId, { phase: 'db-sqlite' });
+            const dbResult = runDbSqliteBenchmark(addonDbPath);
+            metrics.dbSqlite = dbResult;
+            scores['db-sqlite'] = scoreDbLatency(dbResult.maxLatencyMs);
+        }
 
-        patchRun(db, runId, { phase: 'db-sqlite' });
-        const dbResult = runDbSqliteBenchmark(addonDbPath);
-        metrics.dbSqlite = dbResult;
-        scores['db-sqlite'] = scoreDbLatency(dbResult.maxLatencyMs);
-
-        patchRun(db, runId, { phase: 'audio-vc' });
-        dispatchRunnerJob(runId, ctrl.benchToken, {
-            phase: 'audio-vc',
-            botCount: opts.botCount,
-            vcBotCount: 10,
-            worlds: opts.worlds,
-            pdfPath: opts.pdfPath,
-        });
-        await sleep(PHASE_MS.audioVc);
+        if (isBenchPhaseEnabled(phases, 'audio-vc')) {
+            patchRun(db, runId, { phase: 'audio-vc' });
+            dispatchRunnerJob(runId, ctrl.benchToken, {
+                phase: 'audio-vc',
+                botCount: opts.botCount,
+                vcBotCount: 10,
+                worlds: opts.worlds,
+                pdfPath: opts.pdfPath,
+            }, runnerName);
+            await sleep(PHASE_MS.audioVc);
+        }
 
         const row = getRunRow(db, runId);
         const runnerMetrics = row?.metrics_json ? JSON.parse(row.metrics_json) : {};
         Object.assign(metrics, runnerMetrics);
 
-        if (runnerMetrics.mvConnect) {
-            scores['mv-connect'] = scoreMvConnect(
-                runnerMetrics.mvConnect.retainPct ?? 0,
-                runnerMetrics.mvConnect.pingP95Ms ?? 300
-            );
-        } else {
-            scores['mv-connect'] = 0;
-            failures.push('Runner から mv-connect メトリクスが届きませんでした。');
-            status = 'partial';
+        if (isBenchPhaseEnabled(phases, 'socket-bots')) {
+            if (runnerMetrics.mvConnect) {
+                scores['mv-connect'] = scoreMvConnect(
+                    runnerMetrics.mvConnect.retainPct ?? 0,
+                    runnerMetrics.mvConnect.pingP95Ms ?? 300
+                );
+            } else {
+                scores['mv-connect'] = 0;
+                failures.push('Runner から mv-connect メトリクスが届きませんでした。');
+                status = 'partial';
+            }
+
+            const cpuScore = scoreCpuDegrade(cpuRatio);
+            const pingScore = scorePingP95(runnerMetrics.mvConnect?.pingP95Ms ?? 300);
+            scores['mv-degrade'] = scoreMvDegrade({
+                tpsScore: scores['mv-tps'] ?? 0,
+                cpuScore,
+                pingScore,
+            });
         }
 
-        const cpuScore = scoreCpuDegrade(cpuRatio);
-        const pingScore = scorePingP95(runnerMetrics.mvConnect?.pingP95Ms ?? 300);
-        scores['mv-degrade'] = scoreMvDegrade({
-            tpsScore: scores['mv-tps'],
-            cpuScore,
-            pingScore,
-        });
-
-        if (runnerMetrics.audioVc) {
-            scores['audio-vc'] = scoreAudioVc(runnerMetrics.audioVc);
-        } else {
-            scores['audio-vc'] = 0;
-            failures.push('Runner から audio-vc メトリクスが届きませんでした。');
-            status = 'partial';
+        if (isBenchPhaseEnabled(phases, 'audio-vc')) {
+            if (runnerMetrics.audioVc) {
+                scores['audio-vc'] = scoreAudioVc(runnerMetrics.audioVc);
+            } else {
+                scores['audio-vc'] = 0;
+                failures.push('Runner から audio-vc メトリクスが届きませんでした。');
+                status = 'partial';
+            }
         }
 
         if (ctrl.abort) {
@@ -348,22 +414,24 @@ async function executeRun(db, runId, opts, ctrl) {
         patchRun(db, runId, { error_message: failures.join('; ') });
     } finally {
         clearTimeout(timeout);
-        stopTickSampling();
-        setBenchMaintenance({ active: false, runId: null, io: ioRef });
+        if (needsTick) stopTickSampling();
+        if (needsRunner) setBenchMaintenance({ active: false, runId: null, io: ioRef });
 
-        let deleteFailed = false;
-        for (let i = 0; i < 3; i++) {
-            try {
-                deleteBenchUsers(runId);
-                deleteFailed = false;
-                break;
-            } catch {
-                deleteFailed = true;
+        if (needsBenchUsers) {
+            let deleteFailed = false;
+            for (let i = 0; i < 3; i++) {
+                try {
+                    deleteBenchUsers(runId);
+                    deleteFailed = false;
+                    break;
+                } catch {
+                    deleteFailed = true;
+                }
             }
-        }
-        if (deleteFailed) {
-            failures.push(`一時ユーザー削除失敗（要手動削除）: runId=${runId}`);
-            notes.push(`bench_users WHERE run_id='${runId}'`);
+            if (deleteFailed) {
+                failures.push(`一時ユーザー削除失敗（要手動削除）: runId=${runId}`);
+                notes.push(`bench_users WHERE run_id='${runId}'`);
+            }
         }
 
         const catalog = getAddonCatalogSnapshot();
@@ -375,9 +443,12 @@ async function executeRun(db, runId, opts, ctrl) {
             nodeVersion: process.version,
             coreVersion: opts.config?.coreVersion,
             loadedAddons: catalog.addons.filter((a) => a.enabled).map((a) => a.id),
+            runnerName,
+            phases,
         };
 
-        const overall = overallScore(scores);
+        const scoreKeys = scoreKeysForPhases(phases);
+        const overall = overallScore(scores, scoreKeys);
         const reportName = benchReportFilename(new Date());
         const html = buildBenchReportHtml({
             runId,
@@ -440,11 +511,12 @@ function scoreAudioVc(av) {
  * @param {string} runId
  * @param {string} benchToken
  * @param {object} job
+ * @param {string} runnerName
  */
-function dispatchRunnerJob(runId, benchToken, job) {
-    if (!ioRef) return;
-    const runner = getRunnerStatus();
-    if (!runner.socketId) return;
+function dispatchRunnerJob(runId, benchToken, job, runnerName) {
+    if (!ioRef || !runnerName) return;
+    const runner = getRunnerStatusByName(runnerName);
+    if (!runner?.socketId) return;
     ioRef.to(runner.socketId).emit('addon:meta-bench-r1:job', {
         runId,
         benchToken,

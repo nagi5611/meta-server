@@ -132,9 +132,13 @@ async function main() {
             runnerDebug('heartbeat', 'skipped (pairing mode, no secret)');
             return;
         }
-        postJson(server, '/api/addons/meta-bench-r1/runner/heartbeat', {}, String(args.secret), 'heartbeat').catch(
-            (e) => runnerWarn('heartbeat', 'failed', formatError(e))
-        );
+        postJson(
+            server,
+            '/api/addons/meta-bench-r1/runner/heartbeat',
+            { name },
+            String(args.secret),
+            'heartbeat'
+        ).catch((e) => runnerWarn('heartbeat', 'failed', formatError(e)));
     }, 25_000);
 
     const socket = io(
@@ -153,7 +157,7 @@ async function main() {
     socket.on('connect', () => {
         runnerInfo('socket', 'connected', { id: socket.id, transport: socket.io.engine?.transport?.name });
         if (args.secret) {
-            socket.emit('addon:meta-bench-r1:runner-attach', { runnerSecret: String(args.secret) }, (ack) => {
+            socket.emit('addon:meta-bench-r1:runner-attach', { runnerSecret: String(args.secret), name }, (ack) => {
                 if (ack?.ok) runnerInfo('socket', 'runner-attach ok', ack);
                 else runnerError('socket', 'runner-attach failed', ack || '(no ack)');
             });

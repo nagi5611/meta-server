@@ -63,6 +63,7 @@ describe('scoring', () => {
 
     it('overallScore averages', () => {
         assert.equal(overallScore({ a: 80, b: 60 }), 70);
-        assert.equal(overallScore({}), null);
+        assert.equal(overallScore({}, ['a']), null);
+        assert.equal(overallScore({ a: 80, b: 20 }, ['a']), 80);
     });
 });

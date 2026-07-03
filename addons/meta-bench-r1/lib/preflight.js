@@ -2,7 +2,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBenchMaintenance, isMediasoupReady } from '../../../lib/bench-maintenance.js';
-import { getRunnerStatus, isRunnerConnected } from './runner-registry.js';
+import {
+    getRunnerStatusByName,
+    isRunnerConnected,
+    listRunners,
+} from './runner-registry.js';
+import { normalizeBenchPhases } from './bench-phases.js';
 const MIN_REPORT_BYTES = 50 * 1024 * 1024;
 
 /**
@@ -11,20 +16,43 @@ const MIN_REPORT_BYTES = 50 * 1024 * 1024;
  * @param {string} opts.reportsDir
  * @param {number} opts.botCount
  * @param {boolean} opts.hasActiveRun
+ * @param {string} [opts.runnerName]
+ * @param {string[]} [opts.phases]
  */
 export function runPreflightChecks(opts) {
     const { db, reportsDir, botCount, hasActiveRun } = opts;
+    const phases = normalizeBenchPhases(opts.phases);
+    const runnerName = typeof opts.runnerName === 'string' ? opts.runnerName.trim() : '';
     /** @type {string[]} */
     const failures = [];
 
-    const runner = getRunnerStatus();
+    if (!runnerName) {
+        failures.push('実行する Bench Runner を選択してください。');
+    } else {
+        const runner = getRunnerStatusByName(runnerName);
+        if (!runner) {
+            failures.push(`Bench Runner「${runnerName}」が登録されていません。`);
+        } else if (!isRunnerConnected(runnerName, 30_000)) {
+            failures.push(
+                `Bench Runner「${runnerName}」が未接続、または最終 heartbeat が 30 秒を超えています。`
+            );
+        } else if (!runner.socketConnected) {
+            failures.push(
+                `Bench Runner「${runnerName}」の Socket.IO が未接続です。Runner ログで connect_error を確認してください。`
+            );
+        } else if (runner.recommendedMaxBots != null && botCount > runner.recommendedMaxBots) {
+            failures.push(
+                `bot 数 ${botCount} が Runner「${runnerName}」の推奨 max ${runner.recommendedMaxBots} を超えています。`
+            );
+        }
+    }
 
-    if (!isRunnerConnected(30_000)) {
-        failures.push('Bench Runner が未接続、または最終 heartbeat が 30 秒を超えています。');
-    } else if (!runner.socketId) {
-        failures.push(
-            'Bench Runner の Socket.IO が未接続です（HTTP heartbeat のみ）。Runner ログで connect_error を確認してください。'
-        );
+    if (listRunners().length === 0) {
+        failures.push('Bench Runner が 1 台も登録されていません。手元 PC で runner/serve.js を起動してください。');
+    }
+
+    if (phases.length === 0) {
+        failures.push('実行するチェック項目を 1 つ以上選択してください。');
     }
 
     if (hasActiveRun) {
@@ -50,14 +78,9 @@ export function runPreflightChecks(opts) {
         failures.push('レポート保存先を確認できませんでした。');
     }
 
-    if (!isMediasoupReady()) {
+    const needsMediasoup = phases.includes('audio-vc');
+    if (needsMediasoup && !isMediasoupReady()) {
         failures.push('mediasoup / VC 系が起動していません。サーバログを確認してください。');
-    }
-
-    if (runner.recommendedMaxBots != null && botCount > runner.recommendedMaxBots) {
-        failures.push(
-            `bot 数 ${botCount} が Runner の推奨 max ${runner.recommendedMaxBots} を超えています。`
-        );
     }
 
     if (db) {
@@ -68,5 +91,5 @@ export function runPreflightChecks(opts) {
         }
     }
 
-    return { ok: failures.length === 0, failures };
+    return { ok: failures.length === 0, failures, phases };
 }

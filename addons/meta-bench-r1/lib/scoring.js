@@ -91,10 +91,16 @@ export function scoreMvConnect(retainPct, pingP95Ms) {
 
 /**
  * @param {Record<string, number | null | undefined>} scores
+ * @param {string[]} [onlyKeys] 指定時はこれらのキーのみ平均
  * @returns {number | null}
  */
-export function overallScore(scores) {
-    const vals = Object.values(scores).filter((v) => typeof v === 'number' && Number.isFinite(v));
+export function overallScore(scores, onlyKeys) {
+    let vals = Object.values(scores).filter((v) => typeof v === 'number' && Number.isFinite(v));
+    if (Array.isArray(onlyKeys) && onlyKeys.length > 0) {
+        vals = onlyKeys
+            .map((k) => scores[k])
+            .filter((v) => typeof v === 'number' && Number.isFinite(v));
+    }
     if (!vals.length) return null;
     return vals.reduce((a, b) => a + b, 0) / vals.length;
 }

@@ -5,6 +5,16 @@ const API = '/admin/addons/meta-bench-r1';
 
 /** @type {ReturnType<typeof setInterval> | null} */
 let pollTimer = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let runnerPollTimer = null;
+
+/** @type {{ id: string, label: string }[]} */
+let benchPhaseDefs = [
+    { id: 'hw', label: 'HW（CPU / メモリ）' },
+    { id: 'socket-bots', label: 'MV 接続・TPS（socket-bots）' },
+    { id: 'db-sqlite', label: 'DB（SQLite）' },
+    { id: 'audio-vc', label: '音声 VC（audio-vc）' },
+];
 
 /**
  * @param {string} path
@@ -73,6 +83,12 @@ function ensurePanelDom() {
                         <div class="bench-r1-card card-like">
                             <h3>Bench Runner</h3>
                             <p id="bench-r1-runner-status" class="status-text">読み込み中…</p>
+                            <label class="bench-r1-label">実行 Runner
+                                <select id="bench-r1-runner-select" class="bench-r1-select">
+                                    <option value="">— 選択 —</option>
+                                </select>
+                            </label>
+                            <ul id="bench-r1-runner-list" class="bench-r1-runner-list" aria-live="polite"></ul>
                             <button type="button" class="btn btn-secondary btn-sm" id="bench-r1-refresh-runner">Runner 状態を更新</button>
                             <button type="button" class="btn btn-secondary btn-sm" id="bench-r1-pairing-code">ペアリングコード発行</button>
                             <p id="bench-r1-pairing-display" class="hint"></p>
@@ -80,6 +96,14 @@ function ensurePanelDom() {
 
                         <div class="bench-r1-card card-like">
                             <h3>ベンチ実行</h3>
+                            <fieldset class="bench-r1-phases">
+                                <legend class="bench-r1-phases-legend">チェック項目</legend>
+                                <div id="bench-r1-phase-checks" class="bench-r1-phase-checks"></div>
+                                <div class="bench-r1-phase-actions">
+                                    <button type="button" class="btn btn-link btn-sm" id="bench-r1-phases-all">すべて選択</button>
+                                    <button type="button" class="btn btn-link btn-sm" id="bench-r1-phases-none">すべて解除</button>
+                                </div>
+                            </fieldset>
                             <label class="bench-r1-label">bot 数
                                 <input type="number" id="bench-r1-bot-count" class="bench-r1-input" min="1" max="200" value="25" />
                             </label>
@@ -113,7 +137,142 @@ function ensurePanelDom() {
     });
 
     injectStyles();
+    void loadPhaseDefs();
+    renderPhaseCheckboxes();
     bindEvents();
+}
+
+function renderPhaseCheckboxes() {
+    const wrap = document.getElementById('bench-r1-phase-checks');
+    if (!wrap) return;
+    wrap.innerHTML = benchPhaseDefs
+        .map(
+            (p) => `<label class="bench-r1-phase-check">
+        <input type="checkbox" name="bench-phase" value="${escapeHtml(p.id)}" checked />
+        <span>${escapeHtml(p.label)}</span>
+    </label>`
+        )
+        .join('');
+}
+
+/**
+ * @returns {string[]}
+ */
+function getSelectedPhases() {
+    return Array.from(document.querySelectorAll('input[name="bench-phase"]:checked')).map((el) =>
+        /** @type {HTMLInputElement} */ (el).value
+    );
+}
+
+/**
+ * @returns {string}
+ */
+function getSelectedRunnerName() {
+    const sel = /** @type {HTMLSelectElement | null} */ (document.getElementById('bench-r1-runner-select'));
+    return sel?.value?.trim() || '';
+}
+
+/**
+ * @param {object[]} runners
+ */
+function syncRunnerSelect(runners) {
+    const sel = /** @type {HTMLSelectElement | null} */ (document.getElementById('bench-r1-runner-select'));
+    if (!sel) return;
+    const prev = sel.value;
+    const names = runners.map((r) => r.name).filter(Boolean);
+    sel.innerHTML =
+        '<option value="">— 選択 —</option>' +
+        names
+            .map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`)
+            .join('');
+    if (prev && names.includes(prev)) sel.value = prev;
+    else if (names.length === 1) sel.value = names[0];
+}
+
+/**
+ * @param {object[]} runners
+ */
+function renderRunnerList(runners) {
+    const list = document.getElementById('bench-r1-runner-list');
+    if (!list) return;
+    if (!runners.length) {
+        list.innerHTML = '<li class="hint">登録 Runner なし</li>';
+        return;
+    }
+    list.innerHTML = runners
+        .map((r) => {
+            const live = r.socketConnected;
+            const hb = r.connected;
+            const state = live ? 'Socket 接続' : hb ? 'heartbeat のみ' : '未接続';
+            return `<li class="bench-r1-runner-item">
+        <span><span class="bench-r1-runner-dot ${live ? 'on' : 'off'}"></span> ${escapeHtml(r.name || 'runner')}</span>
+        <span class="hint">${escapeHtml(state)} · max ${escapeHtml(String(r.recommendedMaxBots ?? '-'))}</span>
+    </li>`;
+        })
+        .join('');
+}
+
+async function loadPhaseDefs() {
+    try {
+        const j = await apiFetch(`${API}/phases`);
+        if (Array.isArray(j.phases) && j.phases.length) {
+            benchPhaseDefs = j.phases.map((p) => ({ id: p.id, label: p.label }));
+            renderPhaseCheckboxes();
+        }
+    } catch {
+        /* use defaults */
+    }
+}
+
+async function refreshRunnerStatus() {
+    const el = document.getElementById('bench-r1-runner-status');
+    try {
+        const j = await apiFetch(`${API}/runner/status`);
+        const runners = Array.isArray(j.runners) ? j.runners : j.runner ? [j.runner] : [];
+        syncRunnerSelect(runners);
+        renderRunnerList(runners);
+        const connected = runners.filter((r) => r.socketConnected);
+        if (!el) return;
+        if (!runners.length) {
+            el.textContent = '未接続 — 手元 PC で runner/serve.js を起動してください。';
+            el.className = 'status-text error';
+            return;
+        }
+        el.textContent = `登録 ${runners.length} 台 / Socket 接続 ${connected.length} 台`;
+        el.className = connected.length ? 'status-text success' : 'status-text error';
+    } catch (e) {
+        if (el) {
+            el.textContent = `取得失敗: ${e instanceof Error ? e.message : String(e)}`;
+            el.className = 'status-text error';
+        }
+    }
+}
+
+function startRunnerPolling() {
+    stopRunnerPolling();
+    runnerPollTimer = setInterval(() => void refreshRunnerStatus(), 1000);
+}
+
+function stopRunnerPolling() {
+    if (runnerPollTimer) {
+        clearInterval(runnerPollTimer);
+        runnerPollTimer = null;
+    }
+}
+
+/**
+ * @param {string} text
+ * @param {boolean} [isError]
+ */
+function buildPreflightQuery(botCount) {
+    const phases = getSelectedPhases();
+    const runnerName = getSelectedRunnerName();
+    const q = new URLSearchParams({
+        botCount: String(botCount),
+    });
+    if (runnerName) q.set('runnerName', runnerName);
+    if (phases.length) q.set('phases', phases.join(','));
+    return q.toString();
 }
 
 function injectStyles() {
@@ -145,6 +304,49 @@ function injectStyles() {
         .bench-r1-history h3 { margin: 0 0 0.75rem; font-size: 1.05rem; }
         .bench-r1-label { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.75rem; font-size: 0.9rem; }
         .bench-r1-input { max-width: 8rem; padding: 0.35rem 0.5rem; }
+        .bench-r1-select { max-width: 100%; padding: 0.35rem 0.5rem; }
+        .bench-r1-runner-list {
+            list-style: none;
+            margin: 0 0 0.75rem;
+            padding: 0;
+            font-size: 0.85rem;
+        }
+        .bench-r1-runner-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            padding: 0.35rem 0;
+            border-bottom: 1px solid var(--admin-border, #eee);
+        }
+        .bench-r1-runner-item:last-child { border-bottom: 0; }
+        .bench-r1-runner-dot {
+            width: 0.55rem;
+            height: 0.55rem;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .bench-r1-runner-dot.on { background: #2e7d32; }
+        .bench-r1-runner-dot.off { background: #bdbdbd; }
+        .bench-r1-phases {
+            border: 0;
+            margin: 0 0 0.75rem;
+            padding: 0;
+        }
+        .bench-r1-phases-legend {
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 0.35rem;
+        }
+        .bench-r1-phase-checks { display: flex; flex-direction: column; gap: 0.35rem; }
+        .bench-r1-phase-check {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.88rem;
+            cursor: pointer;
+        }
+        .bench-r1-phase-actions { margin-top: 0.35rem; display: flex; gap: 0.5rem; }
         .bench-r1-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
         .bench-r1-failures { margin: 0.5rem 0 0; padding-left: 1.25rem; color: #c62828; font-size: 0.9rem; }
         .status-text.error { color: #c62828; }
@@ -237,25 +439,6 @@ function showFailures(failures) {
         return;
     }
     ul.innerHTML = failures.map((f) => `<li>${escapeHtml(f)}</li>`).join('');
-}
-
-async function refreshRunnerStatus() {
-    const el = document.getElementById('bench-r1-runner-status');
-    if (!el) return;
-    try {
-        const j = await apiFetch(`${API}/runner/status`);
-        const r = j.runner || {};
-        if (!r.connected) {
-            el.textContent = '未接続 — 手元 PC で runner/serve.js を起動してください。';
-            el.className = 'status-text error';
-            return;
-        }
-        el.textContent = `接続中: ${r.name || 'runner'} / 推奨 max bots: ${r.recommendedMaxBots ?? '-'}`;
-        el.className = 'status-text success';
-    } catch (e) {
-        el.textContent = `取得失敗: ${e instanceof Error ? e.message : String(e)}`;
-        el.className = 'status-text error';
-    }
 }
 
 /** @type {string | null} */
@@ -435,6 +618,18 @@ function stopPolling() {
 function bindEvents() {
     document.getElementById('bench-r1-refresh-runner')?.addEventListener('click', () => void refreshRunnerStatus());
     document.getElementById('bench-r1-refresh-history')?.addEventListener('click', () => void refreshHistoryList());
+
+    document.getElementById('bench-r1-phases-all')?.addEventListener('click', () => {
+        document.querySelectorAll('input[name="bench-phase"]').forEach((el) => {
+            /** @type {HTMLInputElement} */ (el).checked = true;
+        });
+    });
+    document.getElementById('bench-r1-phases-none')?.addEventListener('click', () => {
+        document.querySelectorAll('input[name="bench-phase"]').forEach((el) => {
+            /** @type {HTMLInputElement} */ (el).checked = false;
+        });
+    });
+
     document.getElementById('bench-r1-pairing-code')?.addEventListener('click', async () => {
         const disp = document.getElementById('bench-r1-pairing-display');
         try {
@@ -451,7 +646,7 @@ function bindEvents() {
         const botCount = parseInt(String(document.getElementById('bench-r1-bot-count')?.value || '25'), 10);
         showFailures([]);
         try {
-            const j = await apiFetch(`${API}/preflight?botCount=${botCount}`);
+            const j = await apiFetch(`${API}/preflight?${buildPreflightQuery(botCount)}`);
             if (j.ok) {
                 setRunStatus('プリフライト合格', false);
                 showFailures([]);
@@ -467,13 +662,23 @@ function bindEvents() {
 
     document.getElementById('bench-r1-start')?.addEventListener('click', async () => {
         const botCount = parseInt(String(document.getElementById('bench-r1-bot-count')?.value || '25'), 10);
+        const phases = getSelectedPhases();
+        const runnerName = getSelectedRunnerName();
         showFailures([]);
+        if (!phases.length) {
+            setRunStatus('チェック項目を 1 つ以上選択してください', true);
+            return;
+        }
+        if (!runnerName) {
+            setRunStatus('実行 Runner を選択してください', true);
+            return;
+        }
         setRunStatus('開始中…');
         try {
             const j = await apiFetch(`${API}/runs`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ botCount }),
+                body: JSON.stringify({ botCount, phases, runnerName }),
             });
             activeRunId = j.runId;
             setRunStatus(`run ${j.runId} を開始しました`, false);
@@ -511,6 +716,7 @@ function showBenchPanel() {
     void refreshRunnerStatus();
     void refreshRunStatus();
     void refreshHistoryList();
+    startRunnerPolling();
 }
 
 function initBenchR1Admin() {
@@ -520,6 +726,9 @@ function initBenchR1Admin() {
             void refreshRunnerStatus();
             void refreshRunStatus();
             void refreshHistoryList();
+            startRunnerPolling();
+        } else {
+            stopRunnerPolling();
         }
     });
     document.addEventListener('admin-panel-request', (e) => {
