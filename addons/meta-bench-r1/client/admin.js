@@ -96,6 +96,10 @@ function ensurePanelDom() {
     `;
     panels.appendChild(panel);
 
+    btn.addEventListener('click', () => {
+        document.dispatchEvent(new CustomEvent('admin-panel-request', { detail: { panelId: NAV_DATA_PANEL } }));
+    });
+
     injectStyles();
     bindEvents();
 }
@@ -277,20 +281,24 @@ function bindEvents() {
 }
 
 function showBenchPanel() {
-    document.dispatchEvent(new CustomEvent('admin-panel-request', { detail: { panelId: NAV_DATA_PANEL } }));
+    document.querySelectorAll('.admin-panel').forEach((el) => el.classList.remove('active'));
+    document.querySelectorAll('.admin-nav-item').forEach((el) => el.classList.remove('active'));
+    const panel = document.getElementById(PANEL_ID);
+    const nav = document.querySelector(`.admin-nav-item[data-panel="${NAV_DATA_PANEL}"]`);
+    if (panel) panel.classList.add('active');
+    if (nav) nav.classList.add('active');
+    document.dispatchEvent(new CustomEvent('admin-panel-activated', { detail: { panelId: NAV_DATA_PANEL } }));
+    void refreshRunnerStatus();
+    void refreshRunStatus();
 }
 
 function initBenchR1Admin() {
     ensurePanelDom();
-    document.addEventListener('admin-panel-activated', (e) => {
-        if (e.detail?.panelId === NAV_DATA_PANEL) {
-            void refreshRunnerStatus();
-            void refreshRunStatus();
-        }
-    });
     document.addEventListener('admin-panel-request', (e) => {
         if (e.detail?.panelId === NAV_DATA_PANEL) showBenchPanel();
     });
+    const params = new URLSearchParams(location.search);
+    if (params.get('panel') === NAV_DATA_PANEL) showBenchPanel();
 }
 
 if (document.readyState === 'loading') {
