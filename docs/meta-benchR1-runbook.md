@@ -4,16 +4,29 @@
 
 ## 1. addon 準備
 
-1. 管理画面 → **アドオン** で `meta-bench-r1` **以外をすべて無効化**
-2. `meta-bench-r1` のみ **有効化**
-3. **Node プロセスを再起動**（[addons-restart-policy.md](../addons-restart-policy.md)）
-4. 管理画面 → **ベンチR1** でプリフライト（P-07）が合格することを確認
+1. 管理画面 → **アドオン** で `meta-bench-r1` を **有効化**（他 addon が有効でもベンチは実行可能）
+2. addon の有効/無効を変更した場合は **Node プロセスを再起動**（[addons-restart-policy.md](../addons-restart-policy.md)）
+3. 管理画面 → **ベンチR1** でプリフライトが合格することを確認
 
-P-07 不合格時の表示例: 「読み込み addon が meta-bench-r1 のみではありません」→ 他 addon を無効化して再起動。
+## 2. 設定（config.json の置き場所）
 
-## 2. 設定
+**推奨:** 次のパスにファイルを作成する。
 
-`addons/meta-bench-r1/config.json`（`config.json.example` をコピー）:
+```
+addons/meta-bench-r1/config.json
+```
+
+`config.json.example` をコピーして編集する。
+
+```bash
+cp addons/meta-bench-r1/config.json.example addons/meta-bench-r1/config.json
+```
+
+**上書きの優先順位**（後が優先）:
+
+1. `addons/meta-bench-r1/config.json`
+2. 管理画面 **アドオン** タブのキー/値設定（`addons_registry.db`）
+3. 環境変数（例: `ADDON_META_BENCH_R1_RUNNERSECRET=...`）
 
 | キー | 説明 |
 |------|------|

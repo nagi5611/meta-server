@@ -1,11 +1,8 @@
-// addons/meta-benchR1/lib/preflight.js — ベンチ開始前チェック P-01〜P-07
+// addons/meta-bench-r1/lib/preflight.js — ベンチ開始前チェック P-01〜P-06
 import fs from 'node:fs';
 import path from 'node:path';
-import { getAddonCatalogSnapshot } from '../../../lib/plugin-bootstrap.js';
 import { isBenchMaintenance, isMediasoupReady } from '../../../lib/bench-maintenance.js';
 import { getRunnerStatus, isRunnerConnected } from './runner-registry.js';
-
-const PLUGIN_ID = 'meta-bench-r1';
 const MIN_REPORT_BYTES = 50 * 1024 * 1024;
 
 /**
@@ -55,16 +52,6 @@ export function runPreflightChecks(opts) {
     if (runner.recommendedMaxBots != null && botCount > runner.recommendedMaxBots) {
         failures.push(
             `bot 数 ${botCount} が Runner の推奨 max ${runner.recommendedMaxBots} を超えています。`
-        );
-    }
-
-    const catalog = getAddonCatalogSnapshot();
-    const loaded = catalog.addons.filter((a) => a.enabled && a.manifestOk && a.engineOk !== false);
-    const loadedIds = loaded.map((a) => a.id);
-    if (loadedIds.length !== 1 || loadedIds[0] !== PLUGIN_ID) {
-        failures.push(
-            `読み込み addon が meta-bench-r1 のみではありません（現在: ${loadedIds.join(', ') || 'なし'}）。` +
-                ' 他 addon を無効化し、Node プロセスを再起動してください。'
         );
     }
 

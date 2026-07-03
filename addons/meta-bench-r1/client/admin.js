@@ -55,16 +55,15 @@ function ensurePanelDom() {
         <section class="bench-r1-section">
             <header class="bench-r1-header">
                 <h2>meta-bench-r1 ベンチマーク</h2>
-                <p class="hint bench-r1-lead">本番負荷テスト用 addon。実行前は <strong>meta-bench-r1 のみ有効</strong> にし、Node を再起動してください。</p>
+                <p class="hint bench-r1-lead">本番負荷テスト用 addon。他 addon が有効でも実行できます（スコアは追加負荷の影響を受ける場合があります）。</p>
             </header>
 
             <div class="bench-r1-p07 card-like">
-                <h3>P-07 再起動手順（毎回必須）</h3>
+                <h3>実行前の確認</h3>
                 <ol>
-                    <li>アドオン管理で他 addon をすべて無効化</li>
-                    <li><code>meta-bench-r1</code> のみ有効化</li>
-                    <li>Node プロセスを再起動</li>
-                    <li>下のプリフライトが合格してからベンチ開始</li>
+                    <li>管理画面の <strong>アドオン</strong> で <code>meta-bench-r1</code> が有効であること</li>
+                    <li>addon を有効/無効した直後は Node を再起動（<a href="/docs/addons-restart-policy.md" target="_blank" rel="noopener">再起動ポリシー</a>）</li>
+                    <li>Bench Runner を起動し、下のプリフライトが合格してからベンチ開始</li>
                 </ol>
             </div>
 
