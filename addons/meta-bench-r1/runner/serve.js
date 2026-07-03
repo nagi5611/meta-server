@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // addons/meta-bench-r1/runner/serve.js — Bench Runner CLI
+import os from 'node:os';
 import { io } from 'socket.io-client';
 import { runSocketBotPool } from './socket-bot-pool.js';
 import { runMediasoupBotPool } from './mediasoup-bot-pool.js';
+import { ensureMediasoupWorker, getMediasoupMode } from './aiortc-worker.js';
 import {
     configureRunnerDebug,
     runnerDebug,
@@ -94,6 +96,18 @@ async function main() {
         auth: args.pairing ? `pairing:${args.pairing}` : maskSecret(String(args.secret || '')),
         debug: !!args.debug,
     });
+
+    if (os.platform() !== 'win32') {
+        await ensureMediasoupWorker();
+        if (getMediasoupMode() === 'fake') {
+            runnerWarn(
+                'main',
+                'mediasoup-client-aiortc が未インストールです。リポジトリ root で npm run bench:install-aiortc を実行してください。'
+            );
+        } else {
+            runnerInfo('main', 'mediasoup-client-aiortc ready');
+        }
+    }
 
     const registerBody = { name, recommendedMaxBots: maxBots };
     if (args.pairing) registerBody.pairingCode = String(args.pairing);

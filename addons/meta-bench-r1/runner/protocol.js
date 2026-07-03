@@ -6,6 +6,9 @@ import {
     createMediaTrack,
 } from './aiortc-worker.js';
 import { runnerDebug, runnerWarn } from './debug.js';
+import {
+    normalizeBenchPdfPath,
+} from '../lib/bench-pdf-path.js';
 
 export { getMediasoupMode };
 
@@ -72,7 +75,7 @@ export class MediasoupBenchClient {
         const joinEvent = `${this.prefix}-join`;
         const joinPayload =
             this.prefix === 'pdf-vc'
-                ? { pdfPath: opts.pdfPath || '/pdfs/bench-sample.pdf' }
+                ? { pdfPath: normalizeBenchPdfPath(opts.pdfPath) }
                 : { roomId: opts.roomId || 'default' };
 
         runnerDebug('protocol', `${this.prefix} join start`, joinPayload);

@@ -235,7 +235,14 @@ Runner のターミナルには `[runner] job socket-bots` / `audio-vc` が出�
 
 ### audio-vc を本番同等で計測したい（P1）
 
-Linux（Ubuntu 等）で Runner を起動すると `mediasoup-client-aiortc` が使えます:
+Linux（Ubuntu / WSL 等）で Runner を起動する前に、**リポジトリ root** で aiortc をインストールします（`optionalDependencies` のため通常の `npm install` だけでは入らないことがあります）:
+
+```bash
+cd /path/to/metaverse-simple
+npm run bench:install-aiortc
+```
+
+続けて Runner を起動:
 
 ```bash
 node addons/meta-bench-r1/runner/serve.js \
@@ -246,7 +253,14 @@ node addons/meta-bench-r1/runner/serve.js \
   --debug
 ```
 
-ログに `using mediasoup-client-aiortc` が出れば本番 WebRTC パスです。Windows は FakeHandler（参考値）になります。
+ログに `using mediasoup-client-aiortc` が出れば本番 WebRTC パスです。Windows ネイティブは FakeHandler（参考値）になります。
+
+### PDF VC が `invalid_pdf_path` で失敗する
+
+- ベンチ用 PDF はサーバーの `PDFS_DIR`（通常 `public/pdfs/` または `META_SRC_DIRECTORY/pdfs`）に置く
+- リポジトリ同梱: `public/pdfs/bench-sample.pdf`
+- `config.json` の `benchPdfPath` は **ファイル名のみ**（例: `"bench-sample.pdf"`）。`/pdfs/...` 形式は使わない
+- 本番サーバーにも同じ PDF をデプロイし、Node を再起動する
 
 ### addon が読み込まれない（`id must be kebab-case`）
 

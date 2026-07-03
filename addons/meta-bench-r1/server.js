@@ -25,6 +25,9 @@ import {
     ingestRunnerMetrics,
 } from './lib/run-orchestrator.js';
 import { scorePacketLoss } from './lib/scoring.js';
+import {
+    normalizeBenchPdfPath,
+} from './lib/bench-pdf-path.js';
 
 const JSON_LIMIT = '64kb';
 
@@ -63,10 +66,7 @@ export default {
         const defaultBotCount =
             typeof ctx.config.defaultBotCount === 'number' ? ctx.config.defaultBotCount : 25;
 
-        const benchPdfPath =
-            typeof ctx.config.benchPdfPath === 'string'
-                ? ctx.config.benchPdfPath
-                : '/pdfs/bench-sample.pdf';
+        const benchPdfPath = normalizeBenchPdfPath(ctx.config.benchPdfPath);
 
         const hwCalibration =
             typeof ctx.config.hwCpuCalibrationOpsPerSec === 'number'

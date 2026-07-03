@@ -34,7 +34,7 @@ cp addons/meta-bench-r1/config.json.example addons/meta-bench-r1/config.json
 |------|------|
 | `runnerSecret` | Runner 登録用共有シークレット |
 | `defaultBotCount` | 既定 bot 数（既定 50） |
-| `benchPdfPath` | PDF VC 用 PDF パス |
+| `benchPdfPath` | PDF VC 用 PDF（`PDFS_DIR` からのファイル名。例: `bench-sample.pdf`） |
 | `hwCpuCalibrationOpsPerSec` | hw-cpu 80 点基準（0=自動） |
 | `reportMaxFiles` | レポート最大保持件数（30） |
 | `reportMaxAgeDays` | レポート最大保持日数（90） |

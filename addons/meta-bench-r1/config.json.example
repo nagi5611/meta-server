@@ -1,7 +1,7 @@
 {
     "runnerSecret": "change-me-in-production",
     "defaultBotCount": 25,
-    "benchPdfPath": "/pdfs/bench-sample.pdf",
+    "benchPdfPath": "bench-sample.pdf",
     "hwCpuCalibrationOpsPerSec": 0,
     "reportMaxFiles": 30,
     "reportMaxAgeDays": 90

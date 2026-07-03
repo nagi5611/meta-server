@@ -1,5 +1,9 @@
 // addons/meta-bench-r1/runner/aiortc-worker.js — mediasoup-client-aiortc 共有 Worker
 import os from 'node:os';
+import { pathToFileURL } from 'node:url';
+import { resolvePackageFromProjectRoot } from './project-root.js';
+
+const AIORTC_INSTALL_HINT = 'npm run bench:install-aiortc（リポジトリ root で実行）';
 
 /** @type {import('mediasoup-client-aiortc').Worker | null} */
 let worker = null;
@@ -42,14 +46,19 @@ export async function ensureMediasoupWorker() {
         }
 
         try {
-            const { createWorker } = await import('mediasoup-client-aiortc');
+            const aiortcEntry = resolvePackageFromProjectRoot('mediasoup-client-aiortc');
+            if (!aiortcEntry) {
+                await initFakeHandler(`mediasoup-client-aiortc is not installed (run: ${AIORTC_INSTALL_HINT})`);
+                return;
+            }
+            const { createWorker } = await import(pathToFileURL(aiortcEntry).href);
             worker = await createWorker({ logLevel: 'warn' });
             handlerFactory = await worker.createHandlerFactory();
             mode = 'aiortc';
             console.log('[bench-protocol] using mediasoup-client-aiortc (production WebRTC)');
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            await initFakeHandler(msg);
+            await initFakeHandler(`${msg} (try: ${AIORTC_INSTALL_HINT})`);
         }
     })();
 
