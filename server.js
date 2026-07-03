@@ -27,6 +27,7 @@ import {
     peekBenchToken,
 } from './lib/bench-maintenance.js';
 import { recordTickEmit } from './lib/bench-tick-metrics.js';
+import { lookupIpLocation } from './lib/ip-geolocation.js';
 import { moderateChatMessage, moderateUsername, getModerationSystemPromptsForAdmin } from './lib/chat-moderation.js';
 import { findNgPhraseMatch, getChatNgWords, saveChatNgWords } from './lib/chat-ng-words.js';
 import {
@@ -4730,7 +4731,7 @@ io.on('connection', (socket) => {
     // ============================
 
     // Admin get player info (for click on avatar in metaverse)
-    socket.on('admin-get-player-info', (data, callback) => {
+    socket.on('admin-get-player-info', async (data, callback) => {
         if (!socket.data.isAdmin || !callback || typeof callback !== 'function') return;
         const { targetSocketId } = data || {};
         if (!targetSocketId) return callback({ error: 'targetSocketId required' });
@@ -4750,6 +4751,8 @@ io.on('connection', (socket) => {
         const perfTier = pingFresh && pingData.effectiveTier ? pingData.effectiveTier : null;
         const loafCount = pingFresh ? (pingData.loafCount ?? null) : null;
         const longtaskCount = pingFresh ? (pingData.longtaskCount ?? null) : null;
+        const ip = info?.ip || '-';
+        const location = await lookupIpLocation(ip);
 
         callback({
             username: player.username,
@@ -4760,7 +4763,8 @@ io.on('connection', (socket) => {
             perfTier,
             loafCount,
             longtaskCount,
-            ip: info?.ip || '-',
+            ip,
+            location: location || null,
             browser: info?.browser || '-',
             os: info?.os || '-'
         });
@@ -6993,12 +6997,14 @@ app.get('/admin/user-sessions', (req, res) => {
     }
 });
 
-app.get('/admin/user-sessions/by-username/:username', (req, res) => {
+app.get('/admin/user-sessions/by-username/:username', async (req, res) => {
     try {
         const username = req.params.username;
         if (!username) return res.status(400).json({ error: 'username required' });
         const session = getLatestSessionByUsername(username);
-        res.json(session || {});
+        if (!session) return res.json({});
+        const location = await lookupIpLocation(session.ip);
+        res.json({ ...session, location: location || null });
     } catch (err) {
         console.error('GET /admin/user-sessions/by-username error:', err);
         sendAdminServerError(res, err);

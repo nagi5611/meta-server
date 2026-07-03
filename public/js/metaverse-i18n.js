@@ -27,6 +27,7 @@ export const METAVERSE_STRINGS = {
     'admin.closeTitle': { ja: '閉じる', en: 'Close', zh: '关闭' },
     'admin.username': { ja: 'ユーザー名', en: 'Username', zh: '用户名' },
     'admin.connected': { ja: '接続時間', en: 'Connected', zh: '连接时长' },
+    'admin.location': { ja: 'おおよその所在地', en: 'Approx. location', zh: '大致位置' },
     'admin.browser': { ja: 'ブラウザ', en: 'Browser', zh: '浏览器' },
     'admin.os': { ja: 'OS', en: 'OS', zh: '操作系统' },
 

@@ -6745,6 +6745,7 @@ async function openUserSessionModal(username) {
             document.getElementById('user-session-username').textContent = session.username || '-';
             document.getElementById('user-session-login-time').textContent = new Date(session.login_time).toLocaleString('ja-JP');
             document.getElementById('user-session-ip').textContent = session.ip || '-';
+            document.getElementById('user-session-location').textContent = session.location || '-';
             document.getElementById('user-session-browser').textContent = session.browser || '-';
             document.getElementById('user-session-os').textContent = session.os || '-';
         }

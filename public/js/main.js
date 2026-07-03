@@ -673,6 +673,7 @@ class MetaverseApp {
             : '-';
         document.getElementById('admin-info-loaf').textContent = loafLt;
         document.getElementById('admin-info-ip').textContent = data.ip || '-';
+        document.getElementById('admin-info-location').textContent = data.location || '-';
         document.getElementById('admin-info-browser').textContent = data.browser || '-';
         document.getElementById('admin-info-os').textContent = data.os || '-';
 
