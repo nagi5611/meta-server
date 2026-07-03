@@ -280,7 +280,7 @@ async function executeRun(db, runId, opts, ctrl) {
     let cpuRatio = 0;
 
     try {
-        if (needsRunner) {
+        if (needsRunner || needsTick) {
             setBenchMaintenance({ active: true, runId, io: ioRef });
         }
         if (needsTick) {
@@ -314,6 +314,15 @@ async function executeRun(db, runId, opts, ctrl) {
                     const tickSnap = getTickMetricsSnapshot();
                     metrics.tick = tickSnap;
                     scores['mv-tps'] = scoreMvTps(tickSnap.minTickPerSec, getTheoreticalMaxTps());
+                    if (tickSnap.minTickPerSec <= 0) {
+                        const dbg = tickSnap.debug || {};
+                        failures.push(
+                            `TPS 計測データなし (recorded=${dbg.totalRecordedEmits ?? 0}, ` +
+                                `sampling=${dbg.samplingActive}, maintenance=${dbg.maintenanceActive}, ` +
+                                `seconds=${dbg.secondsSampled ?? 0})`
+                        );
+                        if (status === 'completed') status = 'partial';
+                    }
                     if (cpuBefore) {
                         const cpuDuring = process.cpuUsage(cpuBefore);
                         cpuRatio =
@@ -415,7 +424,7 @@ async function executeRun(db, runId, opts, ctrl) {
     } finally {
         clearTimeout(timeout);
         if (needsTick) stopTickSampling();
-        if (needsRunner) setBenchMaintenance({ active: false, runId: null, io: ioRef });
+        if (needsRunner || needsTick) setBenchMaintenance({ active: false, runId: null, io: ioRef });
 
         if (needsBenchUsers) {
             let deleteFailed = false;
