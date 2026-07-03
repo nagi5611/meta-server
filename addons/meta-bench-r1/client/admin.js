@@ -294,6 +294,12 @@ function showBenchPanel() {
 
 function initBenchR1Admin() {
     ensurePanelDom();
+    document.addEventListener('admin-panel-activated', (e) => {
+        if (e.detail?.panelId === NAV_DATA_PANEL) {
+            void refreshRunnerStatus();
+            void refreshRunStatus();
+        }
+    });
     document.addEventListener('admin-panel-request', (e) => {
         if (e.detail?.panelId === NAV_DATA_PANEL) showBenchPanel();
     });

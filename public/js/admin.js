@@ -6114,12 +6114,13 @@ document.addEventListener('DOMContentLoaded', () => {
         applyAdminTheme(isDark);
     });
 
-    // サイドメニュー: クリックでパネル切り替え
-    document.querySelectorAll('.admin-nav-item').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const panelId = btn.getAttribute('data-panel');
-            if (panelId) switchPanel(panelId);
-        });
+    // サイドメニュー: クリックでパネル切り替え（動的追加の addon ナビにも対応するため委譲）
+    const adminNav = document.querySelector('.admin-nav');
+    adminNav?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.admin-nav-item');
+        if (!btn || !adminNav.contains(btn)) return;
+        const panelId = btn.getAttribute('data-panel');
+        if (panelId) switchPanel(panelId);
     });
 
     // URL の ?panel= で初期表示パネルを指定（例: ?panel=panel-world-edit または従来どおり ?panel=world-edit）
