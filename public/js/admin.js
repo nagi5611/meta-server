@@ -6127,7 +6127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let initialPanel = params.get('panel');
     if (initialPanel === 'world-edit') initialPanel = 'panel-world-edit';
     if (initialPanel === 'security') initialPanel = 'panel-security';
-    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-aircraft', 'panel-database', 'panel-avatar-management', 'panel-chart', 'panel-chart-inactive', 'panel-addons', 'panel-addon-nfc-spawn', 'panel-addon-meta-benchR1'];
+    const validPanels = ['panel-security', 'panel-status', 'panel-players', 'panel-comm', 'panel-logs', 'panel-user-register', 'panel-world-edit', 'panel-aircraft', 'panel-database', 'panel-avatar-management', 'panel-chart', 'panel-chart-inactive', 'panel-addons', 'panel-addon-nfc-spawn', 'panel-addon-meta-bench-r1'];
     if (initialPanel && validPanels.includes(initialPanel)) {
         switchPanel(initialPanel);
     }

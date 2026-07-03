@@ -1,7 +1,7 @@
-// addons/meta-benchR1/client/admin.js — ベンチマーク管理パネル
-const PANEL_ID = 'panel-addon-meta-benchR1';
-const NAV_DATA_PANEL = 'panel-addon-meta-benchR1';
-const API = '/admin/addons/meta-benchR1';
+// addons/meta-bench-r1/client/admin.js — ベンチマーク管理パネル
+const PANEL_ID = 'panel-addon-meta-bench-r1';
+const NAV_DATA_PANEL = 'panel-addon-meta-bench-r1';
+const API = '/admin/addons/meta-bench-r1';
 
 /** @type {ReturnType<typeof setInterval> | null} */
 let pollTimer = null;
@@ -54,15 +54,15 @@ function ensurePanelDom() {
     panel.innerHTML = `
         <section class="bench-r1-section">
             <header class="bench-r1-header">
-                <h2>meta-benchR1 ベンチマーク</h2>
-                <p class="hint bench-r1-lead">本番負荷テスト用 addon。実行前は <strong>meta-benchR1 のみ有効</strong> にし、Node を再起動してください。</p>
+                <h2>meta-bench-r1 ベンチマーク</h2>
+                <p class="hint bench-r1-lead">本番負荷テスト用 addon。実行前は <strong>meta-bench-r1 のみ有効</strong> にし、Node を再起動してください。</p>
             </header>
 
             <div class="bench-r1-p07 card-like">
                 <h3>P-07 再起動手順（毎回必須）</h3>
                 <ol>
                     <li>アドオン管理で他 addon をすべて無効化</li>
-                    <li><code>meta-benchR1</code> のみ有効化</li>
+                    <li><code>meta-bench-r1</code> のみ有効化</li>
                     <li>Node プロセスを再起動</li>
                     <li>下のプリフライトが合格してからベンチ開始</li>
                 </ol>

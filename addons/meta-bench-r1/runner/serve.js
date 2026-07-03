@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// addons/meta-benchR1/runner/serve.js — Bench Runner CLI
+// addons/meta-bench-r1/runner/serve.js — Bench Runner CLI
 import { io } from 'socket.io-client';
 import { runSocketBotPool } from './socket-bot-pool.js';
 import { runMediasoupBotPool } from './mediasoup-bot-pool.js';
@@ -54,14 +54,14 @@ async function main() {
         process.exit(1);
     }
 
-    await postJson(server, '/api/addons/meta-benchR1/runner/register', registerBody);
+    await postJson(server, '/api/addons/meta-bench-r1/runner/register', registerBody);
     console.log('[runner] registered');
 
     const heartbeatIv = setInterval(() => {
         if (!args.secret) return;
         postJson(
             server,
-            '/api/addons/meta-benchR1/runner/heartbeat',
+            '/api/addons/meta-bench-r1/runner/heartbeat',
             {},
             args.secret
         ).catch((e) => console.warn('[runner] heartbeat failed:', e.message));
@@ -75,13 +75,13 @@ async function main() {
     socket.on('connect', () => {
         console.log('[runner] socket connected', socket.id);
         if (args.secret) {
-            socket.emit('addon:meta-benchR1:runner-attach', { runnerSecret: args.secret }, (ack) => {
+            socket.emit('addon:meta-bench-r1:runner-attach', { runnerSecret: args.secret }, (ack) => {
                 console.log('[runner] attach', ack);
             });
         }
     });
 
-    socket.on('addon:meta-benchR1:job', async (job) => {
+    socket.on('addon:meta-bench-r1:job', async (job) => {
         console.log('[runner] job', job.phase, job.runId);
         try {
             if (job.phase === 'socket-bots') {
@@ -95,11 +95,11 @@ async function main() {
                 });
                 await postJson(
                     server,
-                    `/api/addons/meta-benchR1/runs/${job.runId}/metrics`,
+                    `/api/addons/meta-bench-r1/runs/${job.runId}/metrics`,
                     { benchToken: job.benchToken, mvConnect: metrics },
                     job.benchToken
                 );
-                socket.emit('addon:meta-benchR1:progress', {
+                socket.emit('addon:meta-bench-r1:progress', {
                     runId: job.runId,
                     phase: 'socket-bots',
                     percent: 100,
@@ -116,11 +116,11 @@ async function main() {
                 });
                 await postJson(
                     server,
-                    `/api/addons/meta-benchR1/runs/${job.runId}/metrics`,
+                    `/api/addons/meta-bench-r1/runs/${job.runId}/metrics`,
                     { benchToken: job.benchToken, audioVc: metrics },
                     job.benchToken
                 );
-                socket.emit('addon:meta-benchR1:progress', {
+                socket.emit('addon:meta-bench-r1:progress', {
                     runId: job.runId,
                     phase: 'audio-vc',
                     percent: 100,

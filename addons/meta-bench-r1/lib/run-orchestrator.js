@@ -1,4 +1,4 @@
-// addons/meta-benchR1/lib/run-orchestrator.js — run ライフサイクル
+// addons/meta-bench-r1/lib/run-orchestrator.js — run ライフサイクル
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -151,7 +151,7 @@ export async function startRun(db, opts) {
     activeRuns.set(runId, runControl);
 
     executeRun(db, runId, opts, runControl).catch((e) => {
-        console.error('[meta-benchR1] run error:', e);
+        console.error('[meta-bench-r1] run error:', e);
     });
 
     return { runId, benchToken };
@@ -414,7 +414,7 @@ function dispatchRunnerJob(runId, benchToken, job) {
     if (!ioRef) return;
     const runner = getRunnerStatus();
     if (!runner.socketId) return;
-    ioRef.to(runner.socketId).emit('addon:meta-benchR1:job', {
+    ioRef.to(runner.socketId).emit('addon:meta-bench-r1:job', {
         runId,
         benchToken,
         deadlineMs: RUN_TIMEOUT_MS,

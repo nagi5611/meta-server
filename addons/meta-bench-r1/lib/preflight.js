@@ -5,7 +5,7 @@ import { getAddonCatalogSnapshot } from '../../../lib/plugin-bootstrap.js';
 import { isBenchMaintenance, isMediasoupReady } from '../../../lib/bench-maintenance.js';
 import { getRunnerStatus, isRunnerConnected } from './runner-registry.js';
 
-const PLUGIN_ID = 'meta-benchR1';
+const PLUGIN_ID = 'meta-bench-r1';
 const MIN_REPORT_BYTES = 50 * 1024 * 1024;
 
 /**
@@ -63,7 +63,7 @@ export function runPreflightChecks(opts) {
     const loadedIds = loaded.map((a) => a.id);
     if (loadedIds.length !== 1 || loadedIds[0] !== PLUGIN_ID) {
         failures.push(
-            `読み込み addon が meta-benchR1 のみではありません（現在: ${loadedIds.join(', ') || 'なし'}）。` +
+            `読み込み addon が meta-bench-r1 のみではありません（現在: ${loadedIds.join(', ') || 'なし'}）。` +
                 ' 他 addon を無効化し、Node プロセスを再起動してください。'
         );
     }

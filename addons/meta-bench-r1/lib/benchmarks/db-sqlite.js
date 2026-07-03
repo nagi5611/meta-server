@@ -1,4 +1,4 @@
-// addons/meta-benchR1/lib/benchmarks/db-sqlite.js
+// addons/meta-bench-r1/lib/benchmarks/db-sqlite.js
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -49,13 +49,13 @@ export function runDbSqliteBenchmark(addonDbPath) {
 
     if (addonDbPath && fs.existsSync(addonDbPath)) {
         details.push({
-            target: 'meta-benchR1.db SELECT',
+            target: 'meta-bench-r1.db SELECT',
             latencyMs: measureQuery(addonDbPath, (db) => {
                 db.prepare('SELECT COUNT(*) AS c FROM bench_runs').get();
             }),
         });
         details.push({
-            target: 'meta-benchR1.db INSERT/DELETE',
+            target: 'meta-bench-r1.db INSERT/DELETE',
             latencyMs: measureQuery(addonDbPath, (db) => {
                 db.exec('BEGIN');
                 try {

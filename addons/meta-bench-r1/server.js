@@ -1,4 +1,4 @@
-// addons/meta-benchR1/server.js
+// addons/meta-bench-r1/server.js
 import fs from 'node:fs';
 import express from 'express';
 import { STORAGE_PATHS } from '../../config/storage-paths.js';
@@ -89,23 +89,23 @@ export default {
 
             const jsonMw = express.json({ limit: JSON_LIMIT });
 
-            app.get('/admin/addons/meta-benchR1/runner/status', (_req, res) => {
+            app.get('/admin/addons/meta-bench-r1/runner/status', (_req, res) => {
                 res.json({ ok: true, runner: getRunnerStatus() });
             });
 
-            app.get('/admin/addons/meta-benchR1/runner/pairing-code', (_req, res) => {
+            app.get('/admin/addons/meta-bench-r1/runner/pairing-code', (_req, res) => {
                 const code = createPairingCode();
                 const info = getPairingCode();
                 res.json({ ok: true, code, expiresAt: info?.expiresAt ?? null });
             });
 
-            app.get('/admin/addons/meta-benchR1/preflight', (req, res) => {
+            app.get('/admin/addons/meta-bench-r1/preflight', (req, res) => {
                 const botCount = parseInt(String(req.query.botCount || defaultBotCount), 10);
                 const result = evaluatePreflight(db, Number.isFinite(botCount) ? botCount : defaultBotCount);
                 res.json({ ok: result.ok, failures: result.failures });
             });
 
-            app.post('/admin/addons/meta-benchR1/runs', jsonMw, async (req, res) => {
+            app.post('/admin/addons/meta-bench-r1/runs', jsonMw, async (req, res) => {
                 try {
                     const botCount = parseInt(String(req.body?.botCount ?? defaultBotCount), 10);
                     const worlds = worldsReader();
@@ -122,18 +122,18 @@ export default {
                 }
             });
 
-            app.get('/admin/addons/meta-benchR1/runs/:id', (req, res) => {
+            app.get('/admin/addons/meta-bench-r1/runs/:id', (req, res) => {
                 const run = getRunPublic(db, req.params.id);
                 if (!run) return res.status(404).json({ ok: false, error: 'not_found' });
                 res.json({ ok: true, run });
             });
 
-            app.post('/admin/addons/meta-benchR1/runs/:id/abort', (req, res) => {
+            app.post('/admin/addons/meta-bench-r1/runs/:id/abort', (req, res) => {
                 abortRun(db, req.params.id);
                 res.json({ ok: true });
             });
 
-            app.get('/admin/addons/meta-benchR1/reports/:filename', (req, res) => {
+            app.get('/admin/addons/meta-bench-r1/reports/:filename', (req, res) => {
                 const name = path.basename(req.params.filename);
                 if (!name.startsWith('benchreport') || !name.endsWith('.html')) {
                     return res.status(400).json({ ok: false, error: 'invalid_filename' });
@@ -212,7 +212,7 @@ export default {
             initRunOrchestrator({ io });
 
             io.on('connection', (socket) => {
-                socket.on('addon:meta-benchR1:runner-attach', (payload, ack) => {
+                socket.on('addon:meta-bench-r1:runner-attach', (payload, ack) => {
                     const secret = payload?.runnerSecret;
                     if (!runnerSecret || !safeEqualSecret(String(secret || ''), runnerSecret)) {
                         if (typeof ack === 'function') ack({ ok: false, error: 'unauthorized' });
@@ -222,7 +222,7 @@ export default {
                     if (typeof ack === 'function') ack({ ok: true });
                 });
 
-                socket.on('addon:meta-benchR1:progress', (payload) => {
+                socket.on('addon:meta-bench-r1:progress', (payload) => {
                     if (!payload?.runId) return;
                     ctx.logger.info(`run ${payload.runId} progress: ${payload.phase} ${payload.percent ?? '-'}%`);
                 });
