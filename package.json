@@ -14,6 +14,7 @@
         "test:nfc-spawn": "node --test addons/nfc-spawn/test/*.test.js",
         "test:meta-bench-r1": "node --test addons/meta-bench-r1/test/*.test.js",
         "bench:install-aiortc": "node scripts/install-bench-aiortc.mjs",
+        "bench:install-runner-deps": "npm install --no-fund --no-audit --ignore-scripts",
         "test:webxr-vr": "node --test addons/webxr-vr/test/*.test.js"
     },
     "keywords": [

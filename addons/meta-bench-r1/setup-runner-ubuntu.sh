@@ -44,7 +44,9 @@ fi
 
 log "システム依存をインストールします…"
 sudo apt-get update -qq
-sudo apt-get install -y git curl build-essential python3 ca-certificates
+sudo apt-get install -y \
+    git curl ca-certificates \
+    build-essential python3 python3-pip python3-venv pkg-config
 
 if ! command -v node >/dev/null 2>&1 || ! node -v | grep -q "v${NODE_MAJOR}\\."; then
     log "Node.js ${NODE_MAJOR}.x をインストールします…"
@@ -69,8 +71,9 @@ fi
 
 cd "$REPO_DIR"
 
-log "npm install…"
-npm install --no-fund --no-audit
+log "npm install（Runner 用: mediasoup worker 等の postinstall をスキップ）…"
+log "※ 通常の npm install は mediasoup の Python/pip ビルドが走り EC2 で失敗しやすいです"
+npm run bench:install-runner-deps
 
 log "mediasoup-client-aiortc をインストール…"
 npm run bench:install-aiortc
