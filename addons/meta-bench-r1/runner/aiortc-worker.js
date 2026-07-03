@@ -78,6 +78,45 @@ async function initFakeHandler(reason) {
 }
 
 /**
+ * MP3 等のファイルから produce 用オーディオトラックを取得する（aiortc のみ）
+ * @param {string} absolutePath
+ * @returns {Promise<import('mediasoup-client').MediaStreamTrack>}
+ */
+export async function createAudioTrackFromFile(absolutePath) {
+    await ensureMediasoupWorker();
+    if (mode !== 'aiortc' || !worker) {
+        throw new Error('createAudioTrackFromFile requires mediasoup-client-aiortc');
+    }
+    const stream = await worker.getUserMedia({
+        audio: { source: 'file', file: absolutePath, loop: false },
+    });
+    const track = stream.getAudioTracks()[0];
+    if (!track) throw new Error('aiortc: no audio track from file');
+    return track;
+}
+
+/**
+ * 受信リモートトラックを WAV に録音する（patch-aiortc-record 適用後）
+ * @param {string} trackId
+ * @param {string} outputWavPath
+ * @param {number} durationMs
+ */
+export async function recordRemoteTrack(trackId, outputWavPath, durationMs) {
+    await ensureMediasoupWorker();
+    if (mode !== 'aiortc' || !worker) {
+        throw new Error('recordRemoteTrack requires mediasoup-client-aiortc');
+    }
+    const w = /** @type {{ recordRecvTrack?: Function }} */ (worker);
+    if (typeof w.recordRecvTrack !== 'function') {
+        throw new Error(
+            'recordRecvTrack not available — リポジトリ root で npm run bench:install-aiortc を再実行してください'
+        );
+    }
+    const durationSec = durationMs / 1000;
+    return w.recordRecvTrack(trackId, outputWavPath, durationSec);
+}
+
+/**
  * produce 用オーディオトラックを取得する
  * @param {'audio' | 'video'} [kind]
  * @returns {Promise<import('mediasoup-client').MediaStreamTrack>}

@@ -9,6 +9,7 @@ import {
     scoreMvDegrade,
     scoreDbLatency,
     scorePacketLoss,
+    scoreVoiceMatch,
     scoreMvConnect,
     overallScore,
 } from '../lib/scoring.js';
@@ -48,6 +49,12 @@ describe('scoring', () => {
     it('scorePacketLoss', () => {
         assert.equal(scorePacketLoss(0), 100);
         assert.equal(scorePacketLoss(5), 0);
+    });
+
+    it('scoreVoiceMatch', () => {
+        assert.equal(scoreVoiceMatch(100), 100);
+        assert.equal(scoreVoiceMatch(50), 50);
+        assert.equal(scoreVoiceMatch(null), 0);
     });
 
     it('scoreMvConnect', () => {

@@ -27,4 +27,12 @@ if (result.status !== 0) {
     process.exit(result.status ?? 1);
 }
 
+const patch = spawnSync(process.execPath, ['scripts/patch-aiortc-record.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+});
+if (patch.status !== 0) {
+    process.exit(patch.status ?? 1);
+}
+
 console.log('[bench:install-aiortc] mediasoup-client-aiortc をインストールしました。');

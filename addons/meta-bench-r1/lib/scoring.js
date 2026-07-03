@@ -69,6 +69,16 @@ export function scorePacketLoss(packetLossPct) {
 }
 
 /**
+ * Voice E2E 照合一致率（0–100）をスコアに変換
+ * @param {number | null | undefined} matchPct
+ * @returns {number}
+ */
+export function scoreVoiceMatch(matchPct) {
+    if (matchPct == null || !Number.isFinite(matchPct)) return 0;
+    return clampScore(matchPct);
+}
+
+/**
  * @param {number} retainPct 0–100
  * @param {number} pingP95Ms
  * @returns {number}

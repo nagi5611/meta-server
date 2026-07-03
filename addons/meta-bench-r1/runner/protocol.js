@@ -4,6 +4,7 @@ import {
     getMediasoupHandlerContext,
     getMediasoupMode,
     createMediaTrack,
+    createAudioTrackFromFile,
 } from './aiortc-worker.js';
 import { runnerDebug, runnerWarn } from './debug.js';
 import {
@@ -64,12 +65,43 @@ export class MediasoupBenchClient {
         this.lossSamples = [];
         /** @type {'aiortc' | 'fake'} */
         this.mode = 'fake';
+        /** @type {Promise<import('mediasoup-client').Consumer> | null} */
+        this._audioConsumerPromise = null;
+        /** @type {(consumer: import('mediasoup-client').Consumer) => void | null} */
+        this._audioConsumerResolve = null;
+    }
+
+    /**
+     * リモート音声 consumer の到着を待つ（E2E 受信側用）
+     * @param {number} timeoutMs
+     * @returns {Promise<import('mediasoup-client').Consumer>}
+     */
+    waitForAudioConsumer(timeoutMs = 20_000) {
+        if (!this._audioConsumerPromise) {
+            this._audioConsumerPromise = new Promise((resolve, reject) => {
+                this._audioConsumerResolve = resolve;
+                setTimeout(() => reject(new Error(`${this.prefix}: audio consumer timeout`)), timeoutMs);
+            });
+        }
+        return this._audioConsumerPromise;
+    }
+
+    /**
+     * @param {import('mediasoup-client').Consumer} consumer
+     */
+    _resolveAudioConsumer(consumer) {
+        if (this._audioConsumerResolve) {
+            this._audioConsumerResolve(consumer);
+            this._audioConsumerResolve = null;
+        }
     }
 
     /**
      * @param {object} opts
      * @param {string} [opts.roomId]
      * @param {string} [opts.pdfPath]
+     * @param {string} [opts.audioFilePath] aiortc: MP3 等の絶対パス
+     * @param {boolean} [opts.skipProduce] true なら produce しない（受信専用）
      */
     async join(opts = {}) {
         const joinEvent = `${this.prefix}-join`;
@@ -106,9 +138,15 @@ export class MediasoupBenchClient {
             await emitAsync(this.socket, 'vc-set-speaker', { enabled: true });
         }
 
-        const audioTrack = await createMediaTrack('audio');
-        this.producer = await this.sendTransport.produce({ track: audioTrack });
-        runnerDebug('protocol', `${this.prefix} audio produced`, { producerId: this.producer?.id });
+        if (!opts.skipProduce) {
+            const audioTrack = opts.audioFilePath
+                ? await createAudioTrackFromFile(opts.audioFilePath)
+                : await createMediaTrack('audio');
+            this.producer = await this.sendTransport.produce({ track: audioTrack });
+            runnerDebug('protocol', `${this.prefix} audio produced`, { producerId: this.producer?.id });
+        } else {
+            runnerDebug('protocol', `${this.prefix} skip produce (receive-only)`);
+        }
 
         if (this.prefix === 'video-vc') {
             try {
@@ -123,8 +161,11 @@ export class MediasoupBenchClient {
         this.socket.on(`${this.prefix}-new-producer`, async ({ producerId, peerId }) => {
             if (peerId === this.socket.id) return;
             try {
-                await this._consume(producerId);
+                const consumer = await this._consume(producerId);
                 runnerDebug('protocol', `${this.prefix} consumed`, { producerId, peerId });
+                if (consumer?.kind === 'audio') {
+                    this._resolveAudioConsumer(consumer);
+                }
             } catch (e) {
                 runnerWarn('protocol', `${this.prefix} consume failed`, { producerId, error: e });
             }
@@ -207,6 +248,7 @@ export class MediasoupBenchClient {
         });
         this.consumers.set(consumer.id, consumer);
         await emitAsync(this.socket, `${this.prefix}-consumer-resume`, { consumerId: consumer.id });
+        return consumer;
     }
 
     /**

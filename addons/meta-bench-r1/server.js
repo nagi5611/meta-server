@@ -25,7 +25,7 @@ import {
     evaluatePreflight,
     ingestRunnerMetrics,
 } from './lib/run-orchestrator.js';
-import { scorePacketLoss } from './lib/scoring.js';
+import { scorePacketLoss, scoreVoiceMatch } from './lib/scoring.js';
 import {
     normalizeBenchPdfPath,
 } from './lib/bench-pdf-path.js';
@@ -206,7 +206,7 @@ export default {
                 if (body.audioVc) {
                     const av = body.audioVc;
                     normalized.audioVc = {
-                        voice: scorePacketLoss(av.voiceLossPct ?? 100),
+                        voice: scoreVoiceMatch(av.voiceMatchPct),
                         pdf: scorePacketLoss(av.pdfLossPct ?? 100),
                         video: scorePacketLoss(av.videoLossPct ?? 100),
                         raw: av,

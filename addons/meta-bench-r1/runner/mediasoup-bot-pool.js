@@ -2,6 +2,7 @@
 import { io } from 'socket.io-client';
 import { MediasoupBenchClient, getMediasoupMode } from './protocol.js';
 import { closeMediasoupWorker } from './aiortc-worker.js';
+import { runVoiceE2eBench } from './voice-e2e-bench.js';
 import { runnerDebug, runnerInfo, runnerWarn, formatError } from './debug.js';
 import { buildSocketIoOptions } from './socket-client-options.js';
 
@@ -16,6 +17,7 @@ const CONNECT_STAGGER_MS = 200;
  * @param {number} opts.vcBotCount
  * @param {string[]} [opts.worlds]
  * @param {string} opts.pdfPath
+ * @param {string} [opts.audioFilePath]
  * @param {number} opts.durationMs
  */
 export async function runMediasoupBotPool(opts) {
@@ -26,6 +28,7 @@ export async function runMediasoupBotPool(opts) {
         vcBotCount,
         worlds = ['default'],
         pdfPath,
+        audioFilePath,
         durationMs,
     } = opts;
     const n = Math.min(vcBotCount, 10);
@@ -34,40 +37,37 @@ export async function runMediasoupBotPool(opts) {
     if (getMediasoupMode() === 'fake') {
         runnerWarn(
             'vc-pool',
-            'FakeHandler モード（Windows 等）。packetLoss は参考値。本番相当は Linux Runner + mediasoup-client-aiortc を推奨。'
+            'FakeHandler モード（Windows 等）。voice E2E はスキップ、pdf/video packetLoss は参考値。'
         );
     }
     /** @type {import('socket.io-client').Socket[]} */
     const sockets = [];
-    /** @type {MediasoupBenchClient[]} */
-    const voiceClients = [];
     /** @type {MediasoupBenchClient[]} */
     const pdfClients = [];
     /** @type {MediasoupBenchClient[]} */
     const videoClients = [];
 
     try {
+        const voiceE2e = await runVoiceE2eBench({
+            serverUrl,
+            benchToken,
+            runId,
+            worldId,
+            audioFilePath,
+        });
+
         for (let i = 0; i < n; i++) {
-            runnerDebug('vc-pool', `bot ${i + 1}/${n} connecting`);
+            runnerDebug('vc-pool', `pdf/video bot ${i + 1}/${n} connecting`);
             try {
-                const socket = await createBenchSocket(serverUrl, benchToken, runId, i, worldId);
-                sockets.push(socket);
-
-                const voice = new MediasoupBenchClient(socket, 'vc');
-                await voice.join({ roomId: worldId });
-                voiceClients.push(voice);
-                runnerDebug('vc-pool', `bot ${i + 1} voice joined`, { mode: voice.mode });
-
-                const pdfSocket =
-                    i === 0 ? socket : await createBenchSocket(serverUrl, benchToken, runId, i, worldId, '-pdf');
-                if (pdfSocket !== socket) sockets.push(pdfSocket);
+                const pdfSocket = await createBenchSocket(serverUrl, benchToken, runId, i, worldId, '-pdf');
+                sockets.push(pdfSocket);
                 const pdf = new MediasoupBenchClient(pdfSocket, 'pdf-vc');
                 await pdf.join({ pdfPath });
                 pdfClients.push(pdf);
 
                 const videoSocket =
-                    i === 0 ? socket : await createBenchSocket(serverUrl, benchToken, runId, i, worldId, '-vid');
-                if (videoSocket !== socket && !sockets.includes(videoSocket)) sockets.push(videoSocket);
+                    i === 0 ? pdfSocket : await createBenchSocket(serverUrl, benchToken, runId, i, worldId, '-vid');
+                if (videoSocket !== pdfSocket && !sockets.includes(videoSocket)) sockets.push(videoSocket);
                 const video = new MediasoupBenchClient(videoSocket, 'video-vc');
                 await video.join({ roomId: worldId });
                 videoClients.push(video);
@@ -81,18 +81,19 @@ export async function runMediasoupBotPool(opts) {
 
         const statsEnd = Date.now() + durationMs;
         while (Date.now() < statsEnd) {
-            for (const c of [...voiceClients, ...pdfClients, ...videoClients]) {
+            for (const c of [...pdfClients, ...videoClients]) {
                 await c.samplePacketLoss();
             }
             await sleep(STATS_INTERVAL_MS);
         }
 
-        const voiceLoss = median(voiceClients.map((c) => c.getMedianLossPct()));
         const pdfLoss = median(pdfClients.map((c) => c.getMedianLossPct()));
         const videoLoss = median(videoClients.map((c) => c.getMedianLossPct()));
 
         const result = {
-            voiceLossPct: voiceLoss,
+            voiceMatchPct: voiceE2e.voiceMatchPct,
+            voiceE2eSkipped: voiceE2e.voiceE2eSkipped,
+            voiceE2eRef: voiceE2e.voiceE2eRef,
             pdfLossPct: pdfLoss,
             videoLossPct: videoLoss,
             handlerMode: getMediasoupMode(),
@@ -100,7 +101,7 @@ export async function runMediasoupBotPool(opts) {
         runnerInfo('vc-pool', 'done', result);
         return result;
     } finally {
-        for (const c of [...voiceClients, ...pdfClients, ...videoClients]) {
+        for (const c of [...pdfClients, ...videoClients]) {
             await c.close();
         }
         for (const s of sockets) s.disconnect();
