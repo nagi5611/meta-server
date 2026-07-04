@@ -33,6 +33,10 @@ const VERTICAL_MOVE_MARGIN = 0.02;
 const MAX_BANK_RAD = Math.PI / 6;
 /** この角度以上の機首上げで推力減衰・対気速度キャップ・上昇減速を適用 (°) */
 const EASY_STEEP_CLIMB_PITCH_DEG = 22;
+/** Easy 操縦: エンジンブレード目標角速度上限 (rad/s) */
+const EASY_ENGINE_BLADE_MAX_OMEGA_RAD_PER_S = 90;
+/** Easy 操縦: W 押下時のエンジンブレード角加速度 (rad/s²) */
+const EASY_ENGINE_BLADE_MAX_ACCEL_RAD_PER_S2 = 5;
 
 /**
  * easy 操縦: 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -592,13 +596,19 @@ export default class AircraftControllerEasy {
     _updateLibraryVisuals(dt) {
         if (!this._libAnim?.blades?.length) return;
         const ph = this.physics;
-        const thrust = (this._keyActive('forward') ? 1 : 0) - (this._keyActive('back') ? 1 : 0);
-        let t01 = thrust > 0 ? 1 : thrust < 0 ? 0.35 : 0;
-        if (ph.maxSpeed > 0) {
-            t01 = Math.max(t01, THREE.MathUtils.clamp(this.velocity.length() / ph.maxSpeed, 0, 1));
+        const wPressed = this._keyActive('forward');
+        let throttle01 = 0;
+        if (wPressed && ph.maxSpeed > 0) {
+            const speedKmh = this.velocity.length() * 3.6;
+            const maxSpeedKmh = ph.maxSpeed * 3.6;
+            throttle01 = THREE.MathUtils.clamp(speedKmh / maxSpeedKmh, 0, 1);
         }
+        const easyBladeParams = {
+            maxAccelRadPerS2: EASY_ENGINE_BLADE_MAX_ACCEL_RAD_PER_S2,
+            maxOmegaRadPerS: EASY_ENGINE_BLADE_MAX_OMEGA_RAD_PER_S,
+        };
         for (const b of this._libAnim.blades) {
-            stepEngineBladeRotation(b.blade, b.axis, b.params, t01, dt, b.state);
+            stepEngineBladeRotation(b.blade, b.axis, easyBladeParams, throttle01, dt, b.state);
         }
     }
 

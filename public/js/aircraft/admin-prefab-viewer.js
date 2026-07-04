@@ -114,6 +114,10 @@ export class AdminAircraftPrefabViewer {
         this._raycaster = new THREE.Raycaster();
         this._pointer = new THREE.Vector2();
         this._raf = 0;
+        /** @type {number} */
+        this._lastFrameMs = 0;
+        /** @type {{ active: boolean, blades: THREE.Object3D[], axis: 'x'|'y'|'z', omegaRadPerS: number }} */
+        this._engineBladePreview = { active: false, blades: [], axis: 'z', omegaRadPerS: 30 };
         /** @type {boolean} */
         this._disposed = false;
         this._boundResize = () => this._resize();
@@ -166,8 +170,54 @@ export class AdminAircraftPrefabViewer {
     _loop() {
         if (this._disposed) return;
         this._raf = requestAnimationFrame(() => this._loop());
+        const now = performance.now();
+        const dt = this._lastFrameMs > 0 ? Math.min(0.1, (now - this._lastFrameMs) / 1000) : 0;
+        this._lastFrameMs = now;
+        this._stepEngineBladePreview(dt);
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
+    }
+
+    /**
+     * エンジンブレードのループプレビュー（管理画面・固定角速度）
+     * @param {{ active: boolean, blades?: THREE.Object3D[], axis?: 'x'|'y'|'z', omegaRadPerS?: number }} opts
+     * @returns {void}
+     */
+    setEngineBladePreview(opts) {
+        const prev = this._engineBladePreview;
+        this._engineBladePreview = {
+            active: !!opts.active,
+            blades: opts.blades ?? prev.blades,
+            axis: opts.axis === 'x' || opts.axis === 'y' || opts.axis === 'z' ? opts.axis : prev.axis,
+            omegaRadPerS: typeof opts.omegaRadPerS === 'number' && Number.isFinite(opts.omegaRadPerS)
+                ? opts.omegaRadPerS
+                : prev.omegaRadPerS,
+        };
+        if (!this._engineBladePreview.active) {
+            this._lastFrameMs = 0;
+        }
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    isEngineBladePreviewActive() {
+        return this._engineBladePreview.active;
+    }
+
+    /**
+     * @param {number} dt
+     * @returns {void}
+     */
+    _stepEngineBladePreview(dt) {
+        const p = this._engineBladePreview;
+        if (!p.active || !p.blades.length || dt <= 0) return;
+        const w = p.omegaRadPerS;
+        for (const blade of p.blades) {
+            if (p.axis === 'x') blade.rotation.x += w * dt;
+            else if (p.axis === 'y') blade.rotation.y += w * dt;
+            else blade.rotation.z += w * dt;
+        }
     }
 
     /**
@@ -578,6 +628,7 @@ export class AdminAircraftPrefabViewer {
      * プレハブのみ破棄
      */
     disposePrefabOnly() {
+        this.setEngineBladePreview({ active: false });
         this._transformControls.detach();
         this._clearViewpointMarkers();
         if (this._prefabRoot) {

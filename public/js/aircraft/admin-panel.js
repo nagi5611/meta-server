@@ -6,7 +6,7 @@ import {
     normalizeBindings,
     bindingPathsForRole,
 } from './airframe-definition-schema.js';
-import { AdminAircraftPrefabViewer, collectNamePaths } from './admin-prefab-viewer.js';
+import { AdminAircraftPrefabViewer, collectNamePaths, findObjectByNamePath } from './admin-prefab-viewer.js';
 import {
     mountFlightPhysicsForm,
     fillFlightPhysicsForm,
@@ -39,6 +39,9 @@ let activePhysicsProfile = 'hard';
 let activeViewpointProfile = 'hard';
 /** @type {((e: KeyboardEvent) => void) | null} */
 let acVpKeydownHandler = null;
+
+/** 管理画面プレビュー時のエンジンブレード角速度 (rad/s) */
+const ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S = 30;
 
 /**
  * @param {string} url
@@ -263,6 +266,7 @@ function syncFormFromDraft() {
                     else delete b[role];
                     draftAirframe.bindings = normalizeBindings(b);
                     syncFormFromDraft();
+                    refreshEngineBladePreviewIfActive();
                     setStatus(`削除: ${role} の「${p}」`);
                 });
                 row.appendChild(del);
@@ -295,6 +299,7 @@ function syncFormFromDraft() {
     syncViewpointPanelFromDraft();
     refreshRightTabVisibility();
     applyMeshVisualPivotToViewer();
+    syncEngineBladePreviewButton();
 }
 
 /**
@@ -558,10 +563,97 @@ function readAnimationFromForm() {
 }
 
 /**
+ * engineBlade ロールに割り当てたメッシュをビューアから解決する
+ * @returns {{ blades: import('three').Object3D[], axis: 'x'|'y'|'z' }}
+ */
+function resolveEngineBladeMeshesForPreview() {
+    const root = viewer?.getPrefabRoot?.();
+    if (!root || !draftAirframe) return { blades: [], axis: 'z' };
+    const paths = bindingPathsForRole(draftAirframe.bindings, 'engineBlade');
+    const anim = readAnimationFromForm().engineBlade;
+    const axis = anim.spinAxis === 'x' || anim.spinAxis === 'y' || anim.spinAxis === 'z' ? anim.spinAxis : 'z';
+    /** @type {import('three').Object3D[]} */
+    const blades = [];
+    for (const path of paths) {
+        const blade = findObjectByNamePath(root, path);
+        if (blade) blades.push(blade);
+    }
+    return { blades, axis };
+}
+
+/**
+ * プレビュー再生ボタンの表示を同期する
+ * @returns {void}
+ */
+function syncEngineBladePreviewButton() {
+    const btn = document.getElementById('ac-anim-preview-toggle');
+    if (!btn) return;
+    const active = viewer?.isEngineBladePreviewActive?.() ?? false;
+    btn.textContent = active ? 'プレビュー停止' : 'プレビュー再生';
+    btn.classList.toggle('btn-primary', !active);
+    btn.classList.toggle('btn-outline-secondary', active);
+}
+
+/**
+ * エンジンブレードのループプレビューを停止する
+ * @returns {void}
+ */
+function stopEngineBladePreview() {
+    viewer?.setEngineBladePreview?.({ active: false });
+    syncEngineBladePreviewButton();
+}
+
+/**
+ * エンジンブレードのループプレビューを開始する（30 rad/s）
+ * @returns {boolean}
+ */
+function startEngineBladePreview() {
+    if (!viewer?.getPrefabRoot?.()) {
+        setStatus('プレハブを読み込んでからプレビューしてください', true);
+        return false;
+    }
+    const { blades, axis } = resolveEngineBladeMeshesForPreview();
+    if (!blades.length) {
+        setStatus('engineBlade ロールにメッシュを割り当ててください', true);
+        return false;
+    }
+    viewer.setEngineBladePreview({
+        active: true,
+        blades,
+        axis,
+        omegaRadPerS: ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S,
+    });
+    syncEngineBladePreviewButton();
+    setStatus(`エンジンブレードを ${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s でループ再生中`);
+    return true;
+}
+
+/**
+ * プレビュー再生中ならブレード参照と回転軸を更新する
+ * @returns {void}
+ */
+function refreshEngineBladePreviewIfActive() {
+    if (!viewer?.isEngineBladePreviewActive?.()) return;
+    const { blades, axis } = resolveEngineBladeMeshesForPreview();
+    if (!blades.length) {
+        stopEngineBladePreview();
+        setStatus('engineBlade の割当がなくなったためプレビューを停止しました', true);
+        return;
+    }
+    viewer.setEngineBladePreview({
+        active: true,
+        blades,
+        axis,
+        omegaRadPerS: ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S,
+    });
+}
+
+/**
  * @param {string} id
  * @returns {Promise<void>}
  */
 async function selectAirframe(id) {
+    stopEngineBladePreview();
     selectedAirframeId = id;
     const data = await fetchJson(`/admin/addons/aircraft/airframes/${encodeURIComponent(id)}`);
     draftAirframe = data.airframe;
@@ -753,6 +845,10 @@ export function initAircraftAdminPanel() {
                         <input type="number" id="ac-anim-maxomega" class="prop-input num" step="any" /></div>
                     <div class="field-row"><label class="prop-label" for="ac-anim-spinaxis">回転軸（ローカル）</label>
                         <select id="ac-anim-spinaxis" class="prop-input full"><option value="x">x</option><option value="y">y</option><option value="z">z</option></select></div>
+                    <div class="ac-admin-actions" style="margin-top:4px;">
+                        <button type="button" class="btn btn-sm btn-primary" id="ac-anim-preview-toggle">プレビュー再生</button>
+                    </div>
+                    <p class="hint" style="margin:4px 0 0;font-size:11px;">engineBlade ロール割当済みメッシュを <strong>${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s</strong> でループ表示します。</p>
                 </div>
                 <div id="ac-pane-branch" class="ac-tab-pane" style="display:none">
                     <h3 class="section-subtitle">視点（カメラ）</h3>
@@ -914,6 +1010,7 @@ export function initAircraftAdminPanel() {
         b[role] = [...arr, path];
         draftAirframe.bindings = normalizeBindings(b);
         syncFormFromDraft();
+        refreshEngineBladePreviewIfActive();
         setStatus(`追加: ${role} ← ${path}`);
     });
 
@@ -964,6 +1061,7 @@ export function initAircraftAdminPanel() {
         if (!v) {
             draftAirframe.prefabManifest = '';
             if (el && 'value' in el) /** @type {HTMLInputElement} */ (el).value = '';
+            stopEngineBladePreview();
             viewer?.disposePrefabOnly();
             syncFormFromDraft();
             await saveDraft();
@@ -973,6 +1071,7 @@ export function initAircraftAdminPanel() {
         if (el && 'value' in el) /** @type {HTMLInputElement} */ (el).value = v;
         try {
             setStatus('プレハブを読み込み中…');
+            stopEngineBladePreview();
             await viewer?.loadFromManifest(v);
             refreshPathDropdown();
             syncViewpointEditorOnViewer();
@@ -1003,6 +1102,19 @@ export function initAircraftAdminPanel() {
 
     for (const id of ['ac-mesh-rx', 'ac-mesh-ry', 'ac-mesh-rz']) {
         document.getElementById(id)?.addEventListener('input', () => applyMeshVisualPivotToViewer());
+    }
+
+    document.getElementById('ac-anim-preview-toggle')?.addEventListener('click', () => {
+        if (viewer?.isEngineBladePreviewActive?.()) {
+            stopEngineBladePreview();
+            setStatus('エンジンブレードのプレビューを停止しました');
+            return;
+        }
+        startEngineBladePreview();
+    });
+
+    for (const id of ['ac-anim-spinaxis']) {
+        document.getElementById(id)?.addEventListener('change', () => refreshEngineBladePreviewIfActive());
     }
 
     document.getElementById('ac-vp-add')?.addEventListener('click', () => {
