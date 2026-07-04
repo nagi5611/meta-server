@@ -8,7 +8,7 @@ import {
     updateGroundedHysteresis,
     AIRCRAFT_GROUND_FRICTION_MIN_FORWARD_HORIZ,
 } from './aircraft-physics-defaults.js';
-import { findObjectsForBindingPaths, stepEngineBladeRotation } from './runtime-prefab-aircraft-anim.js';
+import { findObjectsForBindingPaths, stepEngineBladeRotationToTargetOmega } from './runtime-prefab-aircraft-anim.js';
 import {
     applyAircraftViewpointCamera,
     resolveSlotCameraViewpoints,
@@ -35,8 +35,9 @@ const MAX_BANK_RAD = Math.PI / 6;
 const EASY_STEEP_CLIMB_PITCH_DEG = 22;
 /** Easy 操縦: エンジンブレード目標角速度上限 (rad/s) */
 const EASY_ENGINE_BLADE_MAX_OMEGA_RAD_PER_S = 90;
-/** Easy 操縦: W 押下時のエンジンブレード角加速度 (rad/s²) */
 const EASY_ENGINE_BLADE_MAX_ACCEL_RAD_PER_S2 = 5;
+/** Easy 操縦: 前進速度がこの値 (km/h) 未満ならブレード停止扱い */
+const EASY_ENGINE_BLADE_MIN_SPEED_KMH = 0.5;
 
 /**
  * easy 操縦: 共有 GLB ルートに推力・姿勢入力を適用し、カメラを更新する
@@ -589,24 +590,25 @@ export default class AircraftControllerEasy {
     }
 
     /**
+     * HUD と同じ前進速度 (km/h) を目標角速度 (rad/s) に直結。速度なしでは回さない。
      * @param {number} dt
      */
     _updateLibraryVisuals(dt) {
         if (!this._libAnim?.blades?.length) return;
-        const ph = this.physics;
-        const wPressed = this._keyActive('forward');
-        let throttle01 = 0;
-        if (wPressed && ph.maxSpeed > 0) {
-            const speedKmh = this.velocity.length() * 3.6;
-            const maxSpeedKmh = ph.maxSpeed * 3.6;
-            throttle01 = THREE.MathUtils.clamp(speedKmh / maxSpeedKmh, 0, 1);
-        }
-        const easyBladeParams = {
-            maxAccelRadPerS2: EASY_ENGINE_BLADE_MAX_ACCEL_RAD_PER_S2,
-            maxOmegaRadPerS: EASY_ENGINE_BLADE_MAX_OMEGA_RAD_PER_S,
-        };
+        const root = this.slot?.root;
+        if (!root) return;
+        root.getWorldQuaternion(this._worldQuat);
+        this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
+        if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
+        const speedMs = Math.max(0, this.velocity.dot(this._fwd));
+        const speedKmh = speedMs * 3.6;
+        const targetOmega =
+            speedKmh >= EASY_ENGINE_BLADE_MIN_SPEED_KMH
+                ? Math.min(speedKmh, EASY_ENGINE_BLADE_MAX_OMEGA_RAD_PER_S)
+                : 0;
+        const accel = EASY_ENGINE_BLADE_MAX_ACCEL_RAD_PER_S2;
         for (const b of this._libAnim.blades) {
-            stepEngineBladeRotation(b.blade, b.axis, easyBladeParams, throttle01, dt, b.state);
+            stepEngineBladeRotationToTargetOmega(b.blade, b.axis, targetOmega, accel, dt, b.state);
         }
     }
 

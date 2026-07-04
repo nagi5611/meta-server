@@ -125,6 +125,21 @@ export function stepEngineBladeRotation(blade, axis, params, throttle01, dt, sta
     const maxA = Math.max(0.01, Number(params.maxAccelRadPerS2) || 24);
     const maxW = Math.max(0, Number(params.maxOmegaRadPerS) || 140);
     const target = THREE.MathUtils.clamp(throttle01, 0, 1) * maxW;
+    stepEngineBladeRotationToTargetOmega(blade, axis, target, maxA, dt, state);
+}
+
+/**
+ * 目標角速度 (rad/s) へ角加速度制限付きで追従し、ローカル回転を積む。
+ * @param {THREE.Object3D} blade
+ * @param {'x'|'y'|'z'} axis
+ * @param {number} targetOmegaRadPerS
+ * @param {number} maxAccelRadPerS2
+ * @param {number} dt
+ * @param {{ omega: number }} state
+ */
+export function stepEngineBladeRotationToTargetOmega(blade, axis, targetOmegaRadPerS, maxAccelRadPerS2, dt, state) {
+    const maxA = Math.max(0.01, Number(maxAccelRadPerS2) || 5);
+    const target = Math.max(0, Number(targetOmegaRadPerS) || 0);
     let w = state.omega;
     const diff = target - w;
     const step = Math.sign(diff) * Math.min(Math.abs(diff), maxA * dt);
