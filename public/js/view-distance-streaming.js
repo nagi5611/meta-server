@@ -388,20 +388,99 @@ export default class ViewDistanceStreaming {
     }
 
     /**
-     * spawn 周辺の streaming エントリを初回ロード（並列上限のため複数パス）
+     * spawn 周辺の描画距離内 streaming をすべて完了するまで初回ロードする。
+     * 完了条件: 描画距離内の streaming / streaming_part / 追随 piggyback が idle・loading を持たないこと。
      * @param {{ x: number, y: number, z: number }} spawnPoint
      * @param {number} viewDistanceM
      */
     async runInitialNearSpawn(spawnPoint, viewDistanceM) {
         const feet = new THREE.Vector3(spawnPoint.x, spawnPoint.y, spawnPoint.z);
-        for (let pass = 0; pass < 256; pass++) {
-            if (!this._hasIdleStreamingInRange(feet, viewDistanceM)) break;
-            await this._drainInRangeLoads(feet, viewDistanceM);
+        while (this.hasPendingStreamingInRange(feet, viewDistanceM)) {
+            if (this._hasIdleStreamingInRange(feet, viewDistanceM)) {
+                await this._drainInRangeLoads(feet, viewDistanceM);
+                continue;
+            }
+            const piggyLoaded = await this._drainInRangeIdlePiggybacks(feet, viewDistanceM);
+            if (piggyLoaded) {
+                continue;
+            }
+            if (this._loadingCount > 0) {
+                await this._waitForLoadingCountZero();
+                continue;
+            }
+            console.warn(
+                '[VAS] runInitialNearSpawn: unresolved in-range streaming entries remain; continuing world load'
+            );
+            break;
         }
     }
 
     /**
-     * @param {THREE.Vector3} feetWorld
+     * 描画距離内に未完了の streaming（idle / loading）が残っているか
+     * @param {THREE.Vector3 | { x: number, y: number, z: number }} feetWorld
+     * @param {number} viewDistanceM
+     * @returns {boolean}
+     */
+    hasPendingStreamingInRange(feetWorld, viewDistanceM) {
+        const inRangeModelIdx = this._collectInRangeStreamingModelIndices(feetWorld, viewDistanceM);
+        for (const entry of this.entries) {
+            if (entry.state !== 'idle' && entry.state !== 'loading') {
+                continue;
+            }
+            if (isDistanceGatedStreamingEntry(entry)) {
+                if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) {
+                    continue;
+                }
+                if (
+                    isWithinViewDistanceLoadRange(
+                        feetWorld,
+                        entry.worldCenter,
+                        entry.worldRadius,
+                        viewDistanceM
+                    )
+                ) {
+                    return true;
+                }
+                continue;
+            }
+            if (entry.mode === 'streaming_part_piggyback' && inRangeModelIdx.has(entry.idx)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @param {THREE.Vector3 | { x: number, y: number, z: number }} feetWorld
+     * @param {number} viewDistanceM
+     * @returns {Set<number>}
+     */
+    _collectInRangeStreamingModelIndices(feetWorld, viewDistanceM) {
+        /** @type {Set<number>} */
+        const inRangeModelIdx = new Set();
+        for (const entry of this.entries) {
+            if (entry.mode !== 'streaming_part') {
+                continue;
+            }
+            if (!entry.worldCenter || !Number.isFinite(entry.worldRadius)) {
+                continue;
+            }
+            if (
+                isWithinViewDistanceLoadRange(
+                    feetWorld,
+                    entry.worldCenter,
+                    entry.worldRadius,
+                    viewDistanceM
+                )
+            ) {
+                inRangeModelIdx.add(entry.idx);
+            }
+        }
+        return inRangeModelIdx;
+    }
+
+    /**
+     * @param {THREE.Vector3 | { x: number, y: number, z: number }} feetWorld
      * @param {number} viewDistanceM
      * @returns {boolean}
      */
@@ -419,6 +498,37 @@ export default class ViewDistanceStreaming {
                     viewDistanceM
                 )
         );
+    }
+
+    /**
+     * 描画距離内モデルの未ロード piggyback パーツを読み込む
+     * @param {THREE.Vector3 | { x: number, y: number, z: number }} feetWorld
+     * @param {number} viewDistanceM
+     * @returns {Promise<boolean>} 1 件以上ロードを開始したら true
+     */
+    async _drainInRangeIdlePiggybacks(feetWorld, viewDistanceM) {
+        const inRangeModelIdx = this._collectInRangeStreamingModelIndices(feetWorld, viewDistanceM);
+        let any = false;
+        for (const idx of inRangeModelIdx) {
+            const hasIdle = this.entries.some(
+                (e) => e.idx === idx && e.mode === 'streaming_part_piggyback' && e.state === 'idle'
+            );
+            if (!hasIdle) {
+                continue;
+            }
+            any = true;
+            await this._loadPiggybackPartsForModel(idx);
+        }
+        return any;
+    }
+
+    /**
+     * @returns {Promise<void>}
+     */
+    async _waitForLoadingCountZero() {
+        while (this._loadingCount > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 16));
+        }
     }
 
     /**

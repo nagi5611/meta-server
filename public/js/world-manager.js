@@ -179,6 +179,7 @@ class WorldManager {
             await this.sceneManager.loadWorldModels(
                 modelsForRod,
                 async () => {
+                    // 描画距離内 streaming の idle/loading がゼロになるまで待つ（VAS.runInitialNearSpawn）
                     await vas.runInitialNearSpawn(spawn, viewDistanceM);
                     await this.sceneManager.flushBVHRegeneration();
 
