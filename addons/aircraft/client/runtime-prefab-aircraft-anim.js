@@ -3,27 +3,112 @@
 import * as THREE from 'three';
 
 /**
+ * @param {THREE.Object3D} obj
+ * @returns {string}
+ */
+function objectDisplayName(obj) {
+    return obj.name && obj.name.trim() ? obj.name.trim() : '_unnamed_';
+}
+
+/**
+ * 同名兄弟がいる場合は `Name#2` 形式で一意化する（管理画面とゲームで同じ規則）
+ * @param {THREE.Object3D} obj
+ * @param {THREE.Object3D} root
+ * @returns {string}
+ */
+export function objectNamePathFromRoot(obj, root) {
+    /** @type {string[]} */
+    const parts = [];
+    let o = obj;
+    while (o && o !== root) {
+        const parent = o.parent;
+        const base = objectDisplayName(o);
+        if (parent) {
+            const same = parent.children.filter((c) => objectDisplayName(c) === base);
+            if (same.length > 1) {
+                const idx = same.indexOf(o);
+                parts.unshift(`${base}#${idx + 1}`);
+            } else {
+                parts.unshift(base);
+            }
+        } else {
+            parts.unshift(base);
+        }
+        o = parent;
+    }
+    return parts.join('/');
+}
+
+/**
+ * @param {THREE.Object3D} parent
+ * @param {string} seg
+ * @returns {THREE.Object3D[]}
+ */
+function childrenMatchingSegment(parent, seg) {
+    const m = /^(.+)#(\d+)$/.exec(seg);
+    const base = m ? m[1] : seg;
+    const numbered = m ? Math.max(1, parseInt(m[2], 10)) : 0;
+    const matches = parent.children.filter((c) => objectDisplayName(c) === base);
+    if (numbered > 0) {
+        const pick = matches[numbered - 1];
+        return pick ? [pick] : [];
+    }
+    if (matches.length) return matches;
+    return parent.children.filter((c) => objectDisplayName(c) === seg);
+}
+
+/**
  * 名前パスで子オブジェクトを取得（管理画面と同じ規則）
  * @param {THREE.Object3D} root
  * @param {string} path
+ * @param {Set<string>} [usedUuids] 同一パスを複数割当したとき、未使用の兄弟を選ぶ
  * @returns {THREE.Object3D|null}
  */
-export function findObjectByNamePath(root, path) {
+export function findObjectByNamePath(root, path, usedUuids) {
     const segments = String(path || '')
         .split('/')
         .filter(Boolean);
     if (!segments.length || !root) return null;
     /** @type {THREE.Object3D} */
     let cur = root;
-    for (const seg of segments) {
-        const next = cur.children.find((c) => {
-            const n = c.name && c.name.trim() ? c.name.trim() : '_unnamed_';
-            return n === seg;
-        });
-        if (!next) return null;
-        cur = next;
+    for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const isLast = i === segments.length - 1;
+        const candidates = childrenMatchingSegment(cur, seg);
+        if (!candidates.length) return null;
+        if (isLast) {
+            let pick = candidates[0];
+            if (usedUuids && usedUuids.size > 0) {
+                const fresh = candidates.find((c) => !usedUuids.has(c.uuid));
+                if (fresh) pick = fresh;
+            }
+            return pick;
+        }
+        if (candidates.length !== 1) return null;
+        cur = candidates[0];
     }
     return cur;
+}
+
+/**
+ * バインドパス配列を順に解決し、各エントリごとに別オブジェクトを優先して返す
+ * @param {THREE.Object3D} root
+ * @param {string[]} paths
+ * @returns {THREE.Object3D[]}
+ */
+export function findObjectsForBindingPaths(root, paths) {
+    const used = new Set();
+    /** @type {THREE.Object3D[]} */
+    const out = [];
+    for (const path of paths) {
+        const p = String(path || '').trim();
+        if (!p) continue;
+        const obj = findObjectByNamePath(root, p, used);
+        if (!obj) continue;
+        used.add(obj.uuid);
+        out.push(obj);
+    }
+    return out;
 }
 
 /**

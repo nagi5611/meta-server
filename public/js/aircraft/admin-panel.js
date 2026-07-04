@@ -6,7 +6,8 @@ import {
     normalizeBindings,
     bindingPathsForRole,
 } from './airframe-definition-schema.js';
-import { AdminAircraftPrefabViewer, collectNamePaths, findObjectByNamePath } from './admin-prefab-viewer.js';
+import { AdminAircraftPrefabViewer, collectNamePaths } from './admin-prefab-viewer.js';
+import { findObjectsForBindingPaths } from '../../../addons/aircraft/client/runtime-prefab-aircraft-anim.js';
 import {
     mountFlightPhysicsForm,
     fillFlightPhysicsForm,
@@ -572,12 +573,7 @@ function resolveEngineBladeMeshesForPreview() {
     const paths = bindingPathsForRole(draftAirframe.bindings, 'engineBlade');
     const anim = readAnimationFromForm().engineBlade;
     const axis = anim.spinAxis === 'x' || anim.spinAxis === 'y' || anim.spinAxis === 'z' ? anim.spinAxis : 'z';
-    /** @type {import('three').Object3D[]} */
-    const blades = [];
-    for (const path of paths) {
-        const blade = findObjectByNamePath(root, path);
-        if (blade) blades.push(blade);
-    }
+    const blades = findObjectsForBindingPaths(root, paths);
     return { blades, axis };
 }
 
@@ -624,8 +620,17 @@ function startEngineBladePreview() {
         omegaRadPerS: ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S,
     });
     syncEngineBladePreviewButton();
-    setStatus(`エンジンブレードを ${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s でループ再生中`);
-    return true;
+    const n = blades.length;
+    const pathN = bindingPathsForRole(draftAirframe?.bindings, 'engineBlade').length;
+    if (n < pathN) {
+        setStatus(
+            `エンジンブレードを ${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s でループ再生中（${n}/${pathN} 件解決。未解決パスはロール割当を確認）`,
+            n === 0
+        );
+    } else {
+        setStatus(`エンジンブレード ${n} 件を ${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s でループ再生中`);
+    }
+    return n > 0;
 }
 
 /**

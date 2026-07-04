@@ -6,6 +6,13 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { loadPrefabGroupFromManifest } from '/js/prefab-load-shared.js';
+import {
+    objectNamePathFromRoot,
+    findObjectByNamePath,
+    findObjectsForBindingPaths,
+} from '../../../addons/aircraft/client/runtime-prefab-aircraft-anim.js';
+
+export { objectNamePathFromRoot, findObjectByNamePath, findObjectsForBindingPaths };
 
 const DRACO_DECODER_PATH = 'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
 
@@ -24,41 +31,6 @@ function createGLTFLoader() {
     const loader = new GLTFLoader();
     loader.setDRACOLoader(getDraco());
     return loader;
-}
-
-/**
- * ルートからの名前パス（Blender オブジェクト名の連結）
- * @param {THREE.Object3D} obj
- * @param {THREE.Object3D} root
- * @returns {string}
- */
-export function objectNamePathFromRoot(obj, root) {
-    const parts = [];
-    let o = obj;
-    while (o && o !== root) {
-        parts.unshift(o.name && o.name.trim() ? o.name.trim() : '_unnamed_');
-        o = o.parent;
-    }
-    return parts.join('/');
-}
-
-/**
- * @param {THREE.Object3D} root
- * @param {string} path
- * @returns {THREE.Object3D|null}
- */
-export function findObjectByNamePath(root, path) {
-    if (!path || !root) return null;
-    const segments = path.split('/').filter(Boolean);
-    if (segments.length === 0) return null;
-    /** @type {THREE.Object3D|null} */
-    let cur = root;
-    for (const seg of segments) {
-        const next = cur.children.find((c) => (c.name && c.name.trim() ? c.name.trim() : '_unnamed_') === seg);
-        if (!next) return null;
-        cur = next;
-    }
-    return cur;
 }
 
 /**

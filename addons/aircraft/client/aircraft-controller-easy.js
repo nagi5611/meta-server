@@ -8,7 +8,7 @@ import {
     updateGroundedHysteresis,
     AIRCRAFT_GROUND_FRICTION_MIN_FORWARD_HORIZ,
 } from './aircraft-physics-defaults.js';
-import { findObjectByNamePath, stepEngineBladeRotation } from './runtime-prefab-aircraft-anim.js';
+import { findObjectsForBindingPaths, stepEngineBladeRotation } from './runtime-prefab-aircraft-anim.js';
 import {
     applyAircraftViewpointCamera,
     resolveSlotCameraViewpoints,
@@ -286,9 +286,7 @@ export default class AircraftControllerEasy {
                 };
                 /** @type {{ blade: THREE.Object3D, axis: 'x'|'y'|'z', params: typeof params, state: { omega: number } }[]} */
                 const blades = [];
-                for (const path of ebPaths) {
-                    const blade = findObjectByNamePath(root, path);
-                    if (!blade) continue;
+                for (const blade of findObjectsForBindingPaths(root, ebPaths)) {
                     blades.push({ blade, axis, params, state: { omega: 0 } });
                 }
                 if (blades.length) this._libAnim = { blades };

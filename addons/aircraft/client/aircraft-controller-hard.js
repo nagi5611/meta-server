@@ -19,7 +19,7 @@ import {
     AIRCRAFT_FLAP_LABELS,
     AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
-import { findObjectByNamePath, stepEngineBladeRotation, stepFlapDeflection } from './runtime-prefab-aircraft-anim.js';
+import { findObjectByNamePath, findObjectsForBindingPaths, stepEngineBladeRotation, stepFlapDeflection } from './runtime-prefab-aircraft-anim.js';
 import {
     applyAircraftViewpointCamera,
     resolveSlotCameraViewpoints,
@@ -261,12 +261,16 @@ export default class AircraftControllerHard {
                 };
                 /** @type {{ blade: THREE.Object3D, axis: 'x'|'y'|'z', params: typeof params, state: { omega: number } }[]} */
                 const blades = [];
-                for (const path of ebPaths) {
-                    const blade = findObjectByNamePath(root, path);
-                    if (!blade) {
-                        console.warn('[AircraftController] engineBlade path not found:', path);
-                        continue;
-                    }
+                const resolvedBlades = findObjectsForBindingPaths(root, ebPaths);
+                if (resolvedBlades.length < ebPaths.length) {
+                    console.warn(
+                        '[AircraftController] some engineBlade paths not found:',
+                        ebPaths.length - resolvedBlades.length,
+                        'of',
+                        ebPaths.length
+                    );
+                }
+                for (const blade of resolvedBlades) {
                     blades.push({ blade, axis, params, state: { omega: 0 } });
                 }
 
