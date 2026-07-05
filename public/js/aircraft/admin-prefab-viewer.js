@@ -11,8 +11,12 @@ import {
     findObjectByNamePath,
     findObjectsForBindingPaths,
     buildEngineBladeLibraryAnim,
+    buildGearLibraryAnim,
     disposeEngineBladeGltfDrivers,
+    disposeGearGltfDrivers,
     stepEngineBladeLibraryAnimPreview,
+    stepGearLibraryAnim,
+    toggleGearAnimationDirection,
 } from '../../../addons/aircraft/client/runtime-prefab-aircraft-anim.js';
 
 export { objectNamePathFromRoot, findObjectByNamePath, findObjectsForBindingPaths };
@@ -93,6 +97,8 @@ export class AdminAircraftPrefabViewer {
         this._lastFrameMs = 0;
         /** @type {{ active: boolean, omegaRadPerS: number, libAnim: import('../../../addons/aircraft/client/runtime-prefab-aircraft-anim.js').EngineBladeLibraryAnim|null }} */
         this._engineBladePreview = { active: false, omegaRadPerS: 30, libAnim: null };
+        /** @type {{ active: boolean, gearAnim: import('../../../addons/aircraft/client/runtime-prefab-aircraft-anim.js').GearLibraryAnim|null }} */
+        this._gearPreview = { active: false, gearAnim: null };
         /** @type {boolean} */
         this._disposed = false;
         this._boundResize = () => this._resize();
@@ -149,6 +155,7 @@ export class AdminAircraftPrefabViewer {
         const dt = this._lastFrameMs > 0 ? Math.min(0.1, (now - this._lastFrameMs) / 1000) : 0;
         this._lastFrameMs = now;
         this._stepEngineBladePreview(dt);
+        this._stepGearPreview(dt);
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
     }
@@ -196,6 +203,50 @@ export class AdminAircraftPrefabViewer {
         const p = this._engineBladePreview;
         if (!p.active || !p.libAnim || dt <= 0) return;
         stepEngineBladeLibraryAnimPreview(p.libAnim, p.omegaRadPerS, dt);
+    }
+
+    /**
+     * 着陸装置プレビューを構築・解放する
+     * @param {{ active: boolean, paths?: string[], gearConfig?: unknown }} opts
+     * @returns {void}
+     */
+    setGearPreview(opts) {
+        const prev = this._gearPreview;
+        if (!opts.active) {
+            disposeGearGltfDrivers(prev.gearAnim?.drivers);
+            this._gearPreview = { active: false, gearAnim: null };
+            return;
+        }
+        disposeGearGltfDrivers(prev.gearAnim?.drivers);
+        const root = this._prefabRoot;
+        const paths = Array.isArray(opts.paths) ? opts.paths : [];
+        const gearAnim = root && paths.length ? buildGearLibraryAnim(root, paths, opts.gearConfig) : null;
+        this._gearPreview = { active: !!gearAnim, gearAnim };
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    hasGearPreview() {
+        return this._gearPreview.active && !!this._gearPreview.gearAnim;
+    }
+
+    /**
+     * ギア方向切替（ゲーム内 G キー相当）
+     * @returns {void}
+     */
+    toggleGearPreviewDirection() {
+        if (!this._gearPreview.gearAnim) return;
+        toggleGearAnimationDirection(this._gearPreview.gearAnim);
+    }
+
+    /**
+     * @param {number} dt
+     * @returns {void}
+     */
+    _stepGearPreview(dt) {
+        if (!this._gearPreview.active || !this._gearPreview.gearAnim || dt <= 0) return;
+        stepGearLibraryAnim(this._gearPreview.gearAnim, dt);
     }
 
     /**
@@ -607,6 +658,7 @@ export class AdminAircraftPrefabViewer {
      */
     disposePrefabOnly() {
         this.setEngineBladePreview({ active: false });
+        this.setGearPreview({ active: false });
         this._transformControls.detach();
         this._clearViewpointMarkers();
         if (this._prefabRoot) {

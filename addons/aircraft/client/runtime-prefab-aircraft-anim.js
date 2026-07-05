@@ -17,6 +17,15 @@ const TWO_PI = Math.PI * 2;
  *   blades: THREE.Object3D[],
  * }} EngineBladeGltfDriver
  * @typedef {{ manualBlades: ManualEngineBladeEntry[], gltfDrivers: EngineBladeGltfDriver[] }} EngineBladeLibraryAnim
+ * @typedef {{
+ *   mixer: THREE.AnimationMixer,
+ *   action: THREE.AnimationAction,
+ *   clip: THREE.AnimationClip,
+ *   direction: -1 | 0 | 1,
+ *   absTimeScale: number,
+ *   meshes: THREE.Object3D[],
+ * }} GearGltfDriver
+ * @typedef {{ drivers: GearGltfDriver[] }} GearLibraryAnim
  */
 
 /**
@@ -341,6 +350,155 @@ export function stepEngineBladeLibraryAnimPreview(libAnim, omegaRadPerS, dt) {
 export function hasEngineBladeLibraryAnim(libAnim) {
     if (!libAnim) return false;
     return (libAnim.manualBlades?.length ?? 0) > 0 || (libAnim.gltfDrivers?.length ?? 0) > 0;
+}
+
+const GEAR_TIME_EPS = 1e-4;
+
+/**
+ * @param {unknown} g animation.gear
+ * @returns {{ clipName: string, playbackFps: number, sourceFps: number, absTimeScale: number }}
+ */
+export function parseGearAnimationConfig(g) {
+    const o = g && typeof g === 'object' && !Array.isArray(g) ? g : {};
+    const clipName = typeof o.clipName === 'string' ? o.clipName.trim() : '';
+    const playbackFps = typeof o.playbackFps === 'number' && Number.isFinite(o.playbackFps) && o.playbackFps > 0
+        ? o.playbackFps
+        : 24;
+    const sourceFps = typeof o.sourceFps === 'number' && Number.isFinite(o.sourceFps) && o.sourceFps > 0
+        ? o.sourceFps
+        : 24;
+    return { clipName, playbackFps, sourceFps, absTimeScale: playbackFps / sourceFps };
+}
+
+/**
+ * gear ロール割当と GLB クリップから着陸装置アニメ状態を構築（初期: 展開 t=0 で停止）
+ * @param {THREE.Object3D} root
+ * @param {string[]} paths
+ * @param {unknown} gearConfig animation.gear
+ * @returns {GearLibraryAnim|null}
+ */
+export function buildGearLibraryAnim(root, paths, gearConfig) {
+    const { clipName, absTimeScale } = parseGearAnimationConfig(gearConfig);
+    if (!clipName || !paths.length || !root) return null;
+
+    /** @type {Map<string, { host: THREE.Object3D, clip: THREE.AnimationClip, meshes: THREE.Object3D[] }>} */
+    const groups = new Map();
+    for (const path of paths) {
+        const p = String(path || '').trim();
+        if (!p) continue;
+        const mesh = findObjectByNamePath(root, p);
+        if (!mesh) continue;
+        const host = findGltfClipsHostAncestor(mesh, root);
+        const clips = host?.userData?.gltfClips;
+        const clip = clips ? findGltfClipByName(clips, clipName) : null;
+        if (!host || !clip || !(clip.duration > 0)) continue;
+        const key = `${host.uuid}:${clip.uuid}`;
+        let g = groups.get(key);
+        if (!g) {
+            g = { host, clip, meshes: [] };
+            groups.set(key, g);
+        }
+        g.meshes.push(mesh);
+    }
+    if (!groups.size) return null;
+
+    /** @type {GearGltfDriver[]} */
+    const drivers = [];
+    for (const g of groups.values()) {
+        const mixer = new THREE.AnimationMixer(g.host);
+        const action = mixer.clipAction(g.clip);
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+        action.time = 0;
+        action.timeScale = 0;
+        action.play();
+        action.paused = true;
+        drivers.push({
+            mixer,
+            action,
+            clip: g.clip,
+            direction: 0,
+            absTimeScale,
+            meshes: g.meshes,
+        });
+    }
+    return drivers.length ? { drivers } : null;
+}
+
+/**
+ * @param {GearLibraryAnim|null|undefined} gearAnim
+ * @returns {boolean}
+ */
+export function hasGearLibraryAnim(gearAnim) {
+    return (gearAnim?.drivers?.length ?? 0) > 0;
+}
+
+/**
+ * @param {GearGltfDriver[]} drivers
+ * @returns {void}
+ */
+export function disposeGearGltfDrivers(drivers) {
+    if (!drivers?.length) return;
+    for (const d of drivers) {
+        d.action?.stop();
+        d.mixer?.stopAllAction();
+    }
+}
+
+/**
+ * G キー相当: 再生方向を反転（停止中は位置に応じて収納/展開へ）
+ * @param {GearLibraryAnim|null|undefined} gearAnim
+ * @returns {void}
+ */
+export function toggleGearAnimationDirection(gearAnim) {
+    if (!gearAnim?.drivers?.length) return;
+    for (const d of gearAnim.drivers) {
+        const dur = d.clip.duration;
+        const t = d.action.time;
+        let dir = d.direction;
+        if (dir === 0) {
+            dir = t >= dur - GEAR_TIME_EPS ? -1 : 1;
+        } else {
+            dir = /** @type {-1|1} */ (dir * -1);
+        }
+        d.direction = dir;
+        d.action.paused = false;
+        d.action.enabled = true;
+        if (dir < 0 && t >= dur - GEAR_TIME_EPS) {
+            d.action.time = dur;
+        }
+        if (dir > 0 && t <= GEAR_TIME_EPS) {
+            d.action.time = 0;
+        }
+        d.action.timeScale = dir * d.absTimeScale;
+    }
+}
+
+/**
+ * 着陸装置クリップを進め、端で停止してフレームを保持する
+ * @param {GearLibraryAnim|null|undefined} gearAnim
+ * @param {number} dt
+ * @returns {void}
+ */
+export function stepGearLibraryAnim(gearAnim, dt) {
+    if (!gearAnim?.drivers?.length || dt <= 0) return;
+    for (const d of gearAnim.drivers) {
+        if (d.direction === 0) continue;
+        d.mixer.update(dt);
+        const dur = d.clip.duration;
+        const t = d.action.time;
+        if (d.direction > 0 && t >= dur - GEAR_TIME_EPS) {
+            d.action.time = dur;
+            d.action.timeScale = 0;
+            d.action.paused = true;
+            d.direction = 0;
+        } else if (d.direction < 0 && t <= GEAR_TIME_EPS) {
+            d.action.time = 0;
+            d.action.timeScale = 0;
+            d.action.paused = true;
+            d.direction = 0;
+        }
+    }
 }
 
 /**

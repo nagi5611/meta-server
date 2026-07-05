@@ -19,7 +19,7 @@ import {
     AIRCRAFT_FLAP_LABELS,
     AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
-import { findObjectByNamePath, buildEngineBladeLibraryAnim, disposeEngineBladeGltfDrivers, stepEngineBladeLibraryAnimHard, stepFlapDeflection, hasEngineBladeLibraryAnim } from './runtime-prefab-aircraft-anim.js';
+import { findObjectByNamePath, buildEngineBladeLibraryAnim, buildGearLibraryAnim, disposeEngineBladeGltfDrivers, disposeGearGltfDrivers, stepEngineBladeLibraryAnimHard, stepGearLibraryAnim, toggleGearAnimationDirection, stepFlapDeflection, hasEngineBladeLibraryAnim, hasGearLibraryAnim } from './runtime-prefab-aircraft-anim.js';
 import {
     applyAircraftViewpointCamera,
     resolveSlotCameraViewpoints,
@@ -130,7 +130,8 @@ export default class AircraftControllerHard {
          * @type {{
          *   manualBlades: import('./runtime-prefab-aircraft-anim.js').ManualEngineBladeEntry[],
          *   gltfDrivers: import('./runtime-prefab-aircraft-anim.js').EngineBladeGltfDriver[],
-         *   flaps: { mesh: THREE.Object3D, axis: 'x'|'y'|'z', sign: number, maxAngleRad: number, maxOmegaRadPerS: number, state: { angle: number } }[]
+         *   flaps: { mesh: THREE.Object3D, axis: 'x'|'y'|'z', sign: number, maxAngleRad: number, maxOmegaRadPerS: number, state: { angle: number } }[],
+         *   gear: import('./runtime-prefab-aircraft-anim.js').GearLibraryAnim|null
          * }|null}
          */
         this._libAnim = null;
@@ -229,6 +230,7 @@ export default class AircraftControllerHard {
      */
     _scheduleLibraryAnim() {
         disposeEngineBladeGltfDrivers(this._libAnim?.gltfDrivers);
+        disposeGearGltfDrivers(this._libAnim?.gear?.drivers);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
         const slot = this.slot;
@@ -271,8 +273,14 @@ export default class AircraftControllerHard {
                     else flaps.push({ mesh, axis: fAxis, sign: signR, maxAngleRad, maxOmegaRadPerS, state: { angle: NaN } });
                 }
 
-                if (!hasEngineBladeLibraryAnim(engineBlades) && !flaps.length) return;
-                this._libAnim = { ...engineBlades, flaps };
+                const gearPaths = this._bindingPathsForRole(bindings, 'gear');
+                const gear = buildGearLibraryAnim(root, gearPaths, j.airframe.animation?.gear);
+                if (gearPaths.length && !hasGearLibraryAnim(gear)) {
+                    console.warn('[AircraftController] gear clip not resolved for paths:', gearPaths.length);
+                }
+
+                if (!hasEngineBladeLibraryAnim(engineBlades) && !flaps.length && !hasGearLibraryAnim(gear)) return;
+                this._libAnim = { ...engineBlades, flaps, gear };
             })
             .catch((e) => {
                 console.warn('[AircraftController] aircraft library fetch failed:', e);
@@ -297,6 +305,7 @@ export default class AircraftControllerHard {
         this._lastFlapBumpMs = 0;
         this.physics = mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
         disposeEngineBladeGltfDrivers(this._libAnim?.gltfDrivers);
+        disposeGearGltfDrivers(this._libAnim?.gear?.drivers);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
         resetAircraftAutopilot(this._autopilot);
@@ -454,6 +463,15 @@ export default class AircraftControllerHard {
 
         if (c === 'ArrowRight' || c === 'ArrowLeft') {
             if (down && this._tryFlapKeyBump(e)) e.preventDefault();
+            return;
+        }
+
+        if (c === 'KeyG' && down) {
+            if (e.repeat) return;
+            if (hasGearLibraryAnim(this._libAnim?.gear)) {
+                toggleGearAnimationDirection(this._libAnim.gear);
+                e.preventDefault();
+            }
             return;
         }
 
@@ -892,6 +910,9 @@ export default class AircraftControllerHard {
                 const target = norm * f.maxAngleRad * f.sign;
                 stepFlapDeflection(f.mesh, f.axis, target, f.maxOmegaRadPerS, dt, f.state);
             }
+        }
+        if (hasGearLibraryAnim(this._libAnim?.gear)) {
+            stepGearLibraryAnim(this._libAnim.gear, dt);
         }
     }
 
