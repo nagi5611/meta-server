@@ -2,6 +2,23 @@
 
 import * as THREE from 'three';
 
+const TWO_PI = Math.PI * 2;
+
+/**
+ * @typedef {{ maxAccelRadPerS2: number, maxOmegaRadPerS: number }} EngineBladeAnimParams
+ * @typedef {{ blade: THREE.Object3D, axis: 'x'|'y'|'z', params: EngineBladeAnimParams, state: { omega: number } }} ManualEngineBladeEntry
+ * @typedef {{
+ *   mixer: THREE.AnimationMixer,
+ *   action: THREE.AnimationAction,
+ *   baseOmegaRadPerS: number,
+ *   maxOmegaRadPerS: number,
+ *   maxAccelRadPerS2: number,
+ *   state: { omega: number },
+ *   blades: THREE.Object3D[],
+ * }} EngineBladeGltfDriver
+ * @typedef {{ manualBlades: ManualEngineBladeEntry[], gltfDrivers: EngineBladeGltfDriver[] }} EngineBladeLibraryAnim
+ */
+
 /**
  * @param {THREE.Object3D} obj
  * @returns {string}
@@ -109,6 +126,221 @@ export function findObjectsForBindingPaths(root, paths) {
         out.push(obj);
     }
     return out;
+}
+
+/**
+ * 機体ライブラリの engineBlade アニメ JSON を正規化する
+ * @param {unknown} eb
+ * @returns {{ axis: 'x'|'y'|'z', params: EngineBladeAnimParams, clipName: string }}
+ */
+export function parseEngineBladeAnimationConfig(eb) {
+    const ax = String(eb && typeof eb === 'object' && !Array.isArray(eb) ? eb.spinAxis : 'z').toLowerCase();
+    const axis = ax === 'x' || ax === 'y' || ax === 'z' ? ax : 'z';
+    const o = eb && typeof eb === 'object' && !Array.isArray(eb) ? eb : {};
+    const params = {
+        maxAccelRadPerS2: typeof o.maxAccelRadPerS2 === 'number' ? o.maxAccelRadPerS2 : 24,
+        maxOmegaRadPerS: typeof o.maxOmegaRadPerS === 'number' ? o.maxOmegaRadPerS : 140,
+    };
+    const clipName = typeof o.clipName === 'string' ? o.clipName.trim() : '';
+    return { axis, params, clipName };
+}
+
+/**
+ * gltfClips を保持する prefab パーツ root を祖先方向に探す
+ * @param {THREE.Object3D} obj
+ * @param {THREE.Object3D} stopAt
+ * @returns {THREE.Object3D|null}
+ */
+export function findGltfClipsHostAncestor(obj, stopAt) {
+    let o = obj;
+    while (o && o !== stopAt) {
+        const clips = o.userData?.gltfClips;
+        if (Array.isArray(clips) && clips.length) return o;
+        o = o.parent;
+    }
+    return null;
+}
+
+/**
+ * @param {THREE.AnimationClip[]} clips
+ * @param {string} clipName
+ * @returns {THREE.AnimationClip|null}
+ */
+export function findGltfClipByName(clips, clipName) {
+    const cn = String(clipName || '').trim();
+    if (!cn || !Array.isArray(clips)) return null;
+    return clips.find((c) => c && c.name === cn) || null;
+}
+
+/**
+ * 360° 1 回転クリップの timeScale=1 相当角速度 (rad/s)
+ * @param {THREE.AnimationClip} clip
+ * @returns {number}
+ */
+export function engineBladeClipBaseOmegaRadPerS(clip) {
+    const d = clip?.duration;
+    if (typeof d !== 'number' || !Number.isFinite(d) || d <= 0) return 0;
+    return TWO_PI / d;
+}
+
+/**
+ * engineBlade バインドと定義から GLB クリップ駆動／手動回転の状態を構築する
+ * clipName 指定かつクリップ解決できたブレードは GLB、それ以外は手動フォールバック
+ * @param {THREE.Object3D} root
+ * @param {string[]} paths
+ * @param {unknown} eb animation.engineBlade
+ * @returns {EngineBladeLibraryAnim}
+ */
+export function buildEngineBladeLibraryAnim(root, paths, eb) {
+    const { axis, params, clipName } = parseEngineBladeAnimationConfig(eb);
+    const resolvedBlades = findObjectsForBindingPaths(root, paths);
+
+    /** @type {Map<string, { host: THREE.Object3D, clip: THREE.AnimationClip, blades: THREE.Object3D[] }>} */
+    const gltfGroups = new Map();
+    /** @type {ManualEngineBladeEntry[]} */
+    const manualBlades = [];
+
+    for (const blade of resolvedBlades) {
+        if (clipName) {
+            const host = findGltfClipsHostAncestor(blade, root);
+            const clips = host?.userData?.gltfClips;
+            const clip = clips ? findGltfClipByName(clips, clipName) : null;
+            const baseOmega = clip ? engineBladeClipBaseOmegaRadPerS(clip) : 0;
+            if (host && clip && baseOmega > 0) {
+                const key = `${host.uuid}:${clip.uuid}`;
+                let g = gltfGroups.get(key);
+                if (!g) {
+                    g = { host, clip, blades: [] };
+                    gltfGroups.set(key, g);
+                }
+                g.blades.push(blade);
+                continue;
+            }
+        }
+        manualBlades.push({ blade, axis, params, state: { omega: 0 } });
+    }
+
+    /** @type {EngineBladeGltfDriver[]} */
+    const gltfDrivers = [];
+    for (const g of gltfGroups.values()) {
+        const mixer = new THREE.AnimationMixer(g.host);
+        const action = mixer.clipAction(g.clip);
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.play();
+        gltfDrivers.push({
+            mixer,
+            action,
+            baseOmegaRadPerS: engineBladeClipBaseOmegaRadPerS(g.clip),
+            maxOmegaRadPerS: params.maxOmegaRadPerS,
+            maxAccelRadPerS2: params.maxAccelRadPerS2,
+            state: { omega: 0 },
+            blades: g.blades,
+        });
+    }
+
+    return { manualBlades, gltfDrivers };
+}
+
+/**
+ * GLB 駆動ミキサーを解放する
+ * @param {EngineBladeGltfDriver[]|null|undefined} drivers
+ * @returns {void}
+ */
+export function disposeEngineBladeGltfDrivers(drivers) {
+    if (!drivers?.length) return;
+    for (const d of drivers) {
+        d.action?.stop();
+        d.mixer?.stopAllAction();
+    }
+}
+
+/**
+ * @param {EngineBladeGltfDriver} driver
+ * @param {number} targetOmegaRadPerS
+ * @param {number} maxAccelRadPerS2
+ * @param {number} dt
+ * @returns {void}
+ */
+function stepEngineBladeGltfDriverToTargetOmega(driver, targetOmegaRadPerS, maxAccelRadPerS2, dt) {
+    const maxA = Math.max(0.01, Number(maxAccelRadPerS2) || 24);
+    const target = Math.max(0, Number(targetOmegaRadPerS) || 0);
+    let w = driver.state.omega;
+    const diff = target - w;
+    w += Math.sign(diff) * Math.min(Math.abs(diff), maxA * dt);
+    driver.state.omega = w;
+    const base = driver.baseOmegaRadPerS;
+    driver.action.timeScale = base > 0 ? w / base : 0;
+    driver.mixer.update(dt);
+}
+
+/**
+ * Hard 操縦: 推力相当 0..1 からエンジンブレードを更新（GLB クリップ優先・手動フォールバック）
+ * @param {EngineBladeLibraryAnim|null|undefined} libAnim
+ * @param {number} throttle01
+ * @param {number} dt
+ * @returns {void}
+ */
+export function stepEngineBladeLibraryAnimHard(libAnim, throttle01, dt) {
+    if (!libAnim || dt <= 0) return;
+    const t01 = THREE.MathUtils.clamp(throttle01, 0, 1);
+    for (const b of libAnim.manualBlades) {
+        stepEngineBladeRotation(b.blade, b.axis, b.params, t01, dt, b.state);
+    }
+    for (const d of libAnim.gltfDrivers) {
+        const target = t01 * Math.max(0, Number(d.maxOmegaRadPerS) || 0);
+        stepEngineBladeGltfDriverToTargetOmega(d, target, d.maxAccelRadPerS2, dt);
+    }
+}
+
+/**
+ * Easy 操縦: 目標角速度 (rad/s) からエンジンブレードを更新
+ * @param {EngineBladeLibraryAnim|null|undefined} libAnim
+ * @param {number} targetOmegaRadPerS
+ * @param {number} maxAccelRadPerS2
+ * @param {number} dt
+ * @returns {void}
+ */
+export function stepEngineBladeLibraryAnimEasy(libAnim, targetOmegaRadPerS, maxAccelRadPerS2, dt) {
+    if (!libAnim || dt <= 0) return;
+    for (const b of libAnim.manualBlades) {
+        stepEngineBladeRotationToTargetOmega(b.blade, b.axis, targetOmegaRadPerS, maxAccelRadPerS2, dt, b.state);
+    }
+    for (const d of libAnim.gltfDrivers) {
+        stepEngineBladeGltfDriverToTargetOmega(d, targetOmegaRadPerS, maxAccelRadPerS2, dt);
+    }
+}
+
+/**
+ * 管理画面プレビュー: 固定角速度で即時追従
+ * @param {EngineBladeLibraryAnim|null|undefined} libAnim
+ * @param {number} omegaRadPerS
+ * @param {number} dt
+ * @returns {void}
+ */
+export function stepEngineBladeLibraryAnimPreview(libAnim, omegaRadPerS, dt) {
+    if (!libAnim || dt <= 0) return;
+    const w = Math.max(0, Number(omegaRadPerS) || 0);
+    for (const b of libAnim.manualBlades) {
+        b.state.omega = w;
+        if (b.axis === 'x') b.blade.rotation.x += w * dt;
+        else if (b.axis === 'y') b.blade.rotation.y += w * dt;
+        else b.blade.rotation.z += w * dt;
+    }
+    for (const d of libAnim.gltfDrivers) {
+        d.state.omega = w;
+        const base = d.baseOmegaRadPerS;
+        d.action.timeScale = base > 0 ? w / base : 0;
+        d.mixer.update(dt);
+    }
+}
+
+/**
+ * @param {EngineBladeLibraryAnim|null|undefined} libAnim
+ * @returns {boolean}
+ */
+export function hasEngineBladeLibraryAnim(libAnim) {
+    if (!libAnim) return false;
+    return (libAnim.manualBlades?.length ?? 0) > 0 || (libAnim.gltfDrivers?.length ?? 0) > 0;
 }
 
 /**
