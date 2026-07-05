@@ -6134,6 +6134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     loadStats();
+    initServerMaintenanceAdminPanel();
     loadPlayers();
     loadWorldsForCompletion();
     loadLogs();
@@ -6265,6 +6266,83 @@ function updateLastUpdateTime() {
     document.getElementById('last-update').textContent = now.toLocaleTimeString('ja-JP');
 }
 
+/** @type {boolean} */
+let serverMaintenanceSavePending = false;
+
+/**
+ * @param {{ active?: boolean, message?: string } | null | undefined} maintenance
+ */
+function applyServerMaintenanceAdminForm(maintenance) {
+    const activeEl = /** @type {HTMLInputElement | null} */ (document.getElementById('server-maintenance-active'));
+    const msgEl = /** @type {HTMLTextAreaElement | null} */ (document.getElementById('server-maintenance-message'));
+    if (!activeEl || !msgEl || !maintenance) return;
+    activeEl.checked = !!maintenance.active;
+    if (typeof maintenance.message === 'string' && maintenance.message.trim()) {
+        msgEl.value = maintenance.message;
+    }
+}
+
+/**
+ * @param {string} text
+ * @param {boolean} [isError]
+ */
+function setServerMaintenanceAdminStatus(text, isError = false) {
+    const el = document.getElementById('server-maintenance-admin-status');
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle('error', isError);
+}
+
+/**
+ * @param {boolean} active
+ * @param {string} message
+ * @returns {Promise<void>}
+ */
+async function saveServerMaintenanceDisplay(active, message) {
+    if (serverMaintenanceSavePending) return;
+    serverMaintenanceSavePending = true;
+    setServerMaintenanceAdminStatus('反映中…');
+    try {
+        const res = await fetch('/admin/maintenance-display', {
+            method: 'PUT',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ active, message }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+        if (data.maintenance) applyServerMaintenanceAdminForm(data.maintenance);
+        setServerMaintenanceAdminStatus(
+            data.maintenance?.active ? 'メンテナンス表示を ON にしました（全プレイヤーへ通知済み）' : 'メンテナンス表示を OFF にしました'
+        );
+    } catch (e) {
+        setServerMaintenanceAdminStatus(
+            `保存に失敗: ${e instanceof Error ? e.message : String(e)}`,
+            true
+        );
+    } finally {
+        serverMaintenanceSavePending = false;
+    }
+}
+
+/**
+ * ステータスタブのメンテナンス告知 UI を初期化する
+ */
+function initServerMaintenanceAdminPanel() {
+    const activeEl = /** @type {HTMLInputElement | null} */ (document.getElementById('server-maintenance-active'));
+    const msgEl = /** @type {HTMLTextAreaElement | null} */ (document.getElementById('server-maintenance-message'));
+    if (!activeEl || !msgEl) return;
+
+    activeEl.addEventListener('change', () => {
+        void saveServerMaintenanceDisplay(activeEl.checked, msgEl.value);
+    });
+
+    msgEl.addEventListener('change', () => {
+        if (!activeEl.checked) return;
+        void saveServerMaintenanceDisplay(true, msgEl.value);
+    });
+}
+
 async function loadStats() {
     try {
         const response = await fetch('/admin/stats', { credentials: 'include' });
@@ -6317,6 +6395,10 @@ async function loadStats() {
         if (typeof data.chartFeaturesEnabled === 'boolean') {
             adminChartFeaturesEnabled = data.chartFeaturesEnabled;
             applyChartFeaturesAdminChrome();
+        }
+
+        if (data.serverMaintenance) {
+            applyServerMaintenanceAdminForm(data.serverMaintenance);
         }
 
         updateLastUpdateTime();

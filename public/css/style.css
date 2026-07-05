@@ -35,11 +35,52 @@ body {
     min-width: 280px;
 }
 
-#info h1 {
+#info h1,
+#info .info-title-row {
     font-size: 16px;
     margin-bottom: 12px;
     color: #0288d1;
     font-weight: 600;
+}
+
+.info-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    line-height: 1.35;
+}
+
+.info-app-title {
+    flex: 0 1 auto;
+}
+
+.server-maintenance-inline {
+    flex: 1 1 160px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: #b45309;
+    background: #fff7ed;
+    border: 1px solid #fbbf24;
+    border-radius: 8px;
+    padding: 4px 8px;
+}
+
+.server-maintenance-inline[hidden],
+.mobile-maintenance-inline[hidden] {
+    display: none !important;
+}
+
+.mobile-maintenance-inline {
+    font-size: 10px;
+    font-weight: 700;
+    color: #b45309;
+    background: #fff7ed;
+    border: 1px solid #fbbf24;
+    border-radius: 6px;
+    padding: 2px 6px;
+    margin-right: 4px;
 }
 
 .bench-running-banner {

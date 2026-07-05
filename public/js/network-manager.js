@@ -65,6 +65,8 @@ class NetworkManager {
         this._pilotSendQuatScratch = new THREE.Quaternion();
         /** @type {((data: { active?: boolean, message?: string, runId?: string|null }) => void)|null} */
         this.onBenchMaintenanceStatus = null;
+        /** @type {((data: { active?: boolean, message?: string | null }) => void) | null} */
+        this.onServerMaintenanceStatus = null;
         /** @type {Map<string, boolean>} 前 tick の飛行機搭乗状態（降機検知用） */
         this._remoteAircraftOccupied = new Map();
         /** 表示距離内ワールド表示完了までリモートアバター GLB 読み込みを遅延 */
@@ -481,6 +483,12 @@ class NetworkManager {
         this.socket.on('bench-maintenance-status', (data) => {
             if (this.onBenchMaintenanceStatus) {
                 this.onBenchMaintenanceStatus(data);
+            }
+        });
+
+        this.socket.on('server-maintenance-status', (data) => {
+            if (this.onServerMaintenanceStatus) {
+                this.onServerMaintenanceStatus(data);
             }
         });
 

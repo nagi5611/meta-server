@@ -27,6 +27,11 @@ import {
     setMediasoupReadyChecker,
     peekBenchToken,
 } from './lib/bench-maintenance.js';
+import {
+    emitServerMaintenanceStatusToSocket,
+    getServerMaintenanceAdminStatus,
+    setServerMaintenance,
+} from './lib/server-maintenance.js';
 import { peekBenchRunnerSecret } from './lib/bench-runner-auth.js';
 import { recordTickEmit, registerTickHookInstalled } from './lib/bench-tick-metrics.js';
 import { lookupIpLocation } from './lib/ip-geolocation.js';
@@ -2907,6 +2912,7 @@ function cleanupTaikoMpOnDisconnect(ioSrv, socketId) {
 io.on('connection', (socket) => {
     applyBenchBotSocketData(socket);
     emitBenchMaintenanceStatusToSocket(socket);
+    emitServerMaintenanceStatusToSocket(socket);
 
     // Verify admin token and user role if provided
     const adminToken = socket.handshake.auth?.adminToken;
@@ -6682,8 +6688,29 @@ app.get('/admin/stats', (req, res) => {
             portDetails: videoVcPortInfo.portDetails
         },
         workers: workers.length,
-        chartFeaturesEnabled: CHART_FEATURES_ENABLED
+        chartFeaturesEnabled: CHART_FEATURES_ENABLED,
+        serverMaintenance: getServerMaintenanceAdminStatus(),
     });
+});
+
+app.get('/admin/maintenance-display', (_req, res) => {
+    res.json({ ok: true, maintenance: getServerMaintenanceAdminStatus() });
+});
+
+app.put('/admin/maintenance-display', express.json(), (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    if (typeof body.active !== 'boolean') {
+        return res.status(400).json({ ok: false, error: 'active must be boolean' });
+    }
+    if (body.message != null && typeof body.message !== 'string') {
+        return res.status(400).json({ ok: false, error: 'message must be string' });
+    }
+    const maintenance = setServerMaintenance({
+        active: body.active,
+        message: typeof body.message === 'string' ? body.message : undefined,
+        io,
+    });
+    res.json({ ok: true, maintenance });
 });
 
 app.get('/admin/players', (req, res) => {

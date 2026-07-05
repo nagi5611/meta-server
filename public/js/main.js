@@ -289,6 +289,9 @@ class MetaverseApp {
         this.networkManager.onBenchMaintenanceStatus = (data) => {
             this.uiManager.setBenchRunningBanner(!!(data && data.active), data?.message);
         };
+        this.networkManager.onServerMaintenanceStatus = (data) => {
+            this.uiManager.setServerMaintenanceInline(!!(data && data.active), data?.message ?? undefined);
+        };
         this.setupClientPerfObservers();
         this.networkManager.setPerfPayloadGetter(() => this.getPerfPayloadForPing());
         this.networkManager.setPostConnectHandler(async () => {

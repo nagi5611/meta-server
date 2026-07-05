@@ -214,6 +214,8 @@ class UIManager {
         this.menuBar = document.getElementById('menu-bar');
         this.benchRunningBanner = document.getElementById('bench-running-banner');
         this.mobileBenchBanner = document.getElementById('mobile-bench-banner');
+        this.serverMaintenanceInline = document.getElementById('server-maintenance-inline');
+        this.mobileMaintenanceInline = document.getElementById('mobile-maintenance-inline');
 
         this.mobileInteractBtn = document.getElementById('mobile-interact-btn');
         if (this.mobileInteractBtn && !this.mobileInteractBtn.dataset.wiredInteract) {
@@ -501,6 +503,26 @@ class UIManager {
         if (this.mobileBenchBanner) {
             this.mobileBenchBanner.textContent = shortText;
             this.mobileBenchBanner.hidden = !active;
+        }
+    }
+
+    /**
+     * 管理者メンテナンス告知（左上タイトル横 / モバイル info）
+     * @param {boolean} active
+     * @param {string} [message]
+     */
+    setServerMaintenanceInline(active, message) {
+        const text = (message && String(message).trim()) || t('info.serverMaintenanceDefault');
+        const shortText = t('info.serverMaintenanceShort');
+        if (this.serverMaintenanceInline) {
+            this.serverMaintenanceInline.textContent = active ? text : '';
+            this.serverMaintenanceInline.hidden = !active;
+            this.serverMaintenanceInline.title = active ? text : '';
+        }
+        if (this.mobileMaintenanceInline) {
+            this.mobileMaintenanceInline.textContent = active ? shortText : '';
+            this.mobileMaintenanceInline.hidden = !active;
+            this.mobileMaintenanceInline.title = active ? text : '';
         }
     }
 
