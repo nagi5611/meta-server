@@ -18,10 +18,7 @@ import {
     defaultFlightMapConfig,
     parseFlightMapConfig,
 } from '../../lib/aircraft-server/flight-map-schema.js';
-import {
-    normalizeBindings,
-    isKnownRole,
-} from '../../public/js/aircraft/airframe-definition-schema.js';
+import { STORAGE_PATHS } from '../../config/storage-paths.js';
 
 const AIRFRAME_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 const WORLD_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -54,11 +51,6 @@ const BINDINGS_MAX_PATHS_PER_ROLE = 64;
 function parseBindings(raw) {
     if (raw == null) return { ok: true, obj: {} };
     if (!isPlainObject(raw)) return { ok: false, error: 'bindings must be an object' };
-    for (const k of Object.keys(raw)) {
-        if (!isKnownRole(k)) {
-            return { ok: false, error: `bindings.${k} is not a valid animation role` };
-        }
-    }
     /** @type {Record<string, string[]>} */
     const out = {};
     for (const [k, v] of Object.entries(raw)) {
@@ -94,7 +86,7 @@ function parseBindings(raw) {
         }
         if (paths.length) out[key] = paths;
     }
-    return { ok: true, obj: normalizeBindings(out) };
+    return { ok: true, obj: out };
 }
 
 /**
@@ -209,8 +201,10 @@ function rowToAirframe(db, id) {
     if (!row) return null;
     let bindings = {};
     let animation = {};
-    let flightPhysicsRaw = {};
-    let cameraRaw = {};
+    let flightPhysicsHardRaw = {};
+    let flightPhysicsEasyRaw = {};
+    let cameraHardRaw = {};
+    let cameraEasyRaw = {};
     try {
         bindings = row.bindings_json ? JSON.parse(String(row.bindings_json)) : {};
     } catch {
@@ -221,27 +215,37 @@ function rowToAirframe(db, id) {
     } catch {
         animation = {};
     }
+    try {
+        flightPhysicsHardRaw = row.physics_json ? JSON.parse(String(row.physics_json)) : {};
+    } catch {
+        flightPhysicsHardRaw = {};
+    }
+    try {
+        flightPhysicsEasyRaw = row.physics_easy_json ? JSON.parse(String(row.physics_easy_json)) : {};
+    } catch {
+        flightPhysicsEasyRaw = {};
+    }
+    try {
+        cameraHardRaw = row.camera_json ? JSON.parse(String(row.camera_json)) : {};
+    } catch {
+        cameraHardRaw = {};
+    }
+    try {
+        cameraEasyRaw = row.camera_easy_json ? JSON.parse(String(row.camera_easy_json)) : {};
+    } catch {
+        cameraEasyRaw = {};
+    }
     const controlMode = normalizeAircraftControlMode(row.control_mode);
-    const physicsCol = controlMode === 'easy' ? 'physics_easy_json' : 'physics_json';
-    const cameraCol = controlMode === 'easy' ? 'camera_easy_json' : 'camera_json';
-    try {
-        flightPhysicsRaw = row[physicsCol] ? JSON.parse(String(row[physicsCol])) : {};
-    } catch {
-        flightPhysicsRaw = {};
-    }
-    try {
-        cameraRaw = row[cameraCol] ? JSON.parse(String(row[cameraCol])) : {};
-    } catch {
-        cameraRaw = {};
-    }
-    const fp = parseFlightPhysics(flightPhysicsRaw, controlMode);
-    const cam = parseCameraJson(cameraRaw);
-    const flightPhysics = fp.ok
-        ? fp.obj
-        : controlMode === 'easy'
-          ? mergeEasyAircraftPhysicsFromWorld(null)
-          : mergeAircraftPhysicsFromWorld(null);
-    const camera = cam.ok && isPlainObject(cam.obj) ? cam.obj : {};
+    const fpHard = parseFlightPhysics(flightPhysicsHardRaw, 'hard');
+    const fpEasy = parseFlightPhysics(flightPhysicsEasyRaw, 'easy');
+    const camHard = parseCameraJson(cameraHardRaw);
+    const camEasy = parseCameraJson(cameraEasyRaw);
+    const flightPhysicsHard = fpHard.ok ? fpHard.obj : mergeAircraftPhysicsFromWorld(null);
+    const flightPhysicsEasy = fpEasy.ok ? fpEasy.obj : mergeEasyAircraftPhysicsFromWorld(null);
+    const cameraHard = camHard.ok && isPlainObject(camHard.obj) ? camHard.obj : {};
+    const cameraEasy = camEasy.ok && isPlainObject(camEasy.obj) ? camEasy.obj : {};
+    const activePhysics = controlMode === 'easy' ? flightPhysicsEasy : flightPhysicsHard;
+    const activeCamera = controlMode === 'easy' ? cameraEasy : cameraHard;
     return {
         id: String(row.id),
         displayName: String(row.display_name || ''),
@@ -249,8 +253,12 @@ function rowToAirframe(db, id) {
         controlMode,
         bindings: isPlainObject(bindings) ? bindings : {},
         animation: isPlainObject(animation) ? animation : {},
-        flightPhysics,
-        camera,
+        flightPhysicsHard,
+        flightPhysicsEasy,
+        cameraHard,
+        cameraEasy,
+        flightPhysics: activePhysics,
+        camera: activeCamera,
         updatedAt: String(row.updated_at || ''),
     };
 }
@@ -387,31 +395,19 @@ export default {
                     const a = parseAnimation(body.animation);
                     if (!a.ok) return res.status(400).json({ error: a.error });
                     const controlMode = normalizeAircraftControlMode(body.controlMode);
-                    let physicsJson = '{}';
-                    let cameraJson = '{}';
-                    let physicsEasyJson = '{}';
-                    let cameraEasyJson = '{}';
-                    if (controlMode === 'easy') {
-                        const fpEasyRaw =
-                            body.flightPhysicsEasy != null ? body.flightPhysicsEasy : body.flightPhysics;
-                        const camEasyRaw = body.cameraEasy != null ? body.cameraEasy : body.camera;
-                        const fpEasy = parseFlightPhysics(fpEasyRaw, 'easy');
-                        if (!fpEasy.ok) return res.status(400).json({ error: fpEasy.error });
-                        const camEasy = parseCameraJson(camEasyRaw);
-                        if (!camEasy.ok) return res.status(400).json({ error: camEasy.error });
-                        physicsEasyJson = JSON.stringify(fpEasy.obj);
-                        cameraEasyJson = JSON.stringify(camEasy.obj);
-                    } else {
-                        const fpHardRaw =
-                            body.flightPhysicsHard != null ? body.flightPhysicsHard : body.flightPhysics;
-                        const camHardRaw = body.cameraHard != null ? body.cameraHard : body.camera;
-                        const fpHard = parseFlightPhysics(fpHardRaw, 'hard');
-                        if (!fpHard.ok) return res.status(400).json({ error: fpHard.error });
-                        const camHard = parseCameraJson(camHardRaw);
-                        if (!camHard.ok) return res.status(400).json({ error: camHard.error });
-                        physicsJson = JSON.stringify(fpHard.obj);
-                        cameraJson = JSON.stringify(camHard.obj);
-                    }
+                    const fpHardRaw =
+                        body.flightPhysicsHard != null ? body.flightPhysicsHard : body.flightPhysics;
+                    const fpEasyRaw = body.flightPhysicsEasy;
+                    const camHardRaw = body.cameraHard != null ? body.cameraHard : body.camera;
+                    const camEasyRaw = body.cameraEasy;
+                    const fpHard = parseFlightPhysics(fpHardRaw, 'hard');
+                    if (!fpHard.ok) return res.status(400).json({ error: fpHard.error });
+                    const fpEasy = parseFlightPhysics(fpEasyRaw, 'easy');
+                    if (!fpEasy.ok) return res.status(400).json({ error: fpEasy.error });
+                    const camHard = parseCameraJson(camHardRaw);
+                    if (!camHard.ok) return res.status(400).json({ error: camHard.error });
+                    const camEasy = parseCameraJson(camEasyRaw);
+                    if (!camEasy.ok) return res.status(400).json({ error: camEasy.error });
 
                     const exists = db.prepare('SELECT 1 FROM aircraft_airframe WHERE id = ?').get(id);
                     if (exists) {
@@ -433,11 +429,11 @@ export default {
                             prefabManifest,
                             JSON.stringify(b.obj),
                             JSON.stringify(a.obj),
-                            physicsJson,
-                            cameraJson,
+                            JSON.stringify(fpHard.obj),
+                            JSON.stringify(camHard.obj),
                             controlMode,
-                            physicsEasyJson,
-                            cameraEasyJson,
+                            JSON.stringify(fpEasy.obj),
+                            JSON.stringify(camEasy.obj),
                             id
                         );
                     } else {
@@ -450,11 +446,11 @@ export default {
                             prefabManifest,
                             JSON.stringify(b.obj),
                             JSON.stringify(a.obj),
-                            physicsJson,
-                            cameraJson,
+                            JSON.stringify(fpHard.obj),
+                            JSON.stringify(camHard.obj),
                             controlMode,
-                            physicsEasyJson,
-                            cameraEasyJson
+                            JSON.stringify(fpEasy.obj),
+                            JSON.stringify(camEasy.obj)
                         );
                     }
                     const row = rowToAirframe(db, id);

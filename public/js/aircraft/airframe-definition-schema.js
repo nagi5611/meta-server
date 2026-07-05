@@ -1,30 +1,14 @@
 // public/js/aircraft/airframe-definition-schema.js — 機体ライブラリのロール列挙と既定アニメ JSON（管理画面用・/js 配下で配信）
 
-/** 機体アニメーション用パーツロール */
+/** ワールド編集で割り当て可能なパーツロール（v1.1） */
 export const AIRFRAME_ROLE_KEYS = [
     'engineBlade',
-    'tire',
-    'gear',
-    'fuselage',
+    'aileron_L',
+    'aileron_R',
+    'flap_L',
+    'flap_R',
+    'landingGear',
 ];
-
-/** 管理 UI 表示名 */
-export const AIRFRAME_ROLE_LABELS = Object.freeze({
-    engineBlade: 'エンジンブレード',
-    tire: 'タイヤ',
-    gear: 'ギア',
-    fuselage: '胴体',
-});
-
-/**
- * ロールの表示名を返す
- * @param {string} role
- * @returns {string}
- */
-export function roleDisplayLabel(role) {
-    const r = String(role || '').trim();
-    return AIRFRAME_ROLE_LABELS[/** @type {keyof typeof AIRFRAME_ROLE_LABELS} */ (r)] || r;
-}
 
 /**
  * 空のバインドマップ（ロール → 名前パス配列）
@@ -62,6 +46,13 @@ export function defaultAnimationJson() {
             maxAccelRadPerS2: 24,
             maxOmegaRadPerS: 140,
             spinAxis: 'z',
+        },
+        flap: {
+            hingeAxis: 'x',
+            maxAngleRad: 0.52,
+            maxOmegaRadPerS: 1.1,
+            signL: 1,
+            signR: -1,
         },
     };
 }
