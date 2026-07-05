@@ -299,6 +299,7 @@ function syncFormFromDraft() {
     setVal('ac-mesh-rz', String(me.z));
     syncViewpointPanelFromDraft();
     refreshRightTabVisibility();
+    syncEditableProfilesForControlMode();
     applyMeshVisualPivotToViewer();
     syncEngineBladePreviewButton();
 }
@@ -311,6 +312,54 @@ function readControlModeFromForm() {
         document.querySelector('input[name="ac-control-mode"]:checked')
     );
     return normalizeAircraftControlMode(el?.value);
+}
+
+/**
+ * 保存時に非アクティブ側の Hard 物理を draft からそのまま引き継ぐ
+ * @returns {Record<string, number>}
+ */
+function getPreservedFlightPhysicsHard() {
+    const d = draftAirframe?.flightPhysicsHard ?? draftAirframe?.flightPhysics;
+    if (d && typeof d === 'object' && !Array.isArray(d)) {
+        return /** @type {Record<string, number>} */ ({ ...d });
+    }
+    return readFlightPhysicsFromForm();
+}
+
+/**
+ * 保存時に非アクティブ側の Easy 物理を draft からそのまま引き継ぐ
+ * @returns {Record<string, number>}
+ */
+function getPreservedFlightPhysicsEasy() {
+    const d = draftAirframe?.flightPhysicsEasy;
+    if (d && typeof d === 'object' && !Array.isArray(d)) {
+        return /** @type {Record<string, number>} */ ({ ...d });
+    }
+    return readEasyFlightPhysicsFromForm();
+}
+
+/**
+ * 宣言された操縦モードに合わせ、編集可能な物理・視点プロファイルの UI を切り替える
+ * @returns {void}
+ */
+function syncEditableProfilesForControlMode() {
+    const mode = readControlModeFromForm();
+    const physicsTabbar = document.querySelector('#ac-pane-params .ac-profile-tabbar');
+    const vpTabbar = document.querySelector('#ac-pane-branch .ac-profile-tabbar');
+    if (physicsTabbar) physicsTabbar.style.display = 'none';
+    if (vpTabbar) vpTabbar.style.display = 'none';
+
+    const physicsTitle = document.querySelector('#ac-pane-params > .section-subtitle');
+    if (physicsTitle) {
+        physicsTitle.textContent = mode === 'easy' ? '操縦パラメータ（Easy）' : '操縦パラメータ（Hard）';
+    }
+    const vpTitle = document.querySelector('#ac-pane-branch > .section-subtitle');
+    if (vpTitle) {
+        vpTitle.textContent = mode === 'easy' ? '視点（カメラ・Easy）' : '視点（カメラ・Hard）';
+    }
+
+    setActivePhysicsProfile(mode);
+    setActiveViewpointProfile(mode);
 }
 
 /**
@@ -351,7 +400,9 @@ function applyViewpointsToDraftCamera(vps) {
  * @returns {void}
  */
 function setActivePhysicsProfile(profile) {
+    const allowed = readControlModeFromForm();
     activePhysicsProfile = profile === 'easy' ? 'easy' : 'hard';
+    if (activePhysicsProfile !== allowed) activePhysicsProfile = allowed;
     document.querySelectorAll('[data-ac-physics-profile]').forEach((btn) => {
         const t = /** @type {HTMLElement} */ (btn).dataset.acPhysicsProfile;
         btn.classList.toggle('is-active', t === activePhysicsProfile);
@@ -368,7 +419,9 @@ function setActivePhysicsProfile(profile) {
  */
 function setActiveViewpointProfile(profile) {
     readViewpointDetailIntoDraft();
+    const allowed = readControlModeFromForm();
     activeViewpointProfile = profile === 'easy' ? 'easy' : 'hard';
+    if (activeViewpointProfile !== allowed) activeViewpointProfile = allowed;
     document.querySelectorAll('[data-ac-vp-profile]').forEach((btn) => {
         const t = /** @type {HTMLElement} */ (btn).dataset.acVpProfile;
         btn.classList.toggle('is-active', t === activeViewpointProfile);
@@ -715,6 +768,7 @@ async function saveDraft() {
     const prevAnim =
         draftAirframe.animation && typeof draftAirframe.animation === 'object' ? draftAirframe.animation : {};
     const animation = { ...prevAnim, ...readAnimationFromForm() };
+    const controlMode = readControlModeFromForm();
     if (activeRightTab === 'branch') readViewpointDetailIntoDraft();
     const meshEuler = readMeshVisualEulerFromForm();
     const camHardBase =
@@ -727,14 +781,18 @@ async function saveDraft() {
             : {};
     const hardVps = migrateLegacyCameraToViewpoints(camHardBase);
     const easyVps = migrateLegacyCameraToViewpoints(camEasyBase);
+    const flightPhysicsHard =
+        controlMode === 'hard' ? readFlightPhysicsFromForm() : getPreservedFlightPhysicsHard();
+    const flightPhysicsEasy =
+        controlMode === 'easy' ? readEasyFlightPhysicsFromForm() : getPreservedFlightPhysicsEasy();
     const body = {
         displayName: String(document.getElementById('ac-field-display')?.value || '').trim(),
         prefabManifest: String(document.getElementById('ac-field-manifest')?.value || '').trim(),
-        controlMode: readControlModeFromForm(),
+        controlMode,
         bindings,
         animation,
-        flightPhysicsHard: readFlightPhysicsFromForm(),
-        flightPhysicsEasy: readEasyFlightPhysicsFromForm(),
+        flightPhysicsHard,
+        flightPhysicsEasy,
         cameraHard: buildCameraJsonForPut({ ...camHardBase, meshVisualEulerDeg: meshEuler }, hardVps),
         cameraEasy: buildCameraJsonForPut({ ...camEasyBase, meshVisualEulerDeg: meshEuler }, easyVps),
     };
@@ -932,7 +990,7 @@ export function initAircraftAdminPanel() {
 
     mountFlightPhysicsForm(document.getElementById('ac-flight-physics-mount'));
     mountEasyFlightPhysicsForm(document.getElementById('ac-flight-physics-easy-mount'));
-    setActivePhysicsProfile('hard');
+    syncEditableProfilesForControlMode();
 
     const mount = document.getElementById('ac-viewer-mount');
     if (mount) {
@@ -1093,15 +1151,20 @@ export function initAircraftAdminPanel() {
             const t = el.dataset.acTab;
             if (t === 'object' || t === 'params' || t === 'branch') setActiveRightTab(t);
             const phys = el.dataset.acPhysicsProfile;
-            if (phys === 'hard' || phys === 'easy') setActivePhysicsProfile(phys);
+            if (phys === 'hard' || phys === 'easy') {
+                if (phys === readControlModeFromForm()) setActivePhysicsProfile(phys);
+            }
             const vp = el.dataset.acVpProfile;
-            if (vp === 'hard' || vp === 'easy') setActiveViewpointProfile(vp);
+            if (vp === 'hard' || vp === 'easy') {
+                if (vp === readControlModeFromForm()) setActiveViewpointProfile(vp);
+            }
         });
     });
 
     document.querySelectorAll('input[name="ac-control-mode"]').forEach((inp) => {
         inp.addEventListener('change', () => {
             if (draftAirframe) draftAirframe.controlMode = readControlModeFromForm();
+            syncEditableProfilesForControlMode();
         });
     });
 
