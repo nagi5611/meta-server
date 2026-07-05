@@ -18,7 +18,10 @@ import {
     defaultFlightMapConfig,
     parseFlightMapConfig,
 } from '../../lib/aircraft-server/flight-map-schema.js';
-import { STORAGE_PATHS } from '../../config/storage-paths.js';
+import {
+    normalizeBindings,
+    isKnownRole,
+} from '../../public/js/aircraft/airframe-definition-schema.js';
 
 const AIRFRAME_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 const WORLD_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -51,6 +54,11 @@ const BINDINGS_MAX_PATHS_PER_ROLE = 64;
 function parseBindings(raw) {
     if (raw == null) return { ok: true, obj: {} };
     if (!isPlainObject(raw)) return { ok: false, error: 'bindings must be an object' };
+    for (const k of Object.keys(raw)) {
+        if (!isKnownRole(k)) {
+            return { ok: false, error: `bindings.${k} is not a valid animation role` };
+        }
+    }
     /** @type {Record<string, string[]>} */
     const out = {};
     for (const [k, v] of Object.entries(raw)) {
@@ -86,7 +94,7 @@ function parseBindings(raw) {
         }
         if (paths.length) out[key] = paths;
     }
-    return { ok: true, obj: out };
+    return { ok: true, obj: normalizeBindings(out) };
 }
 
 /**
