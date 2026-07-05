@@ -1,14 +1,29 @@
 // public/js/aircraft/airframe-definition-schema.js — 機体ライブラリのロール列挙と既定アニメ JSON（管理画面用・/js 配下で配信）
 
-/** ワールド編集で割り当て可能なパーツロール（v1.1） */
+/** 割り当て可能なパーツロール */
 export const AIRFRAME_ROLE_KEYS = [
     'engineBlade',
-    'aileron_L',
-    'aileron_R',
-    'flap_L',
-    'flap_R',
-    'landingGear',
+    'tire',
+    'gear',
+    'fuselage',
 ];
+
+/** 管理 UI 表示用ラベル */
+export const AIRFRAME_ROLE_LABELS = Object.freeze({
+    engineBlade: 'エンジンブレード',
+    tire: 'タイヤ',
+    gear: 'ギア',
+    fuselage: '胴体',
+});
+
+/**
+ * @param {string} role
+ * @returns {string}
+ */
+export function airframeRoleLabel(role) {
+    const r = String(role || '').trim();
+    return AIRFRAME_ROLE_LABELS[/** @type {keyof typeof AIRFRAME_ROLE_LABELS} */ (r)] || r;
+}
 
 /**
  * 空のバインドマップ（ロール → 名前パス配列）
@@ -16,6 +31,21 @@ export const AIRFRAME_ROLE_KEYS = [
  */
 export function emptyBindings() {
     return {};
+}
+
+/**
+ * @param {unknown} rawBindings
+ * @param {string} roleKey
+ * @returns {string[]}
+ */
+function pathsFromBindingField(rawBindings, roleKey) {
+    if (!isObj(rawBindings)) return [];
+    const v = rawBindings[roleKey];
+    if (Array.isArray(v)) {
+        return v.map((x) => String(x || '').trim()).filter(Boolean);
+    }
+    if (typeof v === 'string' && v.trim()) return [v.trim()];
+    return [];
 }
 
 /**
@@ -27,13 +57,11 @@ export function emptyBindings() {
 export function bindingPathsForRole(rawBindings, role) {
     const r = String(role || '').trim();
     if (!r || !isKnownRole(r)) return [];
-    if (!isObj(rawBindings)) return [];
-    const v = rawBindings[r];
-    if (Array.isArray(v)) {
-        return v.map((x) => String(x || '').trim()).filter(Boolean);
+    const paths = pathsFromBindingField(rawBindings, r);
+    if (r === 'gear' && !paths.length) {
+        return pathsFromBindingField(rawBindings, 'landingGear');
     }
-    if (typeof v === 'string' && v.trim()) return [v.trim()];
-    return [];
+    return paths;
 }
 
 /**
@@ -81,11 +109,16 @@ export function isKnownRole(role) {
  */
 export function normalizeBindings(raw) {
     if (!isObj(raw)) return {};
+    /** @type {Record<string, unknown>} */
+    const migrated = { ...raw };
+    if (migrated.landingGear && !migrated.gear) {
+        migrated.gear = migrated.landingGear;
+    }
     /** @type {Record<string, string[]>} */
     const out = {};
     const MAX_PER_ROLE = 64;
     for (const k of AIRFRAME_ROLE_KEYS) {
-        const v = raw[k];
+        const v = migrated[k];
         /** @type {string[]} */
         const paths = [];
         if (Array.isArray(v)) {

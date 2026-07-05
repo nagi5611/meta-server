@@ -2,6 +2,7 @@
 
 import {
     AIRFRAME_ROLE_KEYS,
+    airframeRoleLabel,
     defaultAnimationJson,
     normalizeBindings,
     bindingPathsForRole,
@@ -32,8 +33,8 @@ let selectedAirframeId = null;
 let draftAirframe = null;
 /** @type {string|null} */
 let selectedViewpointId = null;
-/** @type {'object'|'params'|'branch'} */
-let activeRightTab = 'object';
+/** @type {'animation'|'params'|'branch'} */
+let activeRightTab = 'animation';
 /** @type {'hard'|'easy'} */
 let activePhysicsProfile = 'hard';
 /** @type {'hard'|'easy'} */
@@ -224,7 +225,7 @@ function syncFormFromDraft() {
         for (const role of AIRFRAME_ROLE_KEYS) {
             const opt = document.createElement('option');
             opt.value = role;
-            opt.textContent = role;
+            opt.textContent = `${airframeRoleLabel(role)} (${role})`;
             roleSel.appendChild(opt);
         }
     }
@@ -245,7 +246,7 @@ function syncFormFromDraft() {
             sec.className = 'ac-binding-role-block';
             const h = document.createElement('div');
             h.className = 'ac-binding-role-title';
-            h.textContent = role;
+            h.textContent = `${airframeRoleLabel(role)} (${role})`;
             sec.appendChild(h);
             for (const p of paths) {
                 const row = document.createElement('div');
@@ -566,7 +567,7 @@ function syncViewpointEditorOnViewer() {
  */
 function refreshRightTabVisibility() {
     const panes = {
-        object: document.getElementById('ac-pane-object'),
+        animation: document.getElementById('ac-pane-animation'),
         params: document.getElementById('ac-pane-params'),
         branch: document.getElementById('ac-pane-branch'),
     };
@@ -591,7 +592,7 @@ function refreshRightTabVisibility() {
 }
 
 /**
- * @param {'object'|'params'|'branch'} tab
+ * @param {'animation'|'params'|'branch'} tab
  * @returns {void}
  */
 function setActiveRightTab(tab) {
@@ -866,13 +867,14 @@ export function initAircraftAdminPanel() {
                     </select>
                 </div>
                 <div class="ac-right-tabbar" role="tablist">
-                    <button type="button" class="ac-tab-btn is-active" data-ac-tab="object" role="tab">オブジェクト定義</button>
+                    <button type="button" class="ac-tab-btn is-active" data-ac-tab="animation" role="tab">アニメーション設定</button>
                     <button type="button" class="ac-tab-btn" data-ac-tab="params" role="tab">パラメータ定義</button>
                     <button type="button" class="ac-tab-btn" data-ac-tab="branch" role="tab">支店定義</button>
                 </div>
                 <p class="hint" style="margin:6px 0 8px;font-size:11px;">「支店」タブでは機体ローカル座標の<strong>視点（カメラ）</strong>を編集します。ゲームでは <code>cockpit</code> / <code>chase</code> 役割の先頭1件ずつがコックピット視点・追従視点に使われます。</p>
-                <div id="ac-pane-object" class="ac-tab-pane">
+                <div id="ac-pane-animation" class="ac-tab-pane">
                     <h3 class="section-subtitle">ロール割当</h3>
+                    <p class="hint" style="margin:0 0 8px;font-size:11px;">Blender のオブジェクト名パスを、エンジンブレード・タイヤ・ギア・胴体のいずれかに割り当てます。3D ビューアをクリックしてパスを選べます。</p>
                     <div class="field-row">
                         <label class="prop-label" for="ac-role-select">ロール</label>
                         <select id="ac-role-select" class="prop-input full"></select>
@@ -883,6 +885,17 @@ export function initAircraftAdminPanel() {
                     </div>
                     <button type="button" class="btn btn-primary" id="ac-btn-add-binding">選択パスをロールに追加</button>
                     <div id="ac-bindings-list" class="ac-bindings-list"></div>
+                    <h3 class="section-subtitle">エンジンブレード</h3>
+                    <div class="field-row"><label class="prop-label" for="ac-anim-maxaccel">角加速度上限 (rad/s²)</label>
+                        <input type="number" id="ac-anim-maxaccel" class="prop-input num" step="any" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-anim-maxomega">目標角速度上限 (rad/s)</label>
+                        <input type="number" id="ac-anim-maxomega" class="prop-input num" step="any" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-anim-spinaxis">回転軸（ローカル）</label>
+                        <select id="ac-anim-spinaxis" class="prop-input full"><option value="x">x</option><option value="y">y</option><option value="z">z</option></select></div>
+                    <div class="ac-admin-actions" style="margin-top:4px;">
+                        <button type="button" class="btn btn-sm btn-primary" id="ac-anim-preview-toggle">プレビュー再生</button>
+                    </div>
+                    <p class="hint" style="margin:4px 0 0;font-size:11px;">engineBlade ロール割当済みメッシュを <strong>${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s</strong> でループ表示します。</p>
                 </div>
                 <div id="ac-pane-params" class="ac-tab-pane" style="display:none">
                     <h3 class="section-subtitle">操縦パラメータ</h3>
@@ -901,17 +914,6 @@ export function initAircraftAdminPanel() {
                         <input type="number" id="ac-mesh-ry" class="prop-input num" step="0.5" value="0" /></div>
                     <div class="field-row"><label class="prop-label" for="ac-mesh-rz">Roll Z</label>
                         <input type="number" id="ac-mesh-rz" class="prop-input num" step="0.5" value="0" /></div>
-                    <h3 class="section-subtitle">アニメーション（エンジンブレード）</h3>
-                    <div class="field-row"><label class="prop-label" for="ac-anim-maxaccel">角加速度上限 (rad/s²)</label>
-                        <input type="number" id="ac-anim-maxaccel" class="prop-input num" step="any" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-anim-maxomega">目標角速度上限 (rad/s)</label>
-                        <input type="number" id="ac-anim-maxomega" class="prop-input num" step="any" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-anim-spinaxis">回転軸（ローカル）</label>
-                        <select id="ac-anim-spinaxis" class="prop-input full"><option value="x">x</option><option value="y">y</option><option value="z">z</option></select></div>
-                    <div class="ac-admin-actions" style="margin-top:4px;">
-                        <button type="button" class="btn btn-sm btn-primary" id="ac-anim-preview-toggle">プレビュー再生</button>
-                    </div>
-                    <p class="hint" style="margin:4px 0 0;font-size:11px;">engineBlade ロール割当済みメッシュを <strong>${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s</strong> でループ表示します。</p>
                 </div>
                 <div id="ac-pane-branch" class="ac-tab-pane" style="display:none">
                     <h3 class="section-subtitle">視点（カメラ）</h3>
@@ -1149,7 +1151,7 @@ export function initAircraftAdminPanel() {
         btn.addEventListener('click', () => {
             const el = /** @type {HTMLElement} */ (btn);
             const t = el.dataset.acTab;
-            if (t === 'object' || t === 'params' || t === 'branch') setActiveRightTab(t);
+            if (t === 'animation' || t === 'params' || t === 'branch') setActiveRightTab(t);
             const phys = el.dataset.acPhysicsProfile;
             if (phys === 'hard' || phys === 'easy') {
                 if (phys === readControlModeFromForm()) setActivePhysicsProfile(phys);
