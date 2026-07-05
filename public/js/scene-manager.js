@@ -2017,24 +2017,8 @@ class SceneManager {
                 if (!r.ok || !j?.ok || !j?.airframe) continue;
                 const af = j.airframe;
                 const controlMode = normalizeAircraftControlMode(af.controlMode);
-                const cam =
-                    controlMode === 'easy'
-                        ? af.cameraEasy && typeof af.cameraEasy === 'object'
-                            ? af.cameraEasy
-                            : af.camera
-                        : af.cameraHard && typeof af.cameraHard === 'object'
-                          ? af.cameraHard
-                          : af.camera;
-                const camObj = cam && typeof cam === 'object' ? cam : {};
-                const fpRaw =
-                    controlMode === 'easy'
-                        ? af.flightPhysicsEasy && typeof af.flightPhysicsEasy === 'object'
-                            ? af.flightPhysicsEasy
-                            : af.flightPhysics
-                        : af.flightPhysicsHard && typeof af.flightPhysicsHard === 'object'
-                          ? af.flightPhysicsHard
-                          : af.flightPhysics;
-                const fp = fpRaw && typeof fpRaw === 'object' ? fpRaw : {};
+                const camObj = af.camera && typeof af.camera === 'object' ? af.camera : {};
+                const fpRaw = af.flightPhysics && typeof af.flightPhysics === 'object' ? af.flightPhysics : {};
                 const leg = resolveLegacyCameraFromLibrary(camObj);
                 const libraryViewpoints = migrateLegacyCameraToViewpoints(camObj);
                 for (const slot of slots) {
@@ -2043,8 +2027,8 @@ class SceneManager {
                     slot.cameraViewpoints = libraryViewpoints;
                     slot.physics =
                         controlMode === 'easy'
-                            ? mergeEasyAircraftPhysicsFromWorld(fp)
-                            : mergeAircraftPhysicsFromWorld(fp);
+                            ? mergeEasyAircraftPhysicsFromWorld(fpRaw)
+                            : mergeAircraftPhysicsFromWorld(fpRaw);
                     const ck = leg.cockpitOffset;
                     slot.cockpitOffset = {
                         x: typeof ck.x === 'number' && Number.isFinite(ck.x) ? ck.x : slot.cockpitOffset.x,
