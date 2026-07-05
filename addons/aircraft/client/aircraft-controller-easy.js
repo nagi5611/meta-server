@@ -10,9 +10,14 @@ import {
 } from './aircraft-physics-defaults.js';
 import {
     buildEngineBladeLibraryAnim,
+    buildGearLibraryAnim,
     disposeEngineBladeGltfDrivers,
+    disposeGearGltfDrivers,
     stepEngineBladeLibraryAnimEasy,
+    stepGearLibraryAnim,
+    toggleGearAnimationDirection,
     hasEngineBladeLibraryAnim,
+    hasGearLibraryAnim,
 } from './runtime-prefab-aircraft-anim.js';
 import {
     applyAircraftViewpointCamera,
@@ -186,6 +191,7 @@ export default class AircraftControllerEasy {
         this._aircraftGrounded = false;
         this._lastGroundMinY = null;
         disposeEngineBladeGltfDrivers(this._libAnim?.gltfDrivers);
+        disposeGearGltfDrivers(this._libAnim?.gear?.drivers);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
         resetAircraftAutopilot(this._autopilot);
@@ -271,6 +277,7 @@ export default class AircraftControllerEasy {
      */
     _scheduleLibraryAnim() {
         disposeEngineBladeGltfDrivers(this._libAnim?.gltfDrivers);
+        disposeGearGltfDrivers(this._libAnim?.gear?.drivers);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
         const slot = this.slot;
@@ -287,7 +294,10 @@ export default class AircraftControllerEasy {
                 const ebPaths = this._bindingPathsForRole(j.airframe.bindings, 'engineBlade');
                 const eb = j.airframe.animation?.engineBlade;
                 const engineBlades = buildEngineBladeLibraryAnim(root, ebPaths, eb);
-                if (hasEngineBladeLibraryAnim(engineBlades)) this._libAnim = engineBlades;
+                const gearPaths = this._bindingPathsForRole(j.airframe.bindings, 'gear');
+                const gear = buildGearLibraryAnim(root, gearPaths, j.airframe.animation?.gear);
+                if (!hasEngineBladeLibraryAnim(engineBlades) && !hasGearLibraryAnim(gear)) return;
+                this._libAnim = { ...engineBlades, gear };
             })
             .catch(() => {});
     }
@@ -423,6 +433,16 @@ export default class AircraftControllerEasy {
         if (!this.slot) return;
         if (this._isInputActive()) return;
         const c = e.code;
+
+        if (c === 'KeyG' && down) {
+            if (e.repeat) return;
+            if (hasGearLibraryAnim(this._libAnim?.gear)) {
+                toggleGearAnimationDirection(this._libAnim.gear);
+                e.preventDefault();
+            }
+            return;
+        }
+
         /** @type {[string, keyof AircraftControllerEasy['keys']][]} */
         const map = [
             ['KeyW', 'forward'],
@@ -591,20 +611,24 @@ export default class AircraftControllerEasy {
      * @param {number} dt
      */
     _updateLibraryVisuals(dt) {
-        if (!hasEngineBladeLibraryAnim(this._libAnim)) return;
         const root = this.slot?.root;
         if (!root) return;
-        root.getWorldQuaternion(this._worldQuat);
-        this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
-        if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
-        const speedMs = Math.max(0, this.velocity.dot(this._fwd));
-        const speedKmh = speedMs * 3.6;
-        const targetOmega =
-            speedKmh >= EASY_ENGINE_BLADE_MIN_SPEED_KMH
-                ? Math.min(speedKmh, EASY_ENGINE_BLADE_MAX_OMEGA_RAD_PER_S)
-                : 0;
-        const accel = EASY_ENGINE_BLADE_MAX_ACCEL_RAD_PER_S2;
-        stepEngineBladeLibraryAnimEasy(this._libAnim, targetOmega, accel, dt);
+        if (hasEngineBladeLibraryAnim(this._libAnim)) {
+            root.getWorldQuaternion(this._worldQuat);
+            this._fwd.set(0, 0, -1).applyQuaternion(this._worldQuat);
+            if (this._fwd.lengthSq() > 1e-12) this._fwd.normalize();
+            const speedMs = Math.max(0, this.velocity.dot(this._fwd));
+            const speedKmh = speedMs * 3.6;
+            const targetOmega =
+                speedKmh >= EASY_ENGINE_BLADE_MIN_SPEED_KMH
+                    ? Math.min(speedKmh, EASY_ENGINE_BLADE_MAX_OMEGA_RAD_PER_S)
+                    : 0;
+            const accel = EASY_ENGINE_BLADE_MAX_ACCEL_RAD_PER_S2;
+            stepEngineBladeLibraryAnimEasy(this._libAnim, targetOmega, accel, dt);
+        }
+        if (hasGearLibraryAnim(this._libAnim?.gear)) {
+            stepGearLibraryAnim(this._libAnim.gear, dt);
+        }
     }
 
     /**

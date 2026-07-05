@@ -77,6 +77,12 @@ export function defaultAnimationJson() {
             /** GLB 内の 360° 1 回転クリップ名。空なら手動 rotation フォールバック */
             clipName: '',
         },
+        /** 着陸装置: t=0 展開 / t=duration 収納。G キーで往復スクラブ */
+        gear: {
+            clipName: '',
+            playbackFps: 24,
+            sourceFps: 24,
+        },
         flap: {
             hingeAxis: 'x',
             maxAngleRad: 0.52,

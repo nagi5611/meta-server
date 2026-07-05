@@ -93,6 +93,7 @@ Blender 側で **オブジェクト名をユニークに**し、階層パス（�
 定義可能なロール（v1.1）:
 
 - `engineBlade` — 操縦中のアニメーション実装あり（他は保存のみ）
+- `gear` — 操縦中の着陸装置 GLB アニメ（G キー）実装あり
 - `aileron_L` / `aileron_R`
 - `flap_L` / `flap_R`
 - `landingGear`
@@ -105,6 +106,14 @@ Blender 側で **オブジェクト名をユニークに**し、階層パス（�
 - `maxAccelRadPerS2` — 目標角速度への角加速度上限
 - `maxOmegaRadPerS` — 推力相当 1 のときの目標角速度（Hard 操縦・GLB クリップの上限）
 - `spinAxis` — 手動回転フォールバック時のローカル軸 `x` | `y` | `z`
+
+`animation.gear`:
+
+- `clipName` — GLB 内の着陸装置クリップ名（**必須**。先頭フレーム=展開、末尾=収納）
+- `playbackFps` — 再生速度 (f/s)。固定速度で往復
+- `sourceFps` — クリップ作成時の FPS（既定 24）。`timeScale = playbackFps / sourceFps`
+
+操縦中 **G** キーで再生方向を切替（ギアアップ中に再度 G で逆再生）。完了時は端フレームで停止。`bindings.gear`（レガシー `landingGear` 可）にメッシュパスを割当。
 
 操縦中のプロペラ表示はエンジン回転数（RPM / `engineMaxRpm`）を基準にします。推力は回転数から `thrustAccelFromEngineRpm` で算出し、上下矢印はスロットル 0–100%（`throttleSpoolPerS`）、回転数は目標 RPM へ `engineRpmAccel` で追従します。
 

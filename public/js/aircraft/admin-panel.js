@@ -219,6 +219,10 @@ function syncFormFromDraft() {
     const spin = typeof eb.spinAxis === 'string' && eb.spinAxis ? eb.spinAxis : 'z';
     const spinEl = document.getElementById('ac-anim-spinaxis');
     if (spinEl && 'value' in spinEl) /** @type {HTMLSelectElement} */ (spinEl).value = spin;
+    const gr = anim.gear && typeof anim.gear === 'object' ? anim.gear : {};
+    setVal('ac-gear-clipname', typeof gr.clipName === 'string' ? gr.clipName : '');
+    setVal('ac-gear-playbackfps', String(typeof gr.playbackFps === 'number' ? gr.playbackFps : 24));
+    setVal('ac-gear-sourcefps', String(typeof gr.sourceFps === 'number' ? gr.sourceFps : 24));
     const roleSel = /** @type {HTMLSelectElement|null} */ (document.getElementById('ac-role-select'));
     if (roleSel) {
         roleSel.innerHTML = '';
@@ -269,6 +273,7 @@ function syncFormFromDraft() {
                     draftAirframe.bindings = normalizeBindings(b);
                     syncFormFromDraft();
                     refreshEngineBladePreviewIfActive();
+                    refreshGearPreviewIfActive();
                     setStatus(`削除: ${role} の「${p}」`);
                 });
                 row.appendChild(del);
@@ -609,6 +614,9 @@ function readAnimationFromForm() {
     const spinAxis = String(document.getElementById('ac-anim-spinaxis')?.value || 'z').toLowerCase();
     const axis = ['x', 'y', 'z'].includes(spinAxis) ? spinAxis : 'z';
     const clipName = String(document.getElementById('ac-anim-clipname')?.value || '').trim();
+    const gearClipName = String(document.getElementById('ac-gear-clipname')?.value || '').trim();
+    const gearPlaybackFps = parseFloat(String(document.getElementById('ac-gear-playbackfps')?.value || '24'));
+    const gearSourceFps = parseFloat(String(document.getElementById('ac-gear-sourcefps')?.value || '24'));
     return {
         engineBlade: {
             maxAccelRadPerS2: Number.isFinite(maxAccel) ? maxAccel : 24,
@@ -616,7 +624,75 @@ function readAnimationFromForm() {
             spinAxis: axis,
             clipName,
         },
+        gear: {
+            clipName: gearClipName,
+            playbackFps: Number.isFinite(gearPlaybackFps) && gearPlaybackFps > 0 ? gearPlaybackFps : 24,
+            sourceFps: Number.isFinite(gearSourceFps) && gearSourceFps > 0 ? gearSourceFps : 24,
+        },
     };
+}
+
+function resolveGearPreviewConfig() {
+    if (!draftAirframe) return { paths: [], gearConfig: readAnimationFromForm().gear };
+    const paths = bindingPathsForRole(draftAirframe.bindings, 'gear');
+    const gearConfig = readAnimationFromForm().gear;
+    return { paths, gearConfig };
+}
+
+/**
+ * ギアプレビューをビューアに反映する（未構築なら構築）
+ * @returns {void}
+ */
+function ensureGearPreviewBuilt() {
+    if (!viewer?.getPrefabRoot?.()) return;
+    const { paths, gearConfig } = resolveGearPreviewConfig();
+    if (!paths.length || !String(gearConfig?.clipName || '').trim()) return;
+    viewer.setGearPreview({ active: true, paths, gearConfig });
+}
+
+/**
+ * ギア方向切替（G キー相当）
+ * @returns {boolean}
+ */
+function toggleGearPreviewDirection() {
+    if (!viewer?.getPrefabRoot?.()) {
+        setStatus('プレハブを読み込んでからプレビューしてください', true);
+        return false;
+    }
+    const { paths, gearConfig } = resolveGearPreviewConfig();
+    if (!paths.length) {
+        setStatus('gear ロールにメッシュを割り当ててください', true);
+        return false;
+    }
+    if (!String(gearConfig?.clipName || '').trim()) {
+        setStatus('ギアの GLB クリップ名を入力してください', true);
+        return false;
+    }
+    viewer.setGearPreview({ active: true, paths, gearConfig });
+    viewer.toggleGearPreviewDirection();
+    setStatus('ギア方向を切替（ゲーム内 G キー相当）');
+    return true;
+}
+
+/**
+ * フォーム変更時にギアプレビュー状態を更新
+ * @returns {void}
+ */
+function refreshGearPreviewIfActive() {
+    if (!viewer?.hasGearPreview?.()) return;
+    const { paths, gearConfig } = resolveGearPreviewConfig();
+    if (!paths.length || !String(gearConfig?.clipName || '').trim()) {
+        viewer.setGearPreview({ active: false });
+        return;
+    }
+    viewer.setGearPreview({ active: true, paths, gearConfig });
+}
+
+/**
+ * @returns {void}
+ */
+function stopGearPreview() {
+    viewer?.setGearPreview?.({ active: false });
 }
 
 /**
@@ -706,6 +782,7 @@ function refreshEngineBladePreviewIfActive() {
  */
 async function selectAirframe(id) {
     stopEngineBladePreview();
+    stopGearPreview();
     selectedAirframeId = id;
     const data = await fetchJson(`/admin/addons/aircraft/airframes/${encodeURIComponent(id)}`);
     draftAirframe = data.airframe;
@@ -892,6 +969,17 @@ export function initAircraftAdminPanel() {
                         <button type="button" class="btn btn-sm btn-primary" id="ac-anim-preview-toggle">プレビュー再生</button>
                     </div>
                     <p class="hint" style="margin:4px 0 0;font-size:11px;">engineBlade ロール割当済みメッシュを <strong>${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s</strong> でループ表示します。</p>
+                    <h3 class="section-subtitle">着陸装置（ギア）</h3>
+                    <div class="field-row"><label class="prop-label" for="ac-gear-clipname">GLB クリップ名（展開→収納）</label>
+                        <input type="text" id="ac-gear-clipname" class="prop-input full" placeholder="例: GearRetract" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-gear-playbackfps">再生速度 (f/s)</label>
+                        <input type="number" id="ac-gear-playbackfps" class="prop-input num" step="any" min="0.1" /></div>
+                    <div class="field-row"><label class="prop-label" for="ac-gear-sourcefps">クリップ作成 FPS</label>
+                        <input type="number" id="ac-gear-sourcefps" class="prop-input num" step="any" min="0.1" /></div>
+                    <p class="hint" style="margin:0 0 8px;font-size:11px;">クリップ先頭=展開・末尾=収納。操縦中 <strong>G</strong> キーで方向切替（途中から逆再生可）。完了フレームで停止します。</p>
+                    <div class="ac-admin-actions" style="margin-top:4px;">
+                        <button type="button" class="btn btn-sm btn-primary" id="ac-gear-toggle">ギア切替 (G)</button>
+                    </div>
                 </div>
                 <div id="ac-pane-params" class="ac-tab-pane" style="display:none">
                     <h3 class="section-subtitle">操縦パラメータ</h3>
@@ -1179,10 +1267,20 @@ export function initAircraftAdminPanel() {
         startEngineBladePreview();
     });
 
-    for (const id of ['ac-anim-spinaxis', 'ac-anim-clipname']) {
-        document.getElementById(id)?.addEventListener('change', () => refreshEngineBladePreviewIfActive());
-        document.getElementById(id)?.addEventListener('input', () => refreshEngineBladePreviewIfActive());
+    for (const id of ['ac-anim-spinaxis', 'ac-anim-clipname', 'ac-gear-clipname', 'ac-gear-playbackfps', 'ac-gear-sourcefps']) {
+        document.getElementById(id)?.addEventListener('change', () => {
+            refreshEngineBladePreviewIfActive();
+            refreshGearPreviewIfActive();
+        });
+        document.getElementById(id)?.addEventListener('input', () => {
+            refreshEngineBladePreviewIfActive();
+            refreshGearPreviewIfActive();
+        });
     }
+
+    document.getElementById('ac-gear-toggle')?.addEventListener('click', () => {
+        toggleGearPreviewDirection();
+    });
 
     document.getElementById('ac-vp-add')?.addEventListener('click', () => {
         if (!draftAirframe) return;
