@@ -19,7 +19,7 @@ import {
     AIRCRAFT_FLAP_LABELS,
     AIRCRAFT_PHYSICS_INTERNAL
 } from './aircraft-physics-defaults.js';
-import { findObjectByNamePath, findObjectsForBindingPaths, stepEngineBladeRotation, stepFlapDeflection } from './runtime-prefab-aircraft-anim.js';
+import { findObjectByNamePath, buildEngineBladeLibraryAnim, disposeEngineBladeGltfDrivers, stepEngineBladeLibraryAnimHard, stepFlapDeflection, hasEngineBladeLibraryAnim } from './runtime-prefab-aircraft-anim.js';
 import {
     applyAircraftViewpointCamera,
     resolveSlotCameraViewpoints,
@@ -128,7 +128,8 @@ export default class AircraftControllerHard {
         this._qPilotLook = new THREE.Quaternion();
         /**
          * @type {{
-         *   blades: { blade: THREE.Object3D, axis: 'x'|'y'|'z', params: { maxAccelRadPerS2: number, maxOmegaRadPerS: number }, state: { omega: number } }[],
+         *   manualBlades: import('./runtime-prefab-aircraft-anim.js').ManualEngineBladeEntry[],
+         *   gltfDrivers: import('./runtime-prefab-aircraft-anim.js').EngineBladeGltfDriver[],
          *   flaps: { mesh: THREE.Object3D, axis: 'x'|'y'|'z', sign: number, maxAngleRad: number, maxOmegaRadPerS: number, state: { angle: number } }[]
          * }|null}
          */
@@ -227,6 +228,7 @@ export default class AircraftControllerHard {
      * aircraftLibraryId があれば定義を取得しエンジンブレード・フラップ参照を解決する
      */
     _scheduleLibraryAnim() {
+        disposeEngineBladeGltfDrivers(this._libAnim?.gltfDrivers);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
         const slot = this.slot;
@@ -241,37 +243,11 @@ export default class AircraftControllerHard {
                 if (this._libAnimLoadingFor !== loadingFor || this.slot?.aircraftLibraryId !== loadingFor) return;
                 if (!ok || !j?.ok || !j.airframe) return;
                 const bindings = j.airframe.bindings;
-                const ebRaw = bindings?.engineBlade;
-                /** @type {string[]} */
-                const ebPaths = [];
-                if (Array.isArray(ebRaw)) {
-                    for (const x of ebRaw) {
-                        const s = typeof x === 'string' ? x.trim() : '';
-                        if (s) ebPaths.push(s);
-                    }
-                } else if (typeof ebRaw === 'string' && ebRaw.trim()) {
-                    ebPaths.push(ebRaw.trim());
-                }
+                const ebPaths = this._bindingPathsForRole(bindings, 'engineBlade');
                 const eb = j.airframe.animation?.engineBlade;
-                const ax = String(eb?.spinAxis || 'z').toLowerCase();
-                const axis = ax === 'x' || ax === 'y' || ax === 'z' ? ax : 'z';
-                const params = {
-                    maxAccelRadPerS2: typeof eb?.maxAccelRadPerS2 === 'number' ? eb.maxAccelRadPerS2 : 24,
-                    maxOmegaRadPerS: typeof eb?.maxOmegaRadPerS === 'number' ? eb.maxOmegaRadPerS : 140,
-                };
-                /** @type {{ blade: THREE.Object3D, axis: 'x'|'y'|'z', params: typeof params, state: { omega: number } }[]} */
-                const blades = [];
-                const resolvedBlades = findObjectsForBindingPaths(root, ebPaths);
-                if (resolvedBlades.length < ebPaths.length) {
-                    console.warn(
-                        '[AircraftController] some engineBlade paths not found:',
-                        ebPaths.length - resolvedBlades.length,
-                        'of',
-                        ebPaths.length
-                    );
-                }
-                for (const blade of resolvedBlades) {
-                    blades.push({ blade, axis, params, state: { omega: 0 } });
+                const engineBlades = buildEngineBladeLibraryAnim(root, ebPaths, eb);
+                if (ebPaths.length && engineBlades.gltfDrivers.length === 0 && engineBlades.manualBlades.length === 0) {
+                    console.warn('[AircraftController] some engineBlade paths not found:', ebPaths.length);
                 }
 
                 const fa = j.airframe.animation?.flap;
@@ -295,8 +271,8 @@ export default class AircraftControllerHard {
                     else flaps.push({ mesh, axis: fAxis, sign: signR, maxAngleRad, maxOmegaRadPerS, state: { angle: NaN } });
                 }
 
-                if (!blades.length && !flaps.length) return;
-                this._libAnim = { blades, flaps };
+                if (!hasEngineBladeLibraryAnim(engineBlades) && !flaps.length) return;
+                this._libAnim = { ...engineBlades, flaps };
             })
             .catch((e) => {
                 console.warn('[AircraftController] aircraft library fetch failed:', e);
@@ -320,6 +296,7 @@ export default class AircraftControllerHard {
         this._flapManualLockUntilMs = 0;
         this._lastFlapBumpMs = 0;
         this.physics = mergeAircraftPhysicsFromWorld(this._worldAircraftPhysicsRaw);
+        disposeEngineBladeGltfDrivers(this._libAnim?.gltfDrivers);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
         resetAircraftAutopilot(this._autopilot);
@@ -906,10 +883,8 @@ export default class AircraftControllerHard {
             t01 = Math.max(t01, THREE.MathUtils.clamp(this.velocity.dot(this._fwd) / maxSpdVis, 0, 1));
         }
 
-        if (this._libAnim?.blades?.length) {
-            for (const b of this._libAnim.blades) {
-                stepEngineBladeRotation(b.blade, b.axis, b.params, t01, dt, b.state);
-            }
+        if (hasEngineBladeLibraryAnim(this._libAnim)) {
+            stepEngineBladeLibraryAnimHard(this._libAnim, t01, dt);
         }
         if (this._libAnim?.flaps?.length) {
             const norm = flapDeployNorm01(this._flapIndex);

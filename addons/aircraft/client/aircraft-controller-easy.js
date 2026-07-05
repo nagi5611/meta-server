@@ -8,7 +8,12 @@ import {
     updateGroundedHysteresis,
     AIRCRAFT_GROUND_FRICTION_MIN_FORWARD_HORIZ,
 } from './aircraft-physics-defaults.js';
-import { findObjectsForBindingPaths, stepEngineBladeRotationToTargetOmega } from './runtime-prefab-aircraft-anim.js';
+import {
+    buildEngineBladeLibraryAnim,
+    disposeEngineBladeGltfDrivers,
+    stepEngineBladeLibraryAnimEasy,
+    hasEngineBladeLibraryAnim,
+} from './runtime-prefab-aircraft-anim.js';
 import {
     applyAircraftViewpointCamera,
     resolveSlotCameraViewpoints,
@@ -180,6 +185,7 @@ export default class AircraftControllerEasy {
         this._omegaRoll = 0;
         this._aircraftGrounded = false;
         this._lastGroundMinY = null;
+        disposeEngineBladeGltfDrivers(this._libAnim?.gltfDrivers);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
         resetAircraftAutopilot(this._autopilot);
@@ -264,6 +270,7 @@ export default class AircraftControllerEasy {
      * エンジンブレードのみ（推力入力で回転）
      */
     _scheduleLibraryAnim() {
+        disposeEngineBladeGltfDrivers(this._libAnim?.gltfDrivers);
         this._libAnim = null;
         this._libAnimLoadingFor = null;
         const slot = this.slot;
@@ -279,18 +286,8 @@ export default class AircraftControllerEasy {
                 if (!ok || !j?.ok || !j.airframe) return;
                 const ebPaths = this._bindingPathsForRole(j.airframe.bindings, 'engineBlade');
                 const eb = j.airframe.animation?.engineBlade;
-                const ax = String(eb?.spinAxis || 'z').toLowerCase();
-                const axis = ax === 'x' || ax === 'y' || ax === 'z' ? ax : 'z';
-                const params = {
-                    maxAccelRadPerS2: typeof eb?.maxAccelRadPerS2 === 'number' ? eb.maxAccelRadPerS2 : 24,
-                    maxOmegaRadPerS: typeof eb?.maxOmegaRadPerS === 'number' ? eb.maxOmegaRadPerS : 140,
-                };
-                /** @type {{ blade: THREE.Object3D, axis: 'x'|'y'|'z', params: typeof params, state: { omega: number } }[]} */
-                const blades = [];
-                for (const blade of findObjectsForBindingPaths(root, ebPaths)) {
-                    blades.push({ blade, axis, params, state: { omega: 0 } });
-                }
-                if (blades.length) this._libAnim = { blades };
+                const engineBlades = buildEngineBladeLibraryAnim(root, ebPaths, eb);
+                if (hasEngineBladeLibraryAnim(engineBlades)) this._libAnim = engineBlades;
             })
             .catch(() => {});
     }
@@ -594,7 +591,7 @@ export default class AircraftControllerEasy {
      * @param {number} dt
      */
     _updateLibraryVisuals(dt) {
-        if (!this._libAnim?.blades?.length) return;
+        if (!hasEngineBladeLibraryAnim(this._libAnim)) return;
         const root = this.slot?.root;
         if (!root) return;
         root.getWorldQuaternion(this._worldQuat);
@@ -607,9 +604,7 @@ export default class AircraftControllerEasy {
                 ? Math.min(speedKmh, EASY_ENGINE_BLADE_MAX_OMEGA_RAD_PER_S)
                 : 0;
         const accel = EASY_ENGINE_BLADE_MAX_ACCEL_RAD_PER_S2;
-        for (const b of this._libAnim.blades) {
-            stepEngineBladeRotationToTargetOmega(b.blade, b.axis, targetOmega, accel, dt, b.state);
-        }
+        stepEngineBladeLibraryAnimEasy(this._libAnim, targetOmega, accel, dt);
     }
 
     /**

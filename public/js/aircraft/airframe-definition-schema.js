@@ -74,6 +74,8 @@ export function defaultAnimationJson() {
             maxAccelRadPerS2: 24,
             maxOmegaRadPerS: 140,
             spinAxis: 'z',
+            /** GLB 内の 360° 1 回転クリップ名。空なら手動 rotation フォールバック */
+            clipName: '',
         },
         flap: {
             hingeAxis: 'x',

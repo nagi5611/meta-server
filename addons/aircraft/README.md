@@ -101,9 +101,10 @@ Blender 側で **オブジェクト名をユニークに**し、階層パス（�
 
 `animation.engineBlade`:
 
+- `clipName` — GLB 内の 360° 1 回転クリップ名（指定時は `AnimationMixer.timeScale` で速度制御。未指定または解決失敗時は手動 `rotation` にフォールバック）
 - `maxAccelRadPerS2` — 目標角速度への角加速度上限
-- `maxOmegaRadPerS` — 推力相当 1 のときの目標角速度
-- `spinAxis` — ローカル軸 `x` | `y` | `z`
+- `maxOmegaRadPerS` — 推力相当 1 のときの目標角速度（Hard 操縦・GLB クリップの上限）
+- `spinAxis` — 手動回転フォールバック時のローカル軸 `x` | `y` | `z`
 
 操縦中のプロペラ表示はエンジン回転数（RPM / `engineMaxRpm`）を基準にします。推力は回転数から `thrustAccelFromEngineRpm` で算出し、上下矢印はスロットル 0–100%（`throttleSpoolPerS`）、回転数は目標 RPM へ `engineRpmAccel` で追従します。
 

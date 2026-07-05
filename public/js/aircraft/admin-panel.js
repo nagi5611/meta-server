@@ -8,7 +8,6 @@ import {
     bindingPathsForRole,
 } from './airframe-definition-schema.js';
 import { AdminAircraftPrefabViewer, collectNamePaths } from './admin-prefab-viewer.js';
-import { findObjectsForBindingPaths } from '../../../addons/aircraft/client/runtime-prefab-aircraft-anim.js';
 import {
     mountFlightPhysicsForm,
     fillFlightPhysicsForm,
@@ -216,6 +215,7 @@ function syncFormFromDraft() {
     const eb = anim.engineBlade && typeof anim.engineBlade === 'object' ? anim.engineBlade : {};
     setVal('ac-anim-maxaccel', String(typeof eb.maxAccelRadPerS2 === 'number' ? eb.maxAccelRadPerS2 : 24));
     setVal('ac-anim-maxomega', String(typeof eb.maxOmegaRadPerS === 'number' ? eb.maxOmegaRadPerS : 140));
+    setVal('ac-anim-clipname', typeof eb.clipName === 'string' ? eb.clipName : '');
     const spin = typeof eb.spinAxis === 'string' && eb.spinAxis ? eb.spinAxis : 'z';
     const spinEl = document.getElementById('ac-anim-spinaxis');
     if (spinEl && 'value' in spinEl) /** @type {HTMLSelectElement} */ (spinEl).value = spin;
@@ -608,27 +608,26 @@ function readAnimationFromForm() {
     const maxOmega = parseFloat(String(document.getElementById('ac-anim-maxomega')?.value || '140'));
     const spinAxis = String(document.getElementById('ac-anim-spinaxis')?.value || 'z').toLowerCase();
     const axis = ['x', 'y', 'z'].includes(spinAxis) ? spinAxis : 'z';
+    const clipName = String(document.getElementById('ac-anim-clipname')?.value || '').trim();
     return {
         engineBlade: {
             maxAccelRadPerS2: Number.isFinite(maxAccel) ? maxAccel : 24,
             maxOmegaRadPerS: Number.isFinite(maxOmega) ? maxOmega : 140,
             spinAxis: axis,
+            clipName,
         },
     };
 }
 
 /**
- * engineBlade ロールに割り当てたメッシュをビューアから解決する
- * @returns {{ blades: import('three').Object3D[], axis: 'x'|'y'|'z' }}
+ * プレビュー用の engineBlade バインドとアニメ設定を返す
+ * @returns {{ paths: string[], ebConfig: object }}
  */
-function resolveEngineBladeMeshesForPreview() {
-    const root = viewer?.getPrefabRoot?.();
-    if (!root || !draftAirframe) return { blades: [], axis: 'z' };
+function resolveEngineBladePreviewConfig() {
+    if (!draftAirframe) return { paths: [], ebConfig: readAnimationFromForm().engineBlade };
     const paths = bindingPathsForRole(draftAirframe.bindings, 'engineBlade');
-    const anim = readAnimationFromForm().engineBlade;
-    const axis = anim.spinAxis === 'x' || anim.spinAxis === 'y' || anim.spinAxis === 'z' ? anim.spinAxis : 'z';
-    const blades = findObjectsForBindingPaths(root, paths);
-    return { blades, axis };
+    const ebConfig = readAnimationFromForm().engineBlade;
+    return { paths, ebConfig };
 }
 
 /**
@@ -662,29 +661,23 @@ function startEngineBladePreview() {
         setStatus('プレハブを読み込んでからプレビューしてください', true);
         return false;
     }
-    const { blades, axis } = resolveEngineBladeMeshesForPreview();
-    if (!blades.length) {
+    const { paths, ebConfig } = resolveEngineBladePreviewConfig();
+    if (!paths.length) {
         setStatus('engineBlade ロールにメッシュを割り当ててください', true);
         return false;
     }
     viewer.setEngineBladePreview({
         active: true,
-        blades,
-        axis,
+        paths,
+        ebConfig,
         omegaRadPerS: ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S,
     });
     syncEngineBladePreviewButton();
-    const n = blades.length;
-    const pathN = bindingPathsForRole(draftAirframe?.bindings, 'engineBlade').length;
-    if (n < pathN) {
-        setStatus(
-            `エンジンブレードを ${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s でループ再生中（${n}/${pathN} 件解決。未解決パスはロール割当を確認）`,
-            n === 0
-        );
-    } else {
-        setStatus(`エンジンブレード ${n} 件を ${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s でループ再生中`);
-    }
-    return n > 0;
+    const clipHint = ebConfig.clipName ? `GLB クリップ「${ebConfig.clipName}」` : '手動回転';
+    setStatus(
+        `エンジンブレード ${paths.length} 件を ${ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S} rad/s でプレビュー中（${clipHint}）`
+    );
+    return true;
 }
 
 /**
@@ -693,16 +686,16 @@ function startEngineBladePreview() {
  */
 function refreshEngineBladePreviewIfActive() {
     if (!viewer?.isEngineBladePreviewActive?.()) return;
-    const { blades, axis } = resolveEngineBladeMeshesForPreview();
-    if (!blades.length) {
+    const { paths, ebConfig } = resolveEngineBladePreviewConfig();
+    if (!paths.length) {
         stopEngineBladePreview();
         setStatus('engineBlade の割当がなくなったためプレビューを停止しました', true);
         return;
     }
     viewer.setEngineBladePreview({
         active: true,
-        blades,
-        axis,
+        paths,
+        ebConfig,
         omegaRadPerS: ENGINE_BLADE_PREVIEW_OMEGA_RAD_PER_S,
     });
 }
@@ -890,8 +883,11 @@ export function initAircraftAdminPanel() {
                         <input type="number" id="ac-anim-maxaccel" class="prop-input num" step="any" /></div>
                     <div class="field-row"><label class="prop-label" for="ac-anim-maxomega">目標角速度上限 (rad/s)</label>
                         <input type="number" id="ac-anim-maxomega" class="prop-input num" step="any" /></div>
-                    <div class="field-row"><label class="prop-label" for="ac-anim-spinaxis">回転軸（ローカル）</label>
+                    <div class="field-row"><label class="prop-label" for="ac-anim-spinaxis">回転軸（ローカル・手動回転時）</label>
                         <select id="ac-anim-spinaxis" class="prop-input full"><option value="x">x</option><option value="y">y</option><option value="z">z</option></select></div>
+                    <div class="field-row"><label class="prop-label" for="ac-anim-clipname">GLB クリップ名（360° 1 回転）</label>
+                        <input type="text" id="ac-anim-clipname" class="prop-input full" placeholder="例: EngineSpin" /></div>
+                    <p class="hint" style="margin:0 0 8px;font-size:11px;">クリップ名を指定すると GLB 内アニメの再生速度で回転します。未指定または解決できない場合は上の手動回転（spinAxis）にフォールバックします。</p>
                     <div class="ac-admin-actions" style="margin-top:4px;">
                         <button type="button" class="btn btn-sm btn-primary" id="ac-anim-preview-toggle">プレビュー再生</button>
                     </div>
@@ -1183,8 +1179,9 @@ export function initAircraftAdminPanel() {
         startEngineBladePreview();
     });
 
-    for (const id of ['ac-anim-spinaxis']) {
+    for (const id of ['ac-anim-spinaxis', 'ac-anim-clipname']) {
         document.getElementById(id)?.addEventListener('change', () => refreshEngineBladePreviewIfActive());
+        document.getElementById(id)?.addEventListener('input', () => refreshEngineBladePreviewIfActive());
     }
 
     document.getElementById('ac-vp-add')?.addEventListener('click', () => {

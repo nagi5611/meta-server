@@ -10,6 +10,9 @@ import {
     objectNamePathFromRoot,
     findObjectByNamePath,
     findObjectsForBindingPaths,
+    buildEngineBladeLibraryAnim,
+    disposeEngineBladeGltfDrivers,
+    stepEngineBladeLibraryAnimPreview,
 } from '../../../addons/aircraft/client/runtime-prefab-aircraft-anim.js';
 
 export { objectNamePathFromRoot, findObjectByNamePath, findObjectsForBindingPaths };
@@ -88,8 +91,8 @@ export class AdminAircraftPrefabViewer {
         this._raf = 0;
         /** @type {number} */
         this._lastFrameMs = 0;
-        /** @type {{ active: boolean, blades: THREE.Object3D[], axis: 'x'|'y'|'z', omegaRadPerS: number }} */
-        this._engineBladePreview = { active: false, blades: [], axis: 'z', omegaRadPerS: 30 };
+        /** @type {{ active: boolean, omegaRadPerS: number, libAnim: import('../../../addons/aircraft/client/runtime-prefab-aircraft-anim.js').EngineBladeLibraryAnim|null }} */
+        this._engineBladePreview = { active: false, omegaRadPerS: 30, libAnim: null };
         /** @type {boolean} */
         this._disposed = false;
         this._boundResize = () => this._resize();
@@ -151,23 +154,31 @@ export class AdminAircraftPrefabViewer {
     }
 
     /**
-     * エンジンブレードのループプレビュー（管理画面・固定角速度）
-     * @param {{ active: boolean, blades?: THREE.Object3D[], axis?: 'x'|'y'|'z', omegaRadPerS?: number }} opts
+     * エンジンブレードのループプレビュー（GLB クリップ優先・手動フォールバック）
+     * @param {{ active: boolean, omegaRadPerS?: number, paths?: string[], ebConfig?: unknown }} opts
      * @returns {void}
      */
     setEngineBladePreview(opts) {
         const prev = this._engineBladePreview;
-        this._engineBladePreview = {
-            active: !!opts.active,
-            blades: opts.blades ?? prev.blades,
-            axis: opts.axis === 'x' || opts.axis === 'y' || opts.axis === 'z' ? opts.axis : prev.axis,
-            omegaRadPerS: typeof opts.omegaRadPerS === 'number' && Number.isFinite(opts.omegaRadPerS)
-                ? opts.omegaRadPerS
-                : prev.omegaRadPerS,
-        };
-        if (!this._engineBladePreview.active) {
+        if (!opts.active) {
+            disposeEngineBladeGltfDrivers(prev.libAnim?.gltfDrivers);
+            this._engineBladePreview = { active: false, omegaRadPerS: prev.omegaRadPerS, libAnim: null };
             this._lastFrameMs = 0;
+            return;
         }
+        disposeEngineBladeGltfDrivers(prev.libAnim?.gltfDrivers);
+        const root = this._prefabRoot;
+        const paths = Array.isArray(opts.paths) ? opts.paths : [];
+        const omegaRadPerS =
+            typeof opts.omegaRadPerS === 'number' && Number.isFinite(opts.omegaRadPerS)
+                ? opts.omegaRadPerS
+                : prev.omegaRadPerS;
+        const libAnim = root && paths.length ? buildEngineBladeLibraryAnim(root, paths, opts.ebConfig) : null;
+        this._engineBladePreview = {
+            active: true,
+            omegaRadPerS,
+            libAnim,
+        };
     }
 
     /**
@@ -183,13 +194,8 @@ export class AdminAircraftPrefabViewer {
      */
     _stepEngineBladePreview(dt) {
         const p = this._engineBladePreview;
-        if (!p.active || !p.blades.length || dt <= 0) return;
-        const w = p.omegaRadPerS;
-        for (const blade of p.blades) {
-            if (p.axis === 'x') blade.rotation.x += w * dt;
-            else if (p.axis === 'y') blade.rotation.y += w * dt;
-            else blade.rotation.z += w * dt;
-        }
+        if (!p.active || !p.libAnim || dt <= 0) return;
+        stepEngineBladeLibraryAnimPreview(p.libAnim, p.omegaRadPerS, dt);
     }
 
     /**
