@@ -30,6 +30,7 @@ import {
 import {
     emitServerMaintenanceStatusToSocket,
     getServerMaintenanceAdminStatus,
+    initServerMaintenance,
     setServerMaintenance,
 } from './lib/server-maintenance.js';
 import { peekBenchRunnerSecret } from './lib/bench-runner-auth.js';
@@ -118,6 +119,7 @@ const __dirname = path.dirname(__filename);
 
 // Validate required storage env vars early (throw to fail-fast on startup)
 validateAndPrepareStoragePaths();
+initServerMaintenance();
 
 const isNodeProduction = process.env.NODE_ENV === 'production';
 /** httpOnly Cookie 名（Socket 認証用トークン） */

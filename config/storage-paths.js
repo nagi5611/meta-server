@@ -48,6 +48,7 @@ function getStoragePathsFromSrcDirectory(srcDirectory) {
         /** IBL 用 HDR（/env/* で配信・アップロード先） */
         ENV_DIR: path.join(base, 'env'),
         WORLDS_PATH: path.join(dataDir, 'worlds.json'),
+        SERVER_MAINTENANCE_PATH: path.join(dataDir, 'server-maintenance.json'),
         CHARTS_PATH: path.join(dataDir, 'charts.json'),
         CHART_BGM_DIR: path.join(dataDir, 'chart-bgm'),
         DB_DIR: path.join(base, 'db'),
@@ -74,6 +75,7 @@ function getStoragePathsFromExplicitEnv() {
         /** 未設定時は models と同階層の env（META_SRC_DIRECTORY 運用と揃える） */
         ENV_DIR: envOverride ? path.resolve(envOverride) : path.join(path.dirname(modelsDir), 'env'),
         WORLDS_PATH: requireEnv('META_WORLDS_PATH'),
+        SERVER_MAINTENANCE_PATH: path.join(path.dirname(requireEnv('META_WORLDS_PATH')), 'server-maintenance.json'),
         CHARTS_PATH: requireEnv('META_CHARTS_PATH'),
         CHART_BGM_DIR: path.join(path.dirname(requireEnv('META_CHARTS_PATH')), 'chart-bgm'),
         DB_DIR: metaDbDir,
@@ -111,6 +113,7 @@ export function validateAndPrepareStoragePaths() {
     ensureDirExists(STORAGE_PATHS.ENV_DIR, 'ENV_DIR');
 
     ensureParentDirExists(STORAGE_PATHS.WORLDS_PATH, 'META_WORLDS_PATH');
+    ensureParentDirExists(STORAGE_PATHS.SERVER_MAINTENANCE_PATH, 'SERVER_MAINTENANCE_PATH');
     ensureParentDirExists(STORAGE_PATHS.CHARTS_PATH, 'META_CHARTS_PATH');
     ensureDirExists(STORAGE_PATHS.CHART_BGM_DIR, 'CHART_BGM_DIR');
 
