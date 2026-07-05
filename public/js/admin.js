@@ -6270,16 +6270,12 @@ function updateLastUpdateTime() {
 let serverMaintenanceSavePending = false;
 
 /**
- * @param {{ active?: boolean, message?: string } | null | undefined} maintenance
+ * @param {{ active?: boolean } | null | undefined} maintenance
  */
 function applyServerMaintenanceAdminForm(maintenance) {
     const activeEl = /** @type {HTMLInputElement | null} */ (document.getElementById('server-maintenance-active'));
-    const msgEl = /** @type {HTMLTextAreaElement | null} */ (document.getElementById('server-maintenance-message'));
-    if (!activeEl || !msgEl || !maintenance) return;
+    if (!activeEl || !maintenance) return;
     activeEl.checked = !!maintenance.active;
-    if (typeof maintenance.message === 'string' && maintenance.message.trim()) {
-        msgEl.value = maintenance.message;
-    }
 }
 
 /**
@@ -6295,10 +6291,9 @@ function setServerMaintenanceAdminStatus(text, isError = false) {
 
 /**
  * @param {boolean} active
- * @param {string} message
  * @returns {Promise<void>}
  */
-async function saveServerMaintenanceDisplay(active, message) {
+async function saveServerMaintenanceDisplay(active) {
     if (serverMaintenanceSavePending) return;
     serverMaintenanceSavePending = true;
     setServerMaintenanceAdminStatus('反映中…');
@@ -6307,7 +6302,7 @@ async function saveServerMaintenanceDisplay(active, message) {
             method: 'PUT',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ active, message }),
+            body: JSON.stringify({ active }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
@@ -6330,16 +6325,10 @@ async function saveServerMaintenanceDisplay(active, message) {
  */
 function initServerMaintenanceAdminPanel() {
     const activeEl = /** @type {HTMLInputElement | null} */ (document.getElementById('server-maintenance-active'));
-    const msgEl = /** @type {HTMLTextAreaElement | null} */ (document.getElementById('server-maintenance-message'));
-    if (!activeEl || !msgEl) return;
+    if (!activeEl) return;
 
     activeEl.addEventListener('change', () => {
-        void saveServerMaintenanceDisplay(activeEl.checked, msgEl.value);
-    });
-
-    msgEl.addEventListener('change', () => {
-        if (!activeEl.checked) return;
-        void saveServerMaintenanceDisplay(true, msgEl.value);
+        void saveServerMaintenanceDisplay(activeEl.checked);
     });
 }
 

@@ -507,22 +507,16 @@ class UIManager {
     }
 
     /**
-     * 管理者メンテナンス告知（左上タイトル横 / モバイル info）
+     * 管理者メンテナンス告知（タイトル直下 / モバイル info）
      * @param {boolean} active
      * @param {string} [message]
      */
     setServerMaintenanceInline(active, message) {
         const text = (message && String(message).trim()) || t('info.serverMaintenanceDefault');
-        const shortText = t('info.serverMaintenanceShort');
-        if (this.serverMaintenanceInline) {
-            this.serverMaintenanceInline.textContent = active ? text : '';
-            this.serverMaintenanceInline.hidden = !active;
-            this.serverMaintenanceInline.title = active ? text : '';
-        }
-        if (this.mobileMaintenanceInline) {
-            this.mobileMaintenanceInline.textContent = active ? shortText : '';
-            this.mobileMaintenanceInline.hidden = !active;
-            this.mobileMaintenanceInline.title = active ? text : '';
+        for (const el of [this.serverMaintenanceInline, this.mobileMaintenanceInline]) {
+            if (!el) continue;
+            el.textContent = active ? text : '';
+            el.hidden = !active;
         }
     }
 

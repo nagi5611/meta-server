@@ -6702,12 +6702,8 @@ app.put('/admin/maintenance-display', express.json(), (req, res) => {
     if (typeof body.active !== 'boolean') {
         return res.status(400).json({ ok: false, error: 'active must be boolean' });
     }
-    if (body.message != null && typeof body.message !== 'string') {
-        return res.status(400).json({ ok: false, error: 'message must be string' });
-    }
     const maintenance = setServerMaintenance({
         active: body.active,
-        message: typeof body.message === 'string' ? body.message : undefined,
         io,
     });
     res.json({ ok: true, maintenance });

@@ -33,14 +33,9 @@ export const METAVERSE_STRINGS = {
         zh: '基准测试中',
     },
     'info.serverMaintenanceDefault': {
-        ja: '現在メンテナンス作業中です。接続は維持されますが、しばらくお待ちください。',
-        en: 'Maintenance in progress. Your connection stays active; please wait a moment.',
-        zh: '正在进行维护。连接保持中，请稍候。',
-    },
-    'info.serverMaintenanceShort': {
-        ja: 'メンテ中',
-        en: 'Maintenance',
-        zh: '维护中',
+        ja: '現在メンテナンス中です。接続が不安定になったり\n一部の機能で不具合が発生する可能性があります。',
+        en: 'Maintenance in progress. Your connection may become unstable,\nand some features may not work correctly.',
+        zh: '正在维护中。连接可能不稳定，\n部分功能可能出现异常。',
     },
 
     'admin.playerInfoTitle': { ja: 'プレイヤー情報', en: 'Player info', zh: '玩家信息' },
