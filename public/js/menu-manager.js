@@ -1054,6 +1054,21 @@ class MenuManager {
     }
 
     /**
+     * 1人称/3人称を切り替える（設定UI・Vキー共通）。
+     * @returns {'first'|'third'} 切り替え後のモード
+     */
+    toggleViewMode() {
+        const next = this.settings.viewMode === 'first' ? 'third' : 'first';
+        this.settings.viewMode = next;
+        this.updateViewModeButton();
+        this.saveSettings();
+        if (typeof this.onViewModeChange === 'function') {
+            this.onViewModeChange(next);
+        }
+        return next;
+    }
+
+    /**
      * 視点切替ボタンの表示ラベルを更新する。
      */
     updateViewModeButton() {

@@ -238,6 +238,11 @@ export const METAVERSE_STRINGS = {
         en: 'Hold <kbd>Shift</kbd> while moving to sprint.',
         zh: '按住 <kbd>Shift</kbd> 移动可冲刺。',
     },
+    'help.pcBasic5Html': {
+        ja: '<kbd>V</kbd> キーで1人称視点と3人称視点を切り替えます（飛行機搭乗中は機体視点の切替）。',
+        en: 'Press <kbd>V</kbd> to toggle first / third person (aircraft viewpoints while flying).',
+        zh: '按 <kbd>V</kbd> 切换第一/第三人称（搭乘飞机时切换机体视角）。',
+    },
     'help.eKeyTitle': { ja: '近くのオブジェクト（E キー）', en: 'Nearby objects (E)', zh: '附近物体（E 键）' },
     'help.eKeyP': {
         ja: 'プロンプトが表示されているときに E を押すと、次の優先順で動作します（ワールドにより異なります）。',
@@ -254,9 +259,9 @@ export const METAVERSE_STRINGS = {
         zh: '使用底部菜单控制麦克风、扬声器、视频与印章。',
     },
     'help.media2': {
-        ja: '誰かがビデオ配信中のとき、V キーでその配信を視聴できます（入力欄にフォーカスがあるときは無効）。',
-        en: 'When someone is streaming video, press V to watch (disabled while typing in a field).',
-        zh: '有人开启视频时按 V 观看（输入框聚焦时无效）。',
+        ja: '誰かがビデオ配信中のとき、V キーはその配信の視聴が優先されます（入力欄にフォーカスがあるときは無効）。',
+        en: 'When someone is streaming video, V watches their stream first (disabled while typing in a field).',
+        zh: '有人开启视频时，V 键优先观看其直播（输入框聚焦时无效）。',
     },
     'help.media3': {
         ja: 'プレイヤー一覧のユーザーを Shift＋クリックするか U でマウスを解放してからクリックすると、個別に視聴できます。',
@@ -423,9 +428,9 @@ export const METAVERSE_STRINGS = {
         zh: '切换第一/第三人称',
     },
     'settings.viewModeHint': {
-        ja: '1人称はアバターの頭部視点になります',
-        en: 'First person uses the avatar head view',
-        zh: '第一人称使用角色头部视角',
+        ja: '1人称はアバターの頭部視点になります。V キーでも切り替えできます',
+        en: 'First person uses the avatar head view. Press V to toggle',
+        zh: '第一人称使用角色头部视角。也可按 V 键切换',
     },
     'settings.viewFirst': { ja: '1人称視点', en: 'First person', zh: '第一人称' },
     'settings.viewThird': { ja: '3人称視点', en: 'Third person', zh: '第三人称' },

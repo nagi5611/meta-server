@@ -512,6 +512,9 @@ class MetaverseApp {
             this.playerManager.setAircraftPilotViewGhostRemotes(!!isPilot);
         };
         this.aircraftManager?.setOnPilotingChange?.(() => {
+            if (!this.aircraftManager?.isPiloting && !this.aircraftManager?.isPassenger) {
+                this.characterController?.setViewMode(this.menuManager?.settings?.viewMode || 'third');
+            }
             this.refreshLocalAvatarVisibility();
             this.syncMobileAircraftControls?.();
         });
@@ -550,17 +553,20 @@ class MetaverseApp {
             if (this.videoChatManager) this.videoChatManager.showVideoContainer(peerId);
         });
 
-        // Vキー: ビデオ配信中のユーザーを視聴（ポインターロック中でも使える）
+        // Vキー: 歩行時は1/3人称切替（配信中は視聴優先）。飛行機中は aircraft-manager が視点サイクル。
         document.addEventListener('keydown', (e) => {
             if (e.code !== 'KeyV' || e.repeat) return;
             if (this.aircraftManager?.isPiloting || this.aircraftManager?.isPassenger) return;
+            if (this.sceneManager?.getRenderer?.()?.xr?.isPresenting) return;
             const input = document.activeElement?.tagName?.toLowerCase();
             if (input === 'input' || input === 'textarea') return;
             const videoOn = (this.networkManager?.lastPlayersSnapshot || []).find(p => p.vcVideoOn);
             if (videoOn && this.videoChatManager) {
                 console.log('[視聴] Vキーで視聴開始 - peerId:', videoOn.id);
                 this.videoChatManager.showVideoContainer(videoOn.id);
+                return;
             }
+            this.menuManager?.toggleViewMode?.();
         });
 
         // Setup world change handler
