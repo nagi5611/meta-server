@@ -14,14 +14,14 @@ const DISMISS_KEY_CODES = new Set([
     'ShiftLeft', 'ShiftRight', 'KeyC', 'KeyE',
 ]);
 
-/** 75% 配列（表示用ラベル）。wasd / focus で強調 */
+/** 85%（TKL）配列。wasd / spaceGlow / focus で強調 */
 const KB_ROWS = [
     [
         { label: 'Esc', w: 1.15 },
         { label: 'F1' }, { label: 'F2' }, { label: 'F3' }, { label: 'F4' },
         { label: 'F5' }, { label: 'F6' }, { label: 'F7' }, { label: 'F8' },
         { label: 'F9' }, { label: 'F10' }, { label: 'F11' }, { label: 'F12' },
-        { label: 'Del', w: 1.15 },
+        { label: 'Prt' }, { label: 'Scr' }, { label: 'Pse' },
     ],
     [
         { label: '`' },
@@ -29,6 +29,7 @@ const KB_ROWS = [
         { label: '5' }, { label: '6' }, { label: '7' }, { label: '8' },
         { label: '9' }, { label: '0' }, { label: '-' }, { label: '=' },
         { label: '⌫', w: 1.6 },
+        { label: 'Ins' }, { label: 'Hom' }, { label: 'PgU' },
     ],
     [
         { label: 'Tab', w: 1.4 },
@@ -37,6 +38,7 @@ const KB_ROWS = [
         { label: 'E' }, { label: 'R' }, { label: 'T' }, { label: 'Y' },
         { label: 'U' }, { label: 'I' }, { label: 'O' }, { label: 'P' },
         { label: '[' }, { label: ']' }, { label: '\\', w: 1.2 },
+        { label: 'Del' }, { label: 'End' }, { label: 'PgD' },
     ],
     [
         { label: 'Caps', w: 1.65 },
@@ -45,22 +47,24 @@ const KB_ROWS = [
         { label: 'D', wasd: true },
         { label: 'F' }, { label: 'G' }, { label: 'H' }, { label: 'J' },
         { label: 'K' }, { label: 'L' }, { label: ';' }, { label: "'" },
-        { label: '↵', w: 1.75 },
+        { label: '↵', w: 1.95 },
     ],
     [
-        { label: 'Shift', w: 2.1 },
+        { label: 'Shift', w: 2.15 },
         { label: 'Z' }, { label: 'X' }, { label: 'C' }, { label: 'V' },
         { label: 'B' }, { label: 'N' }, { label: 'M' }, { label: ',' },
-        { label: '.' }, { label: '/' }, { label: 'Shift', w: 2.1 },
+        { label: '.' }, { label: '/' }, { label: 'Shift', w: 2.35 },
+        { label: '↑' },
     ],
     [
         { label: 'Ctrl', w: 1.2 },
         { label: 'Win', w: 1.1 },
         { label: 'Alt', w: 1.1 },
-        { label: '', w: 5.2, space: true },
+        { label: '', w: 5.4, space: true, spaceGlow: true },
         { label: 'Alt', w: 1.1 },
         { label: 'Fn', w: 1.1 },
         { label: 'Ctrl', w: 1.2 },
+        { label: '←' }, { label: '↓' }, { label: '→' },
     ],
 ];
 
@@ -221,6 +225,7 @@ class IdleControlHint {
                 if (k.wasd) classes.push('idle-kb-wasd');
                 if (k.focus) classes.push('idle-kb-focus');
                 if (k.space) classes.push('idle-kb-space');
+                if (k.spaceGlow) classes.push('idle-kb-space-glow');
                 const style = `style="--u:${w}"`;
                 const label = k.space ? '' : k.label;
                 return `<span class="${classes.join(' ')}" ${style}><span class="idle-kb-cap">${label}</span></span>`;
@@ -240,7 +245,7 @@ class IdleControlHint {
             root.innerHTML = `
                 <div class="idle-control-hint-panel" role="status">
                     <div class="idle-control-hint-keyboard" hidden>
-                        ${this.buildKeyboardHtml()}
+                        <div class="idle-kb-mount"></div>
                         <p class="idle-control-hint-text" data-i18n="idleHint.pressW">Wキーを押す</p>
                     </div>
                     <div class="idle-control-hint-touch" hidden>
@@ -255,6 +260,8 @@ class IdleControlHint {
             document.body.appendChild(root);
         }
         this.root = root;
+        const mount = this.root.querySelector('.idle-kb-mount');
+        if (mount) mount.innerHTML = this.buildKeyboardHtml();
         this.refreshCopy();
     }
 
