@@ -866,76 +866,75 @@ body {
     pointer-events: none;
 }
 
-@media (max-width: 768px) {
-    #aircraft-hud:not(.is-easy) {
-        left: 10px;
-        bottom: auto;
-        top: 72px;
-    }
+html[data-control-scheme="touch"] #aircraft-hud:not(.is-easy) {
+    left: 10px;
+    bottom: auto;
+    top: 72px;
+}
 
-    #aircraft-hud.is-easy {
-        left: 50%;
-        bottom: calc(42px + env(safe-area-inset-bottom, 0px));
-        top: auto;
-        transform: translateX(-50%);
-        max-width: calc(100vw - 20px);
-    }
+html[data-control-scheme="touch"] #aircraft-hud.is-easy {
+    left: 50%;
+    bottom: calc(42px + env(safe-area-inset-bottom, 0px));
+    top: auto;
+    transform: translateX(-50%);
+    max-width: calc(100vw - 20px);
+}
 
-    /* Easy 操縦中: HUD を上部へ（スティックと非干渉） */
-    body.aircraft-piloting-mobile #aircraft-hud.is-easy {
-        left: 50%;
-        top: calc(8px + env(safe-area-inset-top, 0px));
-        bottom: auto;
-        transform: translateX(-50%);
-    }
+/* Easy 操縦中: HUD を上部へ（スティックと非干渉） */
+html[data-control-scheme="touch"] body.aircraft-piloting-mobile #aircraft-hud.is-easy {
+    left: 50%;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    transform: translateX(-50%);
+}
 
-    body.aircraft-piloting-mobile .aircraft-minimap {
-        left: 10px;
-        right: auto;
-        top: calc(72px + env(safe-area-inset-top, 0px));
-        bottom: auto;
-        width: 160px;
-        height: 160px;
-    }
+html[data-control-scheme="touch"] body.aircraft-piloting-mobile .aircraft-minimap {
+    left: 10px;
+    right: auto;
+    top: calc(72px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    width: 160px;
+    height: 160px;
+}
 
-    body.aircraft-piloting-mobile .aircraft-minimap-3d,
-    body.aircraft-piloting-mobile .aircraft-minimap-overlay,
-    body.aircraft-piloting-mobile .aircraft-minimap-canvas {
-        width: 160px;
-        height: 160px;
-    }
+html[data-control-scheme="touch"] body.aircraft-piloting-mobile .aircraft-minimap-3d,
+html[data-control-scheme="touch"] body.aircraft-piloting-mobile .aircraft-minimap-overlay,
+html[data-control-scheme="touch"] body.aircraft-piloting-mobile .aircraft-minimap-canvas {
+    width: 160px;
+    height: 160px;
+}
 
-    #aircraft-hud .aircraft-hud-easy-panel {
-        padding: 8px 12px;
-        min-width: min(100%, calc(100vw - 20px));
-    }
+html[data-control-scheme="touch"] #aircraft-hud .aircraft-hud-easy-panel {
+    padding: 8px 12px;
+    min-width: min(100%, calc(100vw - 20px));
+}
 
-    #aircraft-hud .aircraft-hud-easy-grid {
-        font-size: 12px;
-        gap: 4px;
-    }
+html[data-control-scheme="touch"] #aircraft-hud .aircraft-hud-easy-grid {
+    font-size: 12px;
+    gap: 4px;
+}
 
-    #aircraft-hud .aircraft-hud-easy-view {
-        font-size: 13px;
-    }
+html[data-control-scheme="touch"] #aircraft-hud .aircraft-hud-easy-view {
+    font-size: 13px;
+}
 
-    #aircraft-hud.is-easy .aircraft-hud-btn {
-        padding: 4px 10px;
-        font-size: 12px;
-    }
+html[data-control-scheme="touch"] #aircraft-hud.is-easy .aircraft-hud-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+}
 
-    .aircraft-minimap {
-        right: 10px;
-        bottom: 10px;
-        width: 210px;
-        height: 210px;
-    }
-    .aircraft-minimap-3d,
-    .aircraft-minimap-overlay,
-    .aircraft-minimap-canvas {
-        width: 210px;
-        height: 210px;
-    }
+html[data-control-scheme="touch"] .aircraft-minimap {
+    right: 10px;
+    bottom: 10px;
+    width: 210px;
+    height: 210px;
+}
+
+html[data-control-scheme="touch"] .aircraft-minimap-3d,
+html[data-control-scheme="touch"] .aircraft-minimap-overlay,
+html[data-control-scheme="touch"] .aircraft-minimap-canvas {
+    width: 210px;
+    height: 210px;
 }
 
 @keyframes pulse {
@@ -2599,7 +2598,7 @@ a.admin-menu-link:hover {
     }
 }
 
-/* モバイル用要素 (768px超過時は非表示) */
+/* モバイル用要素（操作方式が touch のときだけ表示） */
 .mobile-controls,
 .mobile-aircraft-controls,
 .mobile-info,
@@ -2608,8 +2607,8 @@ a.admin-menu-link:hover {
     display: none !important;
 }
 
-/* Responsive: 768px以下 OR 高さ600px以下（横画面スマホ対応・JS isMobile()と揃える） */
-@media (max-width: 768px), (max-height: 600px) {
+/* タッチ操作モード（画面サイズではなく data-control-scheme で切替） */
+html[data-control-scheme="touch"] {
     /* PC用UIを非表示 */
     #info {
         display: none !important;
@@ -4185,13 +4184,238 @@ a.admin-menu-link:hover {
     opacity: 0.92;
 }
 
-@media (max-width: 768px) {
-    .google-maps-attribution {
-        bottom: max(72px, calc(env(safe-area-inset-bottom, 0px) + 10px));
-        right: max(10px, env(safe-area-inset-right, 0px));
-    }
+html[data-control-scheme="touch"] .google-maps-attribution {
+    bottom: max(72px, calc(env(safe-area-inset-bottom, 0px) + 10px));
+    right: max(10px, env(safe-area-inset-right, 0px));
 }
 
 #metaverse-vr-button {
     z-index: 10000 !important;
+}
+
+/* 無操作時の操作案内（グレースケール） */
+.idle-control-hint {
+    position: fixed;
+    left: 50%;
+    bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%) translateY(8px);
+    z-index: 1500;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.35s ease, transform 0.35s ease, visibility 0.35s;
+}
+
+.idle-control-hint.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.idle-control-hint-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 18px 12px;
+    border-radius: 14px;
+    background: rgba(40, 40, 40, 0.55);
+    border: 1px solid rgba(180, 180, 180, 0.35);
+    backdrop-filter: blur(6px);
+    filter: grayscale(1);
+    color: #c8c8c8;
+}
+
+.idle-control-hint-keyboard,
+.idle-control-hint-touch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.idle-control-hint-keyboard[hidden],
+.idle-control-hint-touch[hidden] {
+    display: none !important;
+}
+
+.idle-wasd {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.idle-wasd-row {
+    display: flex;
+    gap: 4px;
+}
+
+.idle-key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 36px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(160, 160, 160, 0.7);
+    background: rgba(90, 90, 90, 0.55);
+    box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: #ddd;
+}
+
+.idle-key-w {
+    animation: idle-key-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes idle-key-pulse {
+    0%, 100% {
+        background: rgba(90, 90, 90, 0.55);
+        color: #ddd;
+        transform: translateY(0);
+    }
+    50% {
+        background: rgba(150, 150, 150, 0.75);
+        color: #fff;
+        transform: translateY(-2px);
+    }
+}
+
+.idle-control-hint-text {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #cfcfcf;
+}
+
+.idle-stick {
+    position: relative;
+    width: 64px;
+    height: 64px;
+}
+
+.idle-stick-base {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid rgba(160, 160, 160, 0.65);
+    background: rgba(70, 70, 70, 0.45);
+}
+
+.idle-stick-knob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 28px;
+    height: 28px;
+    margin: -14px 0 0 -14px;
+    border-radius: 50%;
+    background: rgba(180, 180, 180, 0.85);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+    animation: idle-stick-nudge 1.6s ease-in-out infinite;
+}
+
+@keyframes idle-stick-nudge {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(0, -10px); }
+}
+
+html[data-control-scheme="touch"] .idle-control-hint {
+    bottom: calc(200px + env(safe-area-inset-bottom, 0px));
+}
+
+/* 操作方式（タッチ / キーボード）初回選択 */
+.control-scheme-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(8px);
+}
+
+.control-scheme-dialog {
+    width: min(440px, 100%);
+    padding: 28px 24px;
+    border-radius: 16px;
+    background: #fff;
+    border: 2px solid #0288d1;
+    box-shadow: 0 8px 32px rgba(2, 136, 209, 0.25);
+    text-align: center;
+}
+
+.control-scheme-dialog h2 {
+    margin: 0 0 8px;
+    font-size: 22px;
+    color: #0288d1;
+}
+
+.control-scheme-desc {
+    margin: 0 0 20px;
+    font-size: 13px;
+    color: #666;
+}
+
+.control-scheme-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.control-scheme-btn {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+    padding: 16px 18px;
+    border: 2px solid #0288d1;
+    border-radius: 12px;
+    background: #fff;
+    color: #0288d1;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.control-scheme-btn:hover,
+.control-scheme-btn:focus-visible {
+    background: rgba(2, 136, 209, 0.08);
+    outline: none;
+}
+
+.control-scheme-btn:active {
+    transform: translateY(1px);
+}
+
+.control-scheme-btn-label {
+    font-size: 17px;
+    font-weight: 700;
+}
+
+.control-scheme-btn-hint {
+    font-size: 13px;
+    color: #666;
+    font-weight: 500;
+}
+
+.control-scheme-recommend {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #0288d1;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
 }

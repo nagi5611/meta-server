@@ -14,6 +14,13 @@
     <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
     <script src="/js/spawn-pending-storage.js"></script>
     <script>
+        // 操作方式（タッチ/キーボード）を CSS 用に早期反映
+        try {
+            const scheme = localStorage.getItem('metaverse-control-scheme');
+            if (scheme === 'touch' || scheme === 'keyboard') {
+                document.documentElement.setAttribute('data-control-scheme', scheme);
+            }
+        } catch (_) { /* ignore */ }
         // アクセス制御（NFC ?spawn= は sessionStorage に保持してログイン後も復元）
         if (window.metaverseSpawnPending) {
             window.metaverseSpawnPending.captureSpawnFromUrl();
@@ -477,6 +484,14 @@
                                 <option value="zh">中文（简体）</option>
                             </select>
                             <div class="setting-description" data-i18n="settings.languageHint">表示言語を選択してください</div>
+                        </div>
+                        <div class="setting-item">
+                            <label for="controlScheme" data-i18n="settings.controlSchemeLabel">操作方法:</label>
+                            <select id="controlScheme">
+                                <option value="touch" data-i18n="settings.controlSchemeTouch">タッチ操作</option>
+                                <option value="keyboard" data-i18n="settings.controlSchemeKeyboard">キーボード操作</option>
+                            </select>
+                            <div class="setting-description" data-i18n="settings.controlSchemeHint">タッチは仮想スティック、キーボードは WASD とマウスで操作します</div>
                         </div>
                     </div>
                     <div class="settings-section" id="audio-section">

@@ -12,6 +12,12 @@ import {
     setMetaverseLocale,
     applyMetaverseI18nToDocument
 } from './metaverse-i18n.js';
+import {
+    CONTROL_SCHEME_KEYBOARD,
+    CONTROL_SCHEME_TOUCH,
+    getControlScheme,
+    setControlScheme,
+} from './mobile-utils.js';
 
 /**
  * MenuManager - メニューバーと設定管理
@@ -511,7 +517,16 @@ class MenuManager {
                 new CustomEvent('metaverse-locale-changed', { detail: { locale: this.settings.language } })
             );
         });
-        
+
+        const controlSchemeEl = document.getElementById('controlScheme');
+        if (controlSchemeEl) {
+            controlSchemeEl.addEventListener('change', (e) => {
+                const v = e.target.value;
+                if (v !== CONTROL_SCHEME_TOUCH && v !== CONTROL_SCHEME_KEYBOARD) return;
+                setControlScheme(v);
+            });
+        }
+
         document.getElementById('micVolume').addEventListener('input', (e) => {
             this.settings.micVolume = parseInt(e.target.value);
             document.getElementById('micVolumeValue').textContent = this.settings.micVolume * 3; // 0%〜300%表示
@@ -793,6 +808,7 @@ class MenuManager {
     }
     
     openSettings() {
+        this.updateSettingsUI();
         this.settingsModal.classList.add('visible');
         this.ensureMicAnalyzerSegments();
     }
@@ -984,6 +1000,10 @@ class MenuManager {
     
     updateSettingsUI() {
         document.getElementById('language').value = this.settings.language;
+        const controlSchemeEl = document.getElementById('controlScheme');
+        if (controlSchemeEl) {
+            controlSchemeEl.value = getControlScheme() || CONTROL_SCHEME_KEYBOARD;
+        }
         document.getElementById('micVolume').value = this.settings.micVolume;
         document.getElementById('speakerVolume').value = this.settings.speakerVolume;
         document.getElementById('micVolumeValue').textContent = this.settings.micVolume * 3; // 倍率0%〜300%

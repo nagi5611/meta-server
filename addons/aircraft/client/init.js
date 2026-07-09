@@ -83,8 +83,16 @@ export async function initAircraftSubsystem(app) {
      * Easy 操縦中のモバイル UI と歩行ジョイスティックの切り替え
      */
     app.syncMobileAircraftControls = () => {
-        if (!app.isMobileMode || !app.aircraftManager) return;
+        if (!app.aircraftManager) return;
         const mgr = app.aircraftManager;
+
+        if (!app.isMobileMode) {
+            MobileAircraftControls.hide();
+            MobileAircraftControls.destroy();
+            MobileJoystickManager.destroy();
+            return;
+        }
+
         const isEasyPilot = mgr.isPiloting && mgr.activeSlot?.controlMode === 'easy';
 
         if (isEasyPilot) {

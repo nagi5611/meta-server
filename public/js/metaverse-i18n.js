@@ -346,6 +346,43 @@ export const METAVERSE_STRINGS = {
         en: 'Choose the display language',
         zh: '请选择界面语言',
     },
+    'settings.controlSchemeLabel': { ja: '操作方法:', en: 'Controls:', zh: '操作方式：' },
+    'settings.controlSchemeTouch': { ja: 'タッチ操作', en: 'Touch', zh: '触摸操作' },
+    'settings.controlSchemeKeyboard': { ja: 'キーボード操作', en: 'Keyboard', zh: '键盘操作' },
+    'settings.controlSchemeHint': {
+        ja: 'タッチは仮想スティック、キーボードは WASD とマウスで操作します',
+        en: 'Touch uses virtual sticks; keyboard uses WASD and mouse',
+        zh: '触摸使用虚拟摇杆，键盘使用 WASD 与鼠标',
+    },
+    'controlScheme.title': {
+        ja: '操作方法を選んでください',
+        en: 'Choose how to control',
+        zh: '请选择操作方式',
+    },
+    'controlScheme.desc': {
+        ja: 'あとから設定の「一般」で変更できます',
+        en: 'You can change this later in Settings → General',
+        zh: '之后可在设置的「常规」中更改',
+    },
+    'controlScheme.touch': { ja: 'タッチ操作', en: 'Touch', zh: '触摸操作' },
+    'controlScheme.touchHint': {
+        ja: '仮想スティックで移動',
+        en: 'Move with virtual sticks',
+        zh: '用虚拟摇杆移动',
+    },
+    'controlScheme.keyboard': { ja: 'キーボード操作', en: 'Keyboard', zh: '键盘操作' },
+    'controlScheme.keyboardHint': {
+        ja: 'WASD とマウスで操作',
+        en: 'WASD and mouse',
+        zh: 'WASD 与鼠标操作',
+    },
+    'controlScheme.recommended': { ja: 'おすすめ', en: 'Recommended', zh: '推荐' },
+    'idleHint.pressW': { ja: 'Wキーを押す', en: 'Press W', zh: '按下 W 键' },
+    'idleHint.moveStick': {
+        ja: 'スティックを動かす',
+        en: 'Move the stick',
+        zh: '移动摇杆',
+    },
     'settings.audioHeading': { ja: '音声', en: 'Audio', zh: '音频' },
     'settings.micTestLabel': { ja: 'マイクテスト', en: 'Mic test', zh: '麦克风测试' },
     'settings.micTestDesc': {
@@ -824,6 +861,16 @@ function applyMetaverseSelectOptions() {
                 opt.textContent = t('settings.langEn');
             } else if (opt.value === 'zh') {
                 opt.textContent = t('settings.langZh');
+            }
+        }
+    }
+    const controlSchemeSel = document.getElementById('controlScheme');
+    if (controlSchemeSel) {
+        for (const opt of controlSchemeSel.querySelectorAll('option')) {
+            if (opt.value === 'touch') {
+                opt.textContent = t('settings.controlSchemeTouch');
+            } else if (opt.value === 'keyboard') {
+                opt.textContent = t('settings.controlSchemeKeyboard');
             }
         }
     }

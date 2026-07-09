@@ -25,7 +25,7 @@ class MobileJoystickManager {
     }
 
     /**
-     * 768px以下のときのみ初期化
+     * タッチ操作モードのときのみ初期化
      * @param {CharacterController} characterController
      */
     init(characterController) {

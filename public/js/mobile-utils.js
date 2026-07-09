@@ -1,18 +1,88 @@
 /**
- * mobile-utils.js - モバイル端末判定と全画面・横画面ユーティリティ
+ * mobile-utils.js - 操作方式（タッチ/キーボード）判定と全画面・横画面ユーティリティ
  */
 
-const MOBILE_BREAKPOINT_WIDTH = 768;
-const MOBILE_BREAKPOINT_HEIGHT = 600;
+export const CONTROL_SCHEME_STORAGE_KEY = 'metaverse-control-scheme';
+export const CONTROL_SCHEME_TOUCH = 'touch';
+export const CONTROL_SCHEME_KEYBOARD = 'keyboard';
+
+const CONTROL_SCHEME_CHANGE_EVENT = 'metaverse-control-scheme-change';
 
 /**
- * 768px以下をスマホとする（横画面時は高さで判定）
- * 横画面スマホは width>768 になるため、幅 OR 高さのいずれかが閾値以下でモバイルとみなす
+ * タッチ主入力っぽいか（初回選択の推奨用）
+ * @returns {boolean}
+ */
+export function prefersTouchInput() {
+    try {
+        return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    } catch (_) {
+        return (navigator.maxTouchPoints || 0) > 0;
+    }
+}
+
+/**
+ * 保存済みの操作方式を返す
+ * @returns {'touch'|'keyboard'|null}
+ */
+export function getControlScheme() {
+    try {
+        const raw = localStorage.getItem(CONTROL_SCHEME_STORAGE_KEY);
+        if (raw === CONTROL_SCHEME_TOUCH || raw === CONTROL_SCHEME_KEYBOARD) return raw;
+    } catch (_) {
+        /* ignore */
+    }
+    return null;
+}
+
+/**
+ * html[data-control-scheme] を現在の設定に合わせる
+ * @param {'touch'|'keyboard'|null} [scheme]
+ */
+export function applyControlSchemeToDocument(scheme = getControlScheme()) {
+    const root = document.documentElement;
+    if (scheme === CONTROL_SCHEME_TOUCH || scheme === CONTROL_SCHEME_KEYBOARD) {
+        root.setAttribute('data-control-scheme', scheme);
+    } else {
+        root.removeAttribute('data-control-scheme');
+    }
+}
+
+/**
+ * 操作方式を保存し、document と購読者へ反映する
+ * @param {'touch'|'keyboard'} scheme
+ * @returns {'touch'|'keyboard'}
+ */
+export function setControlScheme(scheme) {
+    if (scheme !== CONTROL_SCHEME_TOUCH && scheme !== CONTROL_SCHEME_KEYBOARD) {
+        throw new Error(`Invalid control scheme: ${scheme}`);
+    }
+    localStorage.setItem(CONTROL_SCHEME_STORAGE_KEY, scheme);
+    applyControlSchemeToDocument(scheme);
+    window.dispatchEvent(
+        new CustomEvent(CONTROL_SCHEME_CHANGE_EVENT, { detail: { scheme } })
+    );
+    return scheme;
+}
+
+/**
+ * タッチ操作 UI（仮想スティック等）を使うか
  * @returns {boolean}
  */
 export function isMobile() {
-    return window.innerWidth <= MOBILE_BREAKPOINT_WIDTH ||
-        window.innerHeight <= MOBILE_BREAKPOINT_HEIGHT;
+    return getControlScheme() === CONTROL_SCHEME_TOUCH;
+}
+
+/**
+ * 操作方式が未選択なら選択 UI を出し、確定まで待つ
+ * @returns {Promise<'touch'|'keyboard'>}
+ */
+export async function ensureControlSchemeChosen() {
+    applyControlSchemeToDocument();
+    const existing = getControlScheme();
+    if (existing) return existing;
+
+    const { showControlSchemePicker } = await import('./control-scheme-picker.js');
+    return showControlSchemePicker();
 }
 
 /**
@@ -49,22 +119,31 @@ export async function tryLockLandscape() {
 }
 
 /**
- * 768px境界でモバイル/PC切替時にコールバック実行
+ * 操作方式の変更を購読する（旧 onResize の代替）
  * @param {(isMobile: boolean) => void} callback
  * @returns {() => void} 解除関数
  */
-export function onResize(callback) {
+export function onControlSchemeChange(callback) {
+    applyControlSchemeToDocument();
     let wasMobile = isMobile();
     callback(wasMobile);
 
     const handler = () => {
         const nowMobile = isMobile();
-        if (nowMobile !== wasMobile) {
-            wasMobile = nowMobile;
-            callback(nowMobile);
-        }
+        if (nowMobile === wasMobile) return;
+        wasMobile = nowMobile;
+        callback(nowMobile);
     };
 
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
+    window.addEventListener(CONTROL_SCHEME_CHANGE_EVENT, handler);
+    return () => window.removeEventListener(CONTROL_SCHEME_CHANGE_EVENT, handler);
+}
+
+/**
+ * @deprecated 画面サイズではなく操作方式で切り替える。onControlSchemeChange を使うこと。
+ * @param {(isMobile: boolean) => void} callback
+ * @returns {() => void}
+ */
+export function onResize(callback) {
+    return onControlSchemeChange(callback);
 }

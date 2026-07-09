@@ -16,9 +16,10 @@ import VoiceChatManager from './voice-chat-manager.js';
 import VideoChatManager from './video-chat-manager.js';
 import PdfViewerVoiceChatManager from './pdf-viewer-voice-chat-manager.js';
 import PdfViewerManager from './pdf-viewer-manager.js';
-import { isMobile, setupFullscreen, tryLockLandscape, onResize } from './mobile-utils.js';
+import { isMobile, setupFullscreen, tryLockLandscape, onControlSchemeChange, ensureControlSchemeChosen } from './mobile-utils.js';
 import MobileJoystickManager from './mobile-joystick-manager.js';
 import MobileUIManager from './mobile-ui-manager.js';
+import IdleControlHint from './idle-control-hint.js';
 import { registerMetaverseServiceWorker } from './service-worker-register.js';
 import {
     runClientInits,
@@ -142,6 +143,8 @@ class MetaverseApp {
         console.log('Initializing Metaverse Simple...');
 
         registerMetaverseServiceWorker();
+        applyMetaverseI18nToDocument();
+        await ensureControlSchemeChosen();
         applyMetaverseI18nToDocument();
 
         let chartFeaturesEnabled = true;
@@ -441,7 +444,7 @@ class MetaverseApp {
             this.setupMobileFullscreen();
         }
 
-        this.resizeUnsubscribe = onResize((nowMobile) => {
+        this.resizeUnsubscribe = onControlSchemeChange((nowMobile) => {
             if (nowMobile === this.isMobileMode) return;
             this.isMobileMode = nowMobile;
             this.characterController.setMobileMode(nowMobile);
@@ -456,10 +459,14 @@ class MetaverseApp {
                     MobileJoystickManager.init(this.characterController);
                 }
                 MobileUIManager.init();
-                if (!this.chatManager.isMinimized) this.chatManager.toggleMinimize();
+                this.setupMobileFullscreen();
+                if (this.chatManager && !this.chatManager.isMinimized) this.chatManager.toggleMinimize();
             } else {
                 MobileJoystickManager.destroy();
                 MobileUIManager.destroy();
+                if (this.aircraftManager) {
+                    this.syncMobileAircraftControls?.();
+                }
             }
         });
 
@@ -603,6 +610,8 @@ class MetaverseApp {
             renderer.setAnimationLoop(null);
             runClientDisposes(this);
         });
+
+        IdleControlHint.start(this);
 
         console.log('Metaverse Simple initialized!');
         if (this.isMobileMode) {
