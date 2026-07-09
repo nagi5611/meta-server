@@ -230,7 +230,7 @@
             </div>
 
             <button type="submit" class="login-btn" id="login-btn">
-                ログイン
+                体験する
             </button>
         </form>
 
@@ -322,7 +322,7 @@
                     errorMessage.textContent = msg;
                     errorMessage.style.display = 'block';
                     usernameInput.focus();
-                    loginBtn.textContent = 'ログイン';
+                    loginBtn.textContent = '体験する';
                     loginBtn.disabled = false;
                     return;
                 }
@@ -340,7 +340,7 @@
                 errorMessage.textContent = '通信エラーが発生しました';
                 errorMessage.style.display = 'block';
                 usernameInput.focus();
-                loginBtn.textContent = 'ログイン';
+                loginBtn.textContent = '体験する';
                 loginBtn.disabled = false;
             }
         });
