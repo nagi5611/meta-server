@@ -1,5 +1,5 @@
 /**
- * idle-control-hint.js - 無操作時のシンプルな操作案内（グレースケール）
+ * idle-control-hint.js - 入室後の初回無操作時のみ出す操作案内（グレースケール）
  */
 
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
@@ -8,37 +8,95 @@ import { isMobile, getControlScheme, CONTROL_SCHEME_TOUCH } from './mobile-utils
 const IDLE_MS = 3000;
 const POLL_MS = 250;
 
+/** 操作済みとみなすキー */
+const DISMISS_KEY_CODES = new Set([
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space',
+    'ShiftLeft', 'ShiftRight', 'KeyC', 'KeyE',
+]);
+
+/** 75% 配列（表示用ラベル）。wasd / focus で強調 */
+const KB_ROWS = [
+    [
+        { label: 'Esc', w: 1.15 },
+        { label: 'F1' }, { label: 'F2' }, { label: 'F3' }, { label: 'F4' },
+        { label: 'F5' }, { label: 'F6' }, { label: 'F7' }, { label: 'F8' },
+        { label: 'F9' }, { label: 'F10' }, { label: 'F11' }, { label: 'F12' },
+        { label: 'Del', w: 1.15 },
+    ],
+    [
+        { label: '`' },
+        { label: '1' }, { label: '2' }, { label: '3' }, { label: '4' },
+        { label: '5' }, { label: '6' }, { label: '7' }, { label: '8' },
+        { label: '9' }, { label: '0' }, { label: '-' }, { label: '=' },
+        { label: '⌫', w: 1.6 },
+    ],
+    [
+        { label: 'Tab', w: 1.4 },
+        { label: 'Q' },
+        { label: 'W', wasd: true, focus: true },
+        { label: 'E' }, { label: 'R' }, { label: 'T' }, { label: 'Y' },
+        { label: 'U' }, { label: 'I' }, { label: 'O' }, { label: 'P' },
+        { label: '[' }, { label: ']' }, { label: '\\', w: 1.2 },
+    ],
+    [
+        { label: 'Caps', w: 1.65 },
+        { label: 'A', wasd: true },
+        { label: 'S', wasd: true },
+        { label: 'D', wasd: true },
+        { label: 'F' }, { label: 'G' }, { label: 'H' }, { label: 'J' },
+        { label: 'K' }, { label: 'L' }, { label: ';' }, { label: "'" },
+        { label: '↵', w: 1.75 },
+    ],
+    [
+        { label: 'Shift', w: 2.1 },
+        { label: 'Z' }, { label: 'X' }, { label: 'C' }, { label: 'V' },
+        { label: 'B' }, { label: 'N' }, { label: 'M' }, { label: ',' },
+        { label: '.' }, { label: '/' }, { label: 'Shift', w: 2.1 },
+    ],
+    [
+        { label: 'Ctrl', w: 1.2 },
+        { label: 'Win', w: 1.1 },
+        { label: 'Alt', w: 1.1 },
+        { label: '', w: 5.2, space: true },
+        { label: 'Alt', w: 1.1 },
+        { label: 'Fn', w: 1.1 },
+        { label: 'Ctrl', w: 1.2 },
+    ],
+];
+
 class IdleControlHint {
     constructor() {
         this.root = null;
         this.visible = false;
+        /** 一度でも操作したら以降は出さない */
+        this.dismissed = false;
         this.lastActivityAt = 0;
         this.pollId = null;
         this.app = null;
         this.boundKeyDown = null;
-        this.boundPointerDown = null;
-        this.boundTouchStart = null;
         this.boundLocale = null;
+        this.boundPointerLock = null;
     }
 
     /**
-     * @param {import('./main.js').default | object} app
+     * @param {object} app
      */
     start(app) {
         this.stop();
         this.app = app;
+        this.dismissed = false;
         this.lastActivityAt = performance.now();
         this.ensureDom();
         this.hide();
 
         this.boundKeyDown = (e) => this.onKeyDown(e);
-        this.boundPointerDown = () => this.noteActivity();
-        this.boundTouchStart = () => this.noteActivity();
         this.boundLocale = () => this.refreshCopy();
+        this.boundPointerLock = () => {
+            if (document.pointerLockElement) this.dismissPermanently();
+        };
 
         document.addEventListener('keydown', this.boundKeyDown, true);
-        document.addEventListener('pointerdown', this.boundPointerDown, true);
-        document.addEventListener('touchstart', this.boundTouchStart, { capture: true, passive: true });
+        document.addEventListener('pointerlockchange', this.boundPointerLock);
         window.addEventListener('metaverse-locale-changed', this.boundLocale);
         window.addEventListener('metaverse-control-scheme-change', this.boundLocale);
 
@@ -54,13 +112,9 @@ class IdleControlHint {
             document.removeEventListener('keydown', this.boundKeyDown, true);
             this.boundKeyDown = null;
         }
-        if (this.boundPointerDown) {
-            document.removeEventListener('pointerdown', this.boundPointerDown, true);
-            this.boundPointerDown = null;
-        }
-        if (this.boundTouchStart) {
-            document.removeEventListener('touchstart', this.boundTouchStart, true);
-            this.boundTouchStart = null;
+        if (this.boundPointerLock) {
+            document.removeEventListener('pointerlockchange', this.boundPointerLock);
+            this.boundPointerLock = null;
         }
         if (this.boundLocale) {
             window.removeEventListener('metaverse-locale-changed', this.boundLocale);
@@ -71,7 +125,11 @@ class IdleControlHint {
         this.app = null;
     }
 
-    noteActivity() {
+    /**
+     * 操作済みとして案内を二度と出さない
+     */
+    dismissPermanently() {
+        this.dismissed = true;
         this.lastActivityAt = performance.now();
         if (this.visible) this.hide();
     }
@@ -81,13 +139,12 @@ class IdleControlHint {
      */
     onKeyDown(e) {
         if (e.repeat) return;
-        if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) {
-            this.noteActivity();
+        if (DISMISS_KEY_CODES.has(e.code)) {
+            this.dismissPermanently();
         }
     }
 
     /**
-     * オーバーレイが表示中か
      * @param {string} id
      * @returns {boolean}
      */
@@ -103,7 +160,6 @@ class IdleControlHint {
     }
 
     /**
-     * 案内を出すべきでない状態か
      * @returns {boolean}
      */
     isBlocked() {
@@ -123,7 +179,6 @@ class IdleControlHint {
     }
 
     /**
-     * 移動操作中か
      * @returns {boolean}
      */
     isActivelyMoving() {
@@ -135,14 +190,15 @@ class IdleControlHint {
     }
 
     tick() {
-        if (!this.app) return;
+        if (!this.app || this.dismissed) return;
 
         if (this.isActivelyMoving()) {
-            this.noteActivity();
+            this.dismissPermanently();
             return;
         }
 
         if (this.isBlocked()) {
+            // ブロック中はタイマーを進めない（入室直後のロード等）
             this.lastActivityAt = performance.now();
             if (this.visible) this.hide();
             return;
@@ -152,6 +208,26 @@ class IdleControlHint {
         if (idleFor >= IDLE_MS) {
             this.show();
         }
+    }
+
+    /**
+     * @returns {string}
+     */
+    buildKeyboardHtml() {
+        const rows = KB_ROWS.map((row) => {
+            const keys = row.map((k) => {
+                const w = k.w || 1;
+                const classes = ['idle-kb-key'];
+                if (k.wasd) classes.push('idle-kb-wasd');
+                if (k.focus) classes.push('idle-kb-focus');
+                if (k.space) classes.push('idle-kb-space');
+                const style = `style="--u:${w}"`;
+                const label = k.space ? '' : k.label;
+                return `<span class="${classes.join(' ')}" ${style}><span class="idle-kb-cap">${label}</span></span>`;
+            }).join('');
+            return `<div class="idle-kb-row">${keys}</div>`;
+        }).join('');
+        return `<div class="idle-kb" aria-hidden="true">${rows}</div>`;
     }
 
     ensureDom() {
@@ -164,14 +240,7 @@ class IdleControlHint {
             root.innerHTML = `
                 <div class="idle-control-hint-panel" role="status">
                     <div class="idle-control-hint-keyboard" hidden>
-                        <div class="idle-wasd" aria-hidden="true">
-                            <kbd class="idle-key idle-key-w">W</kbd>
-                            <div class="idle-wasd-row">
-                                <kbd class="idle-key">A</kbd>
-                                <kbd class="idle-key">S</kbd>
-                                <kbd class="idle-key">D</kbd>
-                            </div>
-                        </div>
+                        ${this.buildKeyboardHtml()}
                         <p class="idle-control-hint-text" data-i18n="idleHint.pressW">Wキーを押す</p>
                     </div>
                     <div class="idle-control-hint-touch" hidden>
@@ -204,6 +273,7 @@ class IdleControlHint {
     }
 
     show() {
+        if (this.dismissed) return;
         if (!this.root) this.ensureDom();
         this.refreshCopy();
         this.visible = true;
