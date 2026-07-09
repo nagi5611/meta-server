@@ -1,5 +1,5 @@
 /**
- * idle-control-hint.js - 入室後の初回無操作時のみ出す操作案内（グレースケール）
+ * idle-control-hint.js - 入室後の初回無操作時のみ出す操作案内
  */
 
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
@@ -14,59 +14,121 @@ const DISMISS_KEY_CODES = new Set([
     'ShiftLeft', 'ShiftRight', 'KeyC', 'KeyE',
 ]);
 
-/** 85%（TKL）配列。wasd / spaceGlow / focus で強調 */
+/**
+ * ANSI 85%（TKL）レイアウト。
+ * main は各行 15u で揃える。nav は右側クラスタ。
+ * @type {{ main: object[], nav?: object[] }[]}
+ */
 const KB_ROWS = [
-    [
-        { label: 'Esc', w: 1.15 },
-        { label: 'F1' }, { label: 'F2' }, { label: 'F3' }, { label: 'F4' },
-        { label: 'F5' }, { label: 'F6' }, { label: 'F7' }, { label: 'F8' },
-        { label: 'F9' }, { label: 'F10' }, { label: 'F11' }, { label: 'F12' },
-        { label: 'Prt' }, { label: 'Scr' }, { label: 'Pse' },
-    ],
-    [
-        { label: '`' },
-        { label: '1' }, { label: '2' }, { label: '3' }, { label: '4' },
-        { label: '5' }, { label: '6' }, { label: '7' }, { label: '8' },
-        { label: '9' }, { label: '0' }, { label: '-' }, { label: '=' },
-        { label: '⌫', w: 1.6 },
-        { label: 'Ins' }, { label: 'Hom' }, { label: 'PgU' },
-    ],
-    [
-        { label: 'Tab', w: 1.4 },
-        { label: 'Q' },
-        { label: 'W', wasd: true, focus: true },
-        { label: 'E' }, { label: 'R' }, { label: 'T' }, { label: 'Y' },
-        { label: 'U' }, { label: 'I' }, { label: 'O' }, { label: 'P' },
-        { label: '[' }, { label: ']' }, { label: '\\', w: 1.2 },
-        { label: 'Del' }, { label: 'End' }, { label: 'PgD' },
-    ],
-    [
-        { label: 'Caps', w: 1.65 },
-        { label: 'A', wasd: true },
-        { label: 'S', wasd: true },
-        { label: 'D', wasd: true },
-        { label: 'F' }, { label: 'G' }, { label: 'H' }, { label: 'J' },
-        { label: 'K' }, { label: 'L' }, { label: ';' }, { label: "'" },
-        { label: '↵', w: 1.95 },
-    ],
-    [
-        { label: 'Shift', w: 2.15 },
-        { label: 'Z' }, { label: 'X' }, { label: 'C' }, { label: 'V' },
-        { label: 'B' }, { label: 'N' }, { label: 'M' }, { label: ',' },
-        { label: '.' }, { label: '/' }, { label: 'Shift', w: 2.35 },
-        { label: '↑' },
-    ],
-    [
-        { label: 'Ctrl', w: 1.2 },
-        { label: 'Win', w: 1.1 },
-        { label: 'Alt', w: 1.1 },
-        { label: '', w: 5.4, space: true, spaceGlow: true },
-        { label: 'Alt', w: 1.1 },
-        { label: 'Fn', w: 1.1 },
-        { label: 'Ctrl', w: 1.2 },
-        { label: '←' }, { label: '↓' }, { label: '→' },
-    ],
+    {
+        main: [
+            { label: 'Esc', w: 1 },
+            { gap: 1 },
+            { label: 'F1' }, { label: 'F2' }, { label: 'F3' }, { label: 'F4' },
+            { gap: 0.5 },
+            { label: 'F5' }, { label: 'F6' }, { label: 'F7' }, { label: 'F8' },
+            { gap: 0.5 },
+            { label: 'F9' }, { label: 'F10' }, { label: 'F11' }, { label: 'F12' },
+        ],
+        nav: [
+            { label: 'Prt' }, { label: 'Scr' }, { label: 'Pse' },
+        ],
+    },
+    {
+        main: [
+            { label: '`' },
+            { label: '1' }, { label: '2' }, { label: '3' }, { label: '4' },
+            { label: '5' }, { label: '6' }, { label: '7' }, { label: '8' },
+            { label: '9' }, { label: '0' }, { label: '-' }, { label: '=' },
+            { label: '⌫', w: 2 },
+        ],
+        nav: [
+            { label: 'Ins' }, { label: 'Hom' }, { label: 'PgU' },
+        ],
+    },
+    {
+        main: [
+            { label: 'Tab', w: 1.5 },
+            { label: 'Q' },
+            { label: 'W', wasd: true, focus: true },
+            { label: 'E' }, { label: 'R' }, { label: 'T' }, { label: 'Y' },
+            { label: 'U' }, { label: 'I' }, { label: 'O' }, { label: 'P' },
+            { label: '[' }, { label: ']' }, { label: '\\', w: 1.5 },
+        ],
+        nav: [
+            { label: 'Del' }, { label: 'End' }, { label: 'PgD' },
+        ],
+    },
+    {
+        main: [
+            { label: 'Caps', w: 1.75 },
+            { label: 'A', wasd: true },
+            { label: 'S', wasd: true },
+            { label: 'D', wasd: true },
+            { label: 'F' }, { label: 'G' }, { label: 'H' }, { label: 'J' },
+            { label: 'K' }, { label: 'L' }, { label: ';' }, { label: "'" },
+            { label: '↵', w: 2.25 },
+        ],
+        nav: [
+            { ghost: true }, { ghost: true }, { ghost: true },
+        ],
+    },
+    {
+        main: [
+            { label: 'Shift', w: 2.25 },
+            { label: 'Z' }, { label: 'X' }, { label: 'C' }, { label: 'V' },
+            { label: 'B' }, { label: 'N' }, { label: 'M' }, { label: ',' },
+            { label: '.' }, { label: '/' }, { label: 'Shift', w: 2.75 },
+        ],
+        nav: [
+            { ghost: true }, { label: '↑' }, { ghost: true },
+        ],
+    },
+    {
+        main: [
+            { label: 'Ctrl', w: 1.25 },
+            { label: 'Win', w: 1.25 },
+            { label: 'Alt', w: 1.25 },
+            { label: '', w: 6.25, space: true, glow: true },
+            { label: 'Alt', w: 1.25 },
+            { label: 'Fn', w: 1.25 },
+            { label: 'Menu', w: 1.25 },
+            { label: 'Ctrl', w: 1.25 },
+        ],
+        nav: [
+            { label: '←' }, { label: '↓' }, { label: '→' },
+        ],
+    },
 ];
+
+/**
+ * @param {object} k
+ * @returns {string}
+ */
+function renderKey(k) {
+    if (k.gap) {
+        return `<span class="idle-kb-gap" style="--u:${k.gap}"></span>`;
+    }
+    if (k.ghost) {
+        return `<span class="idle-kb-key idle-kb-ghost" style="--u:1"><span class="idle-kb-cap"></span></span>`;
+    }
+    const w = k.w || 1;
+    const classes = ['idle-kb-key'];
+    if (k.wasd) classes.push('idle-kb-wasd');
+    if (k.focus) classes.push('idle-kb-focus');
+    if (k.space) classes.push('idle-kb-space');
+    if (k.glow) classes.push('idle-kb-glow');
+    const label = k.space ? '' : (k.label ?? '');
+    return `<span class="${classes.join(' ')}" style="--u:${w}"><span class="idle-kb-cap">${label}</span></span>`;
+}
+
+/**
+ * @param {object[]} items
+ * @returns {string}
+ */
+function renderKeys(items) {
+    return items.map(renderKey).join('');
+}
 
 class IdleControlHint {
     constructor() {
@@ -202,7 +264,6 @@ class IdleControlHint {
         }
 
         if (this.isBlocked()) {
-            // ブロック中はタイマーを進めない（入室直後のロード等）
             this.lastActivityAt = performance.now();
             if (this.visible) this.hide();
             return;
@@ -219,18 +280,8 @@ class IdleControlHint {
      */
     buildKeyboardHtml() {
         const rows = KB_ROWS.map((row) => {
-            const keys = row.map((k) => {
-                const w = k.w || 1;
-                const classes = ['idle-kb-key'];
-                if (k.wasd) classes.push('idle-kb-wasd');
-                if (k.focus) classes.push('idle-kb-focus');
-                if (k.space) classes.push('idle-kb-space');
-                if (k.spaceGlow) classes.push('idle-kb-space-glow');
-                const style = `style="--u:${w}"`;
-                const label = k.space ? '' : k.label;
-                return `<span class="${classes.join(' ')}" ${style}><span class="idle-kb-cap">${label}</span></span>`;
-            }).join('');
-            return `<div class="idle-kb-row">${keys}</div>`;
+            const nav = row.nav ? `<div class="idle-kb-nav">${renderKeys(row.nav)}</div>` : '';
+            return `<div class="idle-kb-row"><div class="idle-kb-main">${renderKeys(row.main)}</div>${nav}</div>`;
         }).join('');
         return `<div class="idle-kb" aria-hidden="true">${rows}</div>`;
     }
@@ -282,6 +333,9 @@ class IdleControlHint {
     show() {
         if (this.dismissed) return;
         if (!this.root) this.ensureDom();
+        // レイアウト更新を確実に反映（古い DOM が残っていても差し替え）
+        const mount = this.root.querySelector('.idle-kb-mount');
+        if (mount) mount.innerHTML = this.buildKeyboardHtml();
         this.refreshCopy();
         this.visible = true;
         this.root.classList.add('visible');
