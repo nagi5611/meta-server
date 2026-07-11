@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Metaverse Simple - 一般ログイン</title>
+    <title>Metaverse Simple - 体験</title>
     <script src="/js/spawn-pending-storage.js"></script>
     <style>
         * {
@@ -206,26 +206,24 @@
     <div class="login-container">
         <div class="login-header">
             <h1>Metaverse Simple</h1>
-            <p>一般ログイン - ユーザー名を入力してください</p>
+            <p>表示名を決めてメタバースに入れます（空欄の場合は自動で名前が付きます）</p>
         </div>
 
         <div id="login-avatar-mount" aria-live="polite"></div>
 
         <form id="login-form">
             <div class="form-group">
-                <label for="username">ユーザー名</label>
+                <label for="username">表示名</label>
                 <input 
                     type="text" 
                     id="username" 
                     name="username" 
-                    placeholder="例: Player1" 
+                    placeholder="例: たろう（空欄でも体験できます）" 
                     autocomplete="off"
-                    required
-                    minlength="2"
                     maxlength="20"
                 >
                 <div class="error-message" id="error-message">
-                    ユーザー名は2～20文字で入力してください
+                    表示名は2～20文字で入力してください
                 </div>
             </div>
 
@@ -235,7 +233,7 @@
         </form>
 
         <div class="info-text">
-            同じユーザー名でも複数人ログイン可能です
+            同じ表示名でも複数人が入れます
         </div>
 
         <div class="login-links">
@@ -274,15 +272,38 @@
         const GUEST_LOGIN_MIN_INTERVAL_MS = 3000;
         let lastGuestLoginAttemptAt = 0;
 
+        /**
+         * 空欄時に割り当てる表示名（Guest0101 形式）
+         * @returns {string}
+         */
+        function allocateGuestDisplayName() {
+            const n = Math.floor(Math.random() * 10000);
+            return `Guest${String(n).padStart(4, '0')}`;
+        }
+
+        /**
+         * 表示名を保存してメタバースへ遷移する
+         * @param {string} displayName
+         */
+        function enterMetaverse(displayName) {
+            localStorage.setItem('username', displayName);
+            localStorage.removeItem('userRole');
+            loginBtn.textContent = '体験を開始...';
+            setTimeout(() => {
+                window.location.href = withSpawn('/index.html');
+            }, 300);
+        }
+
         // フォーム送信処理
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
-            const username = usernameInput.value.trim();
+            const raw = usernameInput.value.trim();
+            const isAutoGuest = raw.length === 0;
+            const username = isAutoGuest ? allocateGuestDisplayName() : raw;
 
-            // バリデーション
-            if (username.length < 2 || username.length > 20) {
-                errorMessage.textContent = 'ユーザー名は2～20文字で入力してください';
+            if (!isAutoGuest && (username.length < 2 || username.length > 20)) {
+                errorMessage.textContent = '表示名は2～20文字で入力してください';
                 errorMessage.style.display = 'block';
                 usernameInput.focus();
                 return;
@@ -295,7 +316,7 @@
             }
 
             const nowTs = Date.now();
-            if (nowTs - lastGuestLoginAttemptAt < GUEST_LOGIN_MIN_INTERVAL_MS) {
+            if (!isAutoGuest && nowTs - lastGuestLoginAttemptAt < GUEST_LOGIN_MIN_INTERVAL_MS) {
                 errorMessage.textContent =
                     `前回の試行から${GUEST_LOGIN_MIN_INTERVAL_MS / 1000}秒以上お待ちください`;
                 errorMessage.style.display = 'block';
@@ -304,8 +325,14 @@
             }
             lastGuestLoginAttemptAt = nowTs;
 
-            loginBtn.textContent = 'ユーザー情報を確認中...';
             loginBtn.disabled = true;
+
+            if (isAutoGuest) {
+                enterMetaverse(username);
+                return;
+            }
+
+            loginBtn.textContent = '表示名を確認中...';
 
             try {
                 const res = await fetch('/api/auth/guest/username-moderate', {
@@ -318,7 +345,7 @@
                 if (!res.ok || !data.ok) {
                     const msg =
                         (data && typeof data.message === 'string' && data.message.trim()) ||
-                        (res.status === 429 ? '試行間隔が短すぎます。しばらくお待ちください。' : 'ログインできませんでした');
+                        (res.status === 429 ? '試行間隔が短すぎます。しばらくお待ちください。' : '入場できませんでした');
                     errorMessage.textContent = msg;
                     errorMessage.style.display = 'block';
                     usernameInput.focus();
@@ -327,15 +354,7 @@
                     return;
                 }
 
-                // LocalStorageに保存（一般ユーザーはuserRoleなし）
-                localStorage.setItem('username', username);
-                localStorage.removeItem('userRole');
-
-                loginBtn.textContent = 'ログイン中...';
-
-                setTimeout(() => {
-                    window.location.href = withSpawn('/index.html');
-                }, 300);
+                enterMetaverse(username);
             } catch (_) {
                 errorMessage.textContent = '通信エラーが発生しました';
                 errorMessage.style.display = 'block';
