@@ -1,6 +1,7 @@
-// public/js/spawn-pending-storage.js — NFC ?spawn= をログイン跨ぎで保持（classic script）
+// public/js/spawn-pending-storage.js — NFC ?spawn= / ?world= をログイン跨ぎで保持（classic script）
 (function () {
     const STORAGE_KEY = 'metaverse_pending_spawn';
+    const WORLD_STORAGE_KEY = 'metaverse_pending_world';
 
     /**
      * @param {string} [search]
@@ -18,8 +19,49 @@
     }
 
     /**
-     * URL の spawn を sessionStorage に保存
+     * @param {string} [search]
      * @returns {string|null}
+     */
+    function readWorldFromSearch(search) {
+        try {
+            const w = new URLSearchParams(search || '').get('world');
+            if (w == null) return null;
+            const id = String(w).trim();
+            return id || null;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * @param {string} [hash]
+     * @returns {string|null}
+     */
+    function readWorldFromHash(hash) {
+        try {
+            const raw = String(hash || '').replace(/^#/, '');
+            if (!raw.startsWith('world=')) return null;
+            const id = raw.slice('world='.length).split('&')[0].trim();
+            return id ? decodeURIComponent(id) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * 現在ページの URL から world を読む（?world= または #world=）
+     * @returns {string|null}
+     */
+    function readWorldFromCurrentUrl() {
+        return (
+            readWorldFromSearch(window.location.search) ||
+            readWorldFromHash(window.location.hash)
+        );
+    }
+
+    /**
+     * URL の spawn / world を sessionStorage に保存
+     * @returns {string|null} spawn トークン
      */
     function captureSpawnFromUrl() {
         const t = readSpawnFromSearch(window.location.search);
@@ -30,6 +72,16 @@
                 /* ignore */
             }
         }
+
+        const worldId = readWorldFromCurrentUrl();
+        if (worldId) {
+            try {
+                sessionStorage.setItem(WORLD_STORAGE_KEY, worldId);
+            } catch {
+                /* ignore */
+            }
+        }
+
         return t;
     }
 
@@ -55,6 +107,28 @@
         }
     }
 
+    /**
+     * URL 優先、なければ sessionStorage（?world= / #world=）
+     * @returns {string|null}
+     */
+    function getPendingWorldId() {
+        const fromUrl = readWorldFromCurrentUrl();
+        if (fromUrl) {
+            try {
+                sessionStorage.setItem(WORLD_STORAGE_KEY, fromUrl);
+            } catch {
+                /* ignore */
+            }
+            return fromUrl;
+        }
+        try {
+            const stored = sessionStorage.getItem(WORLD_STORAGE_KEY);
+            return stored && String(stored).trim() ? String(stored).trim() : null;
+        } catch {
+            return null;
+        }
+    }
+
     function clearPendingSpawnToken() {
         try {
             sessionStorage.removeItem(STORAGE_KEY);
@@ -63,27 +137,39 @@
         }
     }
 
+    function clearPendingWorldId() {
+        try {
+            sessionStorage.removeItem(WORLD_STORAGE_KEY);
+        } catch {
+            /* ignore */
+        }
+    }
+
     /**
-     * path（/login/ や /index.html 等）に spawn クエリを付与
+     * path（/login/ や /index.html 等）に spawn / world クエリを付与
      * @param {string} pathAndSearch
      * @returns {string}
      */
     function appendSpawnQuery(pathAndSearch) {
         const token = getPendingSpawnToken();
-        if (!token) return pathAndSearch;
+        const worldId = getPendingWorldId();
+        if (!token && !worldId) return pathAndSearch;
+
         const path = String(pathAndSearch || '/');
         const origin = window.location.origin;
         const u = new URL(path.startsWith('http') ? path : origin + (path.startsWith('/') ? path : `/${path}`));
-        u.searchParams.set('spawn', token);
+        if (token) u.searchParams.set('spawn', token);
+        if (worldId) u.searchParams.set('world', worldId);
         return u.pathname + u.search + u.hash;
     }
 
     /**
-     * ページ内の login 系リンクに spawn を付与
+     * ページ内の login 系リンクに spawn / world を付与
      */
     function patchLoginLinks() {
         const token = getPendingSpawnToken();
-        if (!token) return;
+        const worldId = getPendingWorldId();
+        if (!token && !worldId) return;
         document.querySelectorAll('a[href^="/login"], a[href^="/student"], a[href^="/teacher"]').forEach((a) => {
             const href = a.getAttribute('href');
             if (!href) return;
@@ -93,9 +179,12 @@
 
     window.metaverseSpawnPending = {
         STORAGE_KEY,
+        WORLD_STORAGE_KEY,
         captureSpawnFromUrl,
         getPendingSpawnToken,
+        getPendingWorldId,
         clearPendingSpawnToken,
+        clearPendingWorldId,
         appendSpawnQuery,
         patchLoginLinks,
     };
