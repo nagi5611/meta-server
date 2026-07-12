@@ -271,6 +271,10 @@
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
+            if (window.metaverseWorldPreload) {
+                window.metaverseWorldPreload.start();
+            }
+
             const username = usernameInput.value.trim();
             const password = passwordInput.value;
 
@@ -280,39 +284,67 @@
                 return;
             }
 
-            loginBtn.textContent = 'ログイン中...';
             loginBtn.disabled = true;
             errorMessage.style.display = 'none';
 
-            try {
-                const res = await fetch('/api/auth/student/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify({ username, password })
-                });
-                const data = await res.json();
+            const redirectUrl = window.metaverseSpawnPending
+                ? window.metaverseSpawnPending.appendSpawnQuery('/index.html') + (window.location.hash || '')
+                : '/index.html' + window.location.search + window.location.hash;
 
-                if (data.success) {
+            const runEntry = window.metaverseLoginEntry?.run;
+            if (!runEntry) {
+                try {
+                    const res = await fetch('/api/auth/student/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ username, password })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        localStorage.setItem('username', data.displayName || data.username);
+                        localStorage.setItem('userRole', 'student');
+                        window.location.href = redirectUrl;
+                        return;
+                    }
+                    errorMessage.textContent = data.error === 'invalid_credentials'
+                        ? 'ログインIDまたはパスワードが正しくありません'
+                        : (data.error || 'ログインに失敗しました');
+                    errorMessage.style.display = 'block';
+                } catch (err) {
+                    errorMessage.textContent = '通信エラーが発生しました';
+                    errorMessage.style.display = 'block';
+                } finally {
+                    loginBtn.textContent = 'ログイン';
+                    loginBtn.disabled = false;
+                }
+                return;
+            }
+
+            await runEntry({
+                displayName: username,
+                redirectUrl,
+                authTask: async () => {
+                    const res = await fetch('/api/auth/student/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ username, password }),
+                    });
+                    const data = await res.json();
+                    if (!data.success) {
+                        const msg = data.error === 'invalid_credentials'
+                            ? 'ログインIDまたはパスワードが正しくありません'
+                            : (data.error || 'ログインに失敗しました');
+                        const err = new Error(msg);
+                        err.displayMessage = msg;
+                        throw err;
+                    }
                     localStorage.setItem('username', data.displayName || data.username);
                     localStorage.setItem('userRole', 'student');
-                    window.location.href = (window.metaverseSpawnPending
-                        ? window.metaverseSpawnPending.appendSpawnQuery('/index.html') + (window.location.hash || '')
-                        : '/index.html' + window.location.search + window.location.hash);
-                    return;
-                }
-
-                errorMessage.textContent = data.error === 'invalid_credentials'
-                    ? 'ログインIDまたはパスワードが正しくありません'
-                    : (data.error || 'ログインに失敗しました');
-                errorMessage.style.display = 'block';
-            } catch (err) {
-                errorMessage.textContent = '通信エラーが発生しました';
-                errorMessage.style.display = 'block';
-            } finally {
-                loginBtn.textContent = 'ログイン';
-                loginBtn.disabled = false;
-            }
+                    return data.displayName || data.username;
+                },
+            });
         });
 
         usernameInput.addEventListener('input', () => { errorMessage.style.display = 'none'; });
@@ -328,6 +360,40 @@
     </script>
     <script type="module">
         import { mountLoginAvatarPicker } from '/js/login-avatar-picker.js';
+        import { startLoginWorldPreload } from '/js/world-preload.js';
+        import { runLoginEntryTransition } from '/js/login-entry-transition.js';
+
+        const preloadStart = () => startLoginWorldPreload();
+        window.metaverseWorldPreload = { start: preloadStart };
+        preloadStart();
+
+        window.metaverseLoginEntry = {
+            run: ({ displayName, authTask, redirectUrl }) =>
+                runLoginEntryTransition({
+                    displayName,
+                    theme: 'student',
+                    authTask,
+                    redirectUrl,
+                    preloadStart,
+                    onAuthFailed: (err) => {
+                        const msg =
+                            (err && typeof err.displayMessage === 'string' && err.displayMessage) ||
+                            (err instanceof Error && err.message) ||
+                            '通信エラーが発生しました';
+                        const errorMessage = document.getElementById('error-message');
+                        const loginBtn = document.getElementById('login-btn');
+                        if (errorMessage) {
+                            errorMessage.textContent = msg;
+                            errorMessage.style.display = 'block';
+                        }
+                        if (loginBtn) {
+                            loginBtn.textContent = 'ログイン';
+                            loginBtn.disabled = false;
+                        }
+                    },
+                }),
+        };
+
         const m = document.getElementById('login-avatar-mount');
         if (m) void mountLoginAvatarPicker(m);
     </script>

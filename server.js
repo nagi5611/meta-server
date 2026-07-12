@@ -37,6 +37,8 @@ import { peekBenchRunnerSecret } from './lib/bench-runner-auth.js';
 import { recordTickEmit, registerTickHookInstalled } from './lib/bench-tick-metrics.js';
 import { lookupIpLocation } from './lib/ip-geolocation.js';
 import { moderateChatMessage, moderateUsername, getModerationSystemPromptsForAdmin } from './lib/chat-moderation.js';
+import { translateChatMessage } from './lib/chat-translation.js';
+import { normalizeUiLocale, roomHasJapaneseListener } from './lib/ui-locale.js';
 import { findNgPhraseMatch, getChatNgWords, saveChatNgWords } from './lib/chat-ng-words.js';
 import {
     runGlbTextureResizeQueued,
@@ -671,18 +673,54 @@ const uploadAvatarGlb = multer({
 });
 
 /**
- * Socket set-username は文字列または { username, avatarId } を許可する。
+ * Socket set-username は文字列または { username, avatarId, uiLocale } を許可する。
  * @param {unknown} payload
  * @returns {{ username: string, avatarId: string | null }}
  */
 function parseSetUsernamePayload(payload) {
     if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-        const obj = /** @type {{ username?: unknown, avatarId?: unknown }} */ (payload);
+        const obj = /** @type {{ username?: unknown, avatarId?: unknown, uiLocale?: unknown }} */ (payload);
         const username = typeof obj.username === 'string' ? obj.username.trim() : String(obj.username || '').trim();
         const avatarId = typeof obj.avatarId === 'string' && obj.avatarId.trim() ? obj.avatarId.trim() : null;
-        return { username, avatarId };
+        const uiLocale = normalizeUiLocale(obj.uiLocale);
+        return { username, avatarId, uiLocale };
     }
-    return { username: String(payload || '').trim(), avatarId: null };
+    return { username: String(payload || '').trim(), avatarId: null, uiLocale: 'ja' };
+}
+
+/**
+ * 日本語 UI の受信者には翻訳文、それ以外には原文で chat-receive を送る（送信者は常に原文）
+ * @param {import('socket.io').Server} ioServer
+ * @param {import('socket.io').Socket} senderSocket
+ * @param {{ players: Map<string, { uiLocale?: string }> }} roomState
+ * @param {string} currentRoom
+ * @param {Record<string, unknown>} chatData 他プレイヤー向けベース
+ * @param {string} jaMessage 日本語 UI 向け本文（原文と同じなら翻訳なし扱い）
+ * @param {Record<string, unknown>} [selfChatData] 送信者向け（省略時は chatData）
+ */
+function emitChatToRoomWithLocale(ioServer, senderSocket, roomState, currentRoom, chatData, jaMessage, selfChatData) {
+    const senderId = senderSocket.id;
+    const originalMessage = typeof chatData.message === 'string' ? chatData.message : '';
+    const useJa =
+        typeof jaMessage === 'string' &&
+        jaMessage.trim().length > 0 &&
+        jaMessage !== originalMessage;
+
+    senderSocket.emit('chat-my-message', selfChatData != null ? selfChatData : chatData);
+
+    for (const [id, p] of roomState.players) {
+        if (id === senderId) continue;
+        const targetSocket = ioServer.sockets.sockets.get(id);
+        if (!targetSocket) continue;
+        const locale = normalizeUiLocale(p.uiLocale);
+        const payload =
+            useJa && locale === 'ja'
+                ? { ...chatData, message: jaMessage }
+                : chatData;
+        targetSocket.emit('chat-receive', payload);
+    }
+
+    void currentRoom;
 }
 
 /**
@@ -2978,9 +3016,11 @@ io.on('connection', (socket) => {
         serverLowAssistPrev: null,
         serverLowAssistAt: Date.now(),
         pilotingAircraftId: null,
-        passengeringAircraftId: null
+        passengeringAircraftId: null,
+        uiLocale: 'ja',
     };
     roomState.players.set(socket.id, initialPlayerState);
+    socket.data.uiLocale = 'ja';
     setPhysicsAssistGrace(socket);
 
     const aircraftSnap = buildAircraftSnapshotList(roomState);
@@ -3406,13 +3446,15 @@ io.on('connection', (socket) => {
         }
 
         player.username = trimmed;
+        player.uiLocale = parsed.uiLocale;
+        socket.data.uiLocale = parsed.uiLocale;
         try {
             const reg = await ensureAvatarRegistry(AVATARS_DIR);
             player.avatarId = resolveAvatarId(reg, AVATARS_DIR, parsed.avatarId);
         } catch {
             player.avatarId = null;
         }
-        console.log(`Player ${socket.id} set username to: ${player.username}`);
+        console.log(`Player ${socket.id} set username to: ${player.username} (uiLocale=${player.uiLocale})`);
 
         const info = clientInfo.get(socket.id);
         if (info) {
@@ -3434,6 +3476,19 @@ io.on('connection', (socket) => {
             displayName,
             avatarId: player.avatarId || null,
         });
+    });
+
+    socket.on('set-ui-locale', (locale) => {
+        const currentRoom = socket.data.currentRoom;
+        if (!currentRoom) return;
+
+        const roomState = getRoomState(currentRoom);
+        const player = roomState.players.get(socket.id);
+        if (!player) return;
+
+        const normalized = normalizeUiLocale(locale);
+        player.uiLocale = normalized;
+        socket.data.uiLocale = normalized;
     });
 
     // Handle player position updates (Ingress layer with timestamp verification)
@@ -3605,9 +3660,11 @@ io.on('connection', (socket) => {
             serverLowAssistPrev: null,
             serverLowAssistAt: Date.now(),
             pilotingAircraftId: null,
-            passengeringAircraftId: null
+            passengeringAircraftId: null,
+            uiLocale: normalizeUiLocale(oldPlayerState?.uiLocale || socket.data.uiLocale),
         };
         newRoomState.players.set(socket.id, playerState);
+        socket.data.uiLocale = playerState.uiLocale;
         setPhysicsAssistGrace(socket);
 
         const acInit = buildAircraftSnapshotList(newRoomState);
@@ -3703,14 +3760,30 @@ io.on('connection', (socket) => {
                 getApprovedHistoryTableText(currentRoom, now) || '(過去の通過済みチャットはありません)';
             const pendingLine = `${new Date(now).toISOString()} | ${socket.id} | ${text.replace(/\|/g, '｜').replace(/\r?\n/g, ' ')}`;
 
+            const senderLocale = normalizeUiLocale(player.uiLocale);
+            const shouldTranslateForJa =
+                senderLocale !== 'ja' && roomHasJapaneseListener(roomState, socket.id);
+
+            const moderationPromise = moderateChatMessage({
+                apiKey,
+                model: process.env.GEMINI_MODEL,
+                historyTableText,
+                pendingLine,
+            });
+
+            const translationPromise = shouldTranslateForJa
+                ? translateChatMessage({
+                      apiKey,
+                      model: process.env.GEMINI_MODEL,
+                      text,
+                      targetLocale: 'ja',
+                  })
+                : Promise.resolve({ translated: text, skipped: true });
+
             let moderation;
+            let translation;
             try {
-                moderation = await moderateChatMessage({
-                    apiKey,
-                    model: process.env.GEMINI_MODEL,
-                    historyTableText,
-                    pendingLine,
-                });
+                [moderation, translation] = await Promise.all([moderationPromise, translationPromise]);
             } catch (modErr) {
                 console.error('[CHAT_MOD] API error:', modErr);
                 releaseChatRoomSlot(currentRoom, roomSlotId);
@@ -3721,6 +3794,14 @@ io.on('connection', (socket) => {
                 });
                 return;
             }
+
+            const jaMessage =
+                !translation.skipped &&
+                typeof translation.translated === 'string' &&
+                translation.translated.trim() &&
+                translation.translated !== text
+                    ? translation.translated.trim()
+                    : text;
 
             if (moderation.inappropriate) {
                 const reason =
@@ -3775,8 +3856,15 @@ io.on('connection', (socket) => {
 
                 chatUserLastSuccessAt.set(socket.id, now);
 
-                socket.to(currentRoom).emit('chat-receive', chatDataOthers);
-                socket.emit('chat-my-message', chatDataSelf);
+                emitChatToRoomWithLocale(
+                    io,
+                    socket,
+                    roomState,
+                    currentRoom,
+                    chatDataOthers,
+                    jaMessage,
+                    chatDataSelf,
+                );
                 updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
 
                 ack({ ok: true });
@@ -3805,8 +3893,7 @@ io.on('connection', (socket) => {
 
             chatUserLastSuccessAt.set(socket.id, now);
 
-            socket.to(currentRoom).emit('chat-receive', chatData);
-            socket.emit('chat-my-message', chatData);
+            emitChatToRoomWithLocale(io, socket, roomState, currentRoom, chatData, jaMessage);
             updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
 
             ack({ ok: true });

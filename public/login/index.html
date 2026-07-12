@@ -282,21 +282,31 @@
         }
 
         /**
-         * 表示名を保存してメタバースへ遷移する
+         * 表示名を保存してメタバースへ遷移する（認証演出付き）
          * @param {string} displayName
+         * @param {() => Promise<void>} [authTask]
          */
-        function enterMetaverse(displayName) {
-            localStorage.setItem('username', displayName);
-            localStorage.removeItem('userRole');
-            loginBtn.textContent = '体験を開始...';
-            setTimeout(() => {
+        async function enterMetaverse(displayName, authTask) {
+            if (!window.metaverseLoginEntry?.run) {
+                localStorage.setItem('username', displayName);
+                localStorage.removeItem('userRole');
                 window.location.href = withSpawn('/index.html');
-            }, 300);
+                return;
+            }
+            await window.metaverseLoginEntry.run({
+                displayName,
+                authTask: authTask || (async () => {}),
+                redirectUrl: withSpawn('/index.html'),
+            });
         }
 
         // フォーム送信処理
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+
+            if (window.metaverseWorldPreload) {
+                window.metaverseWorldPreload.start();
+            }
 
             const raw = usernameInput.value.trim();
             const isAutoGuest = raw.length === 0;
@@ -326,15 +336,21 @@
             lastGuestLoginAttemptAt = nowTs;
 
             loginBtn.disabled = true;
+            errorMessage.style.display = 'none';
+
+            const persistGuest = () => {
+                localStorage.setItem('username', username);
+                localStorage.removeItem('userRole');
+            };
 
             if (isAutoGuest) {
-                enterMetaverse(username);
+                await enterMetaverse(username, async () => {
+                    persistGuest();
+                });
                 return;
             }
 
-            loginBtn.textContent = '表示名を確認中...';
-
-            try {
+            await enterMetaverse(username, async () => {
                 const res = await fetch('/api/auth/guest/username-moderate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -346,22 +362,12 @@
                     const msg =
                         (data && typeof data.message === 'string' && data.message.trim()) ||
                         (res.status === 429 ? '試行間隔が短すぎます。しばらくお待ちください。' : '入場できませんでした');
-                    errorMessage.textContent = msg;
-                    errorMessage.style.display = 'block';
-                    usernameInput.focus();
-                    loginBtn.textContent = '体験する';
-                    loginBtn.disabled = false;
-                    return;
+                    const err = new Error(msg);
+                    err.displayMessage = msg;
+                    throw err;
                 }
-
-                enterMetaverse(username);
-            } catch (_) {
-                errorMessage.textContent = '通信エラーが発生しました';
-                errorMessage.style.display = 'block';
-                usernameInput.focus();
-                loginBtn.textContent = '体験する';
-                loginBtn.disabled = false;
-            }
+                persistGuest();
+            });
         });
 
         // 入力時にエラーメッセージを非表示
@@ -381,6 +387,42 @@
     </script>
     <script type="module">
         import { mountLoginAvatarPicker } from '/js/login-avatar-picker.js';
+        import { startLoginWorldPreload } from '/js/world-preload.js';
+        import { runLoginEntryTransition } from '/js/login-entry-transition.js';
+
+        const preloadStart = () => startLoginWorldPreload();
+        window.metaverseWorldPreload = { start: preloadStart };
+        preloadStart();
+
+        window.metaverseLoginEntry = {
+            run: ({ displayName, authTask, redirectUrl }) =>
+                runLoginEntryTransition({
+                    displayName,
+                    theme: 'guest',
+                    authTask,
+                    redirectUrl,
+                    preloadStart,
+                    onAuthFailed: (err) => {
+                        const msg =
+                            (err && typeof err.displayMessage === 'string' && err.displayMessage) ||
+                            (err instanceof Error && err.message) ||
+                            '通信エラーが発生しました';
+                        const errorMessage = document.getElementById('error-message');
+                        const usernameInput = document.getElementById('username');
+                        const loginBtn = document.getElementById('login-btn');
+                        if (errorMessage) {
+                            errorMessage.textContent = msg;
+                            errorMessage.style.display = 'block';
+                        }
+                        usernameInput?.focus();
+                        if (loginBtn) {
+                            loginBtn.textContent = '体験する';
+                            loginBtn.disabled = false;
+                        }
+                    },
+                }),
+        };
+
         const m = document.getElementById('login-avatar-mount');
         if (m) void mountLoginAvatarPicker(m);
     </script>

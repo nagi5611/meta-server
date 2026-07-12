@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client';
 import * as THREE from 'three';
 import { notifyServiceWorkerInvalidate } from './service-worker-register.js';
-import { t } from './metaverse-i18n.js';
+import { t, getMetaverseLocale } from './metaverse-i18n.js';
 import {
     fetchAdminMetaverseEntry,
     isAdminMetaverseEntryPath,
@@ -73,6 +73,26 @@ class NetworkManager {
         this._worldViewDisplayReady = false;
         /** @type {object[]} */
         this._pendingRemotePlayerCreates = [];
+    }
+
+    /**
+     * サーバーへ送る set-username ペイロードを組み立てる
+     * @returns {{ username: string, uiLocale: string }}
+     */
+    buildSetUsernamePayload() {
+        return {
+            username: this.username,
+            uiLocale: getMetaverseLocale(),
+        };
+    }
+
+    /**
+     * UI 言語変更をサーバーへ同期する
+     * @param {string} locale
+     */
+    emitUiLocale(locale) {
+        if (!this.socket?.connected) return;
+        this.socket.emit('set-ui-locale', locale);
     }
 
     /**
@@ -311,8 +331,8 @@ class NetworkManager {
             this.startDisconnectCheck();
 
             // Send username to server
-            this.socket.emit('set-username', this.username);
-            console.log(`Sent username to server: ${this.username}`);
+            this.socket.emit('set-username', this.buildSetUsernamePayload());
+            console.log(`Sent username to server: ${this.username} (locale=${getMetaverseLocale()})`);
 
             if (this._postConnectHandler) {
                 Promise.resolve(this._postConnectHandler()).catch((err) => {

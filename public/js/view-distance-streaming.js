@@ -301,14 +301,17 @@ export default class ViewDistanceStreaming {
      * 初回ロード前に CDN 署名をまとめるための論理パス一覧
      * @param {{ x: number, y: number, z: number }} spawnPoint
      * @param {number} viewDistanceM
+     * @param {{ partFilter?: (config: object, manifest: ReturnType<typeof normalizePrefabManifest>, partIndex: number) => boolean }} [options]
      * @returns {string[]}
      */
-    collectInitialPrefetchPaths(spawnPoint, viewDistanceM) {
+    collectInitialPrefetchPaths(spawnPoint, viewDistanceM, options = {}) {
+        const partFilter = options.partFilter;
         const feet = new THREE.Vector3(spawnPoint.x, spawnPoint.y, spawnPoint.z);
         /** @type {Set<string>} */
         const paths = new Set();
 
-        const addPartPath = (manifest, partIndex) => {
+        const addPartPath = (manifest, partIndex, config) => {
+            if (partFilter && config && !partFilter(config, manifest, partIndex)) return;
             const part = manifest?.parts?.[partIndex];
             if (!part?.file) return;
             paths.add(resolvePrefabPartAssetPath(part.file));
@@ -317,8 +320,13 @@ export default class ViewDistanceStreaming {
         for (const entry of this.entries) {
             if (entry.mode === 'legacy' && entry.manifest) {
                 for (let pi = 0; pi < entry.manifest.parts.length; pi++) {
-                    addPartPath(entry.manifest, pi);
+                    addPartPath(entry.manifest, pi, entry.config);
                 }
+                continue;
+            }
+            if (entry.mode === 'legacy' && !entry.manifest) {
+                const p = String(entry.config?.path || '').trim();
+                if (p) paths.add(p);
                 continue;
             }
             if (entry.mode === 'streaming_part') {
@@ -334,7 +342,7 @@ export default class ViewDistanceStreaming {
                     continue;
                 }
                 if (entry.manifest && entry.partIndex !== undefined) {
-                    addPartPath(entry.manifest, entry.partIndex);
+                    addPartPath(entry.manifest, entry.partIndex, entry.config);
                 }
                 continue;
             }
@@ -355,7 +363,7 @@ export default class ViewDistanceStreaming {
                 }
                 if (entry.manifest) {
                     for (let pi = 0; pi < entry.manifest.parts.length; pi++) {
-                        addPartPath(entry.manifest, pi);
+                        addPartPath(entry.manifest, pi, entry.config);
                     }
                 }
             }
@@ -380,7 +388,7 @@ export default class ViewDistanceStreaming {
             if (entry.mode !== 'streaming_part_piggyback') continue;
             if (!inRangeModelIdx.has(entry.idx)) continue;
             if (entry.manifest && entry.partIndex !== undefined) {
-                addPartPath(entry.manifest, entry.partIndex);
+                addPartPath(entry.manifest, entry.partIndex, entry.config);
             }
         }
 

@@ -7,6 +7,7 @@ import ViewDistanceStreaming from './view-distance-streaming.js';
 import { prefetchSignedAssetHrefs } from './asset-resolve.js';
 import { promptRodSelection } from './rod-selection.js';
 import { resolveWorldModelsForRod, DEFAULT_ROD_ID } from './world-rod-resolve.js';
+import { awaitWorldPreloadIfAny } from './world-preload.js';
 
 class WorldManager {
     constructor(sceneManager) {
@@ -115,6 +116,8 @@ class WorldManager {
         }
 
         console.log(`Loading world: ${worldId}`);
+
+        await awaitWorldPreloadIfAny();
 
         this._worldLoadUi?.onLoadStart?.();
 

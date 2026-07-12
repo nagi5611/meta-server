@@ -32,6 +32,7 @@ import { initAvatorScalableAnimations } from '../../addons/avator-scalable-anima
 import { initMatsuyamaFlightsSubsystem } from '../../addons/matsuyama-flights/client/init.js';
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 import { loadClientConfigOnce } from './asset-resolve.js';
+import { startLoginWorldPreload } from './world-preload.js';
 import { fetchAdminMetaverseEntry, isAdminMetaverseEntryPath } from './admin-metaverse-auth.js';
 import {
     applyClientSpawnPlan,
@@ -301,7 +302,16 @@ class MetaverseApp {
             await this._onNetworkPostConnect();
             await this._joinVoiceAndVideoIfReady();
         });
+        this._onMetaverseLocaleChanged = (ev) => {
+            const loc = ev?.detail?.locale;
+            if (loc) {
+                this.networkManager?.emitUiLocale(loc);
+            }
+        };
+        window.addEventListener('metaverse-locale-changed', this._onMetaverseLocaleChanged);
         const networkConnectPromise = this.networkManager.connect(adminEntryPromise);
+
+        await startLoginWorldPreload();
 
         await this.worldManager.loadWorld(initialWorldId, () => {
             console.log('World loaded:', initialWorldId);
