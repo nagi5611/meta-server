@@ -108,6 +108,8 @@ function getWorldIdFromUrl() {
             const id = rawHash.slice('world='.length).split('&')[0].trim();
             if (id) return decodeURIComponent(id);
         }
+        const pending = window.metaverseSpawnPending?.getPendingWorldId?.();
+        if (pending) return pending;
     } catch {
         /* ignore */
     }
