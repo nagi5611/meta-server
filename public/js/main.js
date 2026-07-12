@@ -32,7 +32,7 @@ import { initAvatorScalableAnimations } from '../../addons/avator-scalable-anima
 import { initMatsuyamaFlightsSubsystem } from '../../addons/matsuyama-flights/client/init.js';
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 import { loadClientConfigOnce } from './asset-resolve.js';
-import { startLoginWorldPreload } from './world-preload.js';
+import { startLoginWorldPreload, clearLoginPreloadState } from './world-preload.js';
 import { fetchAdminMetaverseEntry, isAdminMetaverseEntryPath } from './admin-metaverse-auth.js';
 import {
     applyClientSpawnPlan,
@@ -140,14 +140,10 @@ class MetaverseApp {
         });
     }
 
-    async init() {
-        console.log('Initializing Metaverse Simple...');
-
-        registerMetaverseServiceWorker();
-        applyMetaverseI18nToDocument();
-        await ensureControlSchemeChosen();
-        applyMetaverseI18nToDocument();
-
+    /**
+     * 操作方式選択の裏で実行するコア初期化（シーン・物理・ワールド読込・Socket 接続）
+     */
+    async _bootstrapCore() {
         let chartFeaturesEnabled = true;
         try {
             const cfg = await loadClientConfigOnce();
@@ -158,18 +154,14 @@ class MetaverseApp {
             /* 既定の true のまま */
         }
 
-        // Initialize scene
         this.sceneManager = new SceneManager();
         this.sceneManager.init();
 
-        // Initialize physics (BVH-based)
         this.physicsManager = new PhysicsManager();
         await this.physicsManager.init();
 
-        // Initialize UI Manager
         this.uiManager = new UIManager();
 
-        // Initialize World Manager
         this.worldManager = new WorldManager(this.sceneManager);
         await this.worldManager.init();
 
@@ -186,7 +178,6 @@ class MetaverseApp {
             },
         });
 
-        // Set physics manager reference in scene manager for BVH collider
         this.sceneManager.physicsManager = this.physicsManager;
         this.physicsManager.setSpawnPointGetter(() => this.worldManager.getSpawnPoint());
 
@@ -199,7 +190,6 @@ class MetaverseApp {
             }
         });
 
-        // Initialize Teleport Manager
         this.teleportManager = new TeleportManager(this.worldManager, this.uiManager);
         this.userRole = isAdminMetaverseEntryPath() ? 'admin' : (localStorage.getItem('userRole') || 'guest');
         this.teleportManager.setUserRole(this.userRole);
@@ -214,7 +204,6 @@ class MetaverseApp {
             });
         });
 
-        // Initialize PDF Viewer (E key near PDF object)
         this.pdfViewerManager = new PdfViewerManager();
         this.pdfViewerManager.init();
         this.teleportManager.setPdfCallbacks(
@@ -238,7 +227,6 @@ class MetaverseApp {
             }
         );
 
-        // Initialize Taiko Game (E key near taiko object) — ENABLE_CHART_FEATURES が無効ならモジュールも読まない
         if (chartFeaturesEnabled) {
             const { default: TaikoGameManager } = await import('./taiko-game-manager.js');
             this.taikoGameManager = new TaikoGameManager();
@@ -259,7 +247,6 @@ class MetaverseApp {
             if (this.teleportManager) this.teleportManager.handleTeleport();
         });
 
-        // Load initial world: ?spawn= (NFC) > ?world= / #world= > lobby
         const spawnPlan = await tryResolveClientSpawn();
         const defaultWorldId = this.worldManager.getWorld('lobby') ? 'lobby' : (this.worldManager.getAllWorlds()[0]?.id || 'lobby');
         const urlWorldId = getWorldIdFromUrl();
@@ -277,12 +264,10 @@ class MetaverseApp {
         }
         console.log('Loading world:', initialWorldId);
 
-        // admin トークンをワールド読込より先に取得開始（Socket auth を同期送信するため）
         const adminEntryPromise = isAdminMetaverseEntryPath()
             ? fetchAdminMetaverseEntry()
             : null;
 
-        // ワールド読込と並行して Socket 接続を開始（入場時点で ping 応答済みにする）
         this.playerManager = new PlayerManager(this.sceneManager.getScene());
         this.playerBlockList = new PlayerBlockList();
         this.networkManager = new NetworkManager(this.playerManager);
@@ -309,15 +294,13 @@ class MetaverseApp {
             }
         };
         window.addEventListener('metaverse-locale-changed', this._onMetaverseLocaleChanged);
-        const networkConnectPromise = this.networkManager.connect(adminEntryPromise);
+        this._entryNetworkConnectPromise = this.networkManager.connect(adminEntryPromise);
 
-        await startLoginWorldPreload();
+        await startLoginWorldPreload(initialWorldId);
 
         await this.worldManager.loadWorld(initialWorldId, () => {
             console.log('World loaded:', initialWorldId);
-            // onWorldChange は後で登録するため、初回ロード時も帰属表示を反映する
             this.updateGoogleMapsCopyrightVisibility(this.worldManager.getCurrentWorld());
-            // Setup teleport zones after world is loaded
             this.updateTeleportZones();
             this.updateTaikoZones();
             this.updateGlbInteractZones();
@@ -326,17 +309,31 @@ class MetaverseApp {
                 this._networkConnectPendingRoomSync = false;
                 this._applyInitialRoomSync();
             }
+            clearLoginPreloadState();
         });
 
-        // Get spawn point for current world（NFC ?spawn= があれば DB 座標を優先）
         const worldSpawn = this.worldManager.getSpawnPoint();
-        const spawnPoint = spawnPlan?.position
+        this._entrySpawnPlan = spawnPlan;
+        this._entrySpawnPoint = spawnPlan?.position
             ? { x: spawnPlan.position.x, y: spawnPlan.position.y, z: spawnPlan.position.z }
             : worldSpawn;
+    }
+
+    async init() {
+        console.log('Initializing Metaverse Simple...');
+
+        registerMetaverseServiceWorker();
+        applyMetaverseI18nToDocument();
+
+        // 操作方式未選択時は選択 UI を先に出し、裏でワールド取得などを並行実行
+        await ensureControlSchemeChosen(() => this._bootstrapCore());
+        applyMetaverseI18nToDocument();
+
+        const spawnPlan = this._entrySpawnPlan;
+        const spawnPoint = this._entrySpawnPoint;
+        const networkConnectPromise = this._entryNetworkConnectPromise;
 
         this.isMobileMode = isMobile();
-
-        // Now create character controller (BVH is ready)
         this.characterController = new CharacterController(
             this.sceneManager.getCamera(),
             this.physicsManager,

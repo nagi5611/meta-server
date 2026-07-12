@@ -73,16 +73,27 @@ export function isMobile() {
 }
 
 /**
- * 操作方式が未選択なら選択 UI を出し、確定まで待つ
+ * 操作方式が未選択なら選択 UI を表示し、並行タスクと同時に完了を待つ
+ * @param {() => Promise<unknown>} [parallelWork] 選択中に裏で実行する処理（ワールド取得など）
  * @returns {Promise<'touch'|'keyboard'>}
  */
-export async function ensureControlSchemeChosen() {
+export async function ensureControlSchemeChosen(parallelWork) {
     applyControlSchemeToDocument();
     const existing = getControlScheme();
-    if (existing) return existing;
+    if (existing) {
+        if (typeof parallelWork === 'function') {
+            await parallelWork();
+        }
+        return existing;
+    }
 
     const { showControlSchemePicker } = await import('./control-scheme-picker.js');
-    return showControlSchemePicker();
+    const pickerPromise = showControlSchemePicker();
+    const workPromise =
+        typeof parallelWork === 'function' ? parallelWork() : Promise.resolve();
+
+    const [scheme] = await Promise.all([pickerPromise, workPromise]);
+    return scheme;
 }
 
 /**

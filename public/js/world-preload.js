@@ -8,8 +8,89 @@ import { registerMetaverseServiceWorker } from './service-worker-register.js';
 
 const SPAWN_API_BASE = '/api/addons/nfc-spawn/spawn';
 
+/** ログイン画面で取得したプリロードを「新鮮」とみなす時間（体験する押下から±この範囲で完了したデータ） */
+export const LOGIN_PRELOAD_FRESH_MS = 60_000;
+
+const LOGIN_PRELOAD_STORAGE_KEY = 'metaverse_login_preload_v1';
+
 /** @type {Promise<void> | null} */
 let activePreload = null;
+
+/**
+ * @returns {{ worldId?: string, completedAt?: number, entryClickAt?: number } | null}
+ */
+function readLoginPreloadState() {
+    try {
+        const raw = sessionStorage.getItem(LOGIN_PRELOAD_STORAGE_KEY);
+        if (!raw) return null;
+        const j = JSON.parse(raw);
+        return j && typeof j === 'object' ? j : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * @param {Partial<{ worldId: string, completedAt: number, entryClickAt: number }>} patch
+ */
+function writeLoginPreloadState(patch) {
+    try {
+        const prev = readLoginPreloadState() || {};
+        sessionStorage.setItem(
+            LOGIN_PRELOAD_STORAGE_KEY,
+            JSON.stringify({ ...prev, ...patch })
+        );
+    } catch {
+        /* ignore */
+    }
+}
+
+/**
+ * 「体験する」「ログイン」押下時刻を記録（鮮度判定用）
+ */
+export function recordLoginEntryClick() {
+    writeLoginPreloadState({ entryClickAt: Date.now() });
+}
+
+/**
+ * ログイン画面でのプリロード完了を記録
+ * @param {string} worldId
+ */
+export function markLoginPreloadComplete(worldId) {
+    const id = String(worldId || '').trim();
+    if (!id) return;
+    writeLoginPreloadState({ worldId: id, completedAt: Date.now() });
+}
+
+/**
+ * ログイン〜入場直後にプリロード再取得を省略できるか
+ * @param {string} [expectedWorldId] 省略時はワールド ID 一致を見ない
+ * @returns {boolean}
+ */
+export function isLoginPreloadFresh(expectedWorldId) {
+    const s = readLoginPreloadState();
+    if (!s?.completedAt || !s?.worldId || !s?.entryClickAt) return false;
+
+    const now = Date.now();
+    if (now - s.completedAt > LOGIN_PRELOAD_FRESH_MS) return false;
+    if (Math.abs(s.entryClickAt - s.completedAt) > LOGIN_PRELOAD_FRESH_MS) return false;
+
+    const expected = String(expectedWorldId || '').trim();
+    if (expected && s.worldId !== expected) return false;
+
+    return true;
+}
+
+/**
+ * 鮮度フラグを破棄（ワールド切替後など）
+ */
+export function clearLoginPreloadState() {
+    try {
+        sessionStorage.removeItem(LOGIN_PRELOAD_STORAGE_KEY);
+    } catch {
+        /* ignore */
+    }
+}
 
 /**
  * URL からワールド ID を読む（main.js と同じ優先度の一部）
@@ -235,7 +316,13 @@ export async function preloadWorldAssets(worldId, worlds) {
  * ログイン画面用: 入場先ワールドの事前取得を開始（多重呼び出し安全）
  * @returns {Promise<void>}
  */
-export function startLoginWorldPreload() {
+export function startLoginWorldPreload(expectedWorldId) {
+    const expected = String(expectedWorldId || '').trim();
+    if (isLoginPreloadFresh(expected || undefined)) {
+        if (!activePreload) activePreload = Promise.resolve();
+        return activePreload;
+    }
+
     if (activePreload) return activePreload;
 
     activePreload = (async () => {
@@ -247,6 +334,7 @@ export function startLoginWorldPreload() {
             const worldId = await resolveEntryWorldId(worlds);
             if (!worldId) return;
             await preloadWorldAssets(worldId, worlds);
+            markLoginPreloadComplete(worldId);
         } catch (e) {
             console.warn('[world-preload] failed:', e);
         }
