@@ -3,6 +3,9 @@
 const LOGIN_MUSIC_SRC = '/music/login.mp3';
 const WELCOME_MUSIC_VOLUME = 0.85;
 
+/** Welcome 表示から BGM 再生までの遅延（ms） */
+export const WELCOME_MUSIC_START_DELAY_MS = 500;
+
 /** @type {HTMLAudioElement | null} */
 let welcomeAudio = null;
 
@@ -25,6 +28,16 @@ function getWelcomeAudio() {
 }
 
 /**
+ * 予約済みの再生タイマーを解除する
+ */
+function clearWelcomeMusicStartTimer() {
+    const timerId = window.__metWelcomeMusicPlayTimer;
+    if (timerId == null) return;
+    window.clearTimeout(timerId);
+    window.__metWelcomeMusicPlayTimer = null;
+}
+
+/**
  * ログイン操作直後など、ユーザー操作の文脈で音声を読み込む
  */
 export function primeEntryWelcomeMusic() {
@@ -35,7 +48,7 @@ export function primeEntryWelcomeMusic() {
 }
 
 /**
- * Welcome 表示時に BGM を再生する
+ * Welcome 表示時に BGM を即時再生する
  */
 export function startEntryWelcomeMusic() {
     const audio = getWelcomeAudio();
@@ -48,9 +61,39 @@ export function startEntryWelcomeMusic() {
 }
 
 /**
+ * Welcome 表示から少し遅れて BGM を再生する
+ * @param {number} [delayMs]
+ */
+export function scheduleEntryWelcomeMusic(delayMs = WELCOME_MUSIC_START_DELAY_MS) {
+    clearWelcomeMusicStartTimer();
+    primeEntryWelcomeMusic();
+
+    window.__metWelcomeMusicPlayTimer = window.setTimeout(() => {
+        window.__metWelcomeMusicPlayTimer = null;
+        startEntryWelcomeMusic();
+    }, Math.max(0, delayMs));
+}
+
+/**
+ * Welcome 表示時刻（window.__metWelcomeVisibleAt）から 0.5 秒後に再生する
+ */
+export function scheduleEntryWelcomeMusicAfterWelcomeShown() {
+    const visibleAt =
+        typeof window.__metWelcomeVisibleAt === 'number' ? window.__metWelcomeVisibleAt : Date.now();
+    if (typeof window.__metWelcomeVisibleAt !== 'number') {
+        window.__metWelcomeVisibleAt = visibleAt;
+    }
+    const elapsed = Date.now() - visibleAt;
+    const delayMs = Math.max(0, WELCOME_MUSIC_START_DELAY_MS - elapsed);
+    scheduleEntryWelcomeMusic(delayMs);
+}
+
+/**
  * Welcome 終了時に BGM を止める
  */
 export function stopEntryWelcomeMusic() {
+    clearWelcomeMusicStartTimer();
+
     const audio = welcomeAudio || window.__metWelcomeMusic;
     if (!(audio instanceof HTMLAudioElement)) return;
     audio.pause();
@@ -65,7 +108,10 @@ export function stopEntryWelcomeMusic() {
 export function installEntryWelcomeAudioGlobals() {
     window.metPrimeWelcomeMusic = primeEntryWelcomeMusic;
     window.metStartWelcomeMusic = startEntryWelcomeMusic;
+    window.metScheduleWelcomeMusic = scheduleEntryWelcomeMusic;
+    window.metScheduleWelcomeMusicAfterShown = scheduleEntryWelcomeMusicAfterWelcomeShown;
     window.metStopWelcomeMusic = stopEntryWelcomeMusic;
+    window.metWelcomeMusicStartDelayMs = WELCOME_MUSIC_START_DELAY_MS;
 }
 
 installEntryWelcomeAudioGlobals();

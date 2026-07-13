@@ -7,7 +7,7 @@ import {
     renderEntryWelcomeMessage,
 } from './entry-welcome-messages.js';
 import {
-    startEntryWelcomeMusic,
+    scheduleEntryWelcomeMusicAfterWelcomeShown,
     stopEntryWelcomeMusic,
 } from './entry-welcome-audio.js';
 import {
@@ -70,6 +70,9 @@ function resolveWelcomeMessage(pending) {
  * @param {import('./entry-welcome-messages.js').EntryWelcomeMessage} message
  */
 function ensureWelcomeVisible(message) {
+    if (typeof window.__metWelcomeVisibleAt !== 'number') {
+        window.__metWelcomeVisibleAt = Date.now();
+    }
     ensureWelcomeStyles();
     document.documentElement.classList.add('met-entry-welcome-active');
     document.body.style.overflow = 'hidden';
@@ -118,7 +121,7 @@ export async function runEntryWelcomeIfPending(bootstrapWork) {
     const message = resolveWelcomeMessage(pending);
     const holdMs = Math.max(0, ENTRY_WELCOME_MS - WELCOME_FADE_MS);
     ensureWelcomeVisible(message);
-    startEntryWelcomeMusic();
+    scheduleEntryWelcomeMusicAfterWelcomeShown();
 
     try {
         await Promise.all([bootstrapWork(), delay(holdMs)]);

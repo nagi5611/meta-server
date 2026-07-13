@@ -99,16 +99,37 @@
         const mount = () => {
             if (document.getElementById('met-entry-welcome-root')) return;
             document.body.prepend(root);
+            window.__metWelcomeVisibleAt = Date.now();
         };
 
-        if (document.body) mount();
-        else document.addEventListener('DOMContentLoaded', mount, { once: true });
+        const musicDelayMs = 500;
+        const scheduleEarlyWelcomeMusic = () => {
+            const visibleAt =
+                typeof window.__metWelcomeVisibleAt === 'number' ? window.__metWelcomeVisibleAt : Date.now();
+            const delayMs = Math.max(0, musicDelayMs - (Date.now() - visibleAt));
+            window.__metWelcomeMusicPlayTimer = window.setTimeout(function () {
+                window.__metWelcomeMusicPlayTimer = null;
+                const audio =
+                    window.__metWelcomeMusic instanceof HTMLAudioElement
+                        ? window.__metWelcomeMusic
+                        : new Audio('/music/login.mp3');
+                audio.preload = 'auto';
+                audio.volume = 0.85;
+                window.__metWelcomeMusic = audio;
+                if (audio.paused) {
+                    audio.currentTime = 0;
+                    void audio.play().catch(function () {});
+                }
+            }, delayMs);
+        };
 
-        const audio = new Audio('/music/login.mp3');
-        audio.preload = 'auto';
-        audio.volume = 0.85;
-        window.__metWelcomeMusic = audio;
-        void audio.play().catch(function () {});
+        const onReady = () => {
+            mount();
+            scheduleEarlyWelcomeMusic();
+        };
+
+        if (document.body) onReady();
+        else document.addEventListener('DOMContentLoaded', onReady, { once: true });
     } catch {
         /* ignore */
     }
