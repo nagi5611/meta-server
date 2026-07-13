@@ -21,7 +21,7 @@
                 document.documentElement.setAttribute('data-control-scheme', scheme);
             }
         } catch (_) { /* ignore */ }
-        // アクセス制御（NFC ?spawn= は sessionStorage に保持してログイン後も復元）
+        // アクセス制御（NFC ?spawn= / 共有 ?world= は sessionStorage に保持してログイン後も復元）
         if (window.metaverseSpawnPending) {
             window.metaverseSpawnPending.captureSpawnFromUrl();
         }
