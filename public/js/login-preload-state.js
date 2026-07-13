@@ -1,5 +1,7 @@
 // public/js/login-preload-state.js — ログイン画面プリロードの sessionStorage 状態（軽量）
 
+import { pickRandomEntryWelcomeMessage } from './entry-welcome-messages.js';
+
 /** ログイン画面で取得したプリロードを「新鮮」とみなす時間（体験する押下から±この範囲で完了したデータ） */
 export const LOGIN_PRELOAD_FRESH_MS = 60_000;
 
@@ -92,6 +94,7 @@ export function clearLoginPreloadState() {
 export function setPendingEntryWelcome(payload) {
     const displayName = String(payload?.displayName || '').trim();
     if (!displayName) return;
+    const message = pickRandomEntryWelcomeMessage();
     try {
         sessionStorage.setItem(
             PENDING_WELCOME_STORAGE_KEY,
@@ -99,6 +102,9 @@ export function setPendingEntryWelcome(payload) {
                 displayName,
                 theme: payload?.theme || 'guest',
                 createdAt: Date.now(),
+                welcomeLead: message.lead,
+                welcomeBody: message.body,
+                welcomeClosing: message.closing,
             })
         );
     } catch {
@@ -107,7 +113,14 @@ export function setPendingEntryWelcome(payload) {
 }
 
 /**
- * @returns {{ displayName: string, theme?: string, createdAt?: number } | null}
+ * @returns {{
+ *   displayName: string,
+ *   theme?: string,
+ *   createdAt?: number,
+ *   welcomeLead?: string,
+ *   welcomeBody?: string,
+ *   welcomeClosing?: string,
+ * } | null}
  */
 export function peekPendingEntryWelcome() {
     try {
@@ -121,6 +134,9 @@ export function peekPendingEntryWelcome() {
             displayName,
             theme: typeof j.theme === 'string' ? j.theme : 'guest',
             createdAt: typeof j.createdAt === 'number' ? j.createdAt : undefined,
+            welcomeLead: typeof j.welcomeLead === 'string' ? j.welcomeLead : undefined,
+            welcomeBody: typeof j.welcomeBody === 'string' ? j.welcomeBody : undefined,
+            welcomeClosing: typeof j.welcomeClosing === 'string' ? j.welcomeClosing : undefined,
         };
     } catch {
         return null;

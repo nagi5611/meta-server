@@ -1,6 +1,16 @@
 // public/js/metaverse-entry-welcome.js — メタバース入場時の Welcome 演出（5秒・裏でプリロード）
 
 import {
+    ENTRY_WELCOME_OVERLAY_CSS,
+    entryWelcomeMessageFromStorage,
+    pickRandomEntryWelcomeMessage,
+    renderEntryWelcomeMessage,
+} from './entry-welcome-messages.js';
+import {
+    startEntryWelcomeMusic,
+    stopEntryWelcomeMusic,
+} from './entry-welcome-audio.js';
+import {
     ENTRY_WELCOME_MS,
     clearPendingEntryWelcome,
     peekPendingEntryWelcome,
@@ -25,64 +35,53 @@ function ensureWelcomeStyles() {
 
     const style = document.createElement('style');
     style.id = 'met-entry-welcome-styles';
-    style.textContent = `
-        html.met-entry-welcome-active,
-        html.met-entry-welcome-active body {
-            overflow: hidden !important;
-            background: #ffffff !important;
-        }
-        #${WELCOME_ROOT_ID} {
-            position: fixed;
-            inset: 0;
-            z-index: 100000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #ffffff;
-            opacity: 1;
-            transition: opacity ${WELCOME_FADE_MS}ms ease;
-            pointer-events: auto;
-        }
-        #${WELCOME_ROOT_ID}.met-entry-welcome-fading {
-            opacity: 0;
-            pointer-events: none;
-        }
-        #${WELCOME_ROOT_ID} .met-entry-welcome-text {
-            margin: 0;
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            font-size: clamp(2.5rem, 11vw, 4rem);
-            font-weight: 300;
-            letter-spacing: 0.04em;
-            color: #1d1d1f;
-        }
-    `;
+    style.textContent = ENTRY_WELCOME_OVERLAY_CSS.replace(
+        'transition: opacity 1s ease',
+        `transition: opacity ${WELCOME_FADE_MS}ms ease`
+    );
     document.head.appendChild(style);
 }
 
 /**
- * Welcome 用オーバーレイを生成する（早期表示が無い場合のフォールバック）
+ * @param {import('./entry-welcome-messages.js').EntryWelcomeMessage} message
  * @returns {HTMLElement}
  */
-function createWelcomeOverlay() {
+function createWelcomeOverlay(message) {
     const root = document.createElement('div');
     root.id = WELCOME_ROOT_ID;
     root.setAttribute('role', 'dialog');
     root.setAttribute('aria-modal', 'true');
-    root.innerHTML = '<p class="met-entry-welcome-text">Welcome</p>';
+    root.setAttribute('aria-live', 'polite');
+    renderEntryWelcomeMessage(root, message);
     return root;
 }
 
 /**
- * Welcome を白背景で表示する
+ * @param {ReturnType<typeof peekPendingEntryWelcome>} pending
+ * @returns {import('./entry-welcome-messages.js').EntryWelcomeMessage}
  */
-function ensureWelcomeVisible() {
+function resolveWelcomeMessage(pending) {
+    const fromStorage = pending ? entryWelcomeMessageFromStorage(pending) : null;
+    return fromStorage || pickRandomEntryWelcomeMessage();
+}
+
+/**
+ * Welcome を白背景で表示する
+ * @param {import('./entry-welcome-messages.js').EntryWelcomeMessage} message
+ */
+function ensureWelcomeVisible(message) {
     ensureWelcomeStyles();
     document.documentElement.classList.add('met-entry-welcome-active');
     document.body.style.overflow = 'hidden';
 
-    if (!document.getElementById(WELCOME_ROOT_ID)) {
-        document.body.prepend(createWelcomeOverlay());
+    let root = document.getElementById(WELCOME_ROOT_ID);
+    if (!root) {
+        root = createWelcomeOverlay(message);
+        document.body.prepend(root);
+        return;
     }
+
+    renderEntryWelcomeMessage(root, message);
 }
 
 /**
@@ -116,13 +115,16 @@ export async function runEntryWelcomeIfPending(bootstrapWork) {
         return;
     }
 
+    const message = resolveWelcomeMessage(pending);
     const holdMs = Math.max(0, ENTRY_WELCOME_MS - WELCOME_FADE_MS);
-    ensureWelcomeVisible();
+    ensureWelcomeVisible(message);
+    startEntryWelcomeMusic();
 
     try {
         await Promise.all([bootstrapWork(), delay(holdMs)]);
     } finally {
         await fadeOutWelcomeOverlay();
+        stopEntryWelcomeMusic();
         clearPendingEntryWelcome();
     }
 }

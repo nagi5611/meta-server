@@ -4,6 +4,7 @@ import {
     recordLoginEntryClick,
     setPendingEntryWelcome,
 } from './login-preload-state.js';
+import { primeEntryWelcomeMusic, stopEntryWelcomeMusic } from './entry-welcome-audio.js';
 
 /** 認証フェーズの最短表示時間（ms） */
 export const AUTH_PHASE_MIN_MS = 5000;
@@ -429,6 +430,7 @@ export async function runLoginEntryTransition(options) {
     } = options;
 
     recordLoginEntryClick();
+    primeEntryWelcomeMusic();
     ensureTransitionStyles();
 
     const overlay = createOverlay(theme);
@@ -452,6 +454,7 @@ export async function runLoginEntryTransition(options) {
             resolvedDisplayName = authResult.displayName.trim();
         }
     } catch (err) {
+        stopEntryWelcomeMusic();
         teardownOverlay(overlay);
         onAuthFailed?.(err);
         return false;
