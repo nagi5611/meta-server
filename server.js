@@ -1869,6 +1869,8 @@ const sendAdminMetaverseIndex = (req, res) => {
 };
 app.get('/admin', basicAuth, sendAdminMetaverseIndex);
 app.get('/admin/', basicAuth, sendAdminMetaverseIndex);
+app.get('/admin/camera', basicAuth, sendAdminMetaverseIndex);
+app.get('/admin/camera/', basicAuth, sendAdminMetaverseIndex);
 
 // Apply basic auth to admin API routes
 app.use('/admin', basicAuth);
@@ -2029,24 +2031,40 @@ app.use('/admin', basicAuth);
 // ============================
 // Admin: Metaverse entry token (Basic auth verified admins)
 // ============================
-const adminTokens = new Map(); // token -> expiry timestamp (ms)
+/** @type {Map<string, { expiry: number, mode: 'default' | 'camera' }>} */
+const adminTokens = new Map();
 const ADMIN_TOKEN_TTL_MS = 60 * 1000; // 60 seconds
 
-function generateAdminToken() {
+/**
+ * @param {'default'|'camera'} [mode]
+ * @returns {{ token: string, username?: string }}
+ */
+function generateAdminToken(mode = 'default') {
     const token = crypto.randomBytes(32).toString('hex');
-    adminTokens.set(token, Date.now() + ADMIN_TOKEN_TTL_MS);
-    return token;
+    /** @type {{ expiry: number, mode: 'default' | 'camera', username?: string }} */
+    const entry = { expiry: Date.now() + ADMIN_TOKEN_TTL_MS, mode };
+    if (mode === 'camera') {
+        entry.username = allocateStealthGuestUsername();
+    }
+    adminTokens.set(token, entry);
+    return mode === 'camera'
+        ? { token, username: entry.username }
+        : { token };
 }
 
+/**
+ * @param {unknown} token
+ * @returns {{ mode: 'default' | 'camera', username?: string } | null}
+ */
 function consumeAdminToken(token) {
-    if (!token || typeof token !== 'string') return false;
-    const expiry = adminTokens.get(token);
-    if (!expiry || Date.now() >= expiry) {
-        if (expiry) adminTokens.delete(token);
-        return false;
+    if (!token || typeof token !== 'string') return null;
+    const entry = adminTokens.get(token);
+    if (!entry || Date.now() >= entry.expiry) {
+        if (entry) adminTokens.delete(token);
+        return null;
     }
     adminTokens.delete(token);
-    return true;
+    return { mode: entry.mode === 'camera' ? 'camera' : 'default', username: entry.username };
 }
 
 /**
@@ -2056,8 +2074,23 @@ function consumeAdminToken(token) {
  */
 function peekAdminToken(token) {
     if (!token || typeof token !== 'string') return false;
-    const expiry = adminTokens.get(token);
-    return !!(expiry && Date.now() < expiry);
+    const entry = adminTokens.get(token);
+    return !!(entry && Date.now() < entry.expiry);
+}
+
+/** カメラログイン等でユーザーに見せない仮名 */
+function allocateStealthGuestUsername() {
+    const n = Math.floor(Math.random() * 10000);
+    return `Guest${String(n).padStart(4, '0')}`;
+}
+
+/**
+ * 他プレイヤーへ player-joined / players-update で載せるか
+ * @param {{ adminCameraMode?: boolean }} player
+ * @returns {boolean}
+ */
+function isPlayerVisibleToOthers(player) {
+    return !player?.adminCameraMode;
 }
 
 io.use((socket, next) => {
@@ -2956,10 +2989,15 @@ io.on('connection', (socket) => {
 
     // Verify admin token and user role if provided
     const adminToken = socket.handshake.auth?.adminToken;
-    if (consumeAdminToken(adminToken)) {
+    const adminAuth = consumeAdminToken(adminToken);
+    if (adminAuth) {
         socket.data.isAdmin = true;
+        socket.data.adminCameraMode = adminAuth.mode === 'camera';
+        socket.data.adminCameraUsername = adminAuth.username || null;
         socket.data.role = 'admin';
-        console.log(`Player connected as admin: ${socket.id}`);
+        console.log(
+            `Player connected as admin${socket.data.adminCameraMode ? ' (camera)' : ''}: ${socket.id}`
+        );
     } else {
         socket.data.isAdmin = false;
         const verified = verifySocketAuthToken(getSocketAuthTokenFromHandshake(socket));
@@ -3001,16 +3039,20 @@ io.on('connection', (socket) => {
 
     // Initialize player data in room state
     const roomState = getRoomState(currentRoom);
+    const isCameraAdmin = !!socket.data.adminCameraMode;
     const initialPlayerState = {
         id: socket.id,
-        username: 'Guest', // Will be updated when client sends username
-        isAdmin: !!socket.data.isAdmin,
+        username: isCameraAdmin
+            ? (socket.data.adminCameraUsername || allocateStealthGuestUsername())
+            : 'Guest',
+        isAdmin: isCameraAdmin ? false : !!socket.data.isAdmin,
         position: { x: 0, y: 2, z: 0 },
         rotation: { x: 0, y: 0, z: 0 }, // Euler angles
         quaternion: { x: 0, y: 0, z: 0, w: 1 },
         world: currentRoom,
         timestamp: 0, // Will be updated on first player-update
-        adminInvisible: false,
+        adminInvisible: isCameraAdmin,
+        adminCameraMode: isCameraAdmin,
         animState: 'idle',
         avatarId: null,
         serverLowAssistPrev: null,
@@ -3029,14 +3071,18 @@ io.on('connection', (socket) => {
     }
 
     // Send current players in this room to the new player (with displayName for admin)
-    const currentPlayers = Array.from(roomState.players.values()).map(p => ({
-        ...p,
-        displayName: getPlayerDisplayName(p)
-    }));
+    const currentPlayers = Array.from(roomState.players.values())
+        .filter((p) => p.id === socket.id || isPlayerVisibleToOthers(p))
+        .map(p => ({
+            ...p,
+            displayName: getPlayerDisplayName(p)
+        }));
     socket.emit('current-players', currentPlayers);
 
     // Notify other players in room about new player
-    socket.to(currentRoom).emit('player-joined', initialPlayerState);
+    if (isPlayerVisibleToOthers(initialPlayerState)) {
+        socket.to(currentRoom).emit('player-joined', initialPlayerState);
+    }
     
     console.log(`Player ${socket.id} joined room: ${currentRoom} (${roomState.players.size} players)`);
 
@@ -3351,6 +3397,13 @@ io.on('connection', (socket) => {
         const player = roomState.players.get(socket.id);
         const parsed = parseSetUsernamePayload(payload);
         if (!player || !parsed.username || parsed.username.length === 0) return;
+
+        if (socket.data.adminCameraMode) {
+            player.uiLocale = parsed.uiLocale;
+            socket.data.uiLocale = parsed.uiLocale;
+            return;
+        }
+
         const trimmed = parsed.username;
         // "admin" は管理者トークン検証済みのみ許可。拒否時はエラーで切断
         if (trimmed.toLowerCase() === 'admin' && !socket.data.isAdmin) {
@@ -3645,16 +3698,18 @@ io.on('connection', (socket) => {
         socket.data.currentRoom = newRoom;
 
         const newRoomState = getRoomState(newRoom);
+        const isCameraAdmin = !!socket.data.adminCameraMode;
         const playerState = {
             id: socket.id,
             username: username,
-            isAdmin: !!socket.data.isAdmin,
+            isAdmin: isCameraAdmin ? false : !!socket.data.isAdmin,
             position: { x: 0, y: 2, z: 0 },
             rotation: { x: 0, y: 0, z: 0 },
             quaternion: { x: 0, y: 0, z: 0, w: 1 },
             world: newRoom,
             timestamp: 0,
-            adminInvisible: !!(oldPlayerState && oldPlayerState.adminInvisible),
+            adminInvisible: isCameraAdmin || !!(oldPlayerState && oldPlayerState.adminInvisible),
+            adminCameraMode: isCameraAdmin,
             animState: normalizePlayerAnimState(oldPlayerState?.animState) || 'idle',
             avatarId: oldPlayerState?.avatarId || null,
             serverLowAssistPrev: null,
@@ -3673,7 +3728,9 @@ io.on('connection', (socket) => {
         }
 
         // Notify new room
-        socket.to(newRoom).emit('player-joined', playerState);
+        if (isPlayerVisibleToOthers(playerState)) {
+            socket.to(newRoom).emit('player-joined', playerState);
+        }
         console.log(`Player ${socket.id} joined room: ${newRoom}`);
 
         // VC: Cleanup old VC room and update to new room
@@ -4948,6 +5005,7 @@ setInterval(() => {
                 quaternion: player.quaternion,
                 world: player.world,
                 adminInvisible: !!player.adminInvisible,
+                adminCameraMode: !!player.adminCameraMode,
                 pilotingAircraftId: player.pilotingAircraftId || null,
                 passengeringAircraftId: player.passengeringAircraftId || null,
                 animState: normalizePlayerAnimState(player.animState),
@@ -4960,7 +5018,7 @@ setInterval(() => {
                 perfTier,
                 role
             };
-        });
+        }).filter((p) => isPlayerVisibleToOthers(p));
         
         ensureRoomAircraftState(roomState);
         const aircraftList = buildAircraftSnapshotList(roomState);
@@ -4982,8 +5040,14 @@ registerTickHookInstalled();
 // Admin: API Endpoints
 // ============================
 app.get('/admin/enter-metaverse', (req, res) => {
-    const token = generateAdminToken();
-    res.json({ token, username: 'admin' });
+    const camera = req.query.mode === 'camera';
+    if (camera) {
+        const issued = generateAdminToken('camera');
+        res.json({ token: issued.token, username: issued.username, mode: 'camera' });
+        return;
+    }
+    const issued = generateAdminToken('default');
+    res.json({ token: issued.token, username: 'admin', mode: 'default' });
 });
 
 app.get('/admin/worlds', (req, res) => {
@@ -6824,6 +6888,8 @@ app.get('/admin/players', (req, res) => {
                 world: player.world,
                 position: player.position,
                 role,
+                adminCameraMode: !!player.adminCameraMode,
+                adminInvisible: !!player.adminInvisible,
                 connectedAt: new Date(connectedAt).toISOString(),
                 connectedDuration: Math.floor(connectedDuration / 1000), // seconds
                 hasVC: !!peer,
@@ -6983,12 +7049,14 @@ app.post('/admin/command', async (req, res) => {
                 const playerState = {
                     id: targetSocketId,
                     username: oldPlayer ? oldPlayer.username : 'Guest',
+                    isAdmin: oldPlayer?.adminCameraMode ? false : !!(oldPlayer && oldPlayer.isAdmin),
                     position,
                     rotation: { x: 0, y: 0, z: 0 },
                     quaternion: { x: 0, y: 0, z: 0, w: 1 },
                     world: newRoom,
                     timestamp: 0,
                     adminInvisible: !!(oldPlayer && oldPlayer.adminInvisible),
+                    adminCameraMode: !!(oldPlayer && oldPlayer.adminCameraMode),
                     animState: normalizePlayerAnimState(oldPlayer?.animState) || 'idle',
                     avatarId: oldPlayer?.avatarId || null,
                     pilotingAircraftId: null,
@@ -6997,7 +7065,9 @@ app.post('/admin/command', async (req, res) => {
                     serverLowAssistAt: Date.now()
                 };
                 newRoomState.players.set(targetSocketId, playerState);
-                io.to(newRoom).emit('player-joined', playerState);
+                if (isPlayerVisibleToOthers(playerState)) {
+                    io.to(newRoom).emit('player-joined', playerState);
+                }
                 await cleanupVCPeer(targetSocketId);
                 targetSocket.emit('vc-room-changed', { roomId: newRoom });
                 await cleanupVideoVCPeer(targetSocketId);

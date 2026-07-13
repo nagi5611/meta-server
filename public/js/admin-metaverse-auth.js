@@ -2,27 +2,42 @@
 import { t } from './metaverse-i18n.js';
 
 /**
- * 管理者用メタバースの URL か（/admin または /admin/）
+ * 管理者カメラログインの URL か
+ * @returns {boolean}
+ */
+export function isAdminCameraEntryPath() {
+    const p = window.location.pathname;
+    return p === '/admin/camera' || p === '/admin/camera/';
+}
+
+/**
+ * 管理者用メタバースの URL か（/admin・カメラログイン）
  * @returns {boolean}
  */
 export function isAdminMetaverseEntryPath() {
     const p = window.location.pathname;
-    return p === '/admin' || p === '/admin/';
+    return p === '/admin' || p === '/admin/' || isAdminCameraEntryPath();
 }
 
 /**
  * Basic 認証済みセッションで Socket 用ワンタイムトークンを取得する
- * @returns {Promise<{ token: string, username: string } | null>}
+ * @returns {Promise<{ token: string, username: string, mode?: string } | null>}
  */
 export async function fetchAdminMetaverseEntry() {
     try {
-        const res = await fetch('/admin/enter-metaverse', { credentials: 'include' });
+        const camera = isAdminCameraEntryPath();
+        const url = camera ? '/admin/enter-metaverse?mode=camera' : '/admin/enter-metaverse';
+        const res = await fetch(url, { credentials: 'include' });
         if (!res.ok) return null;
         const data = await res.json();
         const token = String(data?.token || '').trim();
         const username = String(data?.username || '').trim();
         if (!token) return null;
-        return { token, username: username || 'admin' };
+        return {
+            token,
+            username: username || (camera ? 'Guest0000' : 'admin'),
+            mode: data?.mode || (camera ? 'camera' : 'default'),
+        };
     } catch (err) {
         console.error('Admin metaverse auth failed:', err);
         return null;

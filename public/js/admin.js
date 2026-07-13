@@ -6256,7 +6256,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // メタバースへ入る（管理者）: ワールド選択後にトークン取得して /admin?world= へ遷移
     document.getElementById('back-to-metaverse').addEventListener('click', () => {
-        void openEnterMetaverseWorldModal();
+        void openEnterMetaverseWorldModal('default');
+    });
+    document.getElementById('back-to-metaverse-camera')?.addEventListener('click', () => {
+        void openEnterMetaverseWorldModal('camera');
     });
     })();
 });
@@ -6572,15 +6575,31 @@ function closeEnterMetaverseWorldModal() {
     modal.setAttribute('aria-hidden', 'true');
 }
 
+/** @type {'default'|'camera'} */
+let enterMetaverseMode = 'default';
+
 /**
  * メタバース入室: ワールド一覧を読み込み中央モーダルを表示する
+ * @param {'default'|'camera'} [mode]
  */
-async function openEnterMetaverseWorldModal() {
+async function openEnterMetaverseWorldModal(mode = 'default') {
+    enterMetaverseMode = mode === 'camera' ? 'camera' : 'default';
     const modal = document.getElementById('enter-metaverse-world-modal');
     const listEl = document.getElementById('enter-metaverse-world-list');
     const loadingEl = document.getElementById('enter-metaverse-world-loading');
     const errorEl = document.getElementById('enter-metaverse-world-error');
     if (!modal || !listEl || !loadingEl || !errorEl) return;
+
+    const titleEl = modal.querySelector('h3');
+    const hintEl = modal.querySelector('.enter-metaverse-world-hint');
+    if (titleEl) {
+        titleEl.textContent = enterMetaverseMode === 'camera' ? 'カメラログイン — ワールドを選択' : 'ワールドを選択';
+    }
+    if (hintEl) {
+        hintEl.textContent = enterMetaverseMode === 'camera'
+            ? 'ステルスで入室します。他ユーザーには表示されません。'
+            : '入室するワールドを選んでください。';
+    }
 
     listEl.innerHTML = '';
     loadingEl.hidden = false;
@@ -6650,7 +6669,12 @@ async function enterMetaverseAsAdmin(worldId, itemBtn) {
     }
 
     try {
-        const res = await fetch('/admin/enter-metaverse', { credentials: 'include' });
+        const res = await fetch(
+            enterMetaverseMode === 'camera'
+                ? '/admin/enter-metaverse?mode=camera'
+                : '/admin/enter-metaverse',
+            { credentials: 'include' }
+        );
         if (!res.ok) {
             alert('認証に失敗しました。再度ログインしてください。');
             closeEnterMetaverseWorldModal();
@@ -6658,7 +6682,8 @@ async function enterMetaverseAsAdmin(worldId, itemBtn) {
         }
         const { username } = await res.json();
         localStorage.setItem('username', username);
-        const url = new URL('/admin', window.location.origin);
+        const basePath = enterMetaverseMode === 'camera' ? '/admin/camera' : '/admin';
+        const url = new URL(basePath, window.location.origin);
         url.searchParams.set('world', worldId);
         window.location.href = url.pathname + url.search;
     } catch (err) {

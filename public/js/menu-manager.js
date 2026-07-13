@@ -803,7 +803,7 @@ class MenuManager {
         localStorage.removeItem('userRole');
         sessionStorage.removeItem('metaverseAdminToken');
         const ap = window.location.pathname;
-        const fromAdminMetaverse = ap === '/admin' || ap === '/admin/';
+        const fromAdminMetaverse = ap === '/admin' || ap === '/admin/' || ap === '/admin/camera' || ap === '/admin/camera/';
         window.location.href = fromAdminMetaverse ? '/admin.html' : '/login/';
     }
     

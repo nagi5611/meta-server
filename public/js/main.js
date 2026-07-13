@@ -35,7 +35,9 @@ import { loadClientConfigOnce } from './asset-resolve.js';
 import { runEntryWelcomeIfPending } from './metaverse-entry-welcome.js';
 import { peekPendingEntryWelcome } from './login-preload-state.js';
 import { startLoginWorldPreload, clearLoginPreloadState } from './world-preload.js';
-import { fetchAdminMetaverseEntry, isAdminMetaverseEntryPath } from './admin-metaverse-auth.js';
+import { fetchAdminMetaverseEntry, isAdminCameraEntryPath, isAdminMetaverseEntryPath } from './admin-metaverse-auth.js';
+import AdminCameraController from './admin-camera-controller.js';
+import AdminCameraRecorder from './admin-camera-recorder.js';
 import {
     applyClientSpawnPlan,
     tryResolveClientSpawn,
@@ -194,6 +196,7 @@ class MetaverseApp {
 
         this.teleportManager = new TeleportManager(this.worldManager, this.uiManager);
         this.userRole = isAdminMetaverseEntryPath() ? 'admin' : (localStorage.getItem('userRole') || 'guest');
+        this.isAdminCameraMode = isAdminCameraEntryPath();
         this.teleportManager.setUserRole(this.userRole);
         this.teleportManager.setTeleportCallback((destinationWorld, teleporterId) => {
             if (this.aircraftManager) this.aircraftManager.forceLocalPilotingReset();
@@ -341,12 +344,19 @@ class MetaverseApp {
         const spawnPoint = this._entrySpawnPoint;
         const networkConnectPromise = this._entryNetworkConnectPromise;
 
-        this.isMobileMode = isMobile();
-        this.characterController = new CharacterController(
-            this.sceneManager.getCamera(),
-            this.physicsManager,
-            { isMobileMode: this.isMobileMode }
-        );
+        this.isMobileMode = isMobile() && !this.isAdminCameraMode;
+        if (this.isAdminCameraMode) {
+            this.characterController = new AdminCameraController(
+                this.sceneManager.getCamera(),
+                { baseFov: this.sceneManager.getCamera().fov }
+            );
+        } else {
+            this.characterController = new CharacterController(
+                this.sceneManager.getCamera(),
+                this.physicsManager,
+                { isMobileMode: this.isMobileMode }
+            );
+        }
         this.teleportManager.setInputActiveCheck(() => this.characterController.isInputActive());
 
         this.networkManager.onPhysicsYCorrection = (data) => {
@@ -377,13 +387,18 @@ class MetaverseApp {
         }
         this.characterController.setPosition(spawnPoint.x, spawnPoint.y, spawnPoint.z);
 
-        console.log('Loading player avatar...');
-        try {
-            await this.playerManager.createLocalPlayer(spawnPoint);
-            console.log('Player avatar loaded successfully');
-        } catch (error) {
-            console.error('Failed to create player avatar:', error);
-            // Continue anyway - PlayerManager will use fallback
+        this.characterController.setPosition(spawnPoint.x, spawnPoint.y, spawnPoint.z);
+
+        if (!this.isAdminCameraMode) {
+            console.log('Loading player avatar...');
+            try {
+                await this.playerManager.createLocalPlayer(spawnPoint);
+                console.log('Player avatar loaded successfully');
+            } catch (error) {
+                console.error('Failed to create player avatar:', error);
+            }
+        } else if (this.networkManager) {
+            this.networkManager.setAdminInvisible(true);
         }
 
         try {
@@ -548,8 +563,8 @@ class MetaverseApp {
             this.refreshLocalAvatarVisibility();
         });
 
-        // Admin quick controls (透明化 / 飛行 / 高速移動)
-        if (this.userRole === 'admin' && this.menuManager) {
+        // Admin quick controls (透明化 / 飛行 / 高速移動) — カメラログイン時は専用 HUD
+        if (this.userRole === 'admin' && this.menuManager && !this.isAdminCameraMode) {
             this.menuManager.setAdminMenuHandlers({
                 onInvisibleChange: (enabled) => {
                     if (this.networkManager) {
@@ -598,15 +613,30 @@ class MetaverseApp {
         // 初回ロード済みワールドの帰属表示を再同期（onWorldChange 登録前に読み込んだ場合の保険）
         this.updateGoogleMapsCopyrightVisibility(this.worldManager.getCurrentWorld());
 
-        // Admin: プレイヤーアバタークリックで情報表示
-        if (isAdminMetaverseEntryPath()) {
+        // Admin: プレイヤーアバタークリックで情報表示（カメラログインは非表示のため除外）
+        if (isAdminMetaverseEntryPath() && !this.isAdminCameraMode) {
             this.setupAdminPlayerInfoClick();
+        }
+
+        if (this.isAdminCameraMode) {
+            this.adminCameraRecorder = new AdminCameraRecorder({
+                renderer: this.sceneManager.getRenderer(),
+                scene: this.sceneManager.getScene(),
+                camera: this.sceneManager.getCamera(),
+            });
+            this.adminCameraRecorder.bindZoomSlider((factor) => {
+                this.characterController?.setZoomFactor?.(factor);
+            });
+            const adminMenuBtn = document.getElementById('admin-menu-btn');
+            if (adminMenuBtn) adminMenuBtn.style.display = 'none';
         }
 
         await runClientInits(this);
 
-        // 初回操作まで歩行・落下物理を止める（低スペックでロード後に沈むのを防ぐ）
-        this.characterController.setSuspendPhysicsUntilGameplayInput(true);
+        // 初回操作まで歩行・落下物理を止める（カメラモードは物理なし）
+        if (!this.isAdminCameraMode) {
+            this.characterController.setSuspendPhysicsUntilGameplayInput(true);
+        }
 
         // 表示完了時点でまだ接続中なら1秒待ち、未接続なら接続処理をやり直す
         const socketRestarted = await this.networkManager.ensureConnectedAfterDisplayReady();
@@ -623,6 +653,7 @@ class MetaverseApp {
         renderer.setAnimationLoop(this._frameCallback);
         window.addEventListener('beforeunload', () => {
             renderer.setAnimationLoop(null);
+            this.adminCameraRecorder?.dispose?.();
             runClientDisposes(this);
         });
 
@@ -1243,7 +1274,9 @@ class MetaverseApp {
         if (this.uiManager && this.worldManager && this.networkManager) {
             const world = this.worldManager.getCurrentWorld();
             const position = this.characterController?.getPosition?.() ?? null;
-            const playerCount = this.playerManager?.getPlayerCount?.() ?? 0;
+            const playerCount = this.isAdminCameraMode
+                ? (this.playerManager?.remotePlayers?.size ?? 0)
+                : (this.playerManager?.getPlayerCount?.() ?? 0);
             const players = this.networkManager.lastPlayersSnapshot || [];
             if (this.isMobileMode) {
                 MobileUIManager.updateMobileInfo(world?.name || '-', position, playerCount);

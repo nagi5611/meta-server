@@ -1,0 +1,127 @@
+/* public/css/admin-camera.css — 管理者カメラログイン HUD */
+
+.admin-camera-hud {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 8500;
+    display: none;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 16px;
+    box-sizing: border-box;
+}
+
+.admin-camera-hud-top,
+.admin-camera-hud-bottom {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.admin-camera-hud-top {
+    justify-content: flex-end;
+}
+
+.admin-camera-hud-bottom {
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin: 0 auto;
+    max-width: min(520px, 96vw);
+}
+
+.admin-camera-rec-indicator {
+    background: #e53935;
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    padding: 4px 10px;
+    border-radius: 6px;
+    animation: admin-camera-rec-blink 1s step-end infinite;
+}
+
+@keyframes admin-camera-rec-blink {
+    50% { opacity: 0.35; }
+}
+
+.admin-camera-mode-toggle {
+    display: flex;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 8px;
+    padding: 4px;
+}
+
+.admin-camera-mode-btn {
+    border: none;
+    background: transparent;
+    color: #eee;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.admin-camera-mode-btn.active {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+    font-weight: 600;
+}
+
+.admin-camera-zoom-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #fff;
+    font-size: 13px;
+    flex: 1;
+    min-width: 180px;
+}
+
+.admin-camera-zoom-label input[type='range'] {
+    flex: 1;
+    min-width: 100px;
+}
+
+.admin-camera-shutter-btn {
+    border: 2px solid #fff;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.admin-camera-shutter-btn:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.admin-camera-hint {
+    pointer-events: none;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 12px;
+    margin: 0;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.admin-camera-flash {
+    position: fixed;
+    inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 8600;
+    transition: opacity 0.05s ease-out;
+}
+
+.admin-camera-flash.admin-camera-flash-active {
+    opacity: 0.85;
+}

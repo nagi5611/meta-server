@@ -4,6 +4,7 @@ import { notifyServiceWorkerInvalidate } from './service-worker-register.js';
 import { t, getMetaverseLocale } from './metaverse-i18n.js';
 import {
     fetchAdminMetaverseEntry,
+    isAdminCameraEntryPath,
     isAdminMetaverseEntryPath,
     redirectAdminMetaverseAuthFailed,
 } from './admin-metaverse-auth.js';
@@ -30,6 +31,8 @@ class NetworkManager {
         this.username = localStorage.getItem('username') || 'Guest';
         /** 管理者の透明化状態。他プレイヤーに送り、相手側で非表示にする */
         this.adminInvisible = false;
+        /** 管理者カメラログイン（他ユーザーから完全非表示） */
+        this.adminCameraMode = isAdminCameraEntryPath();
         /** @type {{ id: string, username: string, position: {x,y,z}, vcMicOn: boolean, vcSpeakerOn?: boolean, pingMs?: number|null }[]} */
         this.lastPlayersSnapshot = [];
 
@@ -290,6 +293,10 @@ class NetworkManager {
             }
             localStorage.setItem('username', entry.username);
             this.username = entry.username;
+            if (entry.mode === 'camera' || isAdminCameraEntryPath()) {
+                this.adminCameraMode = true;
+                this.adminInvisible = true;
+            }
             this._cachedSocketAuth = { adminToken: entry.token };
         }
 
@@ -661,6 +668,10 @@ class NetworkManager {
      * @param {boolean} invisible
      */
     setAdminInvisible(invisible) {
+        if (this.adminCameraMode) {
+            this.adminInvisible = true;
+            return;
+        }
         this.adminInvisible = !!invisible;
     }
 
