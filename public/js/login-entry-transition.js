@@ -373,7 +373,7 @@ function createOverlay(_theme) {
                     ${KEYHOLE_SVG}
                 </div>
                 <p class="met-entry-status met-entry-status-dots">認証中</p>
-                <p class="met-entry-status-sub">入場資格を確認しています</p>
+                <p class="met-entry-status-sub">安全で高速なネットワークを構築しています</p>
             </div>
         </div>
         <div class="met-entry-progress" aria-hidden="true">

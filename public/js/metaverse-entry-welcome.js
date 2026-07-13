@@ -7,6 +7,7 @@ import {
 } from './login-preload-state.js';
 
 const WELCOME_ROOT_ID = 'met-entry-welcome-root';
+const WELCOME_FADE_MS = 1000;
 
 /**
  * @param {number} ms
@@ -17,100 +18,94 @@ function delay(ms) {
 }
 
 /**
- * 早期スクリプトで表示した Welcome を除去する
+ * Welcome 用スタイルを注入する
  */
-function teardownWelcomeOverlay() {
-    document.getElementById(WELCOME_ROOT_ID)?.remove();
+function ensureWelcomeStyles() {
+    if (document.getElementById('met-entry-welcome-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'met-entry-welcome-styles';
+    style.textContent = `
+        html.met-entry-welcome-active,
+        html.met-entry-welcome-active body {
+            overflow: hidden !important;
+            background: #ffffff !important;
+        }
+        #${WELCOME_ROOT_ID} {
+            position: fixed;
+            inset: 0;
+            z-index: 100000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #ffffff;
+            opacity: 1;
+            transition: opacity ${WELCOME_FADE_MS}ms ease;
+            pointer-events: auto;
+        }
+        #${WELCOME_ROOT_ID}.met-entry-welcome-fading {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #${WELCOME_ROOT_ID} .met-entry-welcome-text {
+            margin: 0;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            font-size: clamp(2.5rem, 11vw, 4rem);
+            font-weight: 300;
+            letter-spacing: 0.04em;
+            color: #1d1d1f;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+/**
+ * Welcome 用オーバーレイを生成する（早期表示が無い場合のフォールバック）
+ * @returns {HTMLElement}
+ */
+function createWelcomeOverlay() {
+    const root = document.createElement('div');
+    root.id = WELCOME_ROOT_ID;
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-modal', 'true');
+    root.innerHTML = '<p class="met-entry-welcome-text">Welcome</p>';
+    return root;
+}
+
+/**
+ * Welcome を白背景で表示する
+ */
+function ensureWelcomeVisible() {
+    ensureWelcomeStyles();
+    document.documentElement.classList.add('met-entry-welcome-active');
+    document.body.style.overflow = 'hidden';
+
+    if (!document.getElementById(WELCOME_ROOT_ID)) {
+        document.body.prepend(createWelcomeOverlay());
+    }
+}
+
+/**
+ * Welcome をフェードアウトして除去する
+ * @returns {Promise<void>}
+ */
+async function fadeOutWelcomeOverlay() {
+    const root = document.getElementById(WELCOME_ROOT_ID);
+    if (!root) {
+        document.documentElement.classList.remove('met-entry-welcome-active');
+        document.body.style.overflow = '';
+        return;
+    }
+
+    root.classList.add('met-entry-welcome-fading');
+    await delay(WELCOME_FADE_MS);
+    root.remove();
     document.documentElement.classList.remove('met-entry-welcome-active');
     document.body.style.overflow = '';
 }
 
 /**
- * Welcome 用オーバーレイを生成する（早期表示が無い場合のフォールバック）
- * @param {string} displayName
- * @returns {HTMLElement}
- */
-function createWelcomeOverlay(displayName) {
-    const CF_ORANGE = '#f38020';
-    const CF_ORANGE_RGB = '243, 128, 32';
-
-    if (!document.getElementById('met-entry-welcome-fallback-styles')) {
-        const style = document.createElement('style');
-        style.id = 'met-entry-welcome-fallback-styles';
-        style.textContent = `
-            html.met-entry-welcome-active,
-            html.met-entry-welcome-active body { overflow: hidden !important; background: #fafafa !important; }
-            #${WELCOME_ROOT_ID} {
-                --met-accent: ${CF_ORANGE};
-                --met-accent-rgb: ${CF_ORANGE_RGB};
-                position: fixed; inset: 0; z-index: 100000;
-                display: flex; align-items: center; justify-content: center;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                background: #fafafa; color: #1d1d1f;
-            }
-            #${WELCOME_ROOT_ID} .met-entry-card {
-                width: min(92vw, 420px); padding: 40px 32px; border-radius: 16px;
-                background: #fff; border: 1px solid rgba(0,0,0,0.06);
-                box-shadow: 0 12px 40px rgba(0,0,0,0.08); text-align: center;
-            }
-            #${WELCOME_ROOT_ID} .met-entry-welcome-badge {
-                display: inline-flex; width: 56px; height: 56px; border-radius: 50%;
-                align-items: center; justify-content: center;
-                background: rgba(var(--met-accent-rgb), 0.12); color: var(--met-accent);
-                font-size: 1.75rem; margin-bottom: 4px;
-            }
-            #${WELCOME_ROOT_ID} .met-entry-welcome-label {
-                font-size: clamp(2rem, 8vw, 2.75rem); font-weight: 800; margin: 0;
-            }
-            #${WELCOME_ROOT_ID} .met-entry-welcome-name {
-                font-size: clamp(1.1rem, 4vw, 1.45rem); font-weight: 600;
-                color: var(--met-accent); margin: 8px 0 0;
-            }
-            #${WELCOME_ROOT_ID} .met-entry-welcome-sub {
-                font-size: 0.9rem; color: #6b6b6f; margin: 12px 0 0;
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
-    const root = document.createElement('div');
-    root.id = WELCOME_ROOT_ID;
-    root.setAttribute('role', 'dialog');
-    root.setAttribute('aria-modal', 'true');
-    root.innerHTML = `
-        <div class="met-entry-card">
-            <div class="met-entry-welcome-badge" aria-hidden="true">✓</div>
-            <p class="met-entry-welcome-label">Welcome!</p>
-            <p class="met-entry-welcome-name"></p>
-            <p class="met-entry-welcome-sub">ワールドを準備しています</p>
-        </div>
-    `;
-    const nameEl = root.querySelector('.met-entry-welcome-name');
-    if (nameEl) nameEl.textContent = displayName;
-    return root;
-}
-
-/**
- * Welcome を表示する（早期スクリプト分があれば再利用）
- * @param {string} displayName
- */
-function ensureWelcomeVisible(displayName) {
-    document.documentElement.classList.add('met-entry-welcome-active');
-    document.body.style.overflow = 'hidden';
-
-    let root = document.getElementById(WELCOME_ROOT_ID);
-    if (!root) {
-        root = createWelcomeOverlay(displayName);
-        document.body.prepend(root);
-        return;
-    }
-
-    const nameEl = root.querySelector('.met-entry-welcome-name');
-    if (nameEl) nameEl.textContent = displayName;
-}
-
-/**
- * ログイン経由の入場時: Welcome を最低5秒表示しつつ bootstrap を並行実行
+ * ログイン経由の入場時: Welcome を表示しつつ bootstrap を並行実行し、フェードアウトで退場
  * @param {() => Promise<void>} bootstrapWork
  * @returns {Promise<void>}
  */
@@ -121,17 +116,13 @@ export async function runEntryWelcomeIfPending(bootstrapWork) {
         return;
     }
 
-    const welcomeStartedAt = Date.now();
-    ensureWelcomeVisible(pending.displayName);
+    const holdMs = Math.max(0, ENTRY_WELCOME_MS - WELCOME_FADE_MS);
+    ensureWelcomeVisible();
 
     try {
-        await Promise.all([bootstrapWork(), delay(ENTRY_WELCOME_MS)]);
+        await Promise.all([bootstrapWork(), delay(holdMs)]);
     } finally {
-        const elapsed = Date.now() - welcomeStartedAt;
-        if (elapsed < ENTRY_WELCOME_MS) {
-            await delay(ENTRY_WELCOME_MS - elapsed);
-        }
-        teardownWelcomeOverlay();
+        await fadeOutWelcomeOverlay();
         clearPendingEntryWelcome();
     }
 }
