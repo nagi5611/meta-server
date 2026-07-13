@@ -11,14 +11,14 @@ export const AUTH_PHASE_MIN_MS = 5000;
 /** Welcome 演出の表示時間（ms） */
 export const WELCOME_PHASE_MS = 4000;
 
-/** @typedef {'guest'|'student'|'teacher'} LoginEntryTheme */
+/** 鍵が開くアニメーション時間（ms） */
+const UNLOCK_ANIM_MS = 900;
 
-/** @type {Record<LoginEntryTheme, { accent: string, accentRgb: string }>} */
-const THEMES = {
-    guest: { accent: '#0288d1', accentRgb: '2, 136, 209' },
-    student: { accent: '#2e7d32', accentRgb: '46, 125, 50' },
-    teacher: { accent: '#ed6c02', accentRgb: '237, 108, 2' },
-};
+/** Cloudflare 風オレンジ */
+const CF_ORANGE = '#F6821F';
+const CF_ORANGE_RGB = '246, 130, 31';
+
+/** @typedef {'guest'|'student'|'teacher'} LoginEntryTheme */
 
 /**
  * @param {number} ms
@@ -38,8 +38,8 @@ function ensureTransitionStyles() {
     style.id = 'met-entry-transition-styles';
     style.textContent = `
         .met-entry-overlay {
-            --met-accent: #0288d1;
-            --met-accent-rgb: 2, 136, 209;
+            --met-orange: ${CF_ORANGE};
+            --met-orange-rgb: ${CF_ORANGE_RGB};
             position: fixed;
             inset: 0;
             z-index: 100000;
@@ -47,75 +47,43 @@ function ensureTransitionStyles() {
             align-items: center;
             justify-content: center;
             overflow: hidden;
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            color: #fff;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: #1a1a1a;
         }
 
         .met-entry-bg {
             position: absolute;
             inset: 0;
             background:
-                radial-gradient(ellipse 80% 60% at 20% 20%, rgba(var(--met-accent-rgb), 0.45), transparent 55%),
-                radial-gradient(ellipse 70% 50% at 80% 80%, rgba(var(--met-accent-rgb), 0.35), transparent 50%),
-                linear-gradient(160deg, #0a1628 0%, #0d2137 45%, #061018 100%);
-            animation: metEntryBgShift 8s ease-in-out infinite alternate;
+                radial-gradient(ellipse 90% 70% at 50% -10%, rgba(var(--met-orange-rgb), 0.14), transparent 55%),
+                radial-gradient(ellipse 60% 50% at 100% 100%, rgba(var(--met-orange-rgb), 0.08), transparent 50%),
+                linear-gradient(180deg, #ffffff 0%, #f6f7f9 48%, #f0f2f5 100%);
         }
 
-        @keyframes metEntryBgShift {
-            0% { filter: hue-rotate(0deg) brightness(1); }
-            100% { filter: hue-rotate(12deg) brightness(1.08); }
-        }
-
-        .met-entry-grid {
-            position: absolute;
-            inset: -20%;
-            background-image:
-                linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-            background-size: 48px 48px;
-            transform: perspective(500px) rotateX(58deg) translateY(12%);
-            transform-origin: center top;
-            opacity: 0.55;
-            animation: metEntryGridDrift 12s linear infinite;
-            mask-image: linear-gradient(to bottom, transparent, #000 25%, #000 75%, transparent);
-        }
-
-        @keyframes metEntryGridDrift {
-            from { background-position: 0 0, 0 0; }
-            to { background-position: 0 96px, 96px 0; }
-        }
-
-        .met-entry-particles {
+        .met-entry-bg-pattern {
             position: absolute;
             inset: 0;
-            pointer-events: none;
-            overflow: hidden;
-        }
-
-        .met-entry-particle {
-            position: absolute;
-            width: 4px;
-            height: 4px;
-            border-radius: 50%;
-            background: rgba(var(--met-accent-rgb), 0.85);
-            box-shadow: 0 0 12px rgba(var(--met-accent-rgb), 0.9);
-            animation: metEntryParticleFloat var(--dur, 6s) ease-in-out infinite;
-            animation-delay: var(--delay, 0s);
-            opacity: 0;
-        }
-
-        @keyframes metEntryParticleFloat {
-            0%, 100% { opacity: 0; transform: translateY(20px) scale(0.5); }
-            20%, 80% { opacity: 0.9; }
-            50% { transform: translateY(-30vh) scale(1); }
+            opacity: 0.35;
+            background-image: radial-gradient(rgba(var(--met-orange-rgb), 0.07) 1px, transparent 1px);
+            background-size: 24px 24px;
+            mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 20%, transparent 75%);
         }
 
         .met-entry-content {
             position: relative;
             z-index: 2;
+            width: min(92vw, 400px);
+        }
+
+        .met-entry-card {
+            background: #ffffff;
+            border-radius: 20px;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            box-shadow:
+                0 4px 24px rgba(0, 0, 0, 0.06),
+                0 0 0 1px rgba(var(--met-orange-rgb), 0.06);
+            padding: 40px 32px 36px;
             text-align: center;
-            padding: 24px;
-            width: min(92vw, 520px);
         }
 
         .met-entry-phase {
@@ -130,40 +98,189 @@ function ensureTransitionStyles() {
         }
 
         .met-entry-phase-exit {
-            animation: metEntryFadeOut 0.45s ease forwards;
+            animation: metEntryFadeOut 0.4s ease forwards;
         }
 
         .met-entry-phase-enter {
-            animation: metEntryFadeIn 0.55s ease forwards;
+            animation: metEntryFadeIn 0.5s ease forwards;
         }
 
         @keyframes metEntryFadeOut {
-            to { opacity: 0; transform: scale(0.96) translateY(-8px); }
+            to { opacity: 0; transform: scale(0.98) translateY(-6px); }
         }
 
         @keyframes metEntryFadeIn {
-            from { opacity: 0; transform: scale(0.92) translateY(16px); }
+            from { opacity: 0; transform: scale(0.96) translateY(10px); }
             to { opacity: 1; transform: scale(1) translateY(0); }
         }
 
-        .met-entry-spinner {
-            width: 52px;
-            height: 52px;
-            border: 3px solid rgba(255, 255, 255, 0.15);
-            border-top-color: var(--met-accent);
-            border-radius: 50%;
-            animation: metEntrySpin 0.85s linear infinite;
+        /* --- 鍵・鍵穴 --- */
+        .met-entry-lock-wrap {
+            position: relative;
+            width: 112px;
+            height: 128px;
+            margin: 0 auto 4px;
         }
 
-        @keyframes metEntrySpin {
-            to { transform: rotate(360deg); }
+        .met-entry-lock-svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+            overflow: visible;
+        }
+
+        .met-entry-shackle {
+            fill: none;
+            stroke: #c5c8ce;
+            stroke-width: 7;
+            stroke-linecap: round;
+            transform-origin: 56px 42px;
+            transition: stroke 0.35s ease, transform 0.55s cubic-bezier(0.34, 1.4, 0.64, 1);
+        }
+
+        .met-entry-lock-body {
+            fill: #f3f4f6;
+            stroke: #d8dce3;
+            stroke-width: 2;
+            transition: fill 0.35s ease, stroke 0.35s ease;
+        }
+
+        .met-entry-keyhole-outer {
+            fill: #9ca3af;
+            transition: fill 0.35s ease;
+        }
+
+        .met-entry-keyhole-inner {
+            fill: #6b7280;
+            transition: fill 0.35s ease;
+        }
+
+        .met-entry-key {
+            position: absolute;
+            left: 50%;
+            top: 58%;
+            width: 36px;
+            height: 72px;
+            margin-left: -18px;
+            margin-top: -8px;
+            transform-origin: 50% 22%;
+            opacity: 0;
+            transform: translateY(28px) rotate(-35deg);
+            transition: none;
+            pointer-events: none;
+        }
+
+        .met-entry-key svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
+        }
+
+        .met-entry-key-bit {
+            fill: var(--met-orange);
+        }
+
+        .met-entry-key-shaft {
+            fill: #e5e7eb;
+            stroke: #d1d5db;
+            stroke-width: 1;
+        }
+
+        .met-entry-lock-wrap.is-verifying .met-entry-key {
+            opacity: 1;
+            animation: metEntryKeyApproach 1.8s ease-in-out infinite;
+        }
+
+        .met-entry-lock-wrap.is-verifying .met-entry-keyhole-outer {
+            fill: #b0b5bd;
+            animation: metEntryKeyholePulse 1.8s ease-in-out infinite;
+        }
+
+        @keyframes metEntryKeyApproach {
+            0%, 100% { transform: translateY(22px) rotate(-40deg); opacity: 0.55; }
+            50% { transform: translateY(6px) rotate(-12deg); opacity: 1; }
+        }
+
+        @keyframes metEntryKeyholePulse {
+            0%, 100% { fill: #b0b5bd; }
+            50% { fill: rgba(var(--met-orange-rgb), 0.55); }
+        }
+
+        .met-entry-lock-wrap.is-unlocking .met-entry-key {
+            opacity: 1;
+            animation: metEntryKeyTurn 0.85s cubic-bezier(0.34, 1.2, 0.64, 1) forwards;
+        }
+
+        @keyframes metEntryKeyTurn {
+            0% { transform: translateY(8px) rotate(-12deg); opacity: 1; }
+            35% { transform: translateY(4px) rotate(0deg); }
+            100% { transform: translateY(4px) rotate(78deg); opacity: 1; }
+        }
+
+        .met-entry-lock-wrap.is-unlocking .met-entry-shackle {
+            stroke: var(--met-orange);
+            transform: translateY(-14px) rotate(-8deg);
+        }
+
+        .met-entry-lock-wrap.is-unlocking .met-entry-lock-body {
+            fill: rgba(var(--met-orange-rgb), 0.08);
+            stroke: var(--met-orange);
+        }
+
+        .met-entry-lock-wrap.is-unlocking .met-entry-keyhole-outer,
+        .met-entry-lock-wrap.is-unlocked .met-entry-keyhole-outer {
+            fill: var(--met-orange);
+        }
+
+        .met-entry-lock-wrap.is-unlocking .met-entry-keyhole-inner,
+        .met-entry-lock-wrap.is-unlocked .met-entry-keyhole-inner {
+            fill: #fff;
+        }
+
+        .met-entry-lock-wrap.is-unlocked .met-entry-shackle {
+            stroke: var(--met-orange);
+            transform: translateY(-16px) rotate(-10deg);
+        }
+
+        .met-entry-lock-wrap.is-unlocked .met-entry-lock-body {
+            fill: rgba(var(--met-orange-rgb), 0.1);
+            stroke: var(--met-orange);
+        }
+
+        .met-entry-lock-wrap.is-unlocked .met-entry-key {
+            opacity: 1;
+            transform: translateY(4px) rotate(78deg);
+        }
+
+        .met-entry-lock-glow {
+            position: absolute;
+            inset: -20%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(var(--met-orange-rgb), 0.25), transparent 65%);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.4s ease;
+        }
+
+        .met-entry-lock-wrap.is-unlocking .met-entry-lock-glow,
+        .met-entry-lock-wrap.is-unlocked .met-entry-lock-glow {
+            opacity: 1;
+            animation: metEntryGlowPop 0.7s ease forwards;
+        }
+
+        @keyframes metEntryGlowPop {
+            0% { transform: scale(0.6); opacity: 0; }
+            50% { opacity: 1; }
+            100% { transform: scale(1.1); opacity: 0.35; }
         }
 
         .met-entry-status {
-            font-size: 1.15rem;
+            font-size: 1.05rem;
             font-weight: 600;
-            letter-spacing: 0.12em;
-            color: rgba(255, 255, 255, 0.92);
+            letter-spacing: 0.06em;
+            color: #374151;
+            margin: 0;
         }
 
         .met-entry-status-dots::after {
@@ -178,66 +295,53 @@ function ensureTransitionStyles() {
             75% { content: '...'; }
         }
 
+        .met-entry-status-sub {
+            font-size: 0.82rem;
+            color: #9ca3af;
+            margin: -8px 0 0;
+            letter-spacing: 0.02em;
+        }
+
+        .met-entry-status.is-unlocked {
+            color: var(--met-orange);
+        }
+
+        /* --- Welcome --- */
         .met-entry-welcome-label {
-            font-size: clamp(2.75rem, 11vw, 5.5rem);
+            font-size: clamp(2.2rem, 9vw, 3.5rem);
             font-weight: 800;
-            line-height: 1.05;
-            letter-spacing: -0.03em;
-            background: linear-gradient(135deg, #fff 0%, rgba(var(--met-accent-rgb), 1) 55%, #fff 100%);
-            background-size: 200% auto;
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            animation: metEntryWelcomePop 0.9s cubic-bezier(0.22, 1.2, 0.36, 1) forwards,
-                metEntryWelcomeShine 2.8s ease-in-out 0.4s infinite;
-            transform: scale(0.4);
+            line-height: 1.1;
+            letter-spacing: -0.02em;
+            color: var(--met-orange);
+            animation: metEntryWelcomePop 0.75s cubic-bezier(0.22, 1.2, 0.36, 1) forwards;
+            transform: scale(0.5);
             opacity: 0;
+            margin: 0;
         }
 
         @keyframes metEntryWelcomePop {
             to { transform: scale(1); opacity: 1; }
         }
 
-        @keyframes metEntryWelcomeShine {
-            0%, 100% { background-position: 0% center; }
-            50% { background-position: 100% center; }
-        }
-
         .met-entry-welcome-name {
-            font-size: clamp(1.25rem, 4.5vw, 1.85rem);
+            font-size: clamp(1.1rem, 4vw, 1.5rem);
             font-weight: 600;
-            color: rgba(255, 255, 255, 0.95);
-            animation: metEntryNameIn 0.7s ease 0.35s both;
+            color: #1f2937;
+            animation: metEntryNameIn 0.6s ease 0.25s both;
+            margin: 0;
         }
 
         @keyframes metEntryNameIn {
-            from { opacity: 0; transform: translateY(20px); }
+            from { opacity: 0; transform: translateY(14px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
         .met-entry-welcome-sub {
-            font-size: 0.95rem;
-            color: rgba(255, 255, 255, 0.65);
-            letter-spacing: 0.08em;
-            animation: metEntryNameIn 0.7s ease 0.55s both;
-        }
-
-        .met-entry-welcome-ring {
-            position: absolute;
-            width: min(70vw, 320px);
-            height: min(70vw, 320px);
-            border-radius: 50%;
-            border: 2px solid rgba(var(--met-accent-rgb), 0.35);
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-            animation: metEntryRingPulse 2.2s ease-out infinite;
-        }
-
-        @keyframes metEntryRingPulse {
-            0% { transform: translate(-50%, -50%) scale(0.85); opacity: 0.9; }
-            100% { transform: translate(-50%, -50%) scale(1.35); opacity: 0; }
+            font-size: 0.88rem;
+            color: #9ca3af;
+            letter-spacing: 0.06em;
+            animation: metEntryNameIn 0.6s ease 0.4s both;
+            margin: 0;
         }
 
         .met-entry-progress {
@@ -246,62 +350,75 @@ function ensureTransitionStyles() {
             left: 0;
             right: 0;
             height: 3px;
-            background: rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.04);
             overflow: hidden;
         }
 
         .met-entry-progress-bar {
             height: 100%;
-            width: 35%;
-            background: linear-gradient(90deg, transparent, var(--met-accent), transparent);
-            animation: metEntryProgressSlide 1.6s ease-in-out infinite;
+            width: 30%;
+            background: linear-gradient(90deg, transparent, var(--met-orange), transparent);
+            animation: metEntryProgressSlide 1.8s ease-in-out infinite;
         }
 
         @keyframes metEntryProgressSlide {
             0% { transform: translateX(-120%); }
-            100% { transform: translateX(320%); }
+            100% { transform: translateX(380%); }
         }
     `;
     document.head.appendChild(style);
 }
 
+/** 鍵・鍵穴 SVG マークアップ */
+const LOCK_SVG = `
+    <svg class="met-entry-lock-svg" viewBox="0 0 112 128" aria-hidden="true">
+        <path class="met-entry-shackle" d="M 28 52 A 28 28 0 0 1 84 52 L 84 62" />
+        <rect class="met-entry-lock-body" x="22" y="58" width="68" height="58" rx="10" />
+        <circle class="met-entry-keyhole-outer" cx="56" cy="82" r="11" />
+        <rect class="met-entry-keyhole-inner" x="52" y="82" width="8" height="18" rx="2" />
+    </svg>
+`;
+
+const KEY_SVG = `
+    <svg viewBox="0 0 36 72" aria-hidden="true">
+        <circle class="met-entry-key-bit" cx="18" cy="14" r="11" />
+        <rect class="met-entry-key-bit" x="14" y="22" width="8" height="6" rx="1" />
+        <rect class="met-entry-key-shaft" x="15" y="26" width="6" height="38" rx="2" />
+        <rect class="met-entry-key-shaft" x="15" y="56" width="10" height="4" rx="1" />
+        <rect class="met-entry-key-shaft" x="15" y="62" width="8" height="3" rx="1" />
+    </svg>
+`;
+
 /**
- * テーマ付き全画面オーバーレイを生成する
- * @param {LoginEntryTheme} theme
+ * 全画面オーバーレイを生成する
  * @returns {HTMLElement}
  */
-function createOverlay(theme) {
-    const t = THEMES[theme] || THEMES.guest;
+function createOverlay() {
     const overlay = document.createElement('div');
     overlay.className = 'met-entry-overlay';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-live', 'polite');
-    overlay.style.setProperty('--met-accent', t.accent);
-    overlay.style.setProperty('--met-accent-rgb', t.accentRgb);
-
-    const particles = Array.from({ length: 18 }, (_, i) => {
-        const left = 5 + Math.random() * 90;
-        const top = 55 + Math.random() * 40;
-        const dur = 5 + Math.random() * 5;
-        const delay = Math.random() * 4;
-        return `<span class="met-entry-particle" style="left:${left}%;top:${top}%;--dur:${dur}s;--delay:${delay}s"></span>`;
-    }).join('');
 
     overlay.innerHTML = `
         <div class="met-entry-bg" aria-hidden="true"></div>
-        <div class="met-entry-grid" aria-hidden="true"></div>
-        <div class="met-entry-particles" aria-hidden="true">${particles}</div>
-        <div class="met-entry-welcome-ring" aria-hidden="true"></div>
+        <div class="met-entry-bg-pattern" aria-hidden="true"></div>
         <div class="met-entry-content">
-            <div class="met-entry-phase met-entry-auth">
-                <div class="met-entry-spinner" aria-hidden="true"></div>
-                <p class="met-entry-status met-entry-status-dots">認証中</p>
-            </div>
-            <div class="met-entry-phase met-entry-welcome" hidden>
-                <p class="met-entry-welcome-label">Welcome!</p>
-                <p class="met-entry-welcome-name"></p>
-                <p class="met-entry-welcome-sub">メタバースに入ります</p>
+            <div class="met-entry-card">
+                <div class="met-entry-phase met-entry-auth">
+                    <div class="met-entry-lock-wrap is-verifying">
+                        <div class="met-entry-lock-glow" aria-hidden="true"></div>
+                        ${LOCK_SVG}
+                        <div class="met-entry-key" aria-hidden="true">${KEY_SVG}</div>
+                    </div>
+                    <p class="met-entry-status met-entry-status-dots">認証中</p>
+                    <p class="met-entry-status-sub">接続を確認しています</p>
+                </div>
+                <div class="met-entry-phase met-entry-welcome" hidden>
+                    <p class="met-entry-welcome-label">Welcome!</p>
+                    <p class="met-entry-welcome-name"></p>
+                    <p class="met-entry-welcome-sub">メタバースに入ります</p>
+                </div>
             </div>
         </div>
         <div class="met-entry-progress" aria-hidden="true">
@@ -321,6 +438,31 @@ function teardownOverlay(overlay) {
 }
 
 /**
+ * 認証成功時に鍵が開くアニメーションを再生する
+ * @param {HTMLElement} overlay
+ */
+async function playUnlockAnimation(overlay) {
+    const lockWrap = overlay.querySelector('.met-entry-lock-wrap');
+    const statusEl = overlay.querySelector('.met-entry-status');
+    const subEl = overlay.querySelector('.met-entry-status-sub');
+    if (!lockWrap) return;
+
+    lockWrap.classList.remove('is-verifying');
+    lockWrap.classList.add('is-unlocking');
+
+    if (statusEl) {
+        statusEl.classList.remove('met-entry-status-dots');
+        statusEl.textContent = '認証完了';
+        statusEl.classList.add('is-unlocked');
+    }
+    if (subEl) subEl.textContent = '鍵が開きました';
+
+    await delay(UNLOCK_ANIM_MS);
+    lockWrap.classList.remove('is-unlocking');
+    lockWrap.classList.add('is-unlocked');
+}
+
+/**
  * Welcome フェーズへ切り替える
  * @param {HTMLElement} overlay
  * @param {string} displayName
@@ -332,7 +474,7 @@ async function switchToWelcomePhase(overlay, displayName) {
     if (!authPhase || !welcomePhase) return;
 
     authPhase.classList.add('met-entry-phase-exit');
-    await delay(420);
+    await delay(380);
     authPhase.hidden = true;
     authPhase.classList.remove('met-entry-phase-exit');
     if (nameEl) nameEl.textContent = displayName;
@@ -341,7 +483,7 @@ async function switchToWelcomePhase(overlay, displayName) {
 }
 
 /**
- * 認証 → Welcome → プリロード完了後に遷移する入場演出
+ * 認証 → 鍵開錠 → Welcome → 遷移
  * @param {{
  *   displayName: string,
  *   theme?: LoginEntryTheme,
@@ -350,12 +492,11 @@ async function switchToWelcomePhase(overlay, displayName) {
  *   redirectUrl: string,
  *   preloadStart?: () => Promise<void>,
  * }} options
- * @returns {Promise<boolean>} 遷移したら true
+ * @returns {Promise<boolean>}
  */
 export async function runLoginEntryTransition(options) {
     const {
         displayName,
-        theme = 'guest',
         authTask,
         onAuthFailed,
         redirectUrl,
@@ -363,9 +504,16 @@ export async function runLoginEntryTransition(options) {
     } = options;
 
     recordLoginEntryClick();
+    ensureTransitionStyles();
+
+    const overlay = createOverlay();
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
 
     const authStartedAt = Date.now();
     let resolvedDisplayName = displayName;
+
+    const preloadPromise = typeof preloadStart === 'function' ? preloadStart() : Promise.resolve();
 
     try {
         const authResult = await authTask();
@@ -379,29 +527,25 @@ export async function runLoginEntryTransition(options) {
         ) {
             resolvedDisplayName = authResult.displayName.trim();
         }
+        await playUnlockAnimation(overlay);
     } catch (err) {
+        teardownOverlay(overlay);
         onAuthFailed?.(err);
         return false;
     }
 
-    const preloadPromise = typeof preloadStart === 'function' ? preloadStart() : Promise.resolve();
     await preloadPromise.catch(() => {});
 
     if (isLoginPreloadFresh()) {
+        teardownOverlay(overlay);
         window.location.href = redirectUrl;
         return true;
     }
-
-    ensureTransitionStyles();
-    const overlay = createOverlay(theme);
-    document.body.appendChild(overlay);
-    document.body.style.overflow = 'hidden';
 
     const authElapsed = Date.now() - authStartedAt;
     await delay(Math.max(0, AUTH_PHASE_MIN_MS - authElapsed));
 
     await switchToWelcomePhase(overlay, resolvedDisplayName);
-
     await delay(WELCOME_PHASE_MS);
 
     window.location.href = redirectUrl;
