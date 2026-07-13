@@ -1,47 +1,212 @@
-/* public/css/admin-camera.css — 管理者カメラログイン HUD */
+/* public/css/admin-camera.css — 管理者カメラログイン専用 UI */
 
+/* 通常 UI を隠し、カメラモードの見た目に統一 */
+html[data-admin-camera-mode='true'] #chat-container,
+body[data-admin-camera-mode='true'] #chat-container,
+html[data-admin-camera-mode='true'] #emoji-menu,
+body[data-admin-camera-mode='true'] #emoji-menu,
+html[data-admin-camera-mode='true'] #mobile-menu-toggle,
+body[data-admin-camera-mode='true'] #mobile-menu-toggle,
+html[data-admin-camera-mode='true'] #pro-mode-settings-btn,
+body[data-admin-camera-mode='true'] #pro-mode-settings-btn,
+html[data-admin-camera-mode='true'] #admin-menu-btn,
+body[data-admin-camera-mode='true'] #admin-menu-btn,
+html[data-admin-camera-mode='true'] #mic-btn,
+body[data-admin-camera-mode='true'] #mic-btn,
+html[data-admin-camera-mode='true'] #speaker-btn,
+body[data-admin-camera-mode='true'] #speaker-btn,
+html[data-admin-camera-mode='true'] #stamp-btn,
+body[data-admin-camera-mode='true'] #stamp-btn,
+html[data-admin-camera-mode='true'] #video-btn,
+body[data-admin-camera-mode='true'] #video-btn,
+html[data-admin-camera-mode='true'] #help-btn,
+body[data-admin-camera-mode='true'] #help-btn,
+html[data-admin-camera-mode='true'] #restart-world-btn,
+body[data-admin-camera-mode='true'] #restart-world-btn,
+html[data-admin-camera-mode='true'] #settings-btn,
+body[data-admin-camera-mode='true'] #settings-btn,
+html[data-admin-camera-mode='true'] #idle-control-hint,
+body[data-admin-camera-mode='true'] #idle-control-hint {
+    display: none !important;
+}
+
+html[data-admin-camera-mode='true'] #menu-bar,
+body[data-admin-camera-mode='true'] #menu-bar {
+    left: auto;
+    right: 12px;
+    bottom: 12px;
+    top: auto;
+    transform: none;
+    background: rgba(0, 0, 0, 0.45);
+    border-radius: 10px;
+    padding: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+html[data-admin-camera-mode='true'] #info,
+body[data-admin-camera-mode='true'] #info {
+    top: 52px;
+    left: 12px;
+    right: auto;
+    max-width: 220px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+
+body[data-admin-camera-mode='true'] #info h1 {
+    display: none;
+}
+
+body[data-admin-camera-mode='true'] #info-stats p {
+    margin: 2px 0;
+}
+
+body[data-admin-camera-mode='true'] #player-list-container {
+    max-height: 120px;
+}
+
+body[data-admin-camera-mode='true'] #canvas {
+    cursor: crosshair;
+}
+
+/* ── HUD ルート ── */
 .admin-camera-hud {
     position: fixed;
     inset: 0;
     pointer-events: none;
     z-index: 8500;
     display: none;
-    flex-direction: column;
-    justify-content: space-between;
-    padding: 16px;
+    color: #fff;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* レターボックス（撮影枠外を暗く） */
+.admin-camera-viewfinder {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.admin-camera-viewfinder-frame {
+    position: absolute;
+    top: 48px;
+    bottom: 36px;
+    left: 72px;
+    right: 88px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42);
+    border: 1px solid rgba(255, 255, 255, 0.35);
     box-sizing: border-box;
 }
 
-.admin-camera-hud-top,
-.admin-camera-hud-bottom {
+.admin-camera-corner {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-color: rgba(255, 255, 255, 0.9);
+    border-style: solid;
+    border-width: 0;
+}
+
+.admin-camera-corner-tl {
+    top: -1px;
+    left: -1px;
+    border-top-width: 3px;
+    border-left-width: 3px;
+}
+
+.admin-camera-corner-tr {
+    top: -1px;
+    right: -1px;
+    border-top-width: 3px;
+    border-right-width: 3px;
+}
+
+.admin-camera-corner-bl {
+    bottom: -1px;
+    left: -1px;
+    border-bottom-width: 3px;
+    border-left-width: 3px;
+}
+
+.admin-camera-corner-br {
+    bottom: -1px;
+    right: -1px;
+    border-bottom-width: 3px;
+    border-right-width: 3px;
+}
+
+.admin-camera-center-mark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 50%;
+    opacity: 0.6;
+}
+
+.admin-camera-center-mark::before,
+.admin-camera-center-mark::after {
+    content: '';
+    position: absolute;
+    background: rgba(255, 255, 255, 0.35);
+}
+
+.admin-camera-center-mark::before {
+    left: 50%;
+    top: 2px;
+    bottom: 2px;
+    width: 1px;
+    margin-left: -0.5px;
+}
+
+.admin-camera-center-mark::after {
+    top: 50%;
+    left: 2px;
+    right: 2px;
+    height: 1px;
+    margin-top: -0.5px;
+}
+
+/* ── 上端ステータスバー ── */
+.admin-camera-top-bar {
     pointer-events: auto;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 44px;
     display: flex;
     align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
+    gap: 14px;
+    padding: 0 16px;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0.2));
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.admin-camera-hud-top {
-    justify-content: flex-end;
-}
-
-.admin-camera-hud-bottom {
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.55);
-    border-radius: 12px;
-    padding: 12px 16px;
-    margin: 0 auto;
-    max-width: min(520px, 96vw);
+.admin-camera-brand {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.85);
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .admin-camera-rec-indicator {
     background: #e53935;
     color: #fff;
     font-weight: 700;
-    font-size: 13px;
-    letter-spacing: 0.08em;
-    padding: 4px 10px;
-    border-radius: 6px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    padding: 3px 8px;
+    border-radius: 4px;
     animation: admin-camera-rec-blink 1s step-end infinite;
 }
 
@@ -49,69 +214,158 @@
     50% { opacity: 0.35; }
 }
 
+.admin-camera-zoom-readout {
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    min-width: 3.5em;
+    color: rgba(255, 255, 255, 0.9);
+}
+
 .admin-camera-mode-toggle {
+    margin-left: auto;
     display: flex;
-    gap: 4px;
-    background: rgba(0, 0, 0, 0.5);
-    border-radius: 8px;
-    padding: 4px;
+    gap: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .admin-camera-mode-btn {
     border: none;
     background: transparent;
-    color: #eee;
-    padding: 6px 14px;
-    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.65);
+    padding: 5px 12px;
+    border-radius: 4px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 .admin-camera-mode-btn.active {
     background: rgba(255, 255, 255, 0.2);
     color: #fff;
-    font-weight: 600;
 }
 
-.admin-camera-zoom-label {
+/* ── 左端: ズーム ── */
+.admin-camera-left-rail {
+    pointer-events: auto;
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
     display: flex;
+    flex-direction: column;
     align-items: center;
     gap: 8px;
-    color: #fff;
-    font-size: 13px;
-    flex: 1;
-    min-width: 180px;
+    padding: 10px 8px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    min-height: 160px;
 }
 
-.admin-camera-zoom-label input[type='range'] {
-    flex: 1;
-    min-width: 100px;
+.admin-camera-rail-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.admin-camera-zoom-slider {
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 28px;
+    height: 120px;
+    margin: 0;
+    accent-color: #fff;
+    cursor: pointer;
+}
+
+.admin-camera-rail-hint {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1;
+}
+
+/* ── 右端: シャッター ── */
+.admin-camera-right-rail {
+    pointer-events: auto;
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
 }
 
 .admin-camera-shutter-btn {
-    border: 2px solid #fff;
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-    padding: 8px 16px;
-    border-radius: 8px;
+    width: 68px;
+    height: 68px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.95);
+    background: rgba(0, 0, 0, 0.35);
+    padding: 5px;
     cursor: pointer;
-    font-weight: 600;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s ease, border-color 0.15s ease;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
 }
 
 .admin-camera-shutter-btn:hover {
-    background: rgba(255, 255, 255, 0.22);
+    transform: scale(1.04);
+    border-color: #fff;
 }
 
-.admin-camera-hint {
-    pointer-events: none;
-    text-align: center;
+.admin-camera-shutter-btn:active {
+    transform: scale(0.96);
+}
+
+.admin-camera-shutter-inner {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: #fff;
+    transition: background 0.15s ease, border-radius 0.15s ease;
+}
+
+.admin-camera-shutter-btn.is-recording .admin-camera-shutter-inner {
+    background: #e53935;
+    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+}
+
+.admin-camera-shutter-btn.is-video-mode:not(.is-recording) .admin-camera-shutter-inner {
+    background: #e53935;
+}
+
+.admin-camera-shutter-label {
+    font-size: 11px;
     color: rgba(255, 255, 255, 0.75);
-    font-size: 12px;
-    margin: 0;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    text-align: center;
+    max-width: 72px;
+    line-height: 1.3;
 }
 
+/* ── 下端ヒント ── */
+.admin-camera-footer-hint {
+    pointer-events: none;
+    position: absolute;
+    bottom: 8px;
+    left: 72px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    letter-spacing: 0.02em;
+}
+
+/* ── シャッターフラッシュ ── */
 .admin-camera-flash {
     position: fixed;
     inset: 0;

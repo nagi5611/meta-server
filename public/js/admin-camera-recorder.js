@@ -62,6 +62,7 @@ export class AdminCameraRecorder {
         this._photoBtn = document.getElementById('admin-camera-mode-photo');
         this._videoBtn = document.getElementById('admin-camera-mode-video');
         this._shutterBtn = document.getElementById('admin-camera-shutter');
+        this._shutterLabel = document.getElementById('admin-camera-shutter-label');
         this._zoomSlider = document.getElementById('admin-camera-zoom');
         this._boundEnter = (e) => this.onEnterKey(e);
 
@@ -79,6 +80,7 @@ export class AdminCameraRecorder {
         this._shutterBtn?.addEventListener('click', () => {
             void this.capture();
         });
+        this.setMode('photo');
 
         document.addEventListener('keydown', this._boundEnter);
     }
@@ -91,8 +93,17 @@ export class AdminCameraRecorder {
         this.mode = mode === 'video' ? 'video' : 'photo';
         this._photoBtn?.classList.toggle('active', this.mode === 'photo');
         this._videoBtn?.classList.toggle('active', this.mode === 'video');
-        if (this._shutterBtn) {
-            this._shutterBtn.textContent = this.mode === 'video' ? '録画 (Enter)' : '撮影 (Enter)';
+        this._shutterBtn?.classList.toggle('is-video-mode', this.mode === 'video');
+        this._shutterBtn?.classList.remove('is-recording');
+        this._updateShutterLabel();
+    }
+
+    _updateShutterLabel() {
+        if (!this._shutterLabel) return;
+        if (this.mode === 'video') {
+            this._shutterLabel.textContent = this.isRecording ? '停止 · Enter' : '録画 · Enter';
+        } else {
+            this._shutterLabel.textContent = '撮影 · Enter';
         }
     }
 
@@ -207,7 +218,8 @@ export class AdminCameraRecorder {
         this.mediaRecorder.start(200);
         this.isRecording = true;
         if (this.recIndicator) this.recIndicator.hidden = false;
-        if (this._shutterBtn) this._shutterBtn.textContent = '停止 (Enter)';
+        this._shutterBtn?.classList.add('is-recording');
+        this._updateShutterLabel();
         void this.playShutterFlash();
     }
 
@@ -216,7 +228,8 @@ export class AdminCameraRecorder {
         if (!this.isRecording || !this.mediaRecorder) return;
         this.isRecording = false;
         if (this.recIndicator) this.recIndicator.hidden = true;
-        if (this._shutterBtn) this._shutterBtn.textContent = '録画 (Enter)';
+        this._shutterBtn?.classList.remove('is-recording');
+        this._updateShutterLabel();
         try {
             this.mediaRecorder.stop();
         } catch (err) {

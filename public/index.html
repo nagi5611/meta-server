@@ -36,6 +36,9 @@
         const isAdminPath = p === '/admin' || p === '/admin/' || p === '/admin/camera' || p === '/admin/camera/';
         if (isAdminPath) {
             // /admin, /admin/camera: Basic認証でページ取得済み。トークン取得は main.js で実施
+            if (p === '/admin/camera' || p === '/admin/camera/') {
+                document.documentElement.dataset.adminCameraMode = 'true';
+            }
         } else {
             if (username && username.trim().toLowerCase() === 'admin') {
                 window.location.href = withSpawn('/admin');
@@ -362,25 +365,47 @@
         </div>
     </div>
 
-    <!-- 管理者カメラログイン専用 HUD（他ユーザーには見えないローカル UI） -->
+    <!-- 管理者カメラログイン専用 HUD（ビューファインダー＋端配置コントロール） -->
     <div id="admin-camera-hud" class="admin-camera-hud" style="display: none;" aria-hidden="true">
-        <div class="admin-camera-hud-top">
-            <span id="admin-camera-rec-indicator" class="admin-camera-rec-indicator" hidden>REC</span>
-            <div class="admin-camera-mode-toggle" role="group" aria-label="撮影モード">
-                <button type="button" id="admin-camera-mode-photo" class="admin-camera-mode-btn active">写真</button>
-                <button type="button" id="admin-camera-mode-video" class="admin-camera-mode-btn">動画</button>
+        <div class="admin-camera-viewfinder" aria-hidden="true">
+            <div class="admin-camera-viewfinder-frame">
+                <span class="admin-camera-corner admin-camera-corner-tl"></span>
+                <span class="admin-camera-corner admin-camera-corner-tr"></span>
+                <span class="admin-camera-corner admin-camera-corner-bl"></span>
+                <span class="admin-camera-corner admin-camera-corner-br"></span>
+                <span class="admin-camera-center-mark"></span>
             </div>
         </div>
+
+        <header class="admin-camera-top-bar">
+            <span class="admin-camera-brand"><i class="bi bi-camera-video"></i> CAMERA</span>
+            <span id="admin-camera-rec-indicator" class="admin-camera-rec-indicator" hidden>REC</span>
+            <span id="admin-camera-zoom-value" class="admin-camera-zoom-readout">1.0×</span>
+            <div class="admin-camera-mode-toggle" role="group" aria-label="撮影モード">
+                <button type="button" id="admin-camera-mode-photo" class="admin-camera-mode-btn active" title="写真モード">写真</button>
+                <button type="button" id="admin-camera-mode-video" class="admin-camera-mode-btn" title="動画モード">動画</button>
+            </div>
+        </header>
+
+        <aside class="admin-camera-left-rail" aria-label="ズーム">
+            <span class="admin-camera-rail-label">ZOOM</span>
+            <input type="range" id="admin-camera-zoom" class="admin-camera-zoom-slider" min="0.5" max="10" step="0.1" value="1" orient="vertical" aria-valuemin="0.5" aria-valuemax="10">
+            <span class="admin-camera-rail-hint">0.5×</span>
+            <span class="admin-camera-rail-hint">10×</span>
+        </aside>
+
+        <aside class="admin-camera-right-rail" aria-label="シャッター">
+            <button type="button" id="admin-camera-shutter" class="admin-camera-shutter-btn" aria-label="撮影">
+                <span class="admin-camera-shutter-inner" aria-hidden="true"></span>
+            </button>
+            <span id="admin-camera-shutter-label" class="admin-camera-shutter-label">撮影 · Enter</span>
+        </aside>
+
+        <footer class="admin-camera-footer-hint">
+            WASD 移動 · Space 上 · Shift 下 · クリックで視点
+        </footer>
+
         <div id="admin-camera-flash" class="admin-camera-flash" hidden aria-hidden="true"></div>
-        <div class="admin-camera-hud-bottom">
-            <label class="admin-camera-zoom-label">
-                <span>ズーム</span>
-                <input type="range" id="admin-camera-zoom" min="0.5" max="10" step="0.1" value="1">
-                <span id="admin-camera-zoom-value">1.0×</span>
-            </label>
-            <button type="button" id="admin-camera-shutter" class="admin-camera-shutter-btn">撮影 (Enter)</button>
-        </div>
-        <p class="admin-camera-hint">WASD 移動 · Space 上 · Shift 下 · クリックで視点 · Enter 撮影</p>
     </div>
 
     <!-- 操作方法ヘルプ -->

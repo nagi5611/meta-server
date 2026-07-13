@@ -435,15 +435,23 @@ class MetaverseApp {
 
         await this._joinVoiceAndVideoIfReady();
 
-        // Initialize chat manager (モバイル時は初期でアイコンのみ表示)
-        this.chatManager = new ChatManager(
-            this.networkManager,
-            this.playerManager,
-            this.sceneManager,
-            { initialMinimized: this.isMobileMode }
-        );
-        this.chatManager.setCharacterController(this.characterController);
-        this.chatManager.setPlayerBlockedCheck((id) => this.playerBlockList.has(id));
+        if (!this.isAdminCameraMode) {
+            // Initialize chat manager (モバイル時は初期でアイコンのみ表示)
+            this.chatManager = new ChatManager(
+                this.networkManager,
+                this.playerManager,
+                this.sceneManager,
+                { initialMinimized: this.isMobileMode }
+            );
+            this.chatManager.setCharacterController(this.characterController);
+            this.chatManager.setPlayerBlockedCheck((id) => this.playerBlockList.has(id));
+        } else {
+            document.documentElement.dataset.adminCameraMode = 'true';
+            document.body.dataset.adminCameraMode = 'true';
+            const chatEl = document.getElementById('chat-container');
+            if (chatEl) chatEl.style.display = 'none';
+        }
+
         this.playerActionMenu = new PlayerActionMenu({
             blockList: this.playerBlockList,
             chatManager: this.chatManager,
@@ -659,8 +667,14 @@ class MetaverseApp {
 
         IdleControlHint.start(this);
 
+        if (this.isAdminCameraMode) {
+            IdleControlHint.stop?.();
+        }
+
         console.log('Metaverse Simple initialized!');
-        if (this.isMobileMode) {
+        if (this.isAdminCameraMode) {
+            console.log('Admin camera mode: WASD move, pointer lock look, Enter to capture');
+        } else if (this.isMobileMode) {
             console.log('Mobile mode: use virtual joysticks');
         } else {
             console.log('Click to lock pointer, then use WASD to move, Space to jump');
