@@ -900,6 +900,8 @@ class PlayerManager {
         const applied = player.userData.animationState || 'idle';
         if (applied === 'walk' || applied === 'dash') {
             this.ensureRemoteLocomotionActionActive(player, applied, actions);
+        } else if (applied === 'idle') {
+            this.ensureRemoteIdleActionActive(player, actions);
         }
     }
 
@@ -918,6 +920,8 @@ class PlayerManager {
         this.applyRemoteLocomotionActionTransition(player, target, actions);
         if (target === 'walk' || target === 'dash') {
             this.ensureRemoteLocomotionActionActive(player, target, actions);
+        } else if (target === 'idle') {
+            this.ensureRemoteIdleActionActive(player, actions);
         }
     }
 
@@ -1035,6 +1039,17 @@ class PlayerManager {
             return;
         }
 
+        if (newState === 'idle' && (currentState === 'walk' || currentState === 'dash')) {
+            if (cur) {
+                cur.fadeOut(duration);
+            }
+            next.reset();
+            next.play();
+            next.fadeIn(duration);
+            player.userData.animationState = 'idle';
+            return;
+        }
+
         if (cur) {
             cur.crossFadeTo(next, duration);
         } else {
@@ -1082,6 +1097,36 @@ class PlayerManager {
                 wasRunning: running
             });
         }
+    }
+
+    /**
+     * networkAnimState は idle だが walk/dash の weight が残って待機ループが止まる場合の補修
+     * @param {THREE.Object3D} player
+     * @param {*} actions avatarActions（idle / walk / dash / jump）
+     */
+    ensureRemoteIdleActionActive(player, actions) {
+        if (!actions?.idle) return;
+
+        const idle = actions.idle;
+        const w = idle.getEffectiveWeight();
+        const running = typeof idle.isRunning === 'function' ? idle.isRunning() : true;
+        const walkW = actions.walk?.getEffectiveWeight?.() ?? 0;
+        const dashW = actions.dash?.getEffectiveWeight?.() ?? 0;
+        if (w > 0.4 && running && walkW < 0.2 && dashW < 0.2) return;
+
+        const d = 0.12;
+        for (const key of ['walk', 'dash', 'jump']) {
+            const a = actions[key];
+            if (a) {
+                a.fadeOut(d);
+            }
+        }
+
+        idle.paused = false;
+        idle.enabled = true;
+        idle.play();
+        idle.fadeIn(d);
+        player.userData.animationState = 'idle';
     }
 
     /**
