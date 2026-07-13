@@ -697,7 +697,8 @@ class PlayerManager {
         placeholder.userData.playerId = playerId;
         placeholder.userData.username = displayName;
         placeholder.userData.isLoading = true;
-        placeholder.userData.networkAnimState = 'idle';
+        const validAnim = ['idle', 'walk', 'dash', 'jump'];
+        placeholder.userData.networkAnimState = validAnim.includes(animState) ? animState : 'idle';
         placeholder.userData.metaverseAvatarId = avatarId || null;
         
         // Add name tag to placeholder
@@ -735,7 +736,7 @@ class PlayerManager {
             remotePlayer.userData.playerId = playerId;
             remotePlayer.userData.username = displayName;
             remotePlayer.userData.isLoading = false;
-            remotePlayer.userData.networkAnimState = 'idle';
+            remotePlayer.userData.networkAnimState = placeholder.userData.networkAnimState || 'idle';
             remotePlayer.userData.metaverseAvatarId = avatarId || null;
             remotePlayer.userData.networkVisible = placeholder.userData.networkVisible !== false;
             remotePlayer.userData.distanceVisible = placeholder.userData.distanceVisible !== false;
@@ -755,7 +756,10 @@ class PlayerManager {
             this.scene.add(remotePlayer);
             this.remotePlayers.set(playerId, remotePlayer);
 
-            this.applyRemoteAnimationStateFromNetwork(remotePlayer, animState);
+            this.applyRemoteAnimationStateFromNetwork(
+                remotePlayer,
+                remotePlayer.userData.networkAnimState || animState
+            );
             
             // Dispose placeholder
             placeholder.traverse((child) => {
@@ -887,11 +891,11 @@ class PlayerManager {
      * @param {string} animStateRaw
      */
     applyRemoteAnimationStateFromNetwork(player, animStateRaw) {
-        const actions = player.userData.avatarActions;
-        if (!actions) return;
         const valid = ['idle', 'walk', 'dash', 'jump'];
         const s = valid.includes(animStateRaw) ? animStateRaw : 'idle';
         player.userData.networkAnimState = s;
+        const actions = player.userData.avatarActions;
+        if (!actions) return;
         this.applyRemoteLocomotionActionTransition(player, s, actions);
         const applied = player.userData.animationState || 'idle';
         if (applied === 'walk' || applied === 'dash') {
@@ -1138,6 +1142,44 @@ class PlayerManager {
         return v != null ? String(v) : null;
     }
 
+    /**
+     * サーバー同期の avatarId がローカル表示と異なるとき GLB を差し替える（読み込み中は状態のみ保持）
+     * @param {string} playerId
+     * @param {string|null} avatarId
+     * @param {string} [animState]
+     */
+    async syncRemotePlayerAvatarFromNetwork(playerId, avatarId, animState = 'idle') {
+        const player = this.remotePlayers.get(playerId);
+        if (!player) return;
+
+        const nextId = avatarId ? String(avatarId) : null;
+        if (nextId) {
+            player.userData.metaverseAvatarId = nextId;
+        }
+        this.applyRemoteAnimationStateFromNetwork(player, animState);
+
+        if (player.userData.isLoading) return;
+
+        const curId = this.getRemotePlayerAvatarId(playerId);
+        if (!nextId || nextId === curId) return;
+
+        const pos = { x: player.position.x, y: player.position.y, z: player.position.z };
+        const username = player.userData.username;
+        const quat = player.quaternion.clone();
+        const netVis = player.userData.networkVisible;
+        const distVis = player.userData.distanceVisible;
+        const anim = player.userData.networkAnimState || animState || 'idle';
+
+        this.removeRemotePlayer(playerId);
+        await this.createRemotePlayer(playerId, pos, username, anim, nextId);
+        const reloaded = this.remotePlayers.get(playerId);
+        if (!reloaded) return;
+        reloaded.quaternion.copy(quat);
+        reloaded.userData.networkVisible = netVis;
+        reloaded.userData.distanceVisible = distVis;
+        reloaded.visible = netVis !== false && distVis !== false;
+    }
+
     removeRemotePlayer(playerId) {
         const player = this.remotePlayers.get(playerId);
         if (!player) return;
@@ -1200,7 +1242,7 @@ class PlayerManager {
     }
 
     getPlayerCount() {
-        return this.remotePlayers.size + 1; // +1 for local player
+        return this.remotePlayers.size + (this.localPlayer ? 1 : 0);
     }
 
     /**

@@ -163,7 +163,14 @@ class NetworkManager {
     _queueRemotePlayerCreate(player) {
         if (!player?.id || player.id === this.myPlayerId) return;
         if (player.world !== this.currentWorld) return;
-        if (this._pendingRemotePlayerCreates.some((p) => p.id === player.id)) return;
+        const ix = this._pendingRemotePlayerCreates.findIndex((p) => p.id === player.id);
+        if (ix >= 0) {
+            this._pendingRemotePlayerCreates[ix] = {
+                ...this._pendingRemotePlayerCreates[ix],
+                ...player,
+            };
+            return;
+        }
         this._pendingRemotePlayerCreates.push(player);
     }
 
@@ -181,12 +188,21 @@ class NetworkManager {
         }
 
         const name = player.displayName || player.username;
+        const animState = player.animState || 'idle';
+        const avatarId = player.avatarId || null;
         if (!this.playerManager.hasRemotePlayer(player.id)) {
             await this.playerManager.createRemotePlayer(
                 player.id,
                 player.position,
                 name,
-                player.animState || 'idle'
+                animState,
+                avatarId
+            );
+        } else {
+            await this.playerManager.syncRemotePlayerAvatarFromNetwork(
+                player.id,
+                avatarId,
+                animState
             );
         }
         this._syncRemotePlayerVisible(player);
@@ -388,10 +404,21 @@ class NetworkManager {
         });
 
         // Handle player username updates
-        this.socket.on('player-username-updated', (data) => {
+        this.socket.on('player-username-updated', async (data) => {
             const name = data.displayName || data.username;
             console.log(`Player ${data.id} username updated to: ${name}`);
             this.playerManager.updatePlayerUsername(data.id, name);
+            if (!data?.id) return;
+            const snap = this.lastPlayersSnapshot?.find((p) => p.id === data.id);
+            try {
+                await this.playerManager.syncRemotePlayerAvatarFromNetwork(
+                    data.id,
+                    data.avatarId || snap?.avatarId || null,
+                    snap?.animState || 'idle'
+                );
+            } catch (error) {
+                console.error(`Failed to sync avatar for ${data.id}:`, error);
+            }
         });
 
         // admin 名でのログイン拒否時（管理者以外）→ エラー表示してログインへ
@@ -443,12 +470,18 @@ class NetworkManager {
                             // Use quaternion if available, otherwise use rotation
                             const rotation = player.quaternion || player.rotation;
                             const name = player.displayName || player.username;
+                            const animState = player.animState || 'idle';
+                            await this.playerManager.syncRemotePlayerAvatarFromNetwork(
+                                player.id,
+                                player.avatarId || null,
+                                animState
+                            );
                             this.playerManager.updateRemotePlayer(
                                 player.id,
                                 player.position,
                                 rotation,
                                 name,
-                                player.animState || 'idle'
+                                animState
                             );
                         }
                         this._syncRemotePlayerVisible(player);
