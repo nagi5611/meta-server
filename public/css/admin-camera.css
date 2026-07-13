@@ -68,8 +68,13 @@ body[data-admin-camera-mode='true'] #player-list-container {
     max-height: 120px;
 }
 
+html[data-admin-camera-mode='true'] #canvas,
 body[data-admin-camera-mode='true'] #canvas {
-    cursor: crosshair;
+    cursor: grab;
+}
+
+body.admin-camera-dragging #canvas {
+    cursor: grabbing;
 }
 
 /* ── HUD ルート ── */

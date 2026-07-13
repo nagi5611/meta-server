@@ -673,7 +673,7 @@ class MetaverseApp {
 
         console.log('Metaverse Simple initialized!');
         if (this.isAdminCameraMode) {
-            console.log('Admin camera mode: WASD move, pointer lock look, Enter to capture');
+            console.log('Admin camera mode: WASD move, drag look, right-drag roll, Enter to capture');
         } else if (this.isMobileMode) {
             console.log('Mobile mode: use virtual joysticks');
         } else {

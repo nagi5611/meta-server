@@ -21,11 +21,18 @@ function clampYawViewDeltaPerEventRad(deltaRad) {
  * @param {number} deltaRad
  * @returns {number}
  */
-function clampPitchViewDeltaPerEventRad(deltaRad) {
+const MAX_ROLL_VIEW_DELTA_PER_EVENT_RAD = (12 * Math.PI) / 180;
+const MAX_ROLL_RAD = (60 * Math.PI) / 180;
+
+/**
+ * @param {number} deltaRad
+ * @returns {number}
+ */
+function clampRollViewDeltaPerEventRad(deltaRad) {
     return THREE.MathUtils.clamp(
         deltaRad,
-        -MAX_PITCH_VIEW_DELTA_PER_EVENT_RAD,
-        MAX_PITCH_VIEW_DELTA_PER_EVENT_RAD
+        -MAX_ROLL_VIEW_DELTA_PER_EVENT_RAD,
+        MAX_ROLL_VIEW_DELTA_PER_EVENT_RAD
     );
 }
 
@@ -52,8 +59,14 @@ export class AdminCameraController {
 
         this.yaw = 0;
         this.pitch = 0;
+        this.roll = 0;
         this.mouseSensitivity = 0.002;
-        this.isPointerLocked = false;
+        /** @type {'look'|'roll'|null} */
+        this._dragMode = null;
+        /** @type {number|null} */
+        this._activePointerId = null;
+        this._lastPointerX = 0;
+        this._lastPointerY = 0;
 
         this._forward = new THREE.Vector3();
         this._right = new THREE.Vector3();
@@ -69,29 +82,22 @@ export class AdminCameraController {
     /** カメラ姿勢からヨー・ピッチを復元 */
     _syncAnglesFromCamera() {
         this._eulerScratch.setFromQuaternion(this.camera.quaternion, 'YXZ');
-        this.yaw = this._eulerScratch.y;
         this.pitch = this._eulerScratch.x;
+        this.yaw = this._eulerScratch.y;
+        this.roll = this._eulerScratch.z;
     }
 
     setupControls() {
         document.addEventListener('keydown', (e) => this.onKeyDown(e));
         document.addEventListener('keyup', (e) => this.onKeyUp(e));
-        document.addEventListener('mousemove', (e) => this.onMouseMove(e));
-        document.addEventListener('pointerlockchange', () => {
-            this.isPointerLocked = document.pointerLockElement != null;
-        });
+        document.addEventListener('pointermove', (e) => this.onPointerMove(e));
+        document.addEventListener('pointerup', (e) => this.onPointerUp(e));
+        document.addEventListener('pointercancel', (e) => this.onPointerUp(e));
 
         const canvas = document.getElementById('canvas');
         if (canvas) {
-            canvas.addEventListener('click', () => {
-                if (this.shouldBlockDesktopInput()) return;
-                if (!this.isPointerLocked) {
-                    requestAnimationFrame(() => {
-                        if (this.shouldBlockDesktopInput() || document.pointerLockElement) return;
-                        document.body.requestPointerLock().catch(() => {});
-                    });
-                }
-            });
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
         }
     }
 
@@ -146,17 +152,93 @@ export class AdminCameraController {
         }
     }
 
-    onMouseMove(event) {
-        if (this.shouldBlockDesktopInput()) return;
-        if (!this.isPointerLocked) return;
+    /**
+     * @param {PointerEvent} event
+     */
+    onPointerDown(event) {
+        if (this.shouldBlockDesktopInput() || this.isInputActive()) return;
+        if (event.button === 0) {
+            this._dragMode = 'look';
+        } else if (event.button === 2) {
+            this._dragMode = 'roll';
+        } else {
+            return;
+        }
 
-        let dYaw = -event.movementX * this.mouseSensitivity;
-        let dPitch = -event.movementY * this.mouseSensitivity;
-        dYaw = clampYawViewDeltaPerEventRad(dYaw);
-        dPitch = clampPitchViewDeltaPerEventRad(dPitch);
-        this.yaw += dYaw;
-        this.pitch += dPitch;
-        this.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.pitch));
+        if (document.pointerLockElement) {
+            document.exitPointerLock();
+        }
+
+        this._activePointerId = event.pointerId;
+        this._lastPointerX = event.clientX;
+        this._lastPointerY = event.clientY;
+        event.preventDefault();
+
+        const canvas = document.getElementById('canvas');
+        if (canvas?.setPointerCapture) {
+            try {
+                canvas.setPointerCapture(event.pointerId);
+            } catch {
+                /* ignore */
+            }
+        }
+        document.body.classList.add('admin-camera-dragging');
+    }
+
+    /**
+     * @param {PointerEvent} event
+     */
+    onPointerMove(event) {
+        if (this._dragMode == null || this._activePointerId !== event.pointerId) return;
+        if (this.shouldBlockDesktopInput()) return;
+
+        const dx = event.clientX - this._lastPointerX;
+        const dy = event.clientY - this._lastPointerY;
+        this._lastPointerX = event.clientX;
+        this._lastPointerY = event.clientY;
+
+        if (this._dragMode === 'look') {
+            let dYaw = -dx * this.mouseSensitivity;
+            let dPitch = -dy * this.mouseSensitivity;
+            dYaw = clampYawViewDeltaPerEventRad(dYaw);
+            dPitch = clampPitchViewDeltaPerEventRad(dPitch);
+            this.yaw += dYaw;
+            this.pitch += dPitch;
+            this.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.pitch));
+        } else if (this._dragMode === 'roll') {
+            let dRoll = -dx * this.mouseSensitivity;
+            dRoll = clampRollViewDeltaPerEventRad(dRoll);
+            this.roll += dRoll;
+            this.roll = THREE.MathUtils.clamp(this.roll, -MAX_ROLL_RAD, MAX_ROLL_RAD);
+        }
+
+        this._applyOrientation();
+    }
+
+    /**
+     * @param {PointerEvent} event
+     */
+    onPointerUp(event) {
+        if (this._activePointerId !== event.pointerId) return;
+
+        this._dragMode = null;
+        this._activePointerId = null;
+        document.body.classList.remove('admin-camera-dragging');
+
+        const canvas = document.getElementById('canvas');
+        if (canvas?.releasePointerCapture) {
+            try {
+                canvas.releasePointerCapture(event.pointerId);
+            } catch {
+                /* ignore */
+            }
+        }
+    }
+
+    /** ヨー・ピッチ・ロールをカメラへ反映 */
+    _applyOrientation() {
+        this._eulerScratch.set(this.pitch, this.yaw, this.roll, 'YXZ');
+        this.camera.quaternion.setFromEuler(this._eulerScratch);
     }
 
     /**
@@ -183,8 +265,7 @@ export class AdminCameraController {
      * @param {number} deltaTime
      */
     update(deltaTime) {
-        this._eulerScratch.set(this.pitch, this.yaw, 0);
-        this.camera.quaternion.setFromEuler(this._eulerScratch);
+        this._applyOrientation();
 
         this._velocity.set(0, 0, 0);
         this.camera.getWorldDirection(this._forward);
