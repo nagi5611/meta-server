@@ -291,6 +291,17 @@
                 ? window.metaverseSpawnPending.appendSpawnQuery('/index.html') + (window.location.hash || '')
                 : '/index.html' + window.location.search + window.location.hash;
 
+            const waitForLoginEntry = async (timeoutMs = 15000) => {
+                if (window.metaverseLoginEntry?.run) return true;
+                const start = Date.now();
+                while (!window.metaverseLoginEntry?.run) {
+                    if (Date.now() - start > timeoutMs) return false;
+                    await new Promise((resolve) => setTimeout(resolve, 32));
+                }
+                return true;
+            };
+            await waitForLoginEntry();
+
             const runEntry = window.metaverseLoginEntry?.run;
             if (!runEntry) {
                 try {
@@ -360,39 +371,27 @@
     </script>
     <script type="module">
         import { mountLoginAvatarPicker } from '/js/login-avatar-picker.js';
-        import { startLoginWorldPreload } from '/js/world-preload.js';
-        import { runLoginEntryTransition } from '/js/login-entry-transition.js';
+        import { initLoginPage } from '/js/login-page-init.js';
 
-        const preloadStart = () => startLoginWorldPreload();
-        window.metaverseWorldPreload = { start: preloadStart };
-        preloadStart();
-
-        window.metaverseLoginEntry = {
-            run: ({ displayName, authTask, redirectUrl }) =>
-                runLoginEntryTransition({
-                    displayName,
-                    theme: 'student',
-                    authTask,
-                    redirectUrl,
-                    preloadStart,
-                    onAuthFailed: (err) => {
-                        const msg =
-                            (err && typeof err.displayMessage === 'string' && err.displayMessage) ||
-                            (err instanceof Error && err.message) ||
-                            '通信エラーが発生しました';
-                        const errorMessage = document.getElementById('error-message');
-                        const loginBtn = document.getElementById('login-btn');
-                        if (errorMessage) {
-                            errorMessage.textContent = msg;
-                            errorMessage.style.display = 'block';
-                        }
-                        if (loginBtn) {
-                            loginBtn.textContent = 'ログイン';
-                            loginBtn.disabled = false;
-                        }
-                    },
-                }),
-        };
+        initLoginPage({
+            theme: 'student',
+            onAuthFailed: (err) => {
+                const msg =
+                    (err && typeof err.displayMessage === 'string' && err.displayMessage) ||
+                    (err instanceof Error && err.message) ||
+                    '通信エラーが発生しました';
+                const errorMessage = document.getElementById('error-message');
+                const loginBtn = document.getElementById('login-btn');
+                if (errorMessage) {
+                    errorMessage.textContent = msg;
+                    errorMessage.style.display = 'block';
+                }
+                if (loginBtn) {
+                    loginBtn.textContent = 'ログイン';
+                    loginBtn.disabled = false;
+                }
+            },
+        });
 
         const m = document.getElementById('login-avatar-mount');
         if (m) void mountLoginAvatarPicker(m);

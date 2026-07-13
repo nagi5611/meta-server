@@ -3,7 +3,7 @@
 import {
     isLoginPreloadFresh,
     recordLoginEntryClick,
-} from './world-preload.js';
+} from './login-preload-state.js';
 
 /** 認証フェーズの最短表示時間（ms） */
 export const AUTH_PHASE_MIN_MS = 5000;
@@ -23,6 +23,16 @@ const CF_ORANGE_RGB = '243, 128, 32';
  */
 function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * オーバーレイ追加直後にブラウザへ描画機会を与える
+ * @returns {Promise<void>}
+ */
+function waitForOverlayPaint() {
+    return new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
 }
 
 /**
@@ -455,13 +465,14 @@ export async function runLoginEntryTransition(options) {
     const overlay = createOverlay(theme);
     document.body.appendChild(overlay);
     document.body.style.overflow = 'hidden';
+    await waitForOverlayPaint();
 
-    const authStartedAt = Date.now();
     let resolvedDisplayName = displayName;
     const preloadPromise = typeof preloadStart === 'function' ? preloadStart() : Promise.resolve();
 
+    let authResult;
     try {
-        const authResult = await authTask();
+        [authResult] = await Promise.all([authTask(), delay(AUTH_PHASE_MIN_MS)]);
         if (typeof authResult === 'string' && authResult.trim()) {
             resolvedDisplayName = authResult.trim();
         } else if (
@@ -486,9 +497,6 @@ export async function runLoginEntryTransition(options) {
         window.location.href = redirectUrl;
         return true;
     }
-
-    const authElapsed = Date.now() - authStartedAt;
-    await delay(Math.max(0, AUTH_PHASE_MIN_MS - authElapsed));
 
     await switchToWelcomePhase(overlay, resolvedDisplayName);
     await delay(WELCOME_PHASE_MS);

@@ -282,11 +282,28 @@
         }
 
         /**
+         * 演出モジュールの準備完了を待つ
+         * @param {number} [timeoutMs]
+         * @returns {Promise<boolean>}
+         */
+        async function waitForLoginEntry(timeoutMs = 15000) {
+            if (window.metaverseLoginEntry?.run) return true;
+            const start = Date.now();
+            while (!window.metaverseLoginEntry?.run) {
+                if (Date.now() - start > timeoutMs) return false;
+                await new Promise((resolve) => setTimeout(resolve, 32));
+            }
+            return true;
+        }
+
+        /**
          * 表示名を保存してメタバースへ遷移する（認証演出付き）
          * @param {string} displayName
          * @param {() => Promise<void>} [authTask]
          */
         async function enterMetaverse(displayName, authTask) {
+            await waitForLoginEntry();
+
             if (!window.metaverseLoginEntry?.run) {
                 localStorage.setItem('username', displayName);
                 localStorage.removeItem('userRole');
@@ -387,41 +404,29 @@
     </script>
     <script type="module">
         import { mountLoginAvatarPicker } from '/js/login-avatar-picker.js';
-        import { startLoginWorldPreload } from '/js/world-preload.js';
-        import { runLoginEntryTransition } from '/js/login-entry-transition.js';
+        import { initLoginPage } from '/js/login-page-init.js';
 
-        const preloadStart = () => startLoginWorldPreload();
-        window.metaverseWorldPreload = { start: preloadStart };
-        preloadStart();
-
-        window.metaverseLoginEntry = {
-            run: ({ displayName, authTask, redirectUrl }) =>
-                runLoginEntryTransition({
-                    displayName,
-                    theme: 'guest',
-                    authTask,
-                    redirectUrl,
-                    preloadStart,
-                    onAuthFailed: (err) => {
-                        const msg =
-                            (err && typeof err.displayMessage === 'string' && err.displayMessage) ||
-                            (err instanceof Error && err.message) ||
-                            '通信エラーが発生しました';
-                        const errorMessage = document.getElementById('error-message');
-                        const usernameInput = document.getElementById('username');
-                        const loginBtn = document.getElementById('login-btn');
-                        if (errorMessage) {
-                            errorMessage.textContent = msg;
-                            errorMessage.style.display = 'block';
-                        }
-                        usernameInput?.focus();
-                        if (loginBtn) {
-                            loginBtn.textContent = '体験する';
-                            loginBtn.disabled = false;
-                        }
-                    },
-                }),
-        };
+        initLoginPage({
+            theme: 'guest',
+            onAuthFailed: (err) => {
+                const msg =
+                    (err && typeof err.displayMessage === 'string' && err.displayMessage) ||
+                    (err instanceof Error && err.message) ||
+                    '通信エラーが発生しました';
+                const errorMessage = document.getElementById('error-message');
+                const usernameInput = document.getElementById('username');
+                const loginBtn = document.getElementById('login-btn');
+                if (errorMessage) {
+                    errorMessage.textContent = msg;
+                    errorMessage.style.display = 'block';
+                }
+                usernameInput?.focus();
+                if (loginBtn) {
+                    loginBtn.textContent = '体験する';
+                    loginBtn.disabled = false;
+                }
+            },
+        });
 
         const m = document.getElementById('login-avatar-mount');
         if (m) void mountLoginAvatarPicker(m);
