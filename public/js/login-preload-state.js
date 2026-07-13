@@ -4,6 +4,10 @@
 export const LOGIN_PRELOAD_FRESH_MS = 60_000;
 
 const LOGIN_PRELOAD_STORAGE_KEY = 'metaverse_login_preload_v1';
+const PENDING_WELCOME_STORAGE_KEY = 'metaverse_pending_welcome_v1';
+
+/** メタバース入場時 Welcome 演出の表示時間（ms） */
+export const ENTRY_WELCOME_MS = 5000;
 
 /**
  * @returns {{ worldId?: string, completedAt?: number, entryClickAt?: number } | null}
@@ -76,6 +80,59 @@ export function isLoginPreloadFresh(expectedWorldId) {
 export function clearLoginPreloadState() {
     try {
         sessionStorage.removeItem(LOGIN_PRELOAD_STORAGE_KEY);
+    } catch {
+        /* ignore */
+    }
+}
+
+/**
+ * ログイン認証後にメタバース側で Welcome を出すためのフラグを保存
+ * @param {{ displayName: string, theme?: string }} payload
+ */
+export function setPendingEntryWelcome(payload) {
+    const displayName = String(payload?.displayName || '').trim();
+    if (!displayName) return;
+    try {
+        sessionStorage.setItem(
+            PENDING_WELCOME_STORAGE_KEY,
+            JSON.stringify({
+                displayName,
+                theme: payload?.theme || 'guest',
+                createdAt: Date.now(),
+            })
+        );
+    } catch {
+        /* ignore */
+    }
+}
+
+/**
+ * @returns {{ displayName: string, theme?: string, createdAt?: number } | null}
+ */
+export function peekPendingEntryWelcome() {
+    try {
+        const raw = sessionStorage.getItem(PENDING_WELCOME_STORAGE_KEY);
+        if (!raw) return null;
+        const j = JSON.parse(raw);
+        if (!j || typeof j !== 'object') return null;
+        const displayName = String(j.displayName || '').trim();
+        if (!displayName) return null;
+        return {
+            displayName,
+            theme: typeof j.theme === 'string' ? j.theme : 'guest',
+            createdAt: typeof j.createdAt === 'number' ? j.createdAt : undefined,
+        };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Welcome 演出済みフラグを破棄
+ */
+export function clearPendingEntryWelcome() {
+    try {
+        sessionStorage.removeItem(PENDING_WELCOME_STORAGE_KEY);
     } catch {
         /* ignore */
     }

@@ -34,7 +34,6 @@ export function initLoginPage(options) {
                 theme,
                 authTask,
                 redirectUrl,
-                preloadStart,
                 onAuthFailed,
             }),
     };

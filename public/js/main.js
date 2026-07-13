@@ -32,6 +32,8 @@ import { initAvatorScalableAnimations } from '../../addons/avator-scalable-anima
 import { initMatsuyamaFlightsSubsystem } from '../../addons/matsuyama-flights/client/init.js';
 import { t, applyMetaverseI18nToDocument } from './metaverse-i18n.js';
 import { loadClientConfigOnce } from './asset-resolve.js';
+import { runEntryWelcomeIfPending } from './metaverse-entry-welcome.js';
+import { peekPendingEntryWelcome } from './login-preload-state.js';
 import { startLoginWorldPreload, clearLoginPreloadState } from './world-preload.js';
 import { fetchAdminMetaverseEntry, isAdminMetaverseEntryPath } from './admin-metaverse-auth.js';
 import {
@@ -325,8 +327,14 @@ class MetaverseApp {
         registerMetaverseServiceWorker();
         applyMetaverseI18nToDocument();
 
-        // 操作方式未選択時は選択 UI を先に出し、裏でワールド取得などを並行実行
-        await ensureControlSchemeChosen(() => this._bootstrapCore());
+        // ログイン経由: Welcome（5秒）＋ワールド取得を並行 → 操作形式選択
+        // 直接入場: 従来どおり操作形式選択とワールド取得を並行
+        if (peekPendingEntryWelcome()) {
+            await runEntryWelcomeIfPending(() => this._bootstrapCore());
+            await ensureControlSchemeChosen();
+        } else {
+            await ensureControlSchemeChosen(() => this._bootstrapCore());
+        }
         applyMetaverseI18nToDocument();
 
         const spawnPlan = this._entrySpawnPlan;

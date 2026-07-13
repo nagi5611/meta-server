@@ -1,15 +1,12 @@
 // public/js/login-entry-transition.js — ログイン後の認証待機・Welcome 演出・入場前プリロード
 
 import {
-    isLoginPreloadFresh,
     recordLoginEntryClick,
+    setPendingEntryWelcome,
 } from './login-preload-state.js';
 
 /** 認証フェーズの最短表示時間（ms） */
 export const AUTH_PHASE_MIN_MS = 5000;
-
-/** Welcome 演出の表示時間（ms） */
-export const WELCOME_PHASE_MS = 4000;
 
 /** Cloudflare 風オレンジ（入場演出の共通アクセント） */
 const CF_ORANGE = '#f38020';
@@ -378,12 +375,6 @@ function createOverlay(_theme) {
                 <p class="met-entry-status met-entry-status-dots">認証中</p>
                 <p class="met-entry-status-sub">入場資格を確認しています</p>
             </div>
-            <div class="met-entry-phase met-entry-welcome" hidden>
-                <div class="met-entry-welcome-badge" aria-hidden="true">✓</div>
-                <p class="met-entry-welcome-label">Welcome!</p>
-                <p class="met-entry-welcome-name"></p>
-                <p class="met-entry-welcome-sub">メタバースに入ります</p>
-            </div>
         </div>
         <div class="met-entry-progress" aria-hidden="true">
             <div class="met-entry-progress-bar"></div>
@@ -418,34 +409,13 @@ async function playKeyUnlockAnimation(overlay) {
 }
 
 /**
- * Welcome フェーズへ切り替える
- * @param {HTMLElement} overlay
- * @param {string} displayName
- */
-async function switchToWelcomePhase(overlay, displayName) {
-    const authPhase = overlay.querySelector('.met-entry-auth');
-    const welcomePhase = overlay.querySelector('.met-entry-welcome');
-    const nameEl = overlay.querySelector('.met-entry-welcome-name');
-    if (!authPhase || !welcomePhase) return;
-
-    authPhase.classList.add('met-entry-phase-exit');
-    await delay(380);
-    authPhase.hidden = true;
-    authPhase.classList.remove('met-entry-phase-exit');
-    if (nameEl) nameEl.textContent = displayName;
-    welcomePhase.hidden = false;
-    welcomePhase.classList.add('met-entry-phase-enter');
-}
-
-/**
- * 認証 → 鍵開錠 → Welcome → 遷移
+ * 認証 → 鍵開錠 → メタバースへ遷移（Welcome はメタバース側で表示）
  * @param {{
  *   displayName: string,
  *   theme?: LoginEntryTheme,
  *   authTask: () => Promise<unknown>,
  *   onAuthFailed?: (err: unknown) => void,
  *   redirectUrl: string,
- *   preloadStart?: () => Promise<void>,
  * }} options
  * @returns {Promise<boolean>}
  */
@@ -456,7 +426,6 @@ export async function runLoginEntryTransition(options) {
         authTask,
         onAuthFailed,
         redirectUrl,
-        preloadStart,
     } = options;
 
     recordLoginEntryClick();
@@ -468,7 +437,6 @@ export async function runLoginEntryTransition(options) {
     await waitForOverlayPaint();
 
     let resolvedDisplayName = displayName;
-    const preloadPromise = typeof preloadStart === 'function' ? preloadStart() : Promise.resolve();
 
     let authResult;
     try {
@@ -490,17 +458,16 @@ export async function runLoginEntryTransition(options) {
     }
 
     await playKeyUnlockAnimation(overlay);
-    await preloadPromise.catch(() => {});
 
-    if (isLoginPreloadFresh()) {
-        teardownOverlay(overlay);
-        window.location.href = redirectUrl;
-        return true;
+    const status = overlay.querySelector('.met-entry-status');
+    const sub = overlay.querySelector('.met-entry-status-sub');
+    if (status) {
+        status.textContent = 'メタバースへ入場中';
+        status.classList.remove('met-entry-status-dots');
     }
+    if (sub) sub.textContent = 'ワールドを準備しています';
 
-    await switchToWelcomePhase(overlay, resolvedDisplayName);
-    await delay(WELCOME_PHASE_MS);
-
+    setPendingEntryWelcome({ displayName: resolvedDisplayName, theme });
     window.location.href = redirectUrl;
     return true;
 }
