@@ -21,6 +21,14 @@ function clampYawViewDeltaPerEventRad(deltaRad) {
  * @param {number} deltaRad
  * @returns {number}
  */
+function clampPitchViewDeltaPerEventRad(deltaRad) {
+    return THREE.MathUtils.clamp(
+        deltaRad,
+        -MAX_PITCH_VIEW_DELTA_PER_EVENT_RAD,
+        MAX_PITCH_VIEW_DELTA_PER_EVENT_RAD
+    );
+}
+
 const MAX_ROLL_VIEW_DELTA_PER_EVENT_RAD = (12 * Math.PI) / 180;
 const MAX_ROLL_RAD = (60 * Math.PI) / 180;
 
@@ -93,12 +101,36 @@ export class AdminCameraController {
         document.addEventListener('pointermove', (e) => this.onPointerMove(e));
         document.addEventListener('pointerup', (e) => this.onPointerUp(e));
         document.addEventListener('pointercancel', (e) => this.onPointerUp(e));
+        document.addEventListener('contextmenu', (e) => {
+            if (this._isCameraDragTarget(e.target)) e.preventDefault();
+        });
 
-        const canvas = document.getElementById('canvas');
-        if (canvas) {
-            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-            canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
-        }
+        // capture で受け、HUD／WebXR overlay 越しのビューファインダー操作にも対応
+        document.addEventListener('pointerdown', (e) => this.onPointerDown(e), true);
+    }
+
+    /**
+     * カメラ HUD の操作パネルか（ここではドラッグ視点を開始しない）
+     * @param {EventTarget|null} target
+     * @returns {boolean}
+     */
+    _isCameraHudChromeTarget(target) {
+        if (!(target instanceof Element)) return false;
+        return !!target.closest(
+            '.admin-camera-top-bar, .admin-camera-left-rail, .admin-camera-right-rail, #menu-bar, #info, #logout-btn'
+        );
+    }
+
+    /**
+     * 3D ビュー操作の対象か
+     * @param {EventTarget|null} target
+     * @returns {boolean}
+     */
+    _isCameraDragTarget(target) {
+        if (!(target instanceof Element)) return false;
+        if (this._isCameraHudChromeTarget(target)) return false;
+        if (target.id === 'canvas' || target.closest('#canvas')) return true;
+        return !!target.closest('.admin-camera-hud');
     }
 
     /**
@@ -157,6 +189,7 @@ export class AdminCameraController {
      */
     onPointerDown(event) {
         if (this.shouldBlockDesktopInput() || this.isInputActive()) return;
+        if (!this._isCameraDragTarget(event.target)) return;
         if (event.button === 0) {
             this._dragMode = 'look';
         } else if (event.button === 2) {
@@ -173,11 +206,12 @@ export class AdminCameraController {
         this._lastPointerX = event.clientX;
         this._lastPointerY = event.clientY;
         event.preventDefault();
+        event.stopPropagation();
 
-        const canvas = document.getElementById('canvas');
-        if (canvas?.setPointerCapture) {
+        const captureEl = document.getElementById('canvas') || document.body;
+        if (captureEl?.setPointerCapture) {
             try {
-                canvas.setPointerCapture(event.pointerId);
+                captureEl.setPointerCapture(event.pointerId);
             } catch {
                 /* ignore */
             }
@@ -225,10 +259,10 @@ export class AdminCameraController {
         this._activePointerId = null;
         document.body.classList.remove('admin-camera-dragging');
 
-        const canvas = document.getElementById('canvas');
-        if (canvas?.releasePointerCapture) {
+        const captureEl = document.getElementById('canvas') || document.body;
+        if (captureEl?.releasePointerCapture) {
             try {
-                canvas.releasePointerCapture(event.pointerId);
+                captureEl.releasePointerCapture(event.pointerId);
             } catch {
                 /* ignore */
             }

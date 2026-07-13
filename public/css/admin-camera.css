@@ -81,18 +81,33 @@ body.admin-camera-dragging #canvas {
 .admin-camera-hud {
     position: fixed;
     inset: 0;
-    pointer-events: none;
+    pointer-events: none !important;
     z-index: 8500;
     display: none;
     color: #fff;
     font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
+/* WebXR overlay の `.immersive-overlay-root * { pointer-events: auto }` より優先 */
+html[data-admin-camera-mode='true'] .admin-camera-hud .admin-camera-viewfinder,
+html[data-admin-camera-mode='true'] .admin-camera-hud .admin-camera-viewfinder-frame,
+html[data-admin-camera-mode='true'] .admin-camera-hud .admin-camera-viewfinder-frame *,
+html[data-admin-camera-mode='true'] .admin-camera-hud .admin-camera-footer-hint,
+html[data-admin-camera-mode='true'] .admin-camera-hud .admin-camera-flash {
+    pointer-events: none !important;
+}
+
+html[data-admin-camera-mode='true'] .admin-camera-hud .admin-camera-top-bar,
+html[data-admin-camera-mode='true'] .admin-camera-hud .admin-camera-left-rail,
+html[data-admin-camera-mode='true'] .admin-camera-hud .admin-camera-right-rail {
+    pointer-events: auto !important;
+}
+
 /* レターボックス（撮影枠外を暗く） */
 .admin-camera-viewfinder {
     position: absolute;
     inset: 0;
-    pointer-events: none;
+    pointer-events: none !important;
 }
 
 .admin-camera-viewfinder-frame {
