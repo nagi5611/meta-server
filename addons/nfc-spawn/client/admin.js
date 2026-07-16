@@ -1,4 +1,6 @@
 // addons/nfc-spawn/client/admin.js — 管理画面に NFCタグパネル（3Dワールド配置付き）
+import { adminFetch } from '/js/admin-api-fetch.js';
+
 const PANEL_ID = 'panel-addon-nfc-spawn';
 const NAV_DATA_PANEL = 'panel-addon-nfc-spawn';
 const API_BASE = '/admin/addons/nfc-spawn/spawns';
@@ -41,7 +43,7 @@ let loadedWorldId = null;
  * @param {RequestInit} [init]
  */
 async function apiFetch(path, init) {
-    const r = await fetch(path, { credentials: 'include', ...init });
+    const r = await adminFetch(path, { credentials: 'include', ...init });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
         const err = new Error(j.error || `HTTP ${r.status}`);

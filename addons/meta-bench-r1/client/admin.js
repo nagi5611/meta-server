@@ -1,4 +1,6 @@
 // addons/meta-bench-r1/client/admin.js — ベンチマーク管理パネル
+import { adminFetch } from '/js/admin-api-fetch.js';
+
 const PANEL_ID = 'panel-addon-meta-bench-r1';
 const NAV_DATA_PANEL = 'panel-addon-meta-bench-r1';
 const API = '/admin/addons/meta-bench-r1';
@@ -21,7 +23,7 @@ let benchPhaseDefs = [
  * @param {RequestInit} [init]
  */
 async function apiFetch(path, init) {
-    const r = await fetch(path, { credentials: 'include', ...init });
+    const r = await adminFetch(path, { credentials: 'include', ...init });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
         const err = new Error(j.error || j.failures?.join?.('\n') || `HTTP ${r.status}`);

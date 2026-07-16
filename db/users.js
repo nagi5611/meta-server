@@ -7,6 +7,19 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { STORAGE_PATHS, validateAndPrepareStoragePaths } from '../config/storage-paths.js';
 
+/**
+ * @param {unknown} password
+ */
+function assertPasswordPolicy(password) {
+    const check = validateUserPassword(password);
+    if (!check.ok) {
+        const err = new Error(check.error);
+        err.code = 'PASSWORD_POLICY';
+        err.minLength = check.minLength;
+        throw err;
+    }
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -77,6 +90,7 @@ export function verifyTeacher(username, password) {
 /** Register a new student. Returns { id, username, display_name } or throws */
 export function registerStudent(username, password, displayName) {
     if (!db) throw new Error('Database not initialized');
+    assertPasswordPolicy(password);
     const hash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
     const u = username.trim();
     const d = (displayName || u).trim();
@@ -88,6 +102,7 @@ export function registerStudent(username, password, displayName) {
 /** Register a new teacher. Returns { id, username, display_name } or throws */
 export function registerTeacher(username, password, displayName) {
     if (!db) throw new Error('Database not initialized');
+    assertPasswordPolicy(password);
     const hash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
     const u = username.trim();
     const d = (displayName || u).trim();
@@ -118,6 +133,7 @@ export function updateStudent(id, { username, displayName, password } = {}) {
     const u = username !== undefined ? String(username).trim() : row.username;
     const d = displayName !== undefined ? String(displayName).trim() : row.display_name;
     if (password !== undefined && password !== null && String(password).length > 0) {
+        assertPasswordPolicy(password);
         const hash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
         db.prepare('UPDATE students SET username = ?, display_name = ?, password_hash = ? WHERE id = ?').run(u, d, hash, id);
     } else {
@@ -134,6 +150,7 @@ export function updateTeacher(id, { username, displayName, password } = {}) {
     const u = username !== undefined ? String(username).trim() : row.username;
     const d = displayName !== undefined ? String(displayName).trim() : row.display_name;
     if (password !== undefined && password !== null && String(password).length > 0) {
+        assertPasswordPolicy(password);
         const hash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
         db.prepare('UPDATE teachers SET username = ?, display_name = ?, password_hash = ? WHERE id = ?').run(u, d, hash, id);
     } else {

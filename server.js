@@ -104,7 +104,9 @@ import {
     getAddonsRoot,
 } from './lib/plugin-bootstrap.js';
 import { getScalableAnimationSlotsForAdmin } from './lib/avator-scalable-bindings.js';
-import { setAddonEnabled, getAddonConfigEntries, setAddonConfigValue, deleteAddonConfigValue, getAddonEnabledMap, ensureWebxrVrOnUpgrade } from './db/addons-registry.js';
+import { setAddonEnabled, getAddonConfigEntries, setAddonConfigValue, deleteAddonConfigValue, getAddonEnabledMap, getAddonConfigMap, ensureWebxrVrOnUpgrade } from './db/addons-registry.js';
+import { createAdminCsrfBundle } from './lib/admin-csrf.js';
+import { validateUserPassword } from './lib/password-policy.js';
 import { registerAdminDatabaseExplorerRoutes } from './lib/admin-database-explorer.js';
 import { setAircraftServerDeps } from './lib/aircraft-server/deps-registry.js';
 import { validateWorldsAircraft, validateWorldsAircraftPhysics } from './lib/aircraft-server/validate-worlds.js';
@@ -924,6 +926,29 @@ function assertProductionSecurityBeforeListen() {
 }
 
 /**
+ * アドオン読み込み後・listen 前の本番セキュリティ検証（HOST / admin-reboot PIN）
+ * @param {string} host
+ */
+function assertProductionSecurityAfterAddons(host) {
+    if (!isNodeProduction) return;
+    if (host === '0.0.0.0' && !isTruthyEnv(process.env.ALLOW_LAN_BIND)) {
+        throw new Error(
+            '[security] NODE_ENV=production with HOST=0.0.0.0 requires ALLOW_LAN_BIND=1 (explicit LAN exposure).'
+        );
+    }
+    const enabledMap = getAddonEnabledMap();
+    if (enabledMap['admin-reboot']) {
+        const cfg = getAddonConfigMap('admin-reboot');
+        const pin = String(cfg.pin ?? process.env.ADDON_ADMIN_REBOOT_PIN ?? '').trim();
+        if (pin.length === 0) {
+            throw new Error(
+                '[security] NODE_ENV=production with admin-reboot enabled requires ADDON_ADMIN_REBOOT_PIN or addon config pin.'
+            );
+        }
+    }
+}
+
+/**
  * Socket.io 用 CORS 設定（credentials 利用のため本番は明示 Origin リスト必須）
  * @returns {{ origin: Function, credentials: boolean, methods: string[] }}
  */
@@ -967,6 +992,15 @@ const authRegisterIpLimiter = rateLimit({
 const chartScoreIpLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+/** /admin Basic 認証の IP レート制限（失敗試行のブルートフォース対策） */
+const adminAuthIpLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 40,
+    skipSuccessfulRequests: true,
     standardHeaders: true,
     legacyHeaders: false,
 });
@@ -1060,9 +1094,21 @@ function rejectNonTlsHttpLayer(req, res, next) {
 
 app.use(cookieParser());
 app.use(rejectNonTlsHttpLayer);
-// Helmet CSP は Vite 出力・インライン方針と衝突するため無効。nonce やハッシュで script-src を組む段階的 CSP は別タスク。
+// 段階的 CSP: 全体は互換維持（インライン script 許可）、管理 HTML は別ミドルウェアで厳格化
 app.use(helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
+            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+            fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+            imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+            connectSrc: ["'self'", 'wss:', 'ws:', 'https:'],
+            objectSrc: ["'none'"],
+            baseUri: ["'self'"],
+            frameAncestors: ["'self'"],
+        },
+    },
     crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 app.use(express.json({ limit: '1mb' }));
@@ -1347,11 +1393,23 @@ const ADMIN_PASSWORD = envAdminPassword.length > 0
     ? envAdminPassword
     : (() => {
         const generated = crypto.randomUUID();
-        console.log('[security] ADMIN_PASSWORD unset; generated one-time Basic auth password (set ADMIN_PASSWORD in .env to keep it across restarts).');
-        console.log(`[security] Admin user: ${ADMIN_USERNAME}`);
-        console.log(`[security] Admin password: ${generated}`);
+        const credPath = path.join(STORAGE_PATHS.DB_DIR, '.admin-generated-password');
+        try {
+            fs.mkdirSync(STORAGE_PATHS.DB_DIR, { recursive: true });
+            fs.writeFileSync(credPath, `${ADMIN_USERNAME}:${generated}\n`, { mode: 0o600 });
+            console.log(
+                `[security] ADMIN_PASSWORD unset; one-time credentials written to ${credPath} (set ADMIN_PASSWORD in .env to persist across restarts).`
+            );
+            console.log(`[security] Admin user: ${ADMIN_USERNAME}`);
+        } catch (e) {
+            console.error('[security] Failed to write generated admin password file:', e);
+            throw new Error('[security] ADMIN_PASSWORD unset and could not write credential file.');
+        }
         return generated;
     })();
+
+const adminCsrfBundle = createAdminCsrfBundle(ADMIN_PASSWORD);
+const { adminCsrfProtection, registerAdminCsrfRoute, issueToken: issueAdminCsrfToken } = adminCsrfBundle;
 // 通信帯域上限 (Mbps)。1 Mbps ≈ 125,000 bytes/s
 const BANDWIDTH_LIMIT_MBPS = parseFloat(process.env.BANDWIDTH_LIMIT_MBPS || '100');
 const BANDWIDTH_LIMIT_BPS = Math.floor(BANDWIDTH_LIMIT_MBPS * 125000);
@@ -1396,6 +1454,44 @@ function basicAuth(req, res, next) {
 
     res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"');
     return res.status(401).send('認証に失敗しました');
+}
+
+/**
+ * 管理画面向けの厳格 CSP（admin.html は外部 script のみ）
+ * @param {import('express').Request} _req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+function adminCspMiddleware(_req, res, next) {
+    res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' wss: ws: https:; font-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    );
+    next();
+}
+
+/**
+ * @param {import('express').Request} req
+ * @returns {string}
+ */
+function getClientIpFromRequest(req) {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (typeof forwarded === 'string' && forwarded.trim()) {
+        return forwarded.split(',')[0].trim();
+    }
+    return String(req.ip || req.socket?.remoteAddress || '');
+}
+
+/**
+ * @param {import('socket.io').Socket} socket
+ * @returns {string}
+ */
+function getClientIpFromSocket(socket) {
+    const forwarded = socket.handshake.headers['x-forwarded-for'];
+    if (typeof forwarded === 'string' && forwarded.trim()) {
+        return forwarded.split(',')[0].trim();
+    }
+    return String(socket.handshake.address || '');
 }
 
 const SOCKET_AUTH_TOKEN_IN_JSON = isTruthyEnv(process.env.SOCKET_AUTH_TOKEN_IN_JSON);
@@ -1526,9 +1622,18 @@ function getSocketAuthTokenFromHandshake(socket) {
 }
 
 // ============================
+// Admin API protection (must run before addon route registration — SEC-001)
+// ============================
+app.use('/admin', adminAuthIpLimiter);
+app.use('/admin', basicAuth);
+app.use('/admin', adminCsrfProtection);
+registerAdminCsrfRoute(app);
+
+// ============================
 // Addons (plugin.json + hooks)
 // ============================
 await loadAddonsAtStartup({ app, io });
+assertProductionSecurityAfterAddons(HOST);
 registerAddonShutdownHooks(httpServer);
 
 // ============================
@@ -1805,6 +1910,12 @@ if (HOST_MONITOR_UNITS.length > 0) {
     const hostMonitorHtmlPath = path.join(__dirname, 'public', 'host-monitor.html');
     const hostMonitorRouter = express.Router();
     hostMonitorRouter.use(basicAuth);
+    hostMonitorRouter.use(adminCsrfProtection);
+
+    hostMonitorRouter.get('/api/csrf-token', (_req, res) => {
+        const issued = issueAdminCsrfToken();
+        res.json({ ok: true, token: issued.token, expiresAt: issued.expiresAt });
+    });
 
     hostMonitorRouter.get('/api/status', async (_req, res) => {
         try {
@@ -1850,7 +1961,7 @@ if (HOST_MONITOR_UNITS.length > 0) {
 }
 
 // Serve admin.html with basic auth（本番 dist にコピー済みなら dist を優先）
-app.get('/admin.html', basicAuth, (req, res) => {
+app.get('/admin.html', adminCspMiddleware, basicAuth, (req, res) => {
     const distAdmin = path.join(__dirname, 'dist', 'admin.html');
     const adminPath = isProductionBuild && fs.existsSync(distAdmin)
         ? distAdmin
@@ -1867,13 +1978,11 @@ app.get('/setting.html', basicAuth, (req, res) => {
 const sendAdminMetaverseIndex = (req, res) => {
     res.sendFile(path.join(STATIC_DIR, 'index.html'));
 };
-app.get('/admin', basicAuth, sendAdminMetaverseIndex);
-app.get('/admin/', basicAuth, sendAdminMetaverseIndex);
-app.get('/admin/camera', basicAuth, sendAdminMetaverseIndex);
-app.get('/admin/camera/', basicAuth, sendAdminMetaverseIndex);
+app.get('/admin', adminCspMiddleware, basicAuth, sendAdminMetaverseIndex);
+app.get('/admin/', adminCspMiddleware, basicAuth, sendAdminMetaverseIndex);
+app.get('/admin/camera', adminCspMiddleware, basicAuth, sendAdminMetaverseIndex);
+app.get('/admin/camera/', adminCspMiddleware, basicAuth, sendAdminMetaverseIndex);
 
-// Apply basic auth to admin API routes
-app.use('/admin', basicAuth);
 /** 管理画面（Basic 済み）から plane プレハブを取得する。/plane は S3 本番で Socket Cookie 必須のため別経路 */
 app.use('/admin/plane-asset', express.static(PLANE_DIR));
 
@@ -2024,25 +2133,22 @@ app.use('/css', express.static(path.join(__dirname, 'public', 'css')));
 // 静的ファイル（本番時は dist、開発時は public）
 app.use(express.static(STATIC_DIR));
 
-// Apply basic auth to admin routes
-app.use('/admin.html', basicAuth);
-app.use('/admin', basicAuth);
-
 // ============================
 // Admin: Metaverse entry token (Basic auth verified admins)
 // ============================
-/** @type {Map<string, { expiry: number, mode: 'default' | 'camera' }>} */
+/** @type {Map<string, { expiry: number, mode: 'default' | 'camera', username?: string, clientIp: string }>} */
 const adminTokens = new Map();
 const ADMIN_TOKEN_TTL_MS = 60 * 1000; // 60 seconds
 
 /**
  * @param {'default'|'camera'} [mode]
+ * @param {string} [clientIp]
  * @returns {{ token: string, username?: string }}
  */
-function generateAdminToken(mode = 'default') {
+function generateAdminToken(mode = 'default', clientIp = '') {
     const token = crypto.randomBytes(32).toString('hex');
-    /** @type {{ expiry: number, mode: 'default' | 'camera', username?: string }} */
-    const entry = { expiry: Date.now() + ADMIN_TOKEN_TTL_MS, mode };
+    /** @type {{ expiry: number, mode: 'default' | 'camera', username?: string, clientIp: string }} */
+    const entry = { expiry: Date.now() + ADMIN_TOKEN_TTL_MS, mode, clientIp: String(clientIp || '') };
     if (mode === 'camera') {
         entry.username = allocateStealthGuestUsername();
     }
@@ -2054,13 +2160,18 @@ function generateAdminToken(mode = 'default') {
 
 /**
  * @param {unknown} token
+ * @param {string} [clientIp]
  * @returns {{ mode: 'default' | 'camera', username?: string } | null}
  */
-function consumeAdminToken(token) {
+function consumeAdminToken(token, clientIp = '') {
     if (!token || typeof token !== 'string') return null;
     const entry = adminTokens.get(token);
     if (!entry || Date.now() >= entry.expiry) {
         if (entry) adminTokens.delete(token);
+        return null;
+    }
+    if (entry.clientIp && clientIp && entry.clientIp !== clientIp) {
+        adminTokens.delete(token);
         return null;
     }
     adminTokens.delete(token);
@@ -2070,12 +2181,15 @@ function consumeAdminToken(token) {
 /**
  * 管理ワンタイムトークンが未消費かつ有効期限内か（io.use 用、消費はしない）
  * @param {unknown} token
+ * @param {string} [clientIp]
  * @returns {boolean}
  */
-function peekAdminToken(token) {
+function peekAdminToken(token, clientIp = '') {
     if (!token || typeof token !== 'string') return false;
     const entry = adminTokens.get(token);
-    return !!(entry && Date.now() < entry.expiry);
+    if (!entry || Date.now() >= entry.expiry) return false;
+    if (entry.clientIp && clientIp && entry.clientIp !== clientIp) return false;
+    return true;
 }
 
 /** カメラログイン等でユーザーに見せない仮名 */
@@ -2094,13 +2208,17 @@ function isPlayerVisibleToOthers(player) {
 }
 
 io.use((socket, next) => {
-    benchMaintenanceSocketMiddleware(socket, next, { peekAdminToken, peekBenchRunnerSecret });
+    benchMaintenanceSocketMiddleware(socket, next, {
+        peekAdminToken: (token) => peekAdminToken(token, getClientIpFromSocket(socket)),
+        peekBenchRunnerSecret,
+    });
 });
 
 if (isSocketGuestDisabled()) {
     io.use((socket, next) => {
         const adminToken = socket.handshake.auth?.adminToken;
-        if (peekAdminToken(adminToken)) {
+        const socketClientIp = getClientIpFromSocket(socket);
+        if (peekAdminToken(adminToken, socketClientIp)) {
             return next();
         }
         if (peekBenchRunnerSecret(socket.handshake.auth)) {
@@ -2989,12 +3107,20 @@ io.on('connection', (socket) => {
 
     // Verify admin token and user role if provided
     const adminToken = socket.handshake.auth?.adminToken;
-    const adminAuth = consumeAdminToken(adminToken);
+    const socketClientIp = getClientIpFromSocket(socket);
+    const adminAuth = consumeAdminToken(adminToken, socketClientIp);
     if (adminAuth) {
         socket.data.isAdmin = true;
         socket.data.adminCameraMode = adminAuth.mode === 'camera';
         socket.data.adminCameraUsername = adminAuth.username || null;
         socket.data.role = 'admin';
+        if (socket.data.adminCameraMode) {
+            console.warn('[security] Admin camera (stealth) connection', {
+                socketId: socket.id,
+                ip: socketClientIp,
+                username: socket.data.adminCameraUsername,
+            });
+        }
         console.log(
             `Player connected as admin${socket.data.adminCameraMode ? ' (camera)' : ''}: ${socket.id}`
         );
@@ -5040,13 +5166,14 @@ registerTickHookInstalled();
 // Admin: API Endpoints
 // ============================
 app.get('/admin/enter-metaverse', (req, res) => {
+    const clientIp = getClientIpFromRequest(req);
     const camera = req.query.mode === 'camera';
     if (camera) {
-        const issued = generateAdminToken('camera');
+        const issued = generateAdminToken('camera', clientIp);
         res.json({ token: issued.token, username: issued.username, mode: 'camera' });
         return;
     }
-    const issued = generateAdminToken('default');
+    const issued = generateAdminToken('default', clientIp);
     res.json({ token: issued.token, username: 'admin', mode: 'default' });
 });
 
@@ -7224,12 +7351,19 @@ app.post('/admin/users/student', (req, res) => {
     if (!username || !password) {
         return res.status(400).json({ error: 'username and password required' });
     }
+    const pwCheck = validateUserPassword(password);
+    if (!pwCheck.ok) {
+        return res.status(400).json({ error: pwCheck.error, minLength: pwCheck.minLength });
+    }
     try {
         const user = registerStudent(username, password, displayName);
         res.json({ success: true, user: { id: user.id, username: user.username, displayName: user.displayName } });
     } catch (e) {
         if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
             return res.status(409).json({ error: 'username_exists' });
+        }
+        if (e.code === 'PASSWORD_POLICY') {
+            return res.status(400).json({ error: e.message, minLength: e.minLength });
         }
         res.status(500).json({ error: e.message });
     }
@@ -7240,12 +7374,19 @@ app.post('/admin/users/teacher', (req, res) => {
     if (!username || !password) {
         return res.status(400).json({ error: 'username and password required' });
     }
+    const pwCheck = validateUserPassword(password);
+    if (!pwCheck.ok) {
+        return res.status(400).json({ error: pwCheck.error, minLength: pwCheck.minLength });
+    }
     try {
         const user = registerTeacher(username, password, displayName);
         res.json({ success: true, user: { id: user.id, username: user.username, displayName: user.displayName } });
     } catch (e) {
         if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
             return res.status(409).json({ error: 'username_exists' });
+        }
+        if (e.code === 'PASSWORD_POLICY') {
+            return res.status(400).json({ error: e.message, minLength: e.minLength });
         }
         res.status(500).json({ error: e.message });
     }

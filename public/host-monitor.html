@@ -38,14 +38,37 @@
 
     <script>
         const API = '/host-monitor/api';
+        const CSRF_HEADER = 'X-Admin-CSRF';
+        let csrfToken = null;
+        let csrfExpiresAt = 0;
 
         function authHeaders() {
             const h = sessionStorage.getItem('hm_basic');
             return h ? { Authorization: h } : {};
         }
 
+        async function ensureCsrfToken() {
+            const now = Date.now();
+            if (csrfToken && csrfExpiresAt > now + 60_000) return;
+            let res = await fetch(API + '/csrf-token', fetchOpts());
+            if (res.status === 401 && !sessionStorage.getItem('hm_basic')) {
+                if (promptBasicOnce()) {
+                    res = await fetch(API + '/csrf-token', fetchOpts());
+                }
+            }
+            if (!res.ok) throw new Error('CSRF token fetch failed: ' + res.status);
+            const data = await res.json();
+            csrfToken = String(data.token || '');
+            csrfExpiresAt = Number(data.expiresAt) || 0;
+            if (!csrfToken) throw new Error('CSRF token missing');
+        }
+
         function fetchOpts(extra = {}) {
             const headers = { ...authHeaders(), ...(extra.headers || {}) };
+            const method = String(extra.method || 'GET').toUpperCase();
+            if (csrfToken && method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+                headers[CSRF_HEADER] = csrfToken;
+            }
             return { credentials: 'same-origin', ...extra, headers };
         }
 
@@ -112,6 +135,7 @@
             msg.hidden = true;
             btn.disabled = true;
             try {
+                await ensureCsrfToken();
                 const res = await fetch(API + '/start', fetchOpts({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

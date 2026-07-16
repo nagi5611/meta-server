@@ -1,4 +1,6 @@
 // addons/time-machine/client/admin.js — タイムマシン管理パネル
+import { adminFetch } from '/js/admin-api-fetch.js';
+
 const PANEL_ID = 'panel-addon-time-machine';
 const NAV_DATA_PANEL = 'panel-addon-time-machine';
 const API = '/admin/addons/time-machine';
@@ -8,7 +10,7 @@ const API = '/admin/addons/time-machine';
  * @param {RequestInit} [init]
  */
 async function apiFetch(path, init) {
-    const r = await fetch(path, { credentials: 'include', ...init });
+    const r = await adminFetch(path, { credentials: 'include', ...init });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     return j;

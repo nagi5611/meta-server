@@ -1,4 +1,5 @@
 // addons/admin-reboot/client/admin.js - 管理画面ステータスに再起動UIを追加
+import { adminFetch } from '/js/admin-api-fetch.js';
 
 /**
  * 再起動 API を呼び出して結果を返す。
@@ -7,7 +8,7 @@
  * @returns {Promise<{ ok: boolean, message?: string, error?: string }>}
  */
 async function callRebootApi(endpoint, body = {}) {
-    const res = await fetch(endpoint, {
+    const res = await adminFetch(endpoint, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -78,7 +79,7 @@ function mountAdminRebootPanel() {
 
     const initCapabilities = async () => {
         try {
-            const res = await fetch('/admin/addons/admin-reboot/capabilities', {
+            const res = await adminFetch('/admin/addons/admin-reboot/capabilities', {
                 credentials: 'same-origin',
             });
             const cap = await res.json().catch(() => ({}));

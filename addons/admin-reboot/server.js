@@ -5,6 +5,8 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { HOOKS } from '../../lib/hook-registry.js';
 
+const isNodeProduction = process.env.NODE_ENV === 'production';
+
 /**
  * 設定値を真偽値に正規化する。
  * @param {unknown} value
@@ -58,8 +60,28 @@ export default {
             ? ctx.config.systemdServiceName.trim()
             : 'metaverse-simple';
         const rebootPin = typeof ctx.config.pin === 'string' ? ctx.config.pin.trim() : '';
-        const pinRequired = rebootPin.length > 0;
+        const pinRequired = rebootPin.length > 0 || isNodeProduction;
         const allowServerUpdate = parseBoolean(ctx.config.allowServerUpdate, true);
+
+        /**
+         * 本番または PIN 設定時に PIN を検証する
+         * @param {import('express').Request} req
+         * @param {import('express').Response} res
+         * @returns {boolean} 続行可能なら true
+         */
+        function verifyRebootPin(req, res) {
+            if (!pinRequired) return true;
+            if (!rebootPin) {
+                res.status(503).json({ ok: false, error: 'reboot_pin_not_configured' });
+                return false;
+            }
+            const given = req.body && typeof req.body.pin === 'string' ? req.body.pin : '';
+            if (!safeStringEqual(given, rebootPin)) {
+                res.status(403).json({ ok: false, error: 'invalid_pin' });
+                return false;
+            }
+            return true;
+        }
 
         ctx.hooks.on(HOOKS.EXPRESS_SETUP, ({ app }) => {
             app.get('/admin/addons/admin-reboot/capabilities', (_req, res) => {
@@ -81,12 +103,7 @@ export default {
                 if (!allowNodeRestart) {
                     return res.status(403).json({ ok: false, error: 'node_restart_disabled' });
                 }
-                if (pinRequired) {
-                    const given = req.body && typeof req.body.pin === 'string' ? req.body.pin : '';
-                    if (!safeStringEqual(given, rebootPin)) {
-                        return res.status(403).json({ ok: false, error: 'invalid_pin' });
-                    }
-                }
+                if (!verifyRebootPin(req, res)) return;
                 try {
                     runDetachedCommand({ command: 'systemctl', args: ['restart', serviceName] });
                     return res.json({
@@ -103,12 +120,7 @@ export default {
                 if (!allowServerUpdate) {
                     return res.status(403).json({ ok: false, error: 'server_update_disabled' });
                 }
-                if (pinRequired) {
-                    const given = req.body && typeof req.body.pin === 'string' ? req.body.pin : '';
-                    if (!safeStringEqual(given, rebootPin)) {
-                        return res.status(403).json({ ok: false, error: 'invalid_pin' });
-                    }
-                }
+                if (!verifyRebootPin(req, res)) return;
                 const restartScriptPath = path.resolve(process.cwd(), 'restart.sh');
                 if (!existsSync(restartScriptPath)) {
                     return res.status(404).json({ ok: false, error: 'restart_script_missing' });

@@ -62,11 +62,15 @@ async function fetchJson(url, opt = {}) {
  * @returns {Promise<{ prefabManifest: string }>}
  */
 async function uploadPrefabZip(file, endpoint) {
-    const postZip = (confirmFlag) =>
-        new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${endpoint}${confirmFlag ? '?confirm=1' : ''}`);
-            xhr.withCredentials = true;
+    const postZip = async (confirmFlag) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${endpoint}${confirmFlag ? '?confirm=1' : ''}`);
+        xhr.withCredentials = true;
+        if (typeof window.getAdminCsrfToken === 'function') {
+            const csrf = await window.getAdminCsrfToken();
+            if (csrf) xhr.setRequestHeader('X-Admin-CSRF', csrf);
+        }
+        return new Promise((resolve, reject) => {
             xhr.addEventListener('load', () => {
                 let json = null;
                 try {
@@ -81,6 +85,7 @@ async function uploadPrefabZip(file, endpoint) {
             form.append('zip', file, file.name);
             xhr.send(form);
         });
+    };
 
     let r = await postZip(false);
     if (r.status === 409 && r.json && Array.isArray(r.json.conflictingFiles)) {
