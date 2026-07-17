@@ -1104,6 +1104,7 @@ app.use(helmet({
             fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
             imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
             connectSrc: ["'self'", 'wss:', 'ws:', 'https:'],
+            workerSrc: ["'self'", 'blob:'],
             objectSrc: ["'none'"],
             baseUri: ["'self'"],
             frameAncestors: ["'self'"],
@@ -1457,15 +1458,16 @@ function basicAuth(req, res, next) {
 }
 
 /**
- * 管理画面向けの厳格 CSP（admin.html は外部 script のみ）
+ * 管理パネル（admin.html）向けの厳格 CSP。外部 script のみ許可。
+ * /admin・/admin/camera は index.html（メタバース）を返すため適用しない。
  * @param {import('express').Request} _req
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
  */
-function adminCspMiddleware(_req, res, next) {
+function adminPanelCspMiddleware(_req, res, next) {
     res.setHeader(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' wss: ws: https:; font-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+        "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' wss: ws: https:; font-src 'self' data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
     );
     next();
 }
@@ -1961,7 +1963,7 @@ if (HOST_MONITOR_UNITS.length > 0) {
 }
 
 // Serve admin.html with basic auth（本番 dist にコピー済みなら dist を優先）
-app.get('/admin.html', adminCspMiddleware, basicAuth, (req, res) => {
+app.get('/admin.html', adminPanelCspMiddleware, basicAuth, (req, res) => {
     const distAdmin = path.join(__dirname, 'dist', 'admin.html');
     const adminPath = isProductionBuild && fs.existsSync(distAdmin)
         ? distAdmin
@@ -1978,10 +1980,10 @@ app.get('/setting.html', basicAuth, (req, res) => {
 const sendAdminMetaverseIndex = (req, res) => {
     res.sendFile(path.join(STATIC_DIR, 'index.html'));
 };
-app.get('/admin', adminCspMiddleware, basicAuth, sendAdminMetaverseIndex);
-app.get('/admin/', adminCspMiddleware, basicAuth, sendAdminMetaverseIndex);
-app.get('/admin/camera', adminCspMiddleware, basicAuth, sendAdminMetaverseIndex);
-app.get('/admin/camera/', adminCspMiddleware, basicAuth, sendAdminMetaverseIndex);
+app.get('/admin', basicAuth, sendAdminMetaverseIndex);
+app.get('/admin/', basicAuth, sendAdminMetaverseIndex);
+app.get('/admin/camera', basicAuth, sendAdminMetaverseIndex);
+app.get('/admin/camera/', basicAuth, sendAdminMetaverseIndex);
 
 /** 管理画面（Basic 済み）から plane プレハブを取得する。/plane は S3 本番で Socket Cookie 必須のため別経路 */
 app.use('/admin/plane-asset', express.static(PLANE_DIR));
