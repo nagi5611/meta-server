@@ -1094,12 +1094,12 @@ function rejectNonTlsHttpLayer(req, res, next) {
 
 app.use(cookieParser());
 app.use(rejectNonTlsHttpLayer);
-// 段階的 CSP: 全体は互換維持（インライン script 許可）、管理 HTML は別ミドルウェアで厳格化
+// 段階的 CSP: 全体は互換維持。Three.js Draco（WASM Worker）には wasm-unsafe-eval が必要
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
+            scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", 'https://cdn.jsdelivr.net'],
             styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
             fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
             imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
