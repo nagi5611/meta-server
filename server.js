@@ -1103,7 +1103,8 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
             fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
             imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-            connectSrc: ["'self'", 'wss:', 'ws:', 'https:'],
+            connectSrc: ["'self'", 'blob:', 'wss:', 'ws:', 'https:'],
+            mediaSrc: ["'self'", 'blob:', 'data:', 'https:'],
             workerSrc: ["'self'", 'blob:'],
             objectSrc: ["'none'"],
             baseUri: ["'self'"],
@@ -1467,7 +1468,7 @@ function basicAuth(req, res, next) {
 function adminPanelCspMiddleware(_req, res, next) {
     res.setHeader(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' wss: ws: https:; font-src 'self' data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+        "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: wss: ws: https:; media-src 'self' blob: data: https:; font-src 'self' data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
     );
     next();
 }
