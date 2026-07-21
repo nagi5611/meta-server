@@ -1095,24 +1095,27 @@ function rejectNonTlsHttpLayer(req, res, next) {
 app.use(cookieParser());
 app.use(rejectNonTlsHttpLayer);
 // 段階的 CSP: 全体は互換維持。Three.js Draco（WASM Worker）には wasm-unsafe-eval が必要
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", 'https://cdn.jsdelivr.net'],
-            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-            fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
-            imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-            connectSrc: ["'self'", 'blob:', 'wss:', 'ws:', 'https:'],
-            mediaSrc: ["'self'", 'blob:', 'data:', 'https:'],
-            workerSrc: ["'self'", 'blob:'],
-            objectSrc: ["'none'"],
-            baseUri: ["'self'"],
-            frameAncestors: ["'self'"],
-        },
-    },
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-}));
+const defaultCspDirectives = {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", 'https://cdn.jsdelivr.net'],
+    styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+    imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+    connectSrc: ["'self'", 'blob:', 'wss:', 'ws:', 'https:'],
+    mediaSrc: ["'self'", 'blob:', 'data:', 'https:'],
+    workerSrc: ["'self'", 'blob:'],
+    objectSrc: ["'none'"],
+    baseUri: ["'self'"],
+    frameAncestors: ["'self'"],
+};
+app.use((req, res, next) => {
+    const isInstanceViewerPage =
+        req.method === 'GET' && (req.path === '/instance' || req.path === '/instance/');
+    helmet({
+        contentSecurityPolicy: isInstanceViewerPage ? false : { directives: defaultCspDirectives },
+        crossOriginResourcePolicy: { policy: 'cross-origin' },
+    })(req, res, next);
+});
 app.use(express.json({ limit: '1mb' }));
 
 /** HTTPS: SSL_CERT_PATH と SSL_KEY_PATH が両方設定されていれば HTTPS で待ち受ける（リバースプロキシ時は無効） */
@@ -1469,6 +1472,20 @@ function adminPanelCspMiddleware(_req, res, next) {
     res.setHeader(
         'Content-Security-Policy',
         "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: wss: ws: https:; media-src 'self' blob: data: https:; font-src 'self' data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    );
+    next();
+}
+
+/**
+ * NFC インスタンス閲覧（/instance）向け CSP。A-Frame / Three.js が unsafe-eval を要求する。
+ * @param {import('express').Request} _req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+function instanceViewerCspMiddleware(_req, res, next) {
+    res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: wss: ws: https:; media-src 'self' blob: data: https:; font-src 'self' data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
     );
     next();
 }
@@ -1839,8 +1856,8 @@ const sendInstanceIndex = (req, res) => {
     const file = fs.existsSync(instanceIndexDist) ? instanceIndexDist : instanceIndexPublic;
     res.sendFile(file);
 };
-app.get('/instance', sendInstanceIndex);
-app.get('/instance/', sendInstanceIndex);
+app.get('/instance', instanceViewerCspMiddleware, sendInstanceIndex);
+app.get('/instance/', instanceViewerCspMiddleware, sendInstanceIndex);
 
 const preXrIndexDist = path.join(__dirname, 'dist', 'pre_xr', 'index.html');
 const preXrIndexPublic = path.join(__dirname, 'public', 'pre_xr', 'index.html');
