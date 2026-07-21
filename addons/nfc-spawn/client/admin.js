@@ -46,6 +46,11 @@ async function apiFetch(path, init) {
     const r = await adminFetch(path, { credentials: 'include', ...init });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
+        if (r.status === 404 && path.startsWith(API_BASE)) {
+            throw new Error(
+                'NFC API が見つかりません。管理画面「アドオン」で nfc-spawn が有効かつ「読込済み」か確認し、未読込なら Node を再起動してください。'
+            );
+        }
         const err = new Error(j.error || `HTTP ${r.status}`);
         throw err;
     }

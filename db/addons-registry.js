@@ -172,3 +172,21 @@ export function ensureWebxrVrOnUpgrade(addonsRoot) {
         console.warn('[addons-registry] ensureWebxrVrOnUpgrade failed:', e);
     }
 }
+
+/**
+ * アップグレード時: nfc-spawn 行が無ければ有効化（既存 NFC 環境の維持）
+ * @param {string} addonsRoot
+ */
+export function ensureNfcSpawnOnUpgrade(addonsRoot) {
+    if (!db) return;
+    const manifest = path.join(addonsRoot, 'nfc-spawn', 'plugin.json');
+    if (!fs.existsSync(manifest)) return;
+    const row = db.prepare('SELECT enabled FROM addon_enabled WHERE plugin_id = ?').get('nfc-spawn');
+    if (row) return;
+    try {
+        db.prepare('INSERT INTO addon_enabled (plugin_id, enabled) VALUES (?, 1)').run('nfc-spawn');
+        console.log('[addons-registry] upgrade: enabled addon nfc-spawn');
+    } catch (e) {
+        console.warn('[addons-registry] ensureNfcSpawnOnUpgrade failed:', e);
+    }
+}

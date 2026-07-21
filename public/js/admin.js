@@ -1991,7 +1991,7 @@ async function loadAddonCatalog() {
         const table = document.createElement('table');
         table.className = 'players-table';
         const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th>ID</th><th>バージョン</th><th>整合性</th><th>有効（次回起動時）</th><th>設定</th></tr>';
+        thead.innerHTML = '<tr><th>ID</th><th>バージョン</th><th>整合性</th><th>有効（次回起動時）</th><th>実行中</th><th>設定</th></tr>';
         table.appendChild(thead);
         const tbody = document.createElement('tbody');
 
@@ -2040,6 +2040,16 @@ async function loadAddonCatalog() {
             toggleWrap.appendChild(toggle);
             toggleWrap.appendChild(toggleTrack);
             tdEn.appendChild(toggleWrap);
+            const tdLoaded = document.createElement('td');
+            if (!a.enabled) {
+                tdLoaded.textContent = '—';
+            } else if (a.loaded) {
+                tdLoaded.textContent = '読込済み';
+            } else {
+                const reason = a.skipReason ? String(a.skipReason) : '未読込';
+                tdLoaded.textContent = reason;
+                tdLoaded.title = '有効でも Node 再起動前・起動失敗時は API が 404 になります';
+            }
             const tdCfg = document.createElement('td');
             const cfgBtn = document.createElement('button');
             cfgBtn.type = 'button';
@@ -2054,6 +2064,7 @@ async function loadAddonCatalog() {
             tr.appendChild(tdVer);
             tr.appendChild(tdOk);
             tr.appendChild(tdEn);
+            tr.appendChild(tdLoaded);
             tr.appendChild(tdCfg);
             tbody.appendChild(tr);
         }
