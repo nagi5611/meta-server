@@ -1,6 +1,9 @@
 // public/js/admin-api-fetch.js — 管理 API 向け fetch（CSRF トークン付与）
 export const ADMIN_CSRF_HEADER = 'X-Admin-CSRF';
 
+/** installAdminFetchPatch 前の fetch（再帰呼び出し防止） */
+const nativeFetch = globalThis.fetch.bind(globalThis);
+
 /** @type {string|null} */
 let cachedToken = null;
 /** @type {number} */
@@ -17,7 +20,7 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 export async function initAdminCsrf() {
     if (initPromise) return initPromise;
     initPromise = (async () => {
-        const res = await fetch('/admin/csrf-token', { credentials: 'include' });
+        const res = await nativeFetch('/admin/csrf-token', { credentials: 'include' });
         if (!res.ok) {
             throw new Error(`CSRF token fetch failed: ${res.status}`);
         }
@@ -68,7 +71,7 @@ export async function adminFetch(url, init = {}) {
         }
     }
 
-    return fetch(url, {
+    return nativeFetch(url, {
         ...init,
         credentials: init.credentials ?? 'include',
         headers,
@@ -80,7 +83,6 @@ export async function adminFetch(url, init = {}) {
  */
 export function installAdminFetchPatch() {
     if (typeof window === 'undefined' || window.__adminFetchPatched) return;
-    const nativeFetch = window.fetch.bind(window);
     window.fetch = (url, init) => {
         const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : String(url);
         const method = String(init?.method || 'GET').toUpperCase();
