@@ -1,6 +1,6 @@
 // addons/qr-ar/client/ar/ar-renderer.js — カメラ映像 + Three.js AR 描画
 import * as THREE from 'three';
-import { applyOffsetInQrPlane } from './pose-from-qr.js';
+import { applyOffsetInQrLocalSpace } from './pose-from-qr.js';
 import { loadGlbModel, disposeObject3D } from './model-loader.js';
 
 /**
@@ -32,7 +32,8 @@ export function createArRenderer(opts) {
     renderer.setClearColor(0x000000, 0);
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(60, 1, 0.01, 100);
+    const fovDeg = 60;
+    const camera = new THREE.PerspectiveCamera(fovDeg, 1, 0.01, 100);
     scene.add(camera);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.85);
@@ -42,7 +43,7 @@ export function createArRenderer(opts) {
     scene.add(dir);
 
     const anchor = new THREE.Group();
-    scene.add(anchor);
+    camera.add(anchor);
 
     /** @type {THREE.Group|null} */
     let modelRoot = null;
@@ -105,14 +106,22 @@ export function createArRenderer(opts) {
         }
         visible = true;
         anchor.visible = true;
-        const offset = applyOffsetInQrPlane(activeCard.offset || { x: 0, y: 0, z: 0 }, pose.angle);
+        const offset = applyOffsetInQrLocalSpace(
+            activeCard.offset || { x: 0, y: 0, z: 0 },
+            pose.quaternion
+        );
         anchor.position.set(
             pose.position.x + offset.x,
             pose.position.y + offset.y,
             pose.position.z + offset.z
         );
-        anchor.rotation.set(0, 0, pose.angle);
-        const scale = (activeCard.modelScale || 1) * (pose.width / 120);
+        anchor.quaternion.set(
+            pose.quaternion.x,
+            pose.quaternion.y,
+            pose.quaternion.z,
+            pose.quaternion.w
+        );
+        const scale = activeCard.modelScale || 1;
         anchor.scale.setScalar(scale);
     }
 
