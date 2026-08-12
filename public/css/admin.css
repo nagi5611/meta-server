@@ -3005,6 +3005,15 @@ body.admin-dark .addon-admin-reboot-pin-input {
     height: 26px;
     cursor: pointer;
     vertical-align: middle;
+    border: none;
+    padding: 0;
+    background: transparent;
+    font: inherit;
+}
+
+.addon-enabled-toggle:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .addon-enabled-toggle-input {
@@ -3037,12 +3046,14 @@ body.admin-dark .addon-admin-reboot-pin-input {
     transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.addon-enabled-toggle-input:checked + .addon-enabled-toggle-track {
+.addon-enabled-toggle-input:checked + .addon-enabled-toggle-track,
+.addon-enabled-toggle.is-on .addon-enabled-toggle-track {
     background: #2563eb;
     border-color: #1d4ed8;
 }
 
-.addon-enabled-toggle-input:checked + .addon-enabled-toggle-track::before {
+.addon-enabled-toggle-input:checked + .addon-enabled-toggle-track::before,
+.addon-enabled-toggle.is-on .addon-enabled-toggle-track::before {
     transform: translateX(22px);
 }
 
@@ -3050,12 +3061,14 @@ body.admin-dark .addon-admin-reboot-pin-input {
     border-color: #94a3b8;
 }
 
-.addon-enabled-toggle-input:checked:hover + .addon-enabled-toggle-track {
+.addon-enabled-toggle-input:checked:hover + .addon-enabled-toggle-track,
+.addon-enabled-toggle.is-on:hover .addon-enabled-toggle-track {
     background: #1d4ed8;
     border-color: #1e40af;
 }
 
-.addon-enabled-toggle-input:focus-visible + .addon-enabled-toggle-track {
+.addon-enabled-toggle-input:focus-visible + .addon-enabled-toggle-track,
+.addon-enabled-toggle:focus-visible .addon-enabled-toggle-track {
     outline: none;
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
 }

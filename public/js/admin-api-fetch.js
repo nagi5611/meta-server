@@ -14,6 +14,34 @@ let initPromise = null;
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
+ * fetch 引数からパス判定用 URL 文字列を得る
+ * @param {RequestInfo | URL} url
+ * @returns {string}
+ */
+export function resolveRequestUrl(url) {
+    if (typeof url === 'string') return url;
+    if (url instanceof URL) return url.pathname + url.search;
+    if (typeof Request !== 'undefined' && url instanceof Request) return url.url;
+    return String(url);
+}
+
+/**
+ * @param {string} urlStr
+ */
+function needsCsrf(urlStr) {
+    if (urlStr.startsWith('/admin') || urlStr.startsWith('/host-monitor')) return true;
+    if (typeof window !== 'undefined' && urlStr.startsWith('http')) {
+        try {
+            const u = new URL(urlStr, window.location.origin);
+            return u.pathname.startsWith('/admin') || u.pathname.startsWith('/host-monitor');
+        } catch {
+            return false;
+        }
+    }
+    return false;
+}
+
+/**
  * CSRF トークンを取得・キャッシュする
  * @returns {Promise<void>}
  */
@@ -45,22 +73,13 @@ async function ensureCsrfToken() {
 }
 
 /**
- * URL が CSRF 保護対象か
- * @param {string} url
- */
-function needsCsrf(url) {
-    if (!url.startsWith('/admin') && !url.startsWith('/host-monitor')) return false;
-    return true;
-}
-
-/**
  * 管理 API 向け fetch
  * @param {RequestInfo | URL} url
  * @param {RequestInit} [init]
  * @returns {Promise<Response>}
  */
 export async function adminFetch(url, init = {}) {
-    const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.pathname + url.search : String(url);
+    const urlStr = resolveRequestUrl(url);
     const method = String(init.method || 'GET').toUpperCase();
     const headers = new Headers(init.headers || {});
 
@@ -84,7 +103,7 @@ export async function adminFetch(url, init = {}) {
 export function installAdminFetchPatch() {
     if (typeof window === 'undefined' || window.__adminFetchPatched) return;
     window.fetch = (url, init) => {
-        const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : String(url);
+        const urlStr = resolveRequestUrl(url);
         const method = String(init?.method || 'GET').toUpperCase();
         if (needsCsrf(urlStr) && MUTATING.has(method)) {
             return adminFetch(url, init);

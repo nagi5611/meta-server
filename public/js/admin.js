@@ -1972,6 +1972,22 @@ async function openAddonConfigModal(pluginId) {
     }
 }
 
+async function saveAddonEnabled(pluginId, enabled) {
+    const fetchFn = typeof window.adminFetch === 'function' ? window.adminFetch : fetch;
+    const pr = await fetchFn('/admin/addons/enabled', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ pluginId, enabled }),
+    });
+    const js = await pr.json().catch(() => ({}));
+    if (!pr.ok) {
+        const err = js.error || pr.statusText || `HTTP ${pr.status}`;
+        throw new Error(err === 'csrf_invalid' ? 'CSRF 検証に失敗しました。ページを再読み込みしてください。' : err);
+    }
+    return js;
+}
+
 async function loadAddonCatalog() {
     const mount = document.getElementById('addons-catalog-mount');
     const statusEl = document.getElementById('addons-catalog-status');
@@ -2009,37 +2025,36 @@ async function loadAddonCatalog() {
                 ? (a.engineOk ? 'OK' : `エンジン: ${a.engineReason || 'NG'}`)
                 : (a.errors || []).join('; ');
             const tdEn = document.createElement('td');
-            const toggleWrap = document.createElement('label');
-            toggleWrap.className = 'addon-enabled-toggle';
-            toggleWrap.title = '変更後はサーバー再起動が必要です';
-            const toggle = document.createElement('input');
-            toggle.type = 'checkbox';
-            toggle.className = 'addon-enabled-toggle-input';
-            toggle.checked = Boolean(a.enabled);
-            const toggleTrack = document.createElement('span');
-            toggleTrack.className = 'addon-enabled-toggle-track';
-            toggleTrack.setAttribute('aria-hidden', 'true');
-            toggle.addEventListener('change', async () => {
-                const next = toggle.checked;
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'addon-enabled-toggle';
+            toggleBtn.title = '変更後はサーバー再起動が必要です';
+            toggleBtn.setAttribute('role', 'switch');
+            const enabled = Boolean(a.enabled);
+            toggleBtn.setAttribute('aria-checked', enabled ? 'true' : 'false');
+            toggleBtn.dataset.enabled = enabled ? '1' : '0';
+            toggleBtn.classList.toggle('is-on', enabled);
+            toggleBtn.innerHTML = '<span class="addon-enabled-toggle-track" aria-hidden="true"></span>';
+            toggleBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (toggleBtn.disabled) return;
+                const next = toggleBtn.dataset.enabled !== '1';
+                toggleBtn.disabled = true;
                 try {
-                    const pr = await fetch('/admin/addons/enabled', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'same-origin',
-                        body: JSON.stringify({ pluginId: id, enabled: next }),
-                    });
-                    const js = await pr.json().catch(() => ({}));
-                    if (!pr.ok) throw new Error(js.error || pr.statusText);
+                    const js = await saveAddonEnabled(id, next);
+                    toggleBtn.dataset.enabled = next ? '1' : '0';
+                    toggleBtn.classList.toggle('is-on', next);
+                    toggleBtn.setAttribute('aria-checked', next ? 'true' : 'false');
                     statusEl.textContent = js.message || '保存しました。Node を再起動してください。';
-                } catch (e) {
-                    console.error(e);
-                    toggle.checked = !next;
-                    statusEl.textContent = String(e.message || e);
+                } catch (err) {
+                    console.error(err);
+                    statusEl.textContent = String(err.message || err);
+                } finally {
+                    toggleBtn.disabled = false;
                 }
             });
-            toggleWrap.appendChild(toggle);
-            toggleWrap.appendChild(toggleTrack);
-            tdEn.appendChild(toggleWrap);
+            tdEn.appendChild(toggleBtn);
             const tdLoaded = document.createElement('td');
             if (!a.enabled) {
                 tdLoaded.textContent = '—';
