@@ -146,10 +146,14 @@ async function startAr() {
         scanLoop(video);
     } catch (e) {
         console.error('[qr-ar] start failed:', e);
-        const msg =
-            e?.name === 'NotAllowedError'
-                ? 'カメラの使用が許可されていません'
-                : 'カメラを起動できませんでした（HTTPS が必要です）';
+        let msg = 'カメラを起動できませんでした（HTTPS が必要です）';
+        if (e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError') {
+            msg = 'カメラの使用が許可されていません';
+        } else if (e?.name === 'NotFoundError' || e?.name === 'DevicesNotFoundError') {
+            msg = 'カメラが見つかりません';
+        } else if (e?.message === 'camera_not_supported') {
+            msg = 'このブラウザはカメラ API をサポートしていません';
+        }
         setStatus(msg, true);
         startGuide?.removeAttribute('hidden');
     }

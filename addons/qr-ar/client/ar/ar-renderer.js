@@ -1,5 +1,5 @@
 // addons/qr-ar/client/ar/ar-renderer.js — カメラ映像 + Three.js AR 描画
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import * as THREE from 'three';
 import { applyOffsetInQrPlane } from './pose-from-qr.js';
 import { loadGlbModel, disposeObject3D } from './model-loader.js';
 
