@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QR-AR</title>
+    <link rel="stylesheet" href="/addons/qr-ar/client/ar/ar.css">
+</head>
+
+<body>
+    <div id="qr-ar-start-guide">
+        <div class="qr-ar-start-card">
+            <h1>QR-AR</h1>
+            <p class="qr-ar-lead">カードの QR コードをカメラに映すと、その上に 3D モデルが表示されます。</p>
+            <ul class="qr-ar-guide-list">
+                <li>HTTPS 環境でカメラの許可が必要です</li>
+                <li>QR にはカード ID（例: 001）のみが入っています</li>
+                <li>QR が見えている間、モデルがカードに追従します</li>
+            </ul>
+            <button type="button" id="qr-ar-start-btn" class="qr-ar-start-btn">カメラを起動</button>
+        </div>
+    </div>
+    <p id="qr-ar-status" class="qr-ar-status" role="status">準備完了</p>
+    <div id="qr-ar-mount" class="qr-ar-mount" aria-hidden="true"></div>
+    <script type="module" src="/addons/qr-ar/client/ar/main.js"></script>
+</body>
+
+</html>

@@ -4,3 +4,4 @@ import '../../../addons/admin-reboot/client/admin.js';
 import '../../../addons/nfc-spawn/client/admin.js';
 import '../../../addons/meta-bench-r1/client/admin.js';
 import '../../../addons/time-machine/client/admin.js';
+import '../../../addons/qr-ar/client/admin.js';
