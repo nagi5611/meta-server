@@ -202,6 +202,78 @@ function reprojectionError(objectPoints, imagePoints, r, t, k) {
 }
 
 /**
+ * 物体原点から +X / +Y 方向の画像点を選ぶ
+ * @param {Vec3[]} objectPoints
+ * @param {{x:number,y:number}[]} imagePoints
+ */
+function pickAxisImageCorners(objectPoints, imagePoints) {
+    let xIdx = 1;
+    let yIdx = 1;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (let i = 1; i < 4; i++) {
+        const ox = objectPoints[i].x - objectPoints[0].x;
+        const oy = objectPoints[i].y - objectPoints[0].y;
+        if (ox > maxX) {
+            maxX = ox;
+            xIdx = i;
+        } else if (ox > 1e-9 && Math.abs(ox - maxX) < 1e-9) {
+            const dy = Math.abs(imagePoints[i].y - imagePoints[0].y);
+            const prevDy = Math.abs(imagePoints[xIdx].y - imagePoints[0].y);
+            if (dy < prevDy) xIdx = i;
+        }
+        if (oy > maxY) {
+            maxY = oy;
+            yIdx = i;
+        } else if (oy > 1e-9 && Math.abs(oy - maxY) < 1e-9) {
+            const dx = Math.abs(imagePoints[i].x - imagePoints[0].x);
+            const prevDx = Math.abs(imagePoints[yIdx].x - imagePoints[0].x);
+            if (dx < prevDx) yIdx = i;
+        }
+    }
+
+    return {
+        origin: imagePoints[0],
+        xCorner: imagePoints[xIdx],
+        yCorner: imagePoints[yIdx],
+    };
+}
+
+/**
+ * 物体原点からの辺長（ピクセル）の最大値
+ * @param {Vec3[]} objectPoints
+ * @param {{x:number,y:number}[]} imagePoints
+ */
+function estimateOriginEdgeWidthPx(objectPoints, imagePoints) {
+    let best = 0;
+    for (let i = 1; i < 4; i++) {
+        const objLen = Math.hypot(
+            objectPoints[i].x - objectPoints[0].x,
+            objectPoints[i].y - objectPoints[0].y,
+            objectPoints[i].z - objectPoints[0].z
+        );
+        if (objLen < 1e-9) continue;
+        const imgLen = Math.hypot(
+            imagePoints[i].x - imagePoints[0].x,
+            imagePoints[i].y - imagePoints[0].y
+        );
+        if (imgLen > best) best = imgLen;
+    }
+    return best < 4 ? 0 : best;
+}
+
+/**
+ * TemugeB 形式（原点が corner #1 = (0,0,0)）かどうか
+ * @param {Vec3[]} objectPoints
+ */
+function isCornerOriginObjectPoints(objectPoints) {
+    const o = objectPoints[0];
+    if (Math.abs(o.x) > 1e-6 || Math.abs(o.y) > 1e-6 || Math.abs(o.z) > 1e-6) return false;
+    return objectPoints.some((p) => p.x > 1e-6) && objectPoints.some((p) => p.y > 1e-6);
+}
+
+/**
  * 初期姿勢（距離 + 辺ベクトルから回転を構成）
  * @param {Vec3[]} objectPoints
  * @param {{x:number,y:number}[]} imagePoints
@@ -209,24 +281,28 @@ function reprojectionError(objectPoints, imagePoints, r, t, k) {
  * @param {number} physicalSizeM
  */
 function estimateInitialPose(objectPoints, imagePoints, k, physicalSizeM) {
-    const tl = imagePoints[0];
-    const tr = imagePoints[1];
-    const br = imagePoints[2];
-    const bl = imagePoints[3];
+    const cornerOrigin = isCornerOriginObjectPoints(objectPoints);
+    const corners = cornerOrigin
+        ? pickAxisImageCorners(objectPoints, imagePoints)
+        : {
+              origin: imagePoints[0],
+              xCorner: imagePoints[1],
+              yCorner: imagePoints[3],
+          };
 
-    const cx = (tl.x + tr.x + br.x + bl.x) / 4;
-    const cy = (tl.y + tr.y + br.y + bl.y) / 4;
-    const widthPx = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+    const tl = corners.origin;
+    const tr = corners.xCorner;
+    const bl = corners.yCorner;
+
+    const cx = (imagePoints[0].x + imagePoints[1].x + imagePoints[2].x + imagePoints[3].x) / 4;
+    const cy = (imagePoints[0].y + imagePoints[1].y + imagePoints[2].y + imagePoints[3].y) / 4;
+    const widthPx = cornerOrigin
+        ? estimateOriginEdgeWidthPx(objectPoints, imagePoints)
+        : Math.hypot(tr.x - tl.x, tr.y - tl.y);
     if (widthPx < 4) return null;
 
     const tz = (k.fx * physicalSizeM) / widthPx;
     if (!Number.isFinite(tz) || tz <= 0) return null;
-
-    const t = {
-        x: ((cx - k.cx) * tz) / k.fx,
-        y: ((cy - k.cy) * tz) / k.fy,
-        z: tz,
-    };
 
     const backproject = (px, py, depth) => ({
         x: ((px - k.cx) * depth) / k.fx,
@@ -234,22 +310,30 @@ function estimateInitialPose(objectPoints, imagePoints, k, physicalSizeM) {
         z: depth,
     });
 
-    const camTL = backproject(tl.x, tl.y, tz);
-    const camTR = backproject(tr.x, tr.y, tz);
-    const camBL = backproject(bl.x, bl.y, tz);
+    const t = cornerOrigin
+        ? backproject(tl.x, tl.y, tz)
+        : {
+              x: ((cx - k.cx) * tz) / k.fx,
+              y: ((cy - k.cy) * tz) / k.fy,
+              z: tz,
+          };
 
-    let rx = norm3(sub3(camTR, camTL));
-    // 物体 +Y（上）は BL→TL（画像では上方向）
-    let ry = norm3(sub3(camTL, camBL));
+    const camOrigin = backproject(tl.x, tl.y, tz);
+    const camX = backproject(tr.x, tr.y, tz);
+    const camY = backproject(bl.x, bl.y, tz);
+
+    let rx = norm3(sub3(camX, camOrigin));
+    let ry = norm3(sub3(camY, camOrigin));
     let rz = norm3(cross3(rx, ry));
 
-    if (dot3(rz, t) > 0) {
-        ry = { x: -ry.x, y: -ry.y, z: -ry.z };
-        rz = norm3(cross3(rx, ry));
+    if (!cornerOrigin && dot3(rz, t) > 0) {
+        rz = { x: -rz.x, y: -rz.y, z: -rz.z };
     }
 
-    ry = norm3(cross3(rz, rx));
-    rx = norm3(cross3(ry, rz));
+    if (!cornerOrigin) {
+        ry = norm3(cross3(rz, rx));
+        rx = norm3(cross3(ry, rz));
+    }
 
     const r = [rx.x, rx.y, rx.z, ry.x, ry.y, ry.z, rz.x, rz.y, rz.z];
     return { r, t };
@@ -467,6 +551,8 @@ function solveLinear6(a, b) {
 export function solvePnPPlanar(objectPoints, imagePoints, intrinsics, physicalSizeM) {
     if (!objectPoints?.length || objectPoints.length !== 4 || imagePoints?.length !== 4) return null;
 
+    const cornerOrigin = isCornerOriginObjectPoints(objectPoints);
+
     const initial = estimateInitialPose(objectPoints, imagePoints, intrinsics, physicalSizeM);
     if (!initial) return null;
 
@@ -479,7 +565,7 @@ export function solvePnPPlanar(objectPoints, imagePoints, intrinsics, physicalSi
     let bestErr = reprojectionError(objectPoints, imagePoints, best.r, best.t, intrinsics);
 
     const nz0 = { x: best.r[6], y: best.r[7], z: best.r[8] };
-    if (dot3(nz0, best.t) > 0) {
+    if (!cornerOrigin && dot3(nz0, best.t) > 0) {
         const flippedR = [
             -best.r[0], -best.r[1], -best.r[2],
             best.r[3], best.r[4], best.r[5],
@@ -496,4 +582,19 @@ export function solvePnPPlanar(objectPoints, imagePoints, intrinsics, physicalSi
     if (!Number.isFinite(bestErr) || bestErr > 12) return null;
 
     return { r: best.r, t: best.t, reprojectionError: bestErr };
+}
+
+/**
+ * 物体座標点を画像へ投影（OpenCV projectPoints 相当）
+ * @param {Vec3[]} objectPoints
+ * @param {number[]} r
+ * @param {Vec3} t
+ * @param {CameraIntrinsics} intrinsics
+ * @returns {({x:number,y:number}|null)[]}
+ */
+export function projectObjectPoints(objectPoints, r, t, intrinsics) {
+    return objectPoints.map((p) => {
+        const cam = transformPoint(p, r, t);
+        return projectPoint(cam, intrinsics);
+    });
 }

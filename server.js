@@ -1861,12 +1861,20 @@ app.get('/instance/', instanceViewerCspMiddleware, sendInstanceIndex);
 
 const qrArIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'index.html');
 const qrArIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'index.html');
+const qrArAxesIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'axes', 'index.html');
+const qrArAxesIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'axes', 'index.html');
 const sendQrArIndex = (req, res) => {
     const file = fs.existsSync(qrArIndexDist) ? qrArIndexDist : qrArIndexPublic;
     res.sendFile(file);
 };
+const sendQrArAxesIndex = (req, res) => {
+    const file = fs.existsSync(qrArAxesIndexDist) ? qrArAxesIndexDist : qrArAxesIndexPublic;
+    res.sendFile(file);
+};
 app.get('/qr-ar', instanceViewerCspMiddleware, sendQrArIndex);
 app.get('/qr-ar/', instanceViewerCspMiddleware, sendQrArIndex);
+app.get('/qr-ar/axes', instanceViewerCspMiddleware, sendQrArAxesIndex);
+app.get('/qr-ar/axes/', instanceViewerCspMiddleware, sendQrArAxesIndex);
 
 const preXrIndexDist = path.join(__dirname, 'dist', 'pre_xr', 'index.html');
 const preXrIndexPublic = path.join(__dirname, 'public', 'pre_xr', 'index.html');
