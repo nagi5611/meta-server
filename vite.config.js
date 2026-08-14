@@ -121,6 +121,10 @@ export default defineConfig({
                 target: 'http://localhost:3000',
                 changeOrigin: true,
             },
+            '/qr-ar': {
+                target: 'http://localhost:3000',
+                changeOrigin: true,
+            },
             '/js': {
                 target: 'http://localhost:3000',
                 changeOrigin: true,

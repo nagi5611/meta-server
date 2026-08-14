@@ -1865,17 +1865,29 @@ const qrArAxesIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'axes', 'index.h
 const qrArAxesIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'axes', 'index.html');
 const qrArTemugebIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'temugeb', 'index.html');
 const qrArTemugebIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'temugeb', 'index.html');
-const sendQrArIndex = (req, res) => {
-    const file = fs.existsSync(qrArIndexDist) ? qrArIndexDist : qrArIndexPublic;
+
+/**
+ * dist / public のどちらかに存在する QR-AR 静的 HTML を返す
+ * @param {string} distPath
+ * @param {string} publicPath
+ */
+function sendQrArHtmlPage(distPath, publicPath, res) {
+    const file = fs.existsSync(distPath) ? distPath : publicPath;
+    if (!fs.existsSync(file)) {
+        res.status(404).type('text/plain; charset=utf-8').send('QR-AR page not found. Run npm run build.');
+        return;
+    }
     res.sendFile(file);
+}
+
+const sendQrArIndex = (req, res) => {
+    sendQrArHtmlPage(qrArIndexDist, qrArIndexPublic, res);
 };
 const sendQrArAxesIndex = (req, res) => {
-    const file = fs.existsSync(qrArAxesIndexDist) ? qrArAxesIndexDist : qrArAxesIndexPublic;
-    res.sendFile(file);
+    sendQrArHtmlPage(qrArAxesIndexDist, qrArAxesIndexPublic, res);
 };
 const sendQrArTemugebIndex = (req, res) => {
-    const file = fs.existsSync(qrArTemugebIndexDist) ? qrArTemugebIndexDist : qrArTemugebIndexPublic;
-    res.sendFile(file);
+    sendQrArHtmlPage(qrArTemugebIndexDist, qrArTemugebIndexPublic, res);
 };
 app.get('/qr-ar', instanceViewerCspMiddleware, sendQrArIndex);
 app.get('/qr-ar/', instanceViewerCspMiddleware, sendQrArIndex);
@@ -1883,6 +1895,7 @@ app.get('/qr-ar/axes', instanceViewerCspMiddleware, sendQrArAxesIndex);
 app.get('/qr-ar/axes/', instanceViewerCspMiddleware, sendQrArAxesIndex);
 app.get('/qr-ar/temugeb', instanceViewerCspMiddleware, sendQrArTemugebIndex);
 app.get('/qr-ar/temugeb/', instanceViewerCspMiddleware, sendQrArTemugebIndex);
+app.get('/qr-ar/temugeb/index.html', instanceViewerCspMiddleware, sendQrArTemugebIndex);
 
 const preXrIndexDist = path.join(__dirname, 'dist', 'pre_xr', 'index.html');
 const preXrIndexPublic = path.join(__dirname, 'public', 'pre_xr', 'index.html');
