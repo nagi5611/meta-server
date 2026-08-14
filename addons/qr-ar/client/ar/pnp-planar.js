@@ -579,7 +579,7 @@ export function solvePnPPlanar(objectPoints, imagePoints, intrinsics, physicalSi
         }
     }
 
-    if (!Number.isFinite(bestErr) || bestErr > 12) return null;
+    if (!Number.isFinite(bestErr) || bestErr > 28) return null;
 
     return { r: best.r, t: best.t, reprojectionError: bestErr };
 }

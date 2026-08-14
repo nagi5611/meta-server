@@ -2,9 +2,9 @@
 import { startCameraStream, stopCameraStream } from './camera-stream.js';
 import {
     createScanCanvas,
-    captureVideoFrame,
+    captureVideoFrameForScan,
+    createQrTracker,
 } from './qr-tracker.js';
-import jsQR from 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/+esm';
 import {
     estimateTemugebQrPose,
     projectTemugebAxes,
@@ -29,6 +29,8 @@ let overlayCanvas = null;
 let overlayCtx = null;
 /** @type {ReturnType<typeof createScanCanvas>|null} */
 let scanSurface = null;
+/** @type {ReturnType<typeof createQrTracker>|null} */
+let qrTracker = null;
 let scanning = false;
 
 /**
@@ -54,44 +56,54 @@ function syncOverlaySize() {
 }
 
 /**
+ * @param {{ cardId: string, location: object }} detection
+ * @param {number} frameWidth
+ * @param {number} frameHeight
+ */
+function drawAxesForDetection(detection, frameWidth, frameHeight) {
+    if (!overlayCtx || !detection?.location) return;
+
+    const pose = estimateTemugebQrPose(detection.location, frameWidth, frameHeight, QR_SIZE_M);
+    if (!pose) {
+        setStatus('QR を検出しましたが姿勢推定に失敗しました', true);
+        return;
+    }
+
+    const projected = projectTemugebAxes(pose, AXIS_LENGTH);
+    drawTemugebAxesOnCanvas(overlayCtx, projected, { lineWidth: 5 });
+    setStatus(
+        `QR ${detection.cardId} — 軸表示中（${detection.source} / 誤差 ${pose.reprojectionError.toFixed(2)} px）`
+    );
+}
+
+/**
  * QR 検出ループ
  */
 function scanLoop() {
-    if (!scanning || !scanSurface || !videoEl || !overlayCtx || !overlayCanvas) return;
+    if (!scanning || !scanSurface || !videoEl || !overlayCtx || !overlayCanvas || !qrTracker) return;
 
     syncOverlaySize();
     const { canvas, ctx } = scanSurface;
-    const imageData = captureVideoFrame(videoEl, canvas, ctx);
+    const captured = captureVideoFrameForScan(videoEl, canvas, ctx);
 
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-    if (imageData) {
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'dontInvert',
-        });
-
-        if (code?.location) {
-            const pose = estimateTemugebQrPose(
-                code.location,
-                imageData.width,
-                imageData.height,
-                QR_SIZE_M
-            );
-
-            if (pose) {
-                const projected = projectTemugebAxes(pose, AXIS_LENGTH);
-                drawTemugebAxesOnCanvas(overlayCtx, projected, { lineWidth: 5 });
-                const id = code.data ? String(code.data).trim() : '';
-                setStatus(
-                    id
-                        ? `QR ${id} — 軸表示中（誤差 ${pose.reprojectionError.toFixed(2)} px）`
-                        : `QR 検出 — 軸表示中（誤差 ${pose.reprojectionError.toFixed(2)} px）`
-                );
-            } else {
-                setStatus('QR を検出しましたが姿勢推定に失敗しました', true);
-            }
-        } else {
+    if (captured) {
+        const detected = qrTracker.scanSync(videoEl, canvas, ctx);
+        if (detected) {
+            drawAxesForDetection(detected, captured.fullWidth, captured.fullHeight);
+        } else if (!qrTracker.isTracking()) {
             setStatus('QR コードをカメラに映してください');
+        }
+
+        if (!detected) {
+            qrTracker.maybeScanBarcodeAsync(
+                canvas,
+                captured.fullWidth,
+                captured.fullHeight,
+                captured.scale,
+                (hit) => drawAxesForDetection(hit, captured.fullWidth, captured.fullHeight)
+            );
         }
     }
 
@@ -124,6 +136,7 @@ async function startAxesDemo() {
         const w = video.videoWidth || 640;
         const h = video.videoHeight || 480;
         scanSurface = createScanCanvas(w, h);
+        qrTracker = createQrTracker({ lostFramesMax: 48 });
         scanning = true;
         setStatus('QR コードをカメラに映してください');
         scanLoop();

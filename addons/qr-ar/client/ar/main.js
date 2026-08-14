@@ -2,15 +2,14 @@
 import { startCameraStream, stopCameraStream } from './camera-stream.js';
 import {
     createScanCanvas,
-    captureVideoFrame,
-    detectQrInFrame,
+    captureVideoFrameForScan,
+    createQrTracker,
     refinePoseWithCardConfig,
 } from './qr-tracker.js';
 import { smoothQrPose } from './pose-from-qr.js';
 import { createArRenderer } from './ar-renderer.js';
 
 const API_BASE = '/api/addons/qr-ar/cards';
-const LOST_FRAMES_MAX = 8;
 
 const mount = document.getElementById('qr-ar-mount');
 const statusEl = document.getElementById('qr-ar-status');
@@ -26,10 +25,11 @@ let smoothedPose = null;
 /** @type {Map<string, object>} */
 const cardCache = new Map();
 let activeCardId = null;
-let lostFrames = 0;
 let scanning = false;
 /** @type {ReturnType<typeof createScanCanvas>|null} */
 let scanSurface = null;
+/** @type {ReturnType<typeof createQrTracker>|null} */
+let qrTracker = null;
 
 /**
  * @param {string} message
@@ -55,70 +55,91 @@ async function fetchCardConfig(cardId) {
 }
 
 /**
+ * @param {import('./qr-tracker.js').QrDetection} detected
+ * @param {number} frameWidth
+ * @param {number} frameHeight
+ */
+function applyDetection(detected, frameWidth, frameHeight) {
+    const cardId = detected.cardId;
+    if (!cardId) return;
+
+    if (cardId !== activeCardId) {
+        activeCardId = cardId;
+        setStatus(`カード ${cardId} を認識 — モデルを読み込み中…`);
+        fetchCardConfig(cardId)
+            .then((card) => {
+                const pose = refinePoseWithCardConfig(
+                    detected.pose,
+                    card.qrPhysicalSizeM || 0.02,
+                    frameWidth,
+                    frameHeight,
+                    detected.location
+                );
+                if (pose) smoothedPose = pose;
+                return arRenderer?.setCard({
+                    cardId: card.cardId,
+                    modelUrl: card.modelUrl,
+                    modelScale: card.modelScale,
+                    offset: card.offset,
+                    qrPhysicalSizeM: card.qrPhysicalSizeM,
+                });
+            })
+            .then(() => {
+                setStatus(`カード ${cardId} — AR 表示中`);
+            })
+            .catch((e) => {
+                console.warn('[qr-ar] card load failed:', e);
+                setStatus(`カード ${cardId} のモデルが見つかりません`, true);
+                activeCardId = null;
+            });
+        return;
+    }
+
+    if (!activeCardId || !cardCache.has(activeCardId)) return;
+
+    const card = cardCache.get(activeCardId);
+    const pose = refinePoseWithCardConfig(
+        detected.pose,
+        card.qrPhysicalSizeM || 0.02,
+        frameWidth,
+        frameHeight,
+        detected.location
+    );
+    if (pose) {
+        smoothedPose = smoothQrPose(smoothedPose, pose, 0.35);
+        setStatus(`カード ${cardId} — AR 表示中`);
+    }
+}
+
+/**
  * @param {HTMLVideoElement} video
  */
 function scanLoop(video) {
-    if (!scanning || !scanSurface || !arRenderer) return;
+    if (!scanning || !scanSurface || !arRenderer || !qrTracker) return;
     const { canvas, ctx } = scanSurface;
-    const imageData = captureVideoFrame(video, canvas, ctx);
-    if (!imageData) {
+
+    const captured = captureVideoFrameForScan(video, canvas, ctx);
+    if (!captured) {
         requestAnimationFrame(() => scanLoop(video));
         return;
     }
 
-    const detected = detectQrInFrame(imageData.data, imageData.width, imageData.height);
+    const { fullWidth, fullHeight, scale } = captured;
+    const detected = qrTracker.scanSync(video, canvas, ctx);
+
     if (detected) {
-        lostFrames = 0;
-        const cardId = detected.cardId;
-        if (cardId !== activeCardId) {
-            activeCardId = cardId;
-            setStatus(`カード ${cardId} を認識 — モデルを読み込み中…`);
-            fetchCardConfig(cardId)
-                .then((card) => {
-                    const pose = refinePoseWithCardConfig(
-                        detected.pose,
-                        card.qrPhysicalSizeM || 0.02,
-                        imageData.width,
-                        imageData.height,
-                        detected.location
-                    );
-                    smoothedPose = pose;
-                    return arRenderer.setCard({
-                        cardId: card.cardId,
-                        modelUrl: card.modelUrl,
-                        modelScale: card.modelScale,
-                        offset: card.offset,
-                        qrPhysicalSizeM: card.qrPhysicalSizeM,
-                    });
-                })
-                .then(() => {
-                    setStatus(`カード ${cardId} — AR 表示中`);
-                })
-                .catch((e) => {
-                    console.warn('[qr-ar] card load failed:', e);
-                    setStatus(`カード ${cardId} のモデルが見つかりません`, true);
-                    activeCardId = null;
-                });
-        } else if (activeCardId && cardCache.has(activeCardId)) {
-            const card = cardCache.get(activeCardId);
-            const pose = refinePoseWithCardConfig(
-                detected.pose,
-                card.qrPhysicalSizeM || 0.02,
-                imageData.width,
-                imageData.height,
-                detected.location
-            );
-            smoothedPose = smoothQrPose(smoothedPose, pose, 0.4);
-        } else {
-            smoothedPose = smoothQrPose(smoothedPose, detected.pose, 0.4);
-        }
-    } else {
-        lostFrames += 1;
-        if (lostFrames > LOST_FRAMES_MAX) {
-            smoothedPose = null;
-            activeCardId = null;
-            setStatus('カードの QR をカメラに映してください');
-        }
+        applyDetection(detected, fullWidth, fullHeight);
+    } else if (!qrTracker.isTracking()) {
+        smoothedPose = null;
+        activeCardId = null;
+        setStatus('カードの QR をカメラに映してください');
+    }
+
+  // jsQR 失敗時は BarcodeDetector を非同期で試す
+    if (!detected && captured) {
+        qrTracker.maybeScanBarcodeAsync(canvas, fullWidth, fullHeight, scale, (hit) => {
+            applyDetection(hit, fullWidth, fullHeight);
+        });
     }
 
     arRenderer.updatePose(smoothedPose);
@@ -141,6 +162,7 @@ async function startAr() {
         const w = video.videoWidth || 640;
         const h = video.videoHeight || 480;
         scanSurface = createScanCanvas(w, h);
+        qrTracker = createQrTracker({ lostFramesMax: 48 });
         scanning = true;
         setStatus('カードの QR をカメラに映してください');
         scanLoop(video);
@@ -159,13 +181,9 @@ async function startAr() {
     }
 }
 
-function bindUi() {
-    startBtn?.addEventListener('click', () => {
-        void startAr();
-    });
-}
-
-bindUi();
+startBtn?.addEventListener('click', () => {
+    void startAr();
+});
 
 window.addEventListener('beforeunload', () => {
     scanning = false;
