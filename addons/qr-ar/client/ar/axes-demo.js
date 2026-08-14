@@ -1,4 +1,4 @@
-// addons/qr-ar/client/ar/axes-demo.js — TemugeB 方式 QR 軸表示デモ（JS PnP）
+// addons/qr-ar/client/ar/axes-demo.js — QR 中心原点の軸表示デモ
 import { startCameraStream, stopCameraStream } from './camera-stream.js';
 import {
     createScanCanvas,
@@ -6,14 +6,15 @@ import {
     createQrTracker,
 } from './qr-tracker.js';
 import {
-    estimateTemugebQrPose,
-    projectTemugebAxes,
-    drawTemugebAxesOnCanvas,
-} from './temugeb-pose.js';
+    estimateCenterQrAxesPose,
+    projectCenterQrAxes,
+    drawCenterQrAxesOverlay,
+} from './center-qr-axes.js';
 import { createQrStatusPanel } from './qr-status-panel.js';
 
 const QR_SIZE_M = 0.05;
-const AXIS_LENGTH = QR_SIZE_M;
+/** 中心から伸ばす軸の長さ（QR 辺の半分） */
+const AXIS_LENGTH = QR_SIZE_M * 0.5;
 
 const mount = document.getElementById('qr-ar-axes-mount');
 const startGuide = document.getElementById('qr-ar-start-guide');
@@ -33,6 +34,10 @@ let scanSurface = null;
 /** @type {ReturnType<typeof createQrTracker>|null} */
 let qrTracker = null;
 let scanning = false;
+
+/** トラッキング保持中の最後の描画データ */
+let lastOverlayLocation = null;
+let lastProjectedAxes = null;
 
 /**
  * 映像とオーバーレイキャンバスのサイズを同期する
@@ -78,20 +83,31 @@ function updatePipelineStatus(detection, freshHit) {
  * @param {number} frameWidth
  * @param {number} frameHeight
  */
-function drawAxesForDetection(detection, frameWidth, frameHeight) {
-    if (!overlayCtx || !detection?.location) return;
+function updateAxesForDetection(detection, frameWidth, frameHeight) {
+    if (!detection?.location) return;
 
-    const pose = estimateTemugebQrPose(detection.location, frameWidth, frameHeight, QR_SIZE_M);
+    const pose = estimateCenterQrAxesPose(detection.location, frameWidth, frameHeight, QR_SIZE_M);
     if (!pose) {
-        statusPanel.setPose('fail', 'solvePnP 失敗（JS 実装）');
-        statusPanel.setHint('QR は検出されたが姿勢推定に失敗 — 四隅の順序か FOV 推定を疑う', true);
+        statusPanel.setPose('fail', 'solvePnP 失敗');
+        statusPanel.setHint('四隅はあるが姿勢推定に失敗', true);
         return;
     }
 
-    const projected = projectTemugebAxes(pose, AXIS_LENGTH);
-    drawTemugebAxesOnCanvas(overlayCtx, projected, { lineWidth: 5 });
-    statusPanel.setPose('ok', `誤差 ${pose.reprojectionError.toFixed(1)} px`);
-    statusPanel.setHint(`軸表示中（${detection.source}）`);
+    lastOverlayLocation = pose.location;
+    lastProjectedAxes = projectCenterQrAxes(pose, AXIS_LENGTH);
+    statusPanel.setPose('ok', `誤差 ${pose.reprojectionError.toFixed(1)} px · 中心原点`);
+    statusPanel.setHint(`青=ファインダ3隅 / 黄=中心原点 / 軸（${detection.source}）`);
+}
+
+/**
+ * 保持中のマーカーと軸を描画
+ */
+function paintOverlay() {
+    if (!overlayCtx || !overlayCanvas) return;
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    if (lastOverlayLocation && lastProjectedAxes) {
+        drawCenterQrAxesOverlay(overlayCtx, lastOverlayLocation, lastProjectedAxes);
+    }
 }
 
 /**
@@ -104,15 +120,15 @@ function scanLoop() {
     const { canvas, ctx } = scanSurface;
     const captured = captureVideoFrameForScan(videoEl, canvas, ctx);
 
-    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-
     if (captured) {
         const detected = qrTracker.scanSync(videoEl, canvas, ctx);
         const freshHit = detected && qrTracker.getLostFrames() === 0;
 
         if (detected) {
-            drawAxesForDetection(detected, captured.fullWidth, captured.fullHeight);
+            updateAxesForDetection(detected, captured.fullWidth, captured.fullHeight);
         } else if (!qrTracker.isTracking()) {
+            lastOverlayLocation = null;
+            lastProjectedAxes = null;
             statusPanel.setHint('QR コードをカメラに映してください');
         }
 
@@ -125,13 +141,14 @@ function scanLoop() {
                 captured.fullHeight,
                 captured.scale,
                 (hit) => {
-                    drawAxesForDetection(hit, captured.fullWidth, captured.fullHeight);
+                    updateAxesForDetection(hit, captured.fullWidth, captured.fullHeight);
                     updatePipelineStatus(hit, true);
                 }
             );
         }
     }
 
+    paintOverlay();
     requestAnimationFrame(scanLoop);
 }
 
@@ -164,10 +181,12 @@ async function startAxesDemo() {
         scanSurface = createScanCanvas(w, h);
         qrTracker = createQrTracker({ lostFramesMax: 60 });
         scanning = true;
+        lastOverlayLocation = null;
+        lastProjectedAxes = null;
         statusPanel.setDetect('idle');
         statusPanel.setPose('idle');
         statusPanel.setTrack('lost');
-        statusPanel.setHint('QR コードをカメラに映してください');
+        statusPanel.setHint('QR を映すと青=3隅・黄=中心・RGB=軸');
         scanLoop();
     } catch (e) {
         console.error('[qr-ar-axes] start failed:', e);
