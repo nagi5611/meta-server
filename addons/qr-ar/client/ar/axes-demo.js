@@ -97,7 +97,7 @@ function scanLoop() {
         }
 
         if (!detected) {
-            qrTracker.maybeScanBarcodeAsync(
+            qrTracker.maybeScanAsync(
                 canvas,
                 captured.fullWidth,
                 captured.fullHeight,

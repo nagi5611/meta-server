@@ -1,6 +1,8 @@
-// addons/qr-ar/client/ar/qr-tracker.js — QR 検出（BarcodeDetector + jsQR、低解像度スキャン）
+// addons/qr-ar/client/ar/qr-tracker.js — QR 検出（ZXing + nimiq + BarcodeDetector + jsQR）
 import jsQR from 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/+esm';
 import { estimatePoseFromQrCorners } from './pose-from-qr.js';
+import { detectWithZxing, detectWithZxingRotations } from './zxing-detect.js';
+import { detectWithNimiq } from './nimiq-detect.js';
 
 /**
  * @typedef {import('./pose-from-qr.js').QrPose} QrPose
@@ -8,15 +10,15 @@ import { estimatePoseFromQrCorners } from './pose-from-qr.js';
  * @typedef {{ cardId: string, location: QrLocation, pose: QrPose|null, source: string }} QrDetection
  */
 
-/** 検出用の最大幅（TemugeB 推奨: 低解像度でスキャンして座標を戻す） */
-const SCAN_MAX_WIDTH = 800;
+/** 検出用の最大幅 */
+const SCAN_MAX_WIDTH = 960;
 
 /** @type {BarcodeDetector|null} */
 let barcodeDetector = null;
 let barcodeDetectorInit = false;
 
 /**
- * BarcodeDetector を初期化する（利用可能な場合のみ）
+ * BarcodeDetector を初期化する
  */
 async function ensureBarcodeDetector() {
     if (barcodeDetectorInit) return;
@@ -53,7 +55,7 @@ function barcodeCornersToLocation(points) {
 /**
  * location 座標をフル解像度へスケールする
  * @param {QrLocation} location
- * @param {number} scale スキャン時の縮小率（scan/full）
+ * @param {number} scale
  */
 function scaleQrLocation(location, scale) {
     if (!location || scale >= 1) return location;
@@ -68,11 +70,30 @@ function scaleQrLocation(location, scale) {
 }
 
 /**
+ * @param {{ data: string, location: QrLocation }} found
+ * @param {string} source
+ * @param {number} fullWidth
+ * @param {number} fullHeight
+ * @param {number} scale
+ * @returns {QrDetection|null}
+ */
+function buildDetection(found, source, fullWidth, fullHeight, scale) {
+    if (!found?.data || !found.location) return null;
+    const location = scaleQrLocation(found.location, scale);
+    const pose = estimatePoseFromQrCorners(location, fullWidth, fullHeight, 0.02);
+    return {
+        cardId: found.data,
+        location,
+        pose,
+        source,
+    };
+}
+
+/**
  * jsQR で QR を検出する
  * @param {Uint8ClampedArray} data
  * @param {number} width
  * @param {number} height
- * @returns {{ data: string, location: QrLocation }|null}
  */
 function detectWithJsQr(data, width, height) {
     const code = jsQR(data, width, height, { inversionAttempts: 'attemptBoth' });
@@ -103,9 +124,26 @@ async function detectWithBarcodeDetector(canvas) {
 }
 
 /**
+ * 同期スキャン（ZXing TRY_HARDER → jsQR）
+ * @param {ImageData} imageData
+ * @param {HTMLCanvasElement} canvas
+ * @param {CanvasRenderingContext2D} ctx
+ */
+function detectSyncOnFrame(imageData, canvas, ctx) {
+    let found = detectWithZxing(imageData);
+    if (found) return { found, source: 'zxing' };
+
+    found = detectWithJsQr(imageData.data, imageData.width, imageData.height);
+    if (found) return { found, source: 'jsqr' };
+
+    found = detectWithZxingRotations(canvas, ctx);
+    if (found) return { found, source: 'zxing-rotated' };
+
+    return null;
+}
+
+/**
  * QR 検出ループ用キャンバスを用意する
- * @param {number} width
- * @param {number} height
  */
 export function createScanCanvas(width, height) {
     const canvas = document.createElement('canvas');
@@ -117,11 +155,7 @@ export function createScanCanvas(width, height) {
 }
 
 /**
- * video フレームを検出用キャンバスへ描画して ImageData を返す
- * @param {HTMLVideoElement} video
- * @param {HTMLCanvasElement} canvas
- * @param {CanvasRenderingContext2D} ctx
- * @returns {{ imageData: ImageData, scale: number, fullWidth: number, fullHeight: number }|null}
+ * video フレームを検出用キャンバスへ描画
  */
 export function captureVideoFrameForScan(video, canvas, ctx) {
     const fullWidth = video.videoWidth;
@@ -143,10 +177,7 @@ export function captureVideoFrameForScan(video, canvas, ctx) {
 }
 
 /**
- * video フレームをキャンバスへ描画して ImageData を返す（フル解像度・後方互換）
- * @param {HTMLVideoElement} video
- * @param {HTMLCanvasElement} canvas
- * @param {CanvasRenderingContext2D} ctx
+ * video フレームをキャンバスへ描画（フル解像度・後方互換）
  */
 export function captureVideoFrame(video, canvas, ctx) {
     const captured = captureVideoFrameForScan(video, canvas, ctx);
@@ -161,62 +192,47 @@ export function captureVideoFrame(video, canvas, ctx) {
 }
 
 /**
- * ImageData から QR を検出（同期: jsQR）
- * @param {ImageData} imageData
- * @param {number} [fullWidth]
- * @param {number} [fullHeight]
- * @param {number} [scale]
- * @returns {QrDetection|null}
+ * ImageData から QR を検出
  */
 export function scanQrFromImageData(imageData, fullWidth = imageData.width, fullHeight = imageData.height, scale = 1) {
-    const found = detectWithJsQr(imageData.data, imageData.width, imageData.height);
-    if (!found) return null;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    canvas.width = imageData.width;
+    canvas.height = imageData.height;
+    ctx.putImageData(imageData, 0, 0);
 
-    const location = scaleQrLocation(found.location, scale);
-    const pose = estimatePoseFromQrCorners(location, fullWidth, fullHeight, 0.02);
-    return {
-        cardId: found.data,
-        location,
-        pose,
-        source: 'jsqr',
-    };
+    const sync = detectSyncOnFrame(imageData, canvas, ctx);
+    if (!sync) return null;
+    return buildDetection(sync.found, sync.source, fullWidth, fullHeight, scale);
 }
 
 /**
- * canvas から QR を検出（非同期: BarcodeDetector → jsQR フォールバック）
- * @param {HTMLCanvasElement} canvas
- * @param {number} fullWidth
- * @param {number} fullHeight
- * @param {number} scale
- * @returns {Promise<QrDetection|null>}
+ * canvas から QR を検出（非同期: nimiq → BarcodeDetector → 同期再試行）
  */
 export async function scanQrFromCanvas(canvas, fullWidth, fullHeight, scale = 1) {
     await ensureBarcodeDetector();
 
+    const nimiqHit = await detectWithNimiq(canvas);
+    if (nimiqHit) {
+        return buildDetection(nimiqHit, 'nimiq-qr-scanner', fullWidth, fullHeight, scale);
+    }
+
     const barcodeHit = await detectWithBarcodeDetector(canvas);
     if (barcodeHit) {
-        const location = scaleQrLocation(barcodeHit.location, scale);
-        const pose = estimatePoseFromQrCorners(location, fullWidth, fullHeight, 0.02);
-        return {
-            cardId: barcodeHit.data,
-            location,
-            pose,
-            source: 'barcode-detector',
-        };
+        return buildDetection(barcodeHit, 'barcode-detector', fullWidth, fullHeight, scale);
     }
 
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return null;
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    return scanQrFromImageData(imageData, fullWidth, fullHeight, scale);
+    const sync = detectSyncOnFrame(imageData, canvas, ctx);
+    if (!sync) return null;
+    return buildDetection(sync.found, sync.source, fullWidth, fullHeight, scale);
 }
 
 /**
- * フレームから QR を検出する（同期・後方互換）
- * @param {Uint8ClampedArray} imageData
- * @param {number} width
- * @param {number} height
- * @returns {QrDetection|null}
+ * フレームから QR を検出（同期・後方互換）
  */
 export function detectQrInFrame(imageData, width, height) {
     const data = imageData instanceof Uint8ClampedArray ? imageData : imageData?.data;
@@ -230,7 +246,6 @@ export function detectQrInFrame(imageData, width, height) {
  * @param {number} videoWidth
  * @param {number} videoHeight
  * @param {QrLocation} location
- * @returns {QrPose|null}
  */
 export function refinePoseWithCardConfig(pose, qrPhysicalSizeM, videoWidth, videoHeight, location) {
     const refined = estimatePoseFromQrCorners(location, videoWidth, videoHeight, qrPhysicalSizeM);
@@ -238,16 +253,16 @@ export function refinePoseWithCardConfig(pose, qrPhysicalSizeM, videoWidth, vide
 }
 
 /**
- * QR トラッカー（検出の粘り・BarcodeDetector 併用）
+ * QR トラッカー
  */
 export function createQrTracker(options = {}) {
-    const lostFramesMax = options.lostFramesMax ?? 48;
-    const barcodeFallbackIntervalMs = options.barcodeFallbackIntervalMs ?? 120;
+    const lostFramesMax = options.lostFramesMax ?? 60;
+    const asyncFallbackIntervalMs = options.asyncFallbackIntervalMs ?? 80;
 
     let lostFrames = 0;
     let lastDetection = null;
-    let barcodeFallbackBusy = false;
-    let lastBarcodeAttemptMs = 0;
+    let asyncFallbackBusy = false;
+    let lastAsyncAttemptMs = 0;
 
     /**
      * @param {HTMLVideoElement} video
@@ -260,7 +275,8 @@ export function createQrTracker(options = {}) {
         if (!captured) return lastDetection;
 
         const { imageData, scale, fullWidth, fullHeight } = captured;
-        const syncHit = scanQrFromImageData(imageData, fullWidth, fullHeight, scale);
+        const sync = detectSyncOnFrame(imageData, canvas, ctx);
+        const syncHit = sync ? buildDetection(sync.found, sync.source, fullWidth, fullHeight, scale) : null;
 
         if (syncHit) {
             lostFrames = 0;
@@ -278,20 +294,14 @@ export function createQrTracker(options = {}) {
     }
 
     /**
-     * jsQR で失敗したとき BarcodeDetector を非同期で試す
-     * @param {HTMLCanvasElement} canvas
-     * @param {number} fullWidth
-     * @param {number} fullHeight
-     * @param {number} scale
-     * @param {(detection: QrDetection) => void} onDetected
+     * 同期検出失敗時に nimiq / BarcodeDetector を非同期で試す
      */
-    function maybeScanBarcodeAsync(canvas, fullWidth, fullHeight, scale, onDetected) {
+    function maybeScanAsync(canvas, fullWidth, fullHeight, scale, onDetected) {
         const now = performance.now();
-        if (barcodeFallbackBusy || now - lastBarcodeAttemptMs < barcodeFallbackIntervalMs) return;
-        if (!barcodeDetector && !('BarcodeDetector' in globalThis)) return;
+        if (asyncFallbackBusy || now - lastAsyncAttemptMs < asyncFallbackIntervalMs) return;
 
-        barcodeFallbackBusy = true;
-        lastBarcodeAttemptMs = now;
+        asyncFallbackBusy = true;
+        lastAsyncAttemptMs = now;
 
         void scanQrFromCanvas(canvas, fullWidth, fullHeight, scale)
             .then((hit) => {
@@ -302,13 +312,14 @@ export function createQrTracker(options = {}) {
                 }
             })
             .finally(() => {
-                barcodeFallbackBusy = false;
+                asyncFallbackBusy = false;
             });
     }
 
     return {
         scanSync,
-        maybeScanBarcodeAsync,
+        maybeScanAsync,
+        /** @deprecated */ maybeScanBarcodeAsync: maybeScanAsync,
         reset() {
             lostFrames = 0;
             lastDetection = null;
@@ -318,5 +329,4 @@ export function createQrTracker(options = {}) {
     };
 }
 
-// 起動時に BarcodeDetector を温める
 void ensureBarcodeDetector();

@@ -137,7 +137,7 @@ function scanLoop(video) {
 
   // jsQR 失敗時は BarcodeDetector を非同期で試す
     if (!detected && captured) {
-        qrTracker.maybeScanBarcodeAsync(canvas, fullWidth, fullHeight, scale, (hit) => {
+        qrTracker.maybeScanAsync(canvas, fullWidth, fullHeight, scale, (hit) => {
             applyDetection(hit, fullWidth, fullHeight);
         });
     }
