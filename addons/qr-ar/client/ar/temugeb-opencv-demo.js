@@ -30,6 +30,9 @@ let lostFrames = 0;
 /** @type {import('opencv-ts').cv.QRCodeDetector|null} */
 let qrDetector = null;
 
+const OPENCV_JS_URL =
+    'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js';
+
 /**
  * OpenCV.js を読み込む
  */
@@ -40,7 +43,7 @@ function loadOpenCvRuntime() {
     return new Promise((resolve, reject) => {
         const script = document.createElement('script');
         script.async = true;
-        script.src = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0/build/opencv.js';
+        script.src = OPENCV_JS_URL;
         script.onerror = () => reject(new Error('opencv_load_failed'));
         script.onload = () => {
             const cv = globalThis.cv;
@@ -333,7 +336,9 @@ async function startTemugebDemo() {
         console.error('[qr-ar-temugeb] start failed:', e);
         let msg = '起動に失敗しました';
         if (e?.name === 'NotAllowedError') msg = 'カメラの使用が許可されていません';
-        else if (e?.message === 'opencv_load_failed') msg = 'OpenCV.js の読み込みに失敗しました';
+        else if (e?.message === 'opencv_load_failed') {
+            msg = 'OpenCV.js の読み込みに失敗しました（ネットワークまたは CDN を確認）';
+        }
         statusPanel.setHint(msg, true);
         startGuide?.removeAttribute('hidden');
     }
