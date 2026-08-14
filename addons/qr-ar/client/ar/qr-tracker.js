@@ -3,6 +3,7 @@ import jsQR from 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/+esm';
 import { estimatePoseFromQrCorners } from './pose-from-qr.js';
 import { detectWithZxing, detectWithZxingRotations } from './zxing-detect.js';
 import { detectWithNimiq } from './nimiq-detect.js';
+import { normalizeQrLocation, qrLocationFromPoints } from './qr-corner-order.js';
 
 /**
  * @typedef {import('./pose-from-qr.js').QrPose} QrPose
@@ -34,22 +35,13 @@ async function ensureBarcodeDetector() {
 }
 
 /**
- * BarcodeDetector の cornerPoints を jsQR location 形式へ
+ * BarcodeDetector の cornerPoints を正規化 location へ
  * @param {DOMPointReadOnly[]} points
  * @returns {QrLocation|null}
  */
 function barcodeCornersToLocation(points) {
-    if (!points || points.length < 4) return null;
-    const pts = points.map((p) => ({ x: p.x, y: p.y }));
-    const sorted = [...pts].sort((a, b) => a.y - b.y);
-    const top = sorted.slice(0, 2).sort((a, b) => a.x - b.x);
-    const bottom = sorted.slice(2, 4).sort((a, b) => a.x - b.x);
-    return {
-        topLeftCorner: top[0],
-        topRightCorner: top[1],
-        bottomLeftCorner: bottom[0],
-        bottomRightCorner: bottom[1],
-    };
+    if (!points || points.length < 3) return null;
+    return qrLocationFromPoints(points.map((p) => ({ x: p.x, y: p.y })));
 }
 
 /**
@@ -79,7 +71,9 @@ function scaleQrLocation(location, scale) {
  */
 function buildDetection(found, source, fullWidth, fullHeight, scale) {
     if (!found?.data || !found.location) return null;
-    const location = scaleQrLocation(found.location, scale);
+    const scaled = scaleQrLocation(found.location, scale);
+    const location = normalizeQrLocation(scaled);
+    if (!location) return null;
     const pose = estimatePoseFromQrCorners(location, fullWidth, fullHeight, 0.02);
     return {
         cardId: found.data,
@@ -100,7 +94,9 @@ function detectWithJsQr(data, width, height) {
     if (!code?.location) return null;
     const text = code.data ? String(code.data).trim() : '';
     if (!text) return null;
-    return { data: text, location: code.location };
+    const location = normalizeQrLocation(code.location);
+    if (!location) return null;
+    return { data: text, location };
 }
 
 /**

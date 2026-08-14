@@ -6,6 +6,7 @@ import {
     solvePnPPlanar,
     projectObjectPoints,
 } from './pnp-planar.js';
+import { normalizeQrLocation } from './qr-corner-order.js';
 
 /**
  * @typedef {{ topLeftCorner: {x:number,y:number}, topRightCorner: {x:number,y:number}, bottomRightCorner: {x:number,y:number}, bottomLeftCorner: {x:number,y:number} }} QrLocation
@@ -64,11 +65,12 @@ export function jsQrLocationToTemugebImagePoints(location) {
  * @returns {TemugebPose}
  */
 export function estimateTemugebQrPose(location, videoWidth, videoHeight, qrSizeM = 0.05, fovDeg = 60) {
-    if (!location || !videoWidth || !videoHeight) return null;
+    const normalized = normalizeQrLocation(location);
+    if (!normalized || !videoWidth || !videoHeight) return null;
 
     const intrinsics = buildCameraIntrinsics(videoWidth, videoHeight, fovDeg);
     const objectPoints = temugebQrObjectPoints(qrSizeM);
-    const imagePoints = jsQrLocationToTemugebImagePoints(location);
+    const imagePoints = jsQrLocationToTemugebImagePoints(normalized);
 
     const solved = solvePnPPlanar(objectPoints, imagePoints, intrinsics, qrSizeM);
     if (!solved) return null;

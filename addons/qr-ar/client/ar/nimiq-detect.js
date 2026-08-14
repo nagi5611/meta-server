@@ -1,7 +1,7 @@
 // addons/qr-ar/client/ar/nimiq-detect.js — nimiq/qr-scanner（改良 jsQR + Worker）
-// 参照: third-party/qr-scanner (https://github.com/nimiq/qr-scanner)
 
 import QrScanner from '/addons/qr-ar/vendor/qr-scanner.min.js';
+import { qrLocationFromPoints } from './qr-corner-order.js';
 
 QrScanner.WORKER_PATH = '/addons/qr-ar/vendor/qr-scanner-worker.min.js';
 
@@ -10,18 +10,13 @@ QrScanner.WORKER_PATH = '/addons/qr-ar/vendor/qr-scanner-worker.min.js';
  */
 
 /**
- * nimiq cornerPoints（TL, TR, BR, BL）を location 形式へ
+ * nimiq cornerPoints を正規化した location へ
  * @param {{x:number,y:number}[]} points
- * @returns {QrLocation|null}
+ * @returns {import('./qr-corner-order.js').QrLocation|null}
  */
 export function nimiqCornerPointsToLocation(points) {
-    if (!points || points.length < 4) return null;
-    return {
-        topLeftCorner: { x: points[0].x, y: points[0].y },
-        topRightCorner: { x: points[1].x, y: points[1].y },
-        bottomRightCorner: { x: points[2].x, y: points[2].y },
-        bottomLeftCorner: { x: points[3].x, y: points[3].y },
-    };
+    if (!points || points.length < 3) return null;
+    return qrLocationFromPoints(points.map((p) => ({ x: p.x, y: p.y })));
 }
 
 /**

@@ -1863,8 +1863,6 @@ const qrArIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'index.html');
 const qrArIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'index.html');
 const qrArAxesIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'axes', 'index.html');
 const qrArAxesIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'axes', 'index.html');
-const qrArTemugebIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'temugeb', 'index.html');
-const qrArTemugebIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'temugeb', 'index.html');
 
 /**
  * dist / public のどちらかに存在する QR-AR 静的 HTML を返す
@@ -1886,16 +1884,10 @@ const sendQrArIndex = (req, res) => {
 const sendQrArAxesIndex = (req, res) => {
     sendQrArHtmlPage(qrArAxesIndexDist, qrArAxesIndexPublic, res);
 };
-const sendQrArTemugebIndex = (req, res) => {
-    sendQrArHtmlPage(qrArTemugebIndexDist, qrArTemugebIndexPublic, res);
-};
 app.get('/qr-ar', instanceViewerCspMiddleware, sendQrArIndex);
 app.get('/qr-ar/', instanceViewerCspMiddleware, sendQrArIndex);
 app.get('/qr-ar/axes', instanceViewerCspMiddleware, sendQrArAxesIndex);
 app.get('/qr-ar/axes/', instanceViewerCspMiddleware, sendQrArAxesIndex);
-app.get('/qr-ar/temugeb', instanceViewerCspMiddleware, sendQrArTemugebIndex);
-app.get('/qr-ar/temugeb/', instanceViewerCspMiddleware, sendQrArTemugebIndex);
-app.get('/qr-ar/temugeb/index.html', instanceViewerCspMiddleware, sendQrArTemugebIndex);
 
 const preXrIndexDist = path.join(__dirname, 'dist', 'pre_xr', 'index.html');
 const preXrIndexPublic = path.join(__dirname, 'public', 'pre_xr', 'index.html');

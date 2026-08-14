@@ -9,5 +9,4 @@
 | `third-party/QR_code_orientation_OpenCV` | [TemugeB/QR_code_orientation_OpenCV](https://github.com/TemugeB/QR_code_orientation_OpenCV) | 姿勢推定の参考（Python/OpenCV） |
 
 ブラウザデモ:
-- `/qr-ar/axes/` — ZXing/nimiq 検出 + JS solvePnP
-- `/qr-ar/temugeb/` — OpenCV.js `QRCodeDetector` + solvePnP（`run_qr.py` 同等）
+- `/qr-ar/axes/` — ZXing/nimiq 検出 + JS solvePnP + 四隅順序正規化
