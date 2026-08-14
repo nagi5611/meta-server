@@ -8,13 +8,14 @@ import {
 } from './qr-tracker.js';
 import { smoothQrPose } from './pose-from-qr.js';
 import { createArRenderer } from './ar-renderer.js';
+import { createQrStatusPanel } from './qr-status-panel.js';
 
 const API_BASE = '/api/addons/qr-ar/cards';
 
 const mount = document.getElementById('qr-ar-mount');
-const statusEl = document.getElementById('qr-ar-status');
 const startGuide = document.getElementById('qr-ar-start-guide');
 const startBtn = document.getElementById('qr-ar-start-btn');
+const statusPanel = createQrStatusPanel();
 
 /** @type {MediaStream|null} */
 let mediaStream = null;
@@ -32,13 +33,39 @@ let scanSurface = null;
 let qrTracker = null;
 
 /**
- * @param {string} message
- * @param {boolean} [isError]
+ * 検出結果から画面下部ステータスを更新する
+ * @param {import('./qr-tracker.js').QrDetection|null} detected
+ * @param {boolean} freshHit 今フレームで新規検出したか
  */
-function setStatus(message, isError = false) {
-    if (!statusEl) return;
-    statusEl.textContent = message;
-    statusEl.classList.toggle('error', isError);
+function updatePipelineStatus(detected, freshHit) {
+    if (!qrTracker) return;
+
+    const tracking = qrTracker.isTracking();
+    const lostFrames = qrTracker.getLostFrames();
+
+    if (detected) {
+        if (freshHit) {
+            statusPanel.setDetect('ok', `${detected.source} · ${detected.cardId}`);
+        } else {
+            statusPanel.setDetect('hold', `${lostFrames} フレーム保持 · ${detected.source}`);
+        }
+
+        if (detected.pose) {
+            statusPanel.setPose('ok', `誤差 ${detected.pose.reprojectionError.toFixed(1)} px`);
+        } else {
+            statusPanel.setPose('fail', '四隅はあるが PnP 失敗');
+        }
+
+        statusPanel.setTrack('active', activeCardId ? `カード ${activeCardId}` : '姿勢のみ');
+    } else if (tracking) {
+        statusPanel.setDetect('hold', `${lostFrames} フレーム保持`);
+        statusPanel.setPose(smoothedPose ? 'ok' : 'fail', smoothedPose ? '前フレームの姿勢' : '—');
+        statusPanel.setTrack('active', '直前結果を維持');
+    } else {
+        statusPanel.setDetect('fail');
+        statusPanel.setPose('idle');
+        statusPanel.setTrack('lost');
+    }
 }
 
 /**
@@ -65,7 +92,7 @@ function applyDetection(detected, frameWidth, frameHeight) {
 
     if (cardId !== activeCardId) {
         activeCardId = cardId;
-        setStatus(`カード ${cardId} を認識 — モデルを読み込み中…`);
+        statusPanel.setHint(`カード ${cardId} — モデルを読み込み中…`);
         fetchCardConfig(cardId)
             .then((card) => {
                 const pose = refinePoseWithCardConfig(
@@ -85,11 +112,11 @@ function applyDetection(detected, frameWidth, frameHeight) {
                 });
             })
             .then(() => {
-                setStatus(`カード ${cardId} — AR 表示中`);
+                statusPanel.setHint(`カード ${cardId} — AR 表示中`);
             })
             .catch((e) => {
                 console.warn('[qr-ar] card load failed:', e);
-                setStatus(`カード ${cardId} のモデルが見つかりません`, true);
+                statusPanel.setHint(`カード ${cardId} のモデルが見つかりません`, true);
                 activeCardId = null;
             });
         return;
@@ -107,7 +134,6 @@ function applyDetection(detected, frameWidth, frameHeight) {
     );
     if (pose) {
         smoothedPose = smoothQrPose(smoothedPose, pose, 0.35);
-        setStatus(`カード ${cardId} — AR 表示中`);
     }
 }
 
@@ -126,19 +152,22 @@ function scanLoop(video) {
 
     const { fullWidth, fullHeight, scale } = captured;
     const detected = qrTracker.scanSync(video, canvas, ctx);
+    const freshHit = detected && qrTracker.getLostFrames() === 0;
 
     if (detected) {
         applyDetection(detected, fullWidth, fullHeight);
     } else if (!qrTracker.isTracking()) {
         smoothedPose = null;
         activeCardId = null;
-        setStatus('カードの QR をカメラに映してください');
+        statusPanel.setHint('カードの QR をカメラに映してください');
     }
 
-  // jsQR 失敗時は BarcodeDetector を非同期で試す
+    updatePipelineStatus(detected, freshHit);
+
     if (!detected && captured) {
         qrTracker.maybeScanAsync(canvas, fullWidth, fullHeight, scale, (hit) => {
             applyDetection(hit, fullWidth, fullHeight);
+            updatePipelineStatus(hit, true);
         });
     }
 
@@ -153,7 +182,8 @@ function scanLoop(video) {
 async function startAr() {
     if (scanning) return;
     startGuide?.setAttribute('hidden', 'hidden');
-    setStatus('カメラを起動しています…');
+    statusPanel.setVisible(true);
+    statusPanel.setHint('カメラを起動しています…');
     try {
         const { video, stream } = await startCameraStream();
         mediaStream = stream;
@@ -162,9 +192,12 @@ async function startAr() {
         const w = video.videoWidth || 640;
         const h = video.videoHeight || 480;
         scanSurface = createScanCanvas(w, h);
-        qrTracker = createQrTracker({ lostFramesMax: 48 });
+        qrTracker = createQrTracker({ lostFramesMax: 60 });
         scanning = true;
-        setStatus('カードの QR をカメラに映してください');
+        statusPanel.setDetect('idle');
+        statusPanel.setPose('idle');
+        statusPanel.setTrack('lost');
+        statusPanel.setHint('カードの QR をカメラに映してください');
         scanLoop(video);
     } catch (e) {
         console.error('[qr-ar] start failed:', e);
@@ -176,7 +209,7 @@ async function startAr() {
         } else if (e?.message === 'camera_not_supported') {
             msg = 'このブラウザはカメラ API をサポートしていません';
         }
-        setStatus(msg, true);
+        statusPanel.setHint(msg, true);
         startGuide?.removeAttribute('hidden');
     }
 }

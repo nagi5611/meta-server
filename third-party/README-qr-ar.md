@@ -8,4 +8,6 @@
 | `third-party/zxing-js-library` | [zxing-js/library](https://github.com/zxing-js/library) | ZXing TRY_HARDER（`npm: @zxing/library`） |
 | `third-party/QR_code_orientation_OpenCV` | [TemugeB/QR_code_orientation_OpenCV](https://github.com/TemugeB/QR_code_orientation_OpenCV) | 姿勢推定の参考（Python/OpenCV） |
 
-ブラウザ実行時は `addons/qr-ar/vendor/` の nimiq ビルドと CDN の ZXing を使用しています。
+ブラウザデモ:
+- `/qr-ar/axes/` — ZXing/nimiq 検出 + JS solvePnP
+- `/qr-ar/temugeb/` — OpenCV.js `QRCodeDetector` + solvePnP（`run_qr.py` 同等）

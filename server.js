@@ -1863,6 +1863,8 @@ const qrArIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'index.html');
 const qrArIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'index.html');
 const qrArAxesIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'axes', 'index.html');
 const qrArAxesIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'axes', 'index.html');
+const qrArTemugebIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'temugeb', 'index.html');
+const qrArTemugebIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'temugeb', 'index.html');
 const sendQrArIndex = (req, res) => {
     const file = fs.existsSync(qrArIndexDist) ? qrArIndexDist : qrArIndexPublic;
     res.sendFile(file);
@@ -1871,10 +1873,16 @@ const sendQrArAxesIndex = (req, res) => {
     const file = fs.existsSync(qrArAxesIndexDist) ? qrArAxesIndexDist : qrArAxesIndexPublic;
     res.sendFile(file);
 };
+const sendQrArTemugebIndex = (req, res) => {
+    const file = fs.existsSync(qrArTemugebIndexDist) ? qrArTemugebIndexDist : qrArTemugebIndexPublic;
+    res.sendFile(file);
+};
 app.get('/qr-ar', instanceViewerCspMiddleware, sendQrArIndex);
 app.get('/qr-ar/', instanceViewerCspMiddleware, sendQrArIndex);
 app.get('/qr-ar/axes', instanceViewerCspMiddleware, sendQrArAxesIndex);
 app.get('/qr-ar/axes/', instanceViewerCspMiddleware, sendQrArAxesIndex);
+app.get('/qr-ar/temugeb', instanceViewerCspMiddleware, sendQrArTemugebIndex);
+app.get('/qr-ar/temugeb/', instanceViewerCspMiddleware, sendQrArTemugebIndex);
 
 const preXrIndexDist = path.join(__dirname, 'dist', 'pre_xr', 'index.html');
 const preXrIndexPublic = path.join(__dirname, 'public', 'pre_xr', 'index.html');

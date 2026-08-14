@@ -4,25 +4,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>QR 軸表示デモ (TemugeB)</title>
+    <title>TemugeB OpenCV QR 向き推定</title>
     <link rel="stylesheet" href="/addons/qr-ar/client/ar/ar.css">
 </head>
 
 <body class="qr-ar-axes-page">
     <div id="qr-ar-start-guide">
         <div class="qr-ar-start-card">
-            <h1>QR XYZ 軸デモ</h1>
+            <h1>TemugeB（OpenCV 原版）</h1>
             <p class="qr-ar-lead">
-                TemugeB の OpenCV solvePnP 手順をブラウザで再現します。QR を映すと
-                <strong style="color:#ff3333">X</strong> /
-                <strong style="color:#33ff33">Y</strong> /
-                <strong style="color:#3399ff">Z</strong>
-                軸が重ねて表示されます。
+                クローンした <code>third-party/QR_code_orientation_OpenCV</code> の
+                <code>run_qr.py</code> と同じ手順をブラウザで実行します。
+                <strong>QRCodeDetector</strong> で検出し、<strong>solvePnP</strong> で向きを推定します。
             </p>
             <ul class="qr-ar-guide-list">
-                <li>参照: <code>third-party/QR_code_orientation_OpenCV</code></li>
-                <li>原点: QR 左上、XY 平面、Z は面から垂直</li>
-                <li>HTTPS 環境でカメラ許可が必要です</li>
+                <li>検出: OpenCV.js <code>QRCodeDetector</code>（jsQR / ZXing は使わない）</li>
+                <li>姿勢: <code>get_qr_coords</code> と同じ qr_edges + solvePnP</li>
+                <li>axes デモとは別ページ（こちらが GitHub 手順の忠実再現）</li>
+                <li>初回は OpenCV.js（約 8MB）の読み込みがあります</li>
             </ul>
             <button type="button" id="qr-ar-start-btn" class="qr-ar-start-btn">カメラを起動</button>
         </div>
@@ -44,8 +43,8 @@
         </div>
         <p id="qr-ar-status-hint" class="qr-ar-status-hint"></p>
     </div>
-    <div id="qr-ar-axes-mount" class="qr-ar-mount qr-ar-axes-mount" aria-hidden="true"></div>
-    <script type="module" src="/addons/qr-ar/client/ar/axes-demo.js"></script>
+    <div id="qr-ar-temugeb-mount" class="qr-ar-mount qr-ar-axes-mount" aria-hidden="true"></div>
+    <script type="module" src="/addons/qr-ar/client/ar/temugeb-opencv-demo.js"></script>
 </body>
 
 </html>

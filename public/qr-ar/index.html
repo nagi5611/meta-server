@@ -29,7 +29,23 @@
             <button type="button" id="qr-ar-start-btn" class="qr-ar-start-btn">カメラを起動</button>
         </div>
     </div>
-    <p id="qr-ar-status" class="qr-ar-status" role="status">準備完了</p>
+    <div id="qr-ar-status-panel" class="qr-ar-status-panel" role="status" hidden>
+        <div class="qr-ar-status-grid">
+            <div class="qr-ar-status-cell">
+                <span class="qr-ar-status-label">QR認識</span>
+                <span id="qr-ar-status-detect" class="qr-ar-status-value" data-state="idle">待機</span>
+            </div>
+            <div class="qr-ar-status-cell">
+                <span class="qr-ar-status-label">姿勢推定</span>
+                <span id="qr-ar-status-pose" class="qr-ar-status-value" data-state="idle">—</span>
+            </div>
+            <div class="qr-ar-status-cell">
+                <span class="qr-ar-status-label">トラッキング</span>
+                <span id="qr-ar-status-track" class="qr-ar-status-value" data-state="idle">—</span>
+            </div>
+        </div>
+        <p id="qr-ar-status-hint" class="qr-ar-status-hint"></p>
+    </div>
     <div id="qr-ar-mount" class="qr-ar-mount" aria-hidden="true"></div>
     <script type="module" src="/addons/qr-ar/client/ar/main.js"></script>
 </body>

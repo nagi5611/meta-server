@@ -56,6 +56,77 @@ body {
     color: #ffb4b4;
 }
 
+.qr-ar-status-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    padding: 0.55rem 0.75rem 0.65rem;
+    background: rgba(10, 10, 16, 0.82);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.qr-ar-status-panel[hidden] {
+    display: none !important;
+}
+
+.qr-ar-status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem 0.5rem;
+    max-width: 36rem;
+    margin: 0 auto;
+}
+
+.qr-ar-status-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.qr-ar-status-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    color: #9aa0b8;
+    text-transform: uppercase;
+}
+
+.qr-ar-status-value {
+    font-size: 0.82rem;
+    line-height: 1.35;
+    color: #f0f0f5;
+    word-break: break-word;
+}
+
+.qr-ar-status-value[data-state='ok'],
+.qr-ar-status-value[data-state='active'] {
+    color: #7ee8a8;
+}
+
+.qr-ar-status-value[data-state='fail'],
+.qr-ar-status-value[data-state='lost'] {
+    color: #ffb4b4;
+}
+
+.qr-ar-status-value[data-state='hold'] {
+    color: #ffd27a;
+}
+
+.qr-ar-status-hint {
+    margin: 0.45rem 0 0;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    text-align: center;
+    color: #b8b8c8;
+}
+
+.qr-ar-status-hint.error {
+    color: #ffb4b4;
+}
+
 #qr-ar-start-guide {
     position: fixed;
     inset: 0;
