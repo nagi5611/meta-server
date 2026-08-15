@@ -245,32 +245,50 @@ async function startQrAr() {
         }
     }
 
+    let isAnchored = false;
+
+    /**
+     * 初回検出後はモデルを非表示に戻さず、SDK のポーズ更新を継続適用する。
+     * @param {object} data
+     */
+    function updateAnchoredPose(data) {
+        applySdkCamera(camera, data);
+        if (!model) return;
+
+        model.visible = true;
+        applyPoseToModel(model, data);
+        isAnchored = true;
+        statusText.textContent = 'QR 追跡中';
+    }
+
+    /**
+     * QR が見えなくなったとき、最後のポーズを保持して表示を継続する。
+     * @param {object} data
+     */
+    function holdLastPose(data) {
+        if (!isAnchored || !model) return;
+
+        applySdkCamera(camera, data);
+        applyPoseToModel(model, data);
+        model.visible = true;
+        statusText.textContent = '位置を維持中（QR 非表示）';
+    }
+
     was.on(EVENT_DETECTED, (detectedData) => {
         for (const data of detectedData) {
-            applySdkCamera(camera, data);
-            if (model) {
-                model.visible = true;
-                applyPoseToModel(model, data);
-            }
+            updateAnchoredPose(data);
         }
-        statusText.textContent = 'QR 追跡中';
     }).catch(handleWasError);
 
     was.on(EVENT_LOST, (lostData) => {
-        for (const _data of lostData) {
-            if (model) {
-                model.visible = false;
-            }
+        for (const data of lostData) {
+            holdLastPose(data);
         }
-        statusText.textContent = 'QR を探しています…';
     }).catch(handleWasError);
 
     was.on(EVENT_POSE, (poseData) => {
         for (const data of poseData) {
-            applySdkCamera(camera, data);
-            if (model) {
-                applyPoseToModel(model, data);
-            }
+            updateAnchoredPose(data);
         }
     }).catch(handleWasError);
 
