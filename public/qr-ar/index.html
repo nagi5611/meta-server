@@ -1,53 +1,26 @@
 <!DOCTYPE html>
 <html lang="ja">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>QR-AR</title>
-    <link rel="stylesheet" href="/addons/qr-ar/client/ar/ar.css">
-    <script type="importmap">
-    {
-        "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-        }
-    }
-    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1220" />
+    <title>QR-AR — Open WebAR SDK</title>
+    <link rel="stylesheet" href="./ar.css" />
 </head>
-
 <body>
-    <div id="qr-ar-start-guide">
+    <div id="qr-ar-start-guide" class="qr-ar-start-guide">
         <div class="qr-ar-start-card">
             <h1>QR-AR</h1>
-            <p class="qr-ar-lead">カードの QR コードをカメラに映すと、その上に 3D モデルが表示されます。</p>
-            <ul class="qr-ar-guide-list">
-                <li>HTTPS 環境でカメラの許可が必要です</li>
-                <li>QR にはカード ID（例: 001）のみが入っています</li>
-                <li>QR が見えている間、モデルがカードに追従します</li>
-            </ul>
-            <button type="button" id="qr-ar-start-btn" class="qr-ar-start-btn">カメラを起動</button>
+            <p>カメラを起動し、印刷した QR コードを映してください。コードの上に 3D モデルが表示されます。</p>
+            <p class="qr-ar-start-hint">サンプル QR: <code>public/qr-ar/assets/trigger.png</code> を印刷または画面表示</p>
+            <button type="button" id="qr-ar-start-btn" class="qr-ar-start-btn">AR を開始</button>
+            <p id="qr-ar-error" class="qr-ar-error" hidden></p>
         </div>
     </div>
-    <div id="qr-ar-status-panel" class="qr-ar-status-panel" role="status" hidden>
-        <div class="qr-ar-status-grid">
-            <div class="qr-ar-status-cell">
-                <span class="qr-ar-status-label">QR認識</span>
-                <span id="qr-ar-status-detect" class="qr-ar-status-value" data-state="idle">待機</span>
-            </div>
-            <div class="qr-ar-status-cell">
-                <span class="qr-ar-status-label">姿勢推定</span>
-                <span id="qr-ar-status-pose" class="qr-ar-status-value" data-state="idle">—</span>
-            </div>
-            <div class="qr-ar-status-cell">
-                <span class="qr-ar-status-label">トラッキング</span>
-                <span id="qr-ar-status-track" class="qr-ar-status-value" data-state="idle">—</span>
-            </div>
-        </div>
-        <p id="qr-ar-status-hint" class="qr-ar-status-hint"></p>
+    <div id="qr-ar-mount" class="App" hidden></div>
+    <div id="qr-ar-status" class="qr-ar-status" hidden>
+        <span id="qr-ar-status-text">QR を探しています…</span>
     </div>
-    <div id="qr-ar-mount" class="qr-ar-mount" aria-hidden="true"></div>
-    <script type="module" src="/addons/qr-ar/client/ar/main.js"></script>
+    <script type="module" src="./ar-app.js"></script>
 </body>
-
 </html>

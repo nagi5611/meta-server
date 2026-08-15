@@ -2,6 +2,4 @@
 import { initAdminCsrf, installAdminFetchPatch } from './admin-api-fetch.js';
 
 installAdminFetchPatch();
-void initAdminCsrf().catch((e) => {
-    console.error('[admin-csrf] init failed:', e);
-});
+await initAdminCsrf();

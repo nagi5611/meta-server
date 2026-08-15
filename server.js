@@ -1485,7 +1485,7 @@ function adminPanelCspMiddleware(_req, res, next) {
 function instanceViewerCspMiddleware(_req, res, next) {
     res.setHeader(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: data: wss: ws: https:; media-src 'self' blob: data: https:; font-src 'self' data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: wss: ws: https:; media-src 'self' blob: data: https:; font-src 'self' data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
     );
     next();
 }
@@ -1858,36 +1858,6 @@ const sendInstanceIndex = (req, res) => {
 };
 app.get('/instance', instanceViewerCspMiddleware, sendInstanceIndex);
 app.get('/instance/', instanceViewerCspMiddleware, sendInstanceIndex);
-
-const qrArIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'index.html');
-const qrArIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'index.html');
-const qrArAxesIndexDist = path.join(__dirname, 'dist', 'qr-ar', 'axes', 'index.html');
-const qrArAxesIndexPublic = path.join(__dirname, 'public', 'qr-ar', 'axes', 'index.html');
-
-/**
- * dist / public のどちらかに存在する QR-AR 静的 HTML を返す
- * @param {string} distPath
- * @param {string} publicPath
- */
-function sendQrArHtmlPage(distPath, publicPath, res) {
-    const file = fs.existsSync(distPath) ? distPath : publicPath;
-    if (!fs.existsSync(file)) {
-        res.status(404).type('text/plain; charset=utf-8').send('QR-AR page not found. Run npm run build.');
-        return;
-    }
-    res.sendFile(file);
-}
-
-const sendQrArIndex = (req, res) => {
-    sendQrArHtmlPage(qrArIndexDist, qrArIndexPublic, res);
-};
-const sendQrArAxesIndex = (req, res) => {
-    sendQrArHtmlPage(qrArAxesIndexDist, qrArAxesIndexPublic, res);
-};
-app.get('/qr-ar', instanceViewerCspMiddleware, sendQrArIndex);
-app.get('/qr-ar/', instanceViewerCspMiddleware, sendQrArIndex);
-app.get('/qr-ar/axes', instanceViewerCspMiddleware, sendQrArAxesIndex);
-app.get('/qr-ar/axes/', instanceViewerCspMiddleware, sendQrArAxesIndex);
 
 const preXrIndexDist = path.join(__dirname, 'dist', 'pre_xr', 'index.html');
 const preXrIndexPublic = path.join(__dirname, 'public', 'pre_xr', 'index.html');

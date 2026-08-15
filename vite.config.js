@@ -52,8 +52,9 @@ function copyPublicAssets() {
             copyDirRecursive(path.join(publicDir, 'js'), path.join(distDir, 'js'));
             copyDirRecursive(path.join(publicDir, 'css'), path.join(distDir, 'css'));
             copyDirRecursive(path.join(publicDir, 'instance'), path.join(distDir, 'instance'));
-            copyDirRecursive(path.join(publicDir, 'qr-ar'), path.join(distDir, 'qr-ar'));
             copyDirRecursive(path.join(publicDir, 'pre_xr'), path.join(distDir, 'pre_xr'));
+            copyDirRecursive(path.join(publicDir, 'qr-ar', 'models'), path.join(distDir, 'qr-ar', 'models'));
+            copyDirRecursive(path.join(publicDir, 'qr-ar', 'assets'), path.join(distDir, 'qr-ar', 'assets'));
             copyDirRecursive(addonsDir, path.join(distDir, 'addons'));
             copyDirRecursive(
                 path.join(cwd, 'lib', 'aircraft-server'),
@@ -73,6 +74,7 @@ function copyPublicAssets() {
 
 export default defineConfig({
     root: 'public',
+    envDir: projectRoot,
     resolve: {
         alias: fs.existsSync(threeMeshUiEntry)
             ? { 'three-mesh-ui': threeMeshUiEntry }
@@ -121,10 +123,6 @@ export default defineConfig({
                 target: 'http://localhost:3000',
                 changeOrigin: true,
             },
-            '/qr-ar': {
-                target: 'http://localhost:3000',
-                changeOrigin: true,
-            },
             '/js': {
                 target: 'http://localhost:3000',
                 changeOrigin: true,
@@ -134,5 +132,11 @@ export default defineConfig({
     build: {
         outDir: '../dist',
         emptyOutDir: true,
+        rollupOptions: {
+            input: {
+                main: path.join(projectRoot, 'public/index.html'),
+                qrAr: path.join(projectRoot, 'public/qr-ar/index.html'),
+            },
+        },
     },
 });

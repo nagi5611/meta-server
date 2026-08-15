@@ -56,8 +56,6 @@ function getStoragePathsFromSrcDirectory(srcDirectory) {
         PLUGIN_DATABASES_DIR: path.join(dataDir, 'plugin-databases'),
         /** NFC インスタンス型のベイク済み 3D 資産 */
         NFC_INSTANCES_DIR: path.join(dataDir, 'nfc-instances'),
-        /** QR-AR カード用 GLB */
-        QR_AR_MODELS_DIR: path.join(dataDir, 'qr-ar-models'),
         SERVER_LOG_DIR: path.join(base, 'logs'),
     };
 }
@@ -83,7 +81,6 @@ function getStoragePathsFromExplicitEnv() {
         DB_DIR: metaDbDir,
         PLUGIN_DATABASES_DIR: path.join(path.dirname(metaDbDir), 'plugin-databases'),
         NFC_INSTANCES_DIR: path.join(path.dirname(metaDbDir), 'nfc-instances'),
-        QR_AR_MODELS_DIR: path.join(path.dirname(metaDbDir), 'qr-ar-models'),
         SERVER_LOG_DIR: requireEnv('META_SERVER_LOG_DIR'),
     };
 }
@@ -123,7 +120,6 @@ export function validateAndPrepareStoragePaths() {
     ensureDirExists(STORAGE_PATHS.DB_DIR, 'META_DB_DIR');
     ensureDirExists(STORAGE_PATHS.PLUGIN_DATABASES_DIR, 'PLUGIN_DATABASES_DIR');
     ensureDirExists(STORAGE_PATHS.NFC_INSTANCES_DIR, 'NFC_INSTANCES_DIR');
-    ensureDirExists(STORAGE_PATHS.QR_AR_MODELS_DIR, 'QR_AR_MODELS_DIR');
     ensureDirExists(STORAGE_PATHS.SERVER_LOG_DIR, 'META_SERVER_LOG_DIR');
 }
 
