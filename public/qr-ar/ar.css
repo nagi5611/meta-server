@@ -11,8 +11,36 @@ body {
 }
 
 .App {
+    position: fixed;
+    inset: 0;
     width: 100%;
     height: 100%;
+    z-index: 1;
+    overflow: hidden;
+    background: #000;
+}
+
+.App video,
+.App canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+body.qr-ar-active {
+    background: #000;
+}
+
+body.qr-ar-active .qr-ar-start-guide {
+    display: none;
+}
+
+body:not(.qr-ar-active) .App {
+    visibility: hidden;
+    pointer-events: none;
 }
 
 .qr-ar-start-guide {
