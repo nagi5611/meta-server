@@ -50,12 +50,54 @@ const statusBar = document.getElementById('qr-ar-status');
 const statusText = document.getElementById('qr-ar-status-text');
 
 const triggerQrSource = 'trigger';
-const triggerImageSource = new URL('./assets/trigger.jpg', window.location.href).href;
+    const triggerImageSource = new URL('./assets/trigger.jpg', import.meta.url).href;
 const gltfSource = new URL('./models/33.glb', import.meta.url).href;
 const hdrSource = new URL('./assets/environment.hdr', import.meta.url).href;
 
 /** @type {ImuCompensator|null} */
 let activeImuCompensator = null;
+
+/**
+ * AR ビューへ切り替え、コンテナのレイアウトが確定するまで待つ。
+ */
+async function activateArView() {
+    document.body.classList.add('qr-ar-active');
+    statusBar.hidden = false;
+
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    if (mount.clientWidth === 0 || mount.clientHeight === 0) {
+        throw new Error('AR 表示領域のサイズを取得できませんでした。');
+    }
+}
+
+/**
+ * AR ビューを終了し、開始画面へ戻す。
+ */
+function deactivateArView() {
+    document.body.classList.remove('qr-ar-active');
+    statusBar.hidden = true;
+}
+
+/**
+ * レンダラーと SDK のビューポートをコンテナサイズに合わせる。
+ * @param {import('@web-ar-studio/webar-engine-sdk').default} was
+ * @param {WebGLRenderer} renderer
+ * @param {PerspectiveCamera} camera
+ */
+function syncRendererViewport(was, renderer, camera) {
+    const viewportSizes = was.getViewportSizes();
+    renderer.setSize(mount.clientWidth, mount.clientHeight);
+    renderer.setViewport(
+        -(viewportSizes.width / 2 - mount.clientWidth / 2),
+        -(viewportSizes.height / 2 - mount.clientHeight / 2),
+        viewportSizes.width,
+        viewportSizes.height,
+    );
+    camera.aspect = viewportSizes.width / viewportSizes.height;
+    camera.updateProjectionMatrix();
+}
 
 /**
  * Open WebAR SDK のエラーをユーザー向けメッセージへ変換する。
@@ -95,9 +137,7 @@ function showError(message) {
     errorEl.hidden = false;
     startImageBtn.disabled = false;
     startQrBtn.disabled = false;
-    startGuide.hidden = false;
-    mount.hidden = true;
-    statusBar.hidden = true;
+    deactivateArView();
     activeImuCompensator?.stopListening();
     activeImuCompensator = null;
 }
@@ -199,13 +239,6 @@ async function startQrAr(trackingMode) {
     });
 
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(mount.clientWidth, mount.clientHeight);
-    renderer.setViewport(
-        -(viewportSizes.width / 2 - mount.clientWidth / 2),
-        -(viewportSizes.height / 2 - mount.clientHeight / 2),
-        viewportSizes.width,
-        viewportSizes.height,
-    );
     renderer.setClearColor(0xffffff, 0);
     renderer.clearColor();
 
@@ -217,6 +250,8 @@ async function startQrAr(trackingMode) {
         CAMERA_FAR,
     );
     scene.add(camera);
+
+    syncRendererViewport(was, renderer, camera);
 
     const [gltf] = await Promise.all([loadGltfModel(), loadHdrEnvironment(scene)]);
 
@@ -261,16 +296,7 @@ async function startQrAr(trackingMode) {
     was.on(EVENT_PROCESS, () => {}).catch(handleWasError);
 
     was.on(EVENT_RESIZE, () => {
-        const sizes = was.getViewportSizes();
-        renderer.setSize(mount.clientWidth, mount.clientHeight);
-        renderer.setViewport(
-            -(sizes.width / 2 - mount.clientWidth / 2),
-            -(sizes.height / 2 - mount.clientHeight / 2),
-            sizes.width,
-            sizes.height,
-        );
-        camera.aspect = sizes.width / sizes.height;
-        camera.updateProjectionMatrix();
+        syncRendererViewport(was, renderer, camera);
     }).catch(handleWasError);
 
     was.on(EVENT_SCREEN_ORIENTATION, () => {}).catch(handleWasError);
@@ -298,15 +324,14 @@ async function handleStart(trackingMode) {
     errorEl.textContent = '';
 
     try {
+        statusText.textContent = 'カメラを起動しています…';
+        await activateArView();
+
         const orientationGranted = await requestDeviceOrientationPermission();
         if (!orientationGranted) {
             console.warn('[qr-ar] device orientation permission denied — IMU hold disabled');
         }
 
-        startGuide.hidden = true;
-        mount.hidden = false;
-        statusBar.hidden = false;
-        statusText.textContent = 'カメラを起動しています…';
         await startQrAr(trackingMode);
     } catch (error) {
         handleWasError(error instanceof Error ? error : new Error(String(error)));
