@@ -75,6 +75,37 @@ body {
     cursor: not-allowed;
 }
 
+.qr-ar-start-btn-secondary {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #dbe7f8;
+}
+
+.qr-ar-marker-preview {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin: 0.75rem 0 1rem;
+}
+
+.qr-ar-marker-preview figure {
+    margin: 0;
+    text-align: center;
+}
+
+.qr-ar-marker-preview img {
+    display: block;
+    margin: 0 auto 0.35rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: #fff;
+}
+
+.qr-ar-marker-preview figcaption {
+    font-size: 0.78rem;
+    color: #9fb0c9;
+}
+
 .qr-ar-error {
     margin-top: 0.75rem;
     color: #f87171;

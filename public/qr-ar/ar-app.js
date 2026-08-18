@@ -1,4 +1,4 @@
-// public/qr-ar/ar-app.js — Open WebAR SDK による QR + image-tracking AR（IMU 補正付き）
+// public/qr-ar/ar-app.js — Open WebAR SDK による QR / image-tracking AR（IMU 補正付き）
 import {
     WebGLRenderer,
     Scene,
@@ -25,7 +25,8 @@ import WAS, {
     EVENT_VISIBILITY,
     GL_ERROR,
     HTML_ERROR,
-    PROJECT_MODE_MIX,
+    PROJECT_MODE_IMAGE,
+    PROJECT_MODE_QR,
     TRIGGER_MODE_IMAGE,
     TRIGGER_MODE_QR,
     VIDEO_ERROR,
@@ -41,16 +42,20 @@ const CAMERA_FAR = 100000;
 const TEST_API_KEY = '52f80541de1715ba47f43522d648d0800c6e514d8b5e91b9b6e13ef9e1348cb8';
 
 const startGuide = document.getElementById('qr-ar-start-guide');
-const startBtn = document.getElementById('qr-ar-start-btn');
+const startImageBtn = document.getElementById('qr-ar-start-image-btn');
+const startQrBtn = document.getElementById('qr-ar-start-qr-btn');
 const errorEl = document.getElementById('qr-ar-error');
 const mount = document.getElementById('qr-ar-mount');
 const statusBar = document.getElementById('qr-ar-status');
 const statusText = document.getElementById('qr-ar-status-text');
 
 const triggerQrSource = 'trigger';
-const triggerImageSource = new URL('./assets/trigger.jpg', import.meta.url).href;
+const triggerImageSource = new URL('./assets/trigger.jpg', window.location.href).href;
 const gltfSource = new URL('./models/33.glb', import.meta.url).href;
 const hdrSource = new URL('./assets/environment.hdr', import.meta.url).href;
+
+/** @type {ImuCompensator|null} */
+let activeImuCompensator = null;
 
 /**
  * Open WebAR SDK のエラーをユーザー向けメッセージへ変換する。
@@ -88,10 +93,13 @@ function handleWasError(error) {
 function showError(message) {
     errorEl.textContent = message;
     errorEl.hidden = false;
-    startBtn.disabled = false;
+    startImageBtn.disabled = false;
+    startQrBtn.disabled = false;
     startGuide.hidden = false;
     mount.hidden = true;
     statusBar.hidden = true;
+    activeImuCompensator?.stopListening();
+    activeImuCompensator = null;
 }
 
 /**
@@ -130,29 +138,52 @@ function loadGltfModel() {
 }
 
 /**
- * Open WebAR SDK で QR + image-tracking AR を開始する。
+ * 追跡モードに応じた SDK 設定を返す。
+ * @param {'image' | 'qr'} trackingMode
  */
-async function startQrAr() {
+function buildSdkConfig(trackingMode) {
+    if (trackingMode === 'image') {
+        return {
+            mode: PROJECT_MODE_IMAGE,
+            triggers: [{ id: 2, mode: TRIGGER_MODE_IMAGE, source: triggerImageSource }],
+            searchingText: '画像マーカーを探しています…',
+        };
+    }
+
+    return {
+        mode: PROJECT_MODE_QR,
+        triggers: [{ id: 1, mode: TRIGGER_MODE_QR, source: triggerQrSource }],
+        searchingText: 'QR コードを探しています…',
+    };
+}
+
+/**
+ * Open WebAR SDK で AR を開始する。
+ * @param {'image' | 'qr'} trackingMode
+ */
+async function startQrAr(trackingMode) {
     if (!mount) {
         throw new Error('AR マウント要素が見つかりません。');
     }
 
+    const sdkConfig = buildSdkConfig(trackingMode);
     const apiKey = import.meta.env.VITE_WEBAR_API_KEY || TEST_API_KEY;
     const was = new WAS();
 
     const configData = {
         apiKey,
-        mode: PROJECT_MODE_MIX,
+        mode: sdkConfig.mode,
         cameraMode: CAMERA_MODE_ENVIRONMENT,
         container: mount,
         fov: CAMERA_FOV,
-        triggers: [
-            { id: 1, mode: TRIGGER_MODE_QR, source: triggerQrSource },
-            { id: 2, mode: TRIGGER_MODE_IMAGE, source: triggerImageSource },
-        ],
+        triggers: sdkConfig.triggers,
         isMultiTracking: true,
         anchor: ANCHOR_TYPE_CENTER,
     };
+
+    const imuCompensator = new ImuCompensator();
+    activeImuCompensator = imuCompensator;
+    imuCompensator.startListening();
 
     const { canvas, context, viewportSizes } = await was.init(configData);
 
@@ -202,7 +233,6 @@ async function startQrAr() {
         }
     }
 
-    const imuCompensator = new ImuCompensator();
     const poseController = new PoseController({
         camera,
         model,
@@ -253,23 +283,35 @@ async function startQrAr() {
         }
         renderer.render(scene, camera);
     }).catch(handleWasError);
+
+    statusText.textContent = sdkConfig.searchingText;
 }
 
-startBtn?.addEventListener('click', async () => {
-    startBtn.disabled = true;
+/**
+ * AR 開始ボタンの共通ハンドラ。
+ * @param {'image' | 'qr'} trackingMode
+ */
+async function handleStart(trackingMode) {
+    startImageBtn.disabled = true;
+    startQrBtn.disabled = true;
     errorEl.hidden = true;
     errorEl.textContent = '';
 
     try {
-        await requestDeviceOrientationPermission();
+        const orientationGranted = await requestDeviceOrientationPermission();
+        if (!orientationGranted) {
+            console.warn('[qr-ar] device orientation permission denied — IMU hold disabled');
+        }
 
         startGuide.hidden = true;
         mount.hidden = false;
         statusBar.hidden = false;
         statusText.textContent = 'カメラを起動しています…';
-        await startQrAr();
-        statusText.textContent = 'QR/画像マーカーを探しています…';
+        await startQrAr(trackingMode);
     } catch (error) {
         handleWasError(error instanceof Error ? error : new Error(String(error)));
     }
-});
+}
+
+startImageBtn?.addEventListener('click', () => handleStart('image'));
+startQrBtn?.addEventListener('click', () => handleStart('qr'));
