@@ -1,4 +1,4 @@
-// public/qr-ar/ar-app.js — Open WebAR SDK による QR コード追跡 AR
+// public/qr-ar/ar-app.js — Open WebAR SDK による QR + image-tracking AR（IMU 補正付き）
 import {
     WebGLRenderer,
     Scene,
@@ -6,7 +6,6 @@ import {
     AnimationMixer,
     LoopRepeat,
     EquirectangularReflectionMapping,
-    Quaternion,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
@@ -15,6 +14,7 @@ import WAS, {
     CAMERA_MODE_ENVIRONMENT,
     DEVICE_ERROR,
     EVENT_DETECTED,
+    EVENT_DEVICE_ORIENTATION,
     EVENT_ERROR,
     EVENT_FRAME,
     EVENT_LOST,
@@ -25,11 +25,14 @@ import WAS, {
     EVENT_VISIBILITY,
     GL_ERROR,
     HTML_ERROR,
-    PROJECT_MODE_QR,
+    PROJECT_MODE_MIX,
+    TRIGGER_MODE_IMAGE,
     TRIGGER_MODE_QR,
     VIDEO_ERROR,
     WORKER_ERROR,
 } from '@web-ar-studio/webar-engine-sdk';
+import { ImuCompensator, requestDeviceOrientationPermission } from './imu-compensator.js';
+import { PoseController } from './pose-controller.js';
 
 const CAMERA_FOV = 45;
 const CAMERA_NEAR = 1;
@@ -44,59 +47,10 @@ const mount = document.getElementById('qr-ar-mount');
 const statusBar = document.getElementById('qr-ar-status');
 const statusText = document.getElementById('qr-ar-status-text');
 
-const triggerSource = 'trigger';
+const triggerQrSource = 'trigger';
+const triggerImageSource = new URL('./assets/trigger.jpg', import.meta.url).href;
 const gltfSource = new URL('./models/33.glb', import.meta.url).href;
 const hdrSource = new URL('./assets/environment.hdr', import.meta.url).href;
-
-/**
- * SDK から渡されたカメラ行列を Three.js カメラへ反映する。
- * @param {PerspectiveCamera} camera
- * @param {object} data
- */
-function applySdkCamera(camera, data) {
-    if (data.projectionMatrix && data.projectionMatrix.length === 16) {
-        camera.projectionMatrix.fromArray(data.projectionMatrix);
-        camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
-        return;
-    }
-
-    const params = data.cameraParams;
-    if (!params) return;
-
-    const { fx, fy, cx, cy, width, height } = params;
-    if (!(fx > 0 && fy > 0 && width > 0 && height > 0)) return;
-
-    const near = camera.near;
-    const far = camera.far;
-    const left = (-cx * near) / fx;
-    const right = ((width - cx) * near) / fx;
-    const top = (cy * near) / fy;
-    const bottom = (-(height - cy) * near) / fy;
-
-    camera.projectionMatrix.makePerspective(left, right, top, bottom, near, far);
-    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
-}
-
-/**
- * 検出データからモデルの位置・向きを更新する。
- * @param {import('three').Object3D} model
- * @param {object} data
- */
-function applyPoseToModel(model, data) {
-    model.position.set(
-        data.positionVector.x,
-        data.positionVector.y,
-        data.positionVector.z,
-    );
-    model.rotation.setFromQuaternion(
-        new Quaternion(
-            data.rotationQuaternion.x,
-            data.rotationQuaternion.y,
-            data.rotationQuaternion.z,
-            data.rotationQuaternion.w,
-        ),
-    );
-}
 
 /**
  * Open WebAR SDK のエラーをユーザー向けメッセージへ変換する。
@@ -176,7 +130,7 @@ function loadGltfModel() {
 }
 
 /**
- * Open WebAR SDK で QR 追跡 AR を開始する。
+ * Open WebAR SDK で QR + image-tracking AR を開始する。
  */
 async function startQrAr() {
     if (!mount) {
@@ -188,11 +142,14 @@ async function startQrAr() {
 
     const configData = {
         apiKey,
-        mode: PROJECT_MODE_QR,
+        mode: PROJECT_MODE_MIX,
         cameraMode: CAMERA_MODE_ENVIRONMENT,
         container: mount,
         fov: CAMERA_FOV,
-        triggers: [{ id: 1, mode: TRIGGER_MODE_QR, source: triggerSource }],
+        triggers: [
+            { id: 1, mode: TRIGGER_MODE_QR, source: triggerQrSource },
+            { id: 2, mode: TRIGGER_MODE_IMAGE, source: triggerImageSource },
+        ],
         isMultiTracking: true,
         anchor: ANCHOR_TYPE_CENTER,
     };
@@ -245,51 +202,30 @@ async function startQrAr() {
         }
     }
 
-    let isAnchored = false;
-
-    /**
-     * 初回検出後はモデルを非表示に戻さず、SDK のポーズ更新を継続適用する。
-     * @param {object} data
-     */
-    function updateAnchoredPose(data) {
-        applySdkCamera(camera, data);
-        if (!model) return;
-
-        model.visible = true;
-        applyPoseToModel(model, data);
-        isAnchored = true;
-        statusText.textContent = 'QR 追跡中';
-    }
-
-    /**
-     * QR が見えなくなったとき、最後のポーズを保持して表示を継続する。
-     * @param {object} data
-     */
-    function holdLastPose(data) {
-        if (!isAnchored || !model) return;
-
-        applySdkCamera(camera, data);
-        applyPoseToModel(model, data);
-        model.visible = true;
-        statusText.textContent = '位置を維持中（QR 非表示）';
-    }
+    const imuCompensator = new ImuCompensator();
+    const poseController = new PoseController({
+        camera,
+        model,
+        imuCompensator,
+        onStatusChange: (message) => {
+            statusText.textContent = message;
+        },
+    });
 
     was.on(EVENT_DETECTED, (detectedData) => {
-        for (const data of detectedData) {
-            updateAnchoredPose(data);
-        }
+        poseController.onDetected(detectedData);
     }).catch(handleWasError);
 
     was.on(EVENT_LOST, (lostData) => {
-        for (const data of lostData) {
-            holdLastPose(data);
-        }
+        poseController.onLost(lostData);
     }).catch(handleWasError);
 
     was.on(EVENT_POSE, (poseData) => {
-        for (const data of poseData) {
-            updateAnchoredPose(data);
-        }
+        poseController.onPose(poseData);
+    }).catch(handleWasError);
+
+    was.on(EVENT_DEVICE_ORIENTATION, (event) => {
+        imuCompensator.handleOrientation(event);
     }).catch(handleWasError);
 
     was.on(EVENT_PROCESS, () => {}).catch(handleWasError);
@@ -311,6 +247,7 @@ async function startQrAr() {
     was.on(EVENT_VISIBILITY, () => {}).catch(handleWasError);
 
     was.on(EVENT_FRAME, (deltaTime) => {
+        poseController.onFrame();
         if (animationMixer) {
             animationMixer.update(deltaTime / 1000);
         }
@@ -324,12 +261,14 @@ startBtn?.addEventListener('click', async () => {
     errorEl.textContent = '';
 
     try {
+        await requestDeviceOrientationPermission();
+
         startGuide.hidden = true;
         mount.hidden = false;
         statusBar.hidden = false;
         statusText.textContent = 'カメラを起動しています…';
         await startQrAr();
-        statusText.textContent = 'QR を探しています…';
+        statusText.textContent = 'QR/画像マーカーを探しています…';
     } catch (error) {
         handleWasError(error instanceof Error ? error : new Error(String(error)));
     }

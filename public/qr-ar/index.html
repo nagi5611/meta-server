@@ -11,8 +11,12 @@
     <div id="qr-ar-start-guide" class="qr-ar-start-guide">
         <div class="qr-ar-start-card">
             <h1>QR-AR</h1>
-            <p>カメラを起動し、印刷した QR コードを映してください。コードの上に 3D モデルが表示されます。</p>
-            <p class="qr-ar-start-hint">サンプル QR: <code>public/qr-ar/assets/trigger.png</code> を印刷または画面表示</p>
+            <p>カメラを起動し、印刷したマーカーを映してください。マーカーの上に 3D モデルが表示されます。</p>
+            <p class="qr-ar-start-hint">
+                推奨: 画像マーカー <code>public/qr-ar/assets/trigger.jpg</code> を印刷（斜め角度の追跡に強い）<br />
+                代替: QR コード <code>public/qr-ar/assets/trigger.png</code> でも認識可能<br />
+                マーカー非表示時は IMU で位置を維持します（スマホのみ・平行移動は補正不可）
+            </p>
             <button type="button" id="qr-ar-start-btn" class="qr-ar-start-btn">AR を開始</button>
             <p id="qr-ar-error" class="qr-ar-error" hidden></p>
         </div>
