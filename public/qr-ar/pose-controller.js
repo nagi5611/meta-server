@@ -55,13 +55,6 @@ export class PoseController {
     }
 
     /**
-     * 現在の追跡状態を返す。
-     */
-    getState() {
-        return this.state;
-    }
-
-    /**
      * @param {string} message
      */
     setStatus(message) {
@@ -119,12 +112,22 @@ export class PoseController {
         this.model.visible = true;
         this.imuCompensator.captureReference(this.model);
         this.state = 'imu_hold';
+        this.updateHoldStatus();
+    }
 
-        if (this.imuCompensator.isAvailable()) {
+    /**
+     * hold 中のステータス文言を更新する。
+     */
+    updateHoldStatus() {
+        if (this.imuCompensator.isActive()) {
             this.setStatus('位置を維持中（IMU補正）');
-        } else {
-            this.setStatus('位置を維持中（固定表示）');
+            return;
         }
+        if (this.imuCompensator.isAvailable()) {
+            this.setStatus('位置を維持中（IMU待機中）');
+            return;
+        }
+        this.setStatus('位置を維持中（固定表示・IMU不可）');
     }
 
     /**

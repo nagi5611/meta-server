@@ -12,18 +12,27 @@
         <div class="qr-ar-start-card">
             <h1>QR-AR</h1>
             <p>カメラを起動し、印刷したマーカーを映してください。マーカーの上に 3D モデルが表示されます。</p>
+            <div class="qr-ar-marker-preview">
+                <figure>
+                    <img src="./assets/trigger.jpg" alt="画像マーカー trigger.jpg" width="160" />
+                    <figcaption>画像マーカー（推奨）</figcaption>
+                </figure>
+                <figure>
+                    <img src="./assets/trigger.png" alt="QR コード trigger.png" width="120" />
+                    <figcaption>QR コード</figcaption>
+                </figure>
+            </div>
             <p class="qr-ar-start-hint">
-                推奨: 画像マーカー <code>public/qr-ar/assets/trigger.jpg</code> を印刷（斜め角度の追跡に強い）<br />
-                代替: QR コード <code>public/qr-ar/assets/trigger.png</code> でも認識可能<br />
-                マーカー非表示時は IMU で位置を維持します（スマホのみ・平行移動は補正不可）
+                画像マーカーは斜め角度の追跡に強いです。マーカー非表示時は IMU で位置を維持します（スマホのみ）。
             </p>
-            <button type="button" id="qr-ar-start-btn" class="qr-ar-start-btn">AR を開始</button>
+            <button type="button" id="qr-ar-start-image-btn" class="qr-ar-start-btn">画像マーカーで AR 開始</button>
+            <button type="button" id="qr-ar-start-qr-btn" class="qr-ar-start-btn qr-ar-start-btn-secondary">QR コードで AR 開始</button>
             <p id="qr-ar-error" class="qr-ar-error" hidden></p>
         </div>
     </div>
     <div id="qr-ar-mount" class="App" hidden></div>
     <div id="qr-ar-status" class="qr-ar-status" hidden>
-        <span id="qr-ar-status-text">QR を探しています…</span>
+        <span id="qr-ar-status-text">マーカーを探しています…</span>
     </div>
     <script type="module" src="./ar-app.js"></script>
 </body>
