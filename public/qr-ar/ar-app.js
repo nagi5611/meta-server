@@ -134,6 +134,9 @@ function formatWasError(error) {
         case HTML_ERROR:
             return '表示領域の初期化に失敗しました。ページを再読み込みしてください。';
         default:
+            if (error.message?.includes('apikey') || error.message?.includes('API')) {
+                return 'WebAR API キーの検証に失敗しました。VITE_WEBAR_API_KEY の設定とドメイン登録を確認してください。';
+            }
             return error.message || 'AR の起動に失敗しました。';
     }
 }
@@ -234,6 +237,7 @@ async function startQrAr(trackingMode) {
 
     const configData = {
         apiKey,
+        apiBaseUrl: window.location.origin,
         mode: sdkConfig.mode,
         cameraMode: CAMERA_MODE_ENVIRONMENT,
         container: mount,

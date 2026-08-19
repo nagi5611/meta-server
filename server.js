@@ -1657,6 +1657,48 @@ assertProductionSecurityAfterAddons(HOST);
 registerAddonShutdownHooks(httpServer);
 
 // ============================
+// WebAR SDK API proxy (CORS回避: ブラウザ→自サーバー→api.arclip.design)
+// ============================
+const WEBAR_UPSTREAM_API_BASE = String(process.env.WEBAR_API_BASE_URL || 'https://api.arclip.design').replace(/\/$/, '');
+
+/**
+ * WebAR SDK の API キー検証を上流へ転送する。
+ */
+app.post('/api/v3/apikey/verify', express.json(), async (req, res) => {
+    const apikey = String(req.query.apikey || req.body?.apikey || '').trim();
+    if (!apikey) {
+        return res.status(400).json({ success: false, error: 'apikey required' });
+    }
+
+    const upstreamUrl = `${WEBAR_UPSTREAM_API_BASE}/api/v3/apikey/verify?apikey=${encodeURIComponent(apikey)}`;
+    const forwardHeaders = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/plain, */*',
+    };
+    const origin = req.get('origin');
+    const referer = req.get('referer');
+    if (origin) forwardHeaders.Origin = origin;
+    if (referer) forwardHeaders.Referer = referer;
+
+    try {
+        const upstream = await fetch(upstreamUrl, {
+            method: 'POST',
+            headers: forwardHeaders,
+            body: JSON.stringify(req.body ?? {}),
+        });
+        const bodyText = await upstream.text();
+        const contentType = upstream.headers.get('content-type');
+        if (contentType) {
+            res.setHeader('Content-Type', contentType);
+        }
+        return res.status(upstream.status).send(bodyText);
+    } catch (error) {
+        console.error('[webar-proxy] apikey verify failed:', error);
+        return res.status(502).json({ success: false, error: 'webar_upstream_unavailable' });
+    }
+});
+
+// ============================
 // Auth API (student / teacher)
 // ============================
 app.get('/api/auth/session', (req, res) => {
