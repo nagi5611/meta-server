@@ -431,7 +431,7 @@ class ChatManager {
 
     /**
      * チャット1件を描画する。他者向け moderationWarning では本文を隠し目アイコンで切替
-     * @param {{ senderName: string, senderId: string, message: string, timestamp?: number, moderationWarning?: boolean }} data
+     * @param {{ senderName: string, senderId: string, message: string, timestamp?: number, moderationWarning?: boolean, translatedMessage?: string }} data
      * @param {boolean} isOwnMessage
      */
     addChatMessage(data, isOwnMessage = false) {
@@ -487,6 +487,8 @@ class ChatManager {
 
         messageDiv.appendChild(messageHeader);
 
+        const displayMessage = this.formatDisplayMessage(data, isOwnMessage);
+
         if (showModerationUi) {
             const warnRow = document.createElement('div');
             warnRow.className = 'chat-moderation-warn-row';
@@ -506,7 +508,7 @@ class ChatManager {
 
             const messageText = document.createElement('div');
             messageText.className = 'message-text';
-            messageText.innerHTML = this.formatChatMessageHtml(data.message);
+            messageText.innerHTML = this.formatChatMessageHtml(displayMessage);
 
             bodyWrap.appendChild(messageText);
             warnRow.appendChild(warnLabel);
@@ -532,7 +534,7 @@ class ChatManager {
         } else {
             const messageText = document.createElement('div');
             messageText.className = 'message-text';
-            messageText.innerHTML = this.formatChatMessageHtml(data.message);
+            messageText.innerHTML = this.formatChatMessageHtml(displayMessage);
             messageDiv.appendChild(messageText);
         }
 
@@ -583,6 +585,24 @@ class ChatManager {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }
+
+    /**
+     * 受信メッセージの表示用テキスト（原文 + 翻訳併記）
+     * @param {{ message?: string, translatedMessage?: string }} data
+     * @param {boolean} isOwnMessage
+     * @returns {string}
+     */
+    formatDisplayMessage(data, isOwnMessage = false) {
+        const original = data.message ?? '';
+        if (isOwnMessage) {
+            return original;
+        }
+        const translated = data.translatedMessage;
+        if (typeof translated === 'string' && translated.trim() && translated !== original) {
+            return `${original} (${translated})`;
+        }
+        return original;
     }
 
     /**

@@ -38,7 +38,7 @@ import { recordTickEmit, registerTickHookInstalled } from './lib/bench-tick-metr
 import { lookupIpLocation } from './lib/ip-geolocation.js';
 import { moderateChatMessage, moderateUsername, getModerationSystemPromptsForAdmin } from './lib/chat-moderation.js';
 import { translateChatMessage } from './lib/chat-translation.js';
-import { normalizeUiLocale, roomHasJapaneseListener } from './lib/ui-locale.js';
+import { normalizeUiLocale, getListenerTargetLocales } from './lib/ui-locale.js';
 import { findNgPhraseMatch, getChatNgWords, saveChatNgWords } from './lib/chat-ng-words.js';
 import {
     runGlbTextureResizeQueued,
@@ -691,22 +691,19 @@ function parseSetUsernamePayload(payload) {
 }
 
 /**
- * 日本語 UI の受信者には翻訳文、それ以外には原文で chat-receive を送る（送信者は常に原文）
+ * 受信者の uiLocale に応じて translatedMessage を付与して chat-receive を送る（送信者は常に原文）
  * @param {import('socket.io').Server} ioServer
  * @param {import('socket.io').Socket} senderSocket
  * @param {{ players: Map<string, { uiLocale?: string }> }} roomState
  * @param {string} currentRoom
  * @param {Record<string, unknown>} chatData 他プレイヤー向けベース
- * @param {string} jaMessage 日本語 UI 向け本文（原文と同じなら翻訳なし扱い）
+ * @param {Partial<Record<'ja' | 'en' | 'zh', string>>} translationsByLocale ロケール別翻訳文
  * @param {Record<string, unknown>} [selfChatData] 送信者向け（省略時は chatData）
  */
-function emitChatToRoomWithLocale(ioServer, senderSocket, roomState, currentRoom, chatData, jaMessage, selfChatData) {
+function emitChatToRoomWithLocale(ioServer, senderSocket, roomState, currentRoom, chatData, translationsByLocale, selfChatData) {
     const senderId = senderSocket.id;
     const originalMessage = typeof chatData.message === 'string' ? chatData.message : '';
-    const useJa =
-        typeof jaMessage === 'string' &&
-        jaMessage.trim().length > 0 &&
-        jaMessage !== originalMessage;
+    const senderLocale = normalizeUiLocale(senderSocket.data?.uiLocale);
 
     senderSocket.emit('chat-my-message', selfChatData != null ? selfChatData : chatData);
 
@@ -714,11 +711,13 @@ function emitChatToRoomWithLocale(ioServer, senderSocket, roomState, currentRoom
         if (id === senderId) continue;
         const targetSocket = ioServer.sockets.sockets.get(id);
         if (!targetSocket) continue;
-        const locale = normalizeUiLocale(p.uiLocale);
-        const payload =
-            useJa && locale === 'ja'
-                ? { ...chatData, message: jaMessage }
-                : chatData;
+        const listenerLocale = normalizeUiLocale(p.uiLocale);
+        const translated = translationsByLocale[listenerLocale];
+
+        let payload = chatData;
+        if (listenerLocale !== senderLocale && translated && translated !== originalMessage) {
+            payload = { ...chatData, translatedMessage: translated };
+        }
         targetSocket.emit('chat-receive', payload);
     }
 
@@ -4045,8 +4044,7 @@ io.on('connection', (socket) => {
             const pendingLine = `${new Date(now).toISOString()} | ${socket.id} | ${text.replace(/\|/g, '｜').replace(/\r?\n/g, ' ')}`;
 
             const senderLocale = normalizeUiLocale(player.uiLocale);
-            const shouldTranslateForJa =
-                senderLocale !== 'ja' && roomHasJapaneseListener(roomState, socket.id);
+            const targetLocales = getListenerTargetLocales(roomState, socket.id, senderLocale);
 
             const moderationPromise = moderateChatMessage({
                 apiKey,
@@ -4055,19 +4053,24 @@ io.on('connection', (socket) => {
                 pendingLine,
             });
 
-            const translationPromise = shouldTranslateForJa
-                ? translateChatMessage({
-                      apiKey,
-                      model: process.env.GEMINI_MODEL,
-                      text,
-                      targetLocale: 'ja',
-                  })
-                : Promise.resolve({ translated: text, skipped: true });
+            const translationPromises = targetLocales.map((locale) =>
+                translateChatMessage({
+                    apiKey,
+                    model: process.env.GEMINI_MODEL,
+                    text,
+                    targetLocale: locale,
+                }).then((result) => ({ locale, ...result })),
+            );
 
             let moderation;
-            let translation;
+            let translationResults;
             try {
-                [moderation, translation] = await Promise.all([moderationPromise, translationPromise]);
+                [moderation, translationResults] = await Promise.all([
+                    moderationPromise,
+                    translationPromises.length > 0
+                        ? Promise.all(translationPromises)
+                        : Promise.resolve([]),
+                ]);
             } catch (modErr) {
                 console.error('[CHAT_MOD] API error:', modErr);
                 releaseChatRoomSlot(currentRoom, roomSlotId);
@@ -4079,13 +4082,18 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            const jaMessage =
-                !translation.skipped &&
-                typeof translation.translated === 'string' &&
-                translation.translated.trim() &&
-                translation.translated !== text
-                    ? translation.translated.trim()
-                    : text;
+            /** @type {Partial<Record<'ja' | 'en' | 'zh', string>>} */
+            const translationsByLocale = {};
+            for (const { locale, translated, skipped } of translationResults) {
+                if (
+                    !skipped &&
+                    typeof translated === 'string' &&
+                    translated.trim() &&
+                    translated !== text
+                ) {
+                    translationsByLocale[locale] = translated.trim();
+                }
+            }
 
             if (moderation.inappropriate) {
                 const reason =
@@ -4146,7 +4154,7 @@ io.on('connection', (socket) => {
                     roomState,
                     currentRoom,
                     chatDataOthers,
-                    jaMessage,
+                    translationsByLocale,
                     chatDataSelf,
                 );
                 updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
@@ -4177,7 +4185,7 @@ io.on('connection', (socket) => {
 
             chatUserLastSuccessAt.set(socket.id, now);
 
-            emitChatToRoomWithLocale(io, socket, roomState, currentRoom, chatData, jaMessage);
+            emitChatToRoomWithLocale(io, socket, roomState, currentRoom, chatData, translationsByLocale);
             updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
 
             ack({ ok: true });
