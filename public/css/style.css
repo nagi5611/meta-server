@@ -2583,6 +2583,31 @@ a.admin-menu-link:hover {
     filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.5));
 }
 
+/* リアルタイム音声字幕（プレイヤー頭上のオーバーレイ） */
+.player-caption {
+    position: absolute;
+    z-index: 1490;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    max-width: 320px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.62);
+    color: #fff;
+    font-size: 14px;
+    line-height: 1.35;
+    text-align: center;
+    white-space: pre-wrap;
+    word-break: break-word;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* 確定前(interim)は少し薄く表示 */
+.player-caption.interim {
+    opacity: 0.8;
+    font-style: italic;
+}
+
 @keyframes emojiFloat {
     0% {
         transform: translate(-50%, -50%) scale(0) translateY(30px);

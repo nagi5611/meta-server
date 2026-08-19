@@ -13,6 +13,15 @@ import os from 'os';
 import * as mediasoup from 'mediasoup';
 import { initDb, verifyStudent, verifyTeacher, registerStudent, registerTeacher, listStudents, listTeachers, updateStudent, updateTeacher, deleteStudent, deleteTeacher } from './db/users.js';
 import { initUserSessionsDb, insertSession, getLatestSessionByUsername, getSessionsPaginated } from './db/user-sessions.js';
+import { initCaptionsLogDb } from './db/captions-log.js';
+import {
+    captionsReady as captionsRuntimeReady,
+    setListener as captionsSetListener,
+    handleAudioChunk as captionsHandleAudioChunk,
+    notifySpeakerIfListeners as captionsNotifySpeaker,
+    closeSession as captionsCloseSession,
+    cleanupSocket as captionsCleanupSocket,
+} from './lib/captions-server.js';
 import { STORAGE_PATHS, validateAndPrepareStoragePaths } from './config/storage-paths.js';
 import { MODEL_UPLOAD_MAX_BYTES } from './lib/model-upload-max-bytes.js';
 import cookieParser from 'cookie-parser';
@@ -2987,6 +2996,20 @@ function getRoomState(roomId) {
     return rs;
 }
 
+/**
+ * 字幕表示に使う話者の表示名を返す（displayName 相当）。
+ * @param {import('socket.io').Socket} socket
+ * @returns {string}
+ */
+function captionDisplayName(socket) {
+    try {
+        const rs = getRoomState(socket.data.currentRoom);
+        const p = rs?.players?.get(socket.id);
+        if (p) return p.isAdmin ? 'admin' : (p.username || 'Guest');
+    } catch (_) { /* ignore */ }
+    return 'Guest';
+}
+
 setAircraftServerDeps({ getRoomState, readWorlds });
 
 // VC: Cleanup peer resources
@@ -3925,6 +3948,9 @@ io.on('connection', (socket) => {
         await cleanupVCPeer(socket.id);
         socket.emit('vc-room-changed', { roomId: newRoom });
 
+        // 字幕: 旧ルームのリスナー登録と STT セッションを解除（クライアントが新ルームで再申告する）
+        captionsCleanupSocket(io, socket);
+
         // Video VC: Cleanup old room and notify client
         await cleanupVideoVCPeer(socket.id);
         socket.emit('video-vc-room-changed', { roomId: newRoom });
@@ -4328,6 +4354,11 @@ io.on('connection', (socket) => {
                 }
                 
                 callback({ allowed: true });
+
+                // 字幕: 既にリスナーがいる部屋なら、この話者に capture 開始を伝える
+                if (captionsRuntimeReady()) {
+                    captionsNotifySpeaker(io, peer.roomId, socket.id);
+                }
             } else {
                 // Mic OFF: close producer and sendTransport
                 if (peer.sendTransport) {
@@ -4347,6 +4378,9 @@ io.on('connection', (socket) => {
                 
                 console.log(`[VC] Mic OFF for ${socket.id}, sendTransport closed`);
                 callback({ success: true });
+
+                // 字幕: マイク OFF で STT セッションを終了
+                captionsCloseSession(socket.id);
             }
         } catch (error) {
             console.error(`[VC] Error setting mic:`, error);
@@ -4547,6 +4581,24 @@ io.on('connection', (socket) => {
             console.error(`[VC] Error leaving:`, error);
             if (callback) callback({ error: error.message });
         }
+    });
+
+    // ============================
+    // リアルタイム音声字幕（Speech-to-Text）
+    // ============================
+    // 聞き手が字幕 ON/OFF を切り替える（room のリスナー数で話者の capture を制御）
+    socket.on('stt-listen', ({ enabled } = {}) => {
+        if (!captionsRuntimeReady()) return;
+        captionsSetListener(io, socket.data.currentRoom, socket.id, !!enabled);
+    });
+
+    // 話者の 16kHz mono 16bit LE PCM チャンク（マイク ON かつ capture 中のみ送信される想定）
+    socket.on('stt-audio-chunk', (chunk) => {
+        if (!captionsRuntimeReady()) return;
+        // 高頻度・ack なし。例外は握りつぶす（音声送出を止めない）
+        captionsHandleAudioChunk(io, socket, chunk, captionDisplayName).catch((e) => {
+            console.error('[captions] handleAudioChunk error:', e?.message || e);
+        });
     });
 
     // ============================
@@ -5062,6 +5114,9 @@ io.on('connection', (socket) => {
         await cleanupVCPeer(socket.id);
         await cleanupPdfVCPeer(socket.id);
         await cleanupVideoVCPeer(socket.id);
+
+        // Cleanup captions listener membership + STT session
+        captionsCleanupSocket(io, socket);
 
         // Cleanup traffic stats, ping, client info
         trafficStats.delete(socket.id);
@@ -7552,6 +7607,10 @@ function formatBytes(bytes) {
     }
     initDb();
     initUserSessionsDb();
+    if (captionsRuntimeReady()) {
+        initCaptionsLogDb();
+        console.log('[captions] enabled (provider ready); captions_log.db active');
+    }
     try {
         await ensureAvatarRegistry(AVATARS_DIR);
     } catch (e) {
