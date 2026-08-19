@@ -32,23 +32,54 @@ export function orientationEventToQuaternion(event) {
 }
 
 /**
- * iOS Safari 向けにデバイス姿勢の許可をリクエストする。
- * @returns {Promise<boolean>}
+ * iOS Safari 向けにモーション・姿勢センサーの許可をリクエストする。
+ * Android / PC ではダイアログは出ない（正常）。
+ * @returns {Promise<boolean>} いずれかが許可された、または許可不要な環境なら true
  */
-export async function requestDeviceOrientationPermission() {
+export async function requestMotionPermissions() {
+    let orientationGranted = false;
+    let motionGranted = false;
+    let orientationRequired = false;
+    let motionRequired = false;
+
     const OrientationEvent = window.DeviceOrientationEvent;
-    if (
-        OrientationEvent &&
-        typeof OrientationEvent.requestPermission === 'function'
-    ) {
+    if (OrientationEvent && typeof OrientationEvent.requestPermission === 'function') {
+        orientationRequired = true;
         try {
             const result = await OrientationEvent.requestPermission();
-            return result === 'granted';
+            orientationGranted = result === 'granted';
         } catch {
-            return false;
+            orientationGranted = false;
         }
+    } else {
+        orientationGranted = true;
     }
-    return true;
+
+    const MotionEvent = window.DeviceMotionEvent;
+    if (MotionEvent && typeof MotionEvent.requestPermission === 'function') {
+        motionRequired = true;
+        try {
+            const result = await MotionEvent.requestPermission();
+            motionGranted = result === 'granted';
+        } catch {
+            motionGranted = false;
+        }
+    } else {
+        motionGranted = true;
+    }
+
+    if (!orientationRequired && !motionRequired) {
+        return true;
+    }
+
+    return orientationGranted || motionGranted;
+}
+
+/**
+ * @deprecated requestMotionPermissions を使用してください
+ */
+export async function requestDeviceOrientationPermission() {
+    return requestMotionPermissions();
 }
 
 /**

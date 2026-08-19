@@ -32,7 +32,7 @@ import WAS, {
     VIDEO_ERROR,
     WORKER_ERROR,
 } from '@web-ar-studio/webar-engine-sdk';
-import { ImuCompensator, requestDeviceOrientationPermission } from './imu-compensator.js';
+import { ImuCompensator, requestMotionPermissions } from './imu-compensator.js';
 import { PoseController } from './pose-controller.js';
 
 const CAMERA_FOV = 45;
@@ -50,22 +50,44 @@ const statusBar = document.getElementById('qr-ar-status');
 const statusText = document.getElementById('qr-ar-status-text');
 
 const triggerQrSource = 'trigger';
-    const triggerImageSource = new URL('./assets/trigger.jpg', import.meta.url).href;
+const triggerImageSource = new URL('./assets/trigger.jpg', import.meta.url).href;
 const gltfSource = new URL('./models/33.glb', import.meta.url).href;
 const hdrSource = new URL('./assets/environment.hdr', import.meta.url).href;
 
 /** @type {ImuCompensator|null} */
 let activeImuCompensator = null;
 
+const INIT_TIMEOUT_MS = 45000;
+
 /**
- * AR ビューへ切り替え、コンテナのレイアウトが確定するまで待つ。
+ * Promise にタイムアウトを付与する。
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} timeoutMs
+ * @param {string} message
+ * @returns {Promise<T>}
  */
-async function activateArView() {
+function withTimeout(promise, timeoutMs, message) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        promise
+            .then((value) => {
+                clearTimeout(timer);
+                resolve(value);
+            })
+            .catch((error) => {
+                clearTimeout(timer);
+                reject(error);
+            });
+    });
+}
+
+/**
+ * AR ビューを表示する（同期的に切り替え、ユーザージェスチャーを維持する）。
+ */
+function activateArView() {
     document.body.classList.add('qr-ar-active');
     statusBar.hidden = false;
-
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
 
     if (mount.clientWidth === 0 || mount.clientHeight === 0) {
         throw new Error('AR 表示領域のサイズを取得できませんでした。');
@@ -225,7 +247,13 @@ async function startQrAr(trackingMode) {
     activeImuCompensator = imuCompensator;
     imuCompensator.startListening();
 
-    const { canvas, context, viewportSizes } = await was.init(configData);
+    const { canvas, context, viewportSizes } = await withTimeout(
+        was.init(configData),
+        INIT_TIMEOUT_MS,
+        'カメラの起動がタイムアウトしました。カメラ許可・HTTPS接続を確認して再試行してください。',
+    );
+
+    statusText.textContent = '3D モデルを読み込んでいます…';
 
     let model = null;
     let animationMixer = null;
@@ -322,17 +350,23 @@ async function handleStart(trackingMode) {
     startQrBtn.disabled = true;
     errorEl.hidden = true;
     errorEl.textContent = '';
+    statusBar.hidden = false;
+
+    // iOS: ボタンタップ直後にモーション許可を開始（await は後回し）
+    const motionPromise = requestMotionPermissions();
 
     try {
-        statusText.textContent = 'カメラを起動しています…';
-        await activateArView();
-
-        const orientationGranted = await requestDeviceOrientationPermission();
-        if (!orientationGranted) {
-            console.warn('[qr-ar] device orientation permission denied — IMU hold disabled');
-        }
+        activateArView();
+        statusText.textContent = trackingMode === 'image'
+            ? 'カメラと画像マーカーを準備しています…'
+            : 'カメラを起動しています…';
 
         await startQrAr(trackingMode);
+
+        const motionGranted = await motionPromise;
+        if (!motionGranted) {
+            console.warn('[qr-ar] motion permission denied — IMU hold disabled');
+        }
     } catch (error) {
         handleWasError(error instanceof Error ? error : new Error(String(error)));
     }
