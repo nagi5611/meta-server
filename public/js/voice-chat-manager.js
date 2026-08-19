@@ -37,6 +37,12 @@ class VoiceChatManager {
         this.micTestLoopback = false; // 設定画面のマイクテストでサーバー経由ループバック中
         this.micTestProducerId = null; // ループバック用プロデューサーID（停止時にconsumerを閉じる用）
         this.micTestAudioProducer = null; // マイクテスト用プロデューサー（本番 audioProducer と分離）
+
+        // 字幕（Speech-to-Text）用の PCM キャプチャ
+        this.captionCaptureRequested = false; // サーバーから stt-capture-start を受けている（部屋にリスナーがいる）
+        this.captionWorkletNode = null;
+        this.captionVadLastVoiceAt = 0; // 最後に発話を検知した時刻（ハングオーバー VAD 用）
+
         this.setupAudioAnalyzer();
         
         this.setupEventListeners();
@@ -161,6 +167,87 @@ class VoiceChatManager {
             console.log(`[VC] Room changed to: ${roomId}`);
             await this.changeRoom(roomId);
         });
+
+        // 字幕: サーバーが「この部屋に字幕リスナーがいる」→ 話者はキャプチャ開始
+        this.socket.on('stt-capture-start', () => {
+            this.captionCaptureRequested = true;
+            this._maybeStartCaptionCapture();
+        });
+        // 字幕: リスナーが居なくなった → キャプチャ停止（送信・課金を止める）
+        this.socket.on('stt-capture-stop', () => {
+            this.captionCaptureRequested = false;
+            this._stopCaptionCapture();
+        });
+    }
+
+    /** マイク ON かつサーバーがキャプチャ要求中なら PCM 分岐を開始 */
+    _maybeStartCaptionCapture() {
+        if (this.isMicEnabled && this.captionCaptureRequested) {
+            this._startCaptionCapture();
+        }
+    }
+
+    /**
+     * micGainNode から AudioWorklet を分岐し、16kHz mono PCM を stt-audio-chunk で送る。
+     * VAD（無音抑制）はここで行い、無音は送らない（コスト/帯域節約）。
+     */
+    async _startCaptionCapture() {
+        if (this.captionWorkletNode) return;
+        const ctx = this.micProcessingContext;
+        const gain = this.micGainNode;
+        if (!ctx || !gain) return;
+        try {
+            if (!ctx.__captionWorkletLoaded) {
+                await ctx.audioWorklet.addModule('/js/caption-worklet.js');
+                ctx.__captionWorkletLoaded = true;
+            }
+            // 二重初期化ガード（await 中に stop された場合）
+            if (this.captionWorkletNode || !this.isMicEnabled || !this.captionCaptureRequested) return;
+            const node = new AudioWorkletNode(ctx, 'caption-downsampler');
+            node.port.onmessage = (e) => this._onCaptionPcm(e.data);
+            gain.connect(node);
+            // process() を回すために出力先へ接続（出力は書き込まないため無音）
+            node.connect(ctx.destination);
+            this.captionWorkletNode = node;
+            console.log('[captions] PCM capture started');
+        } catch (e) {
+            console.warn('[captions] worklet start failed:', e);
+        }
+    }
+
+    /** PCM 分岐を停止 */
+    _stopCaptionCapture() {
+        if (!this.captionWorkletNode) return;
+        try {
+            this.captionWorkletNode.port.onmessage = null;
+            this.captionWorkletNode.disconnect();
+        } catch (_) { /* ignore */ }
+        this.captionWorkletNode = null;
+        console.log('[captions] PCM capture stopped');
+    }
+
+    /**
+     * Worklet から届いた 16bit PCM を VAD 判定して送信。
+     * @param {ArrayBuffer} buffer
+     */
+    _onCaptionPcm(buffer) {
+        if (!this.captionCaptureRequested || !this.isMicEnabled) return;
+        if (!buffer || buffer.byteLength === 0) return;
+        // 簡易 VAD: RMS が閾値以上なら発話。発話後 600ms はハングオーバーで送り続ける（語尾の取りこぼし防止）
+        const view = new Int16Array(buffer);
+        let sumSq = 0;
+        for (let i = 0; i < view.length; i++) {
+            const s = view[i] / 32768;
+            sumSq += s * s;
+        }
+        const rms = view.length ? Math.sqrt(sumSq / view.length) : 0;
+        const now = Date.now();
+        if (rms >= 0.015) this.captionVadLastVoiceAt = now;
+        const withinHangover = now - this.captionVadLastVoiceAt < 600;
+        if (!withinHangover) return; // 無音区間は送らない
+        try {
+            this.socket.emit('stt-audio-chunk', buffer);
+        } catch (_) { /* ignore */ }
     }
     
     async joinRoom(roomId) {
@@ -521,6 +608,9 @@ class VoiceChatManager {
                     recvTransport: !!this.recvTransport,
                     consumers: this.consumers.size
                 });
+
+                // 字幕: 部屋にリスナーがいれば PCM キャプチャを開始
+                this._maybeStartCaptionCapture();
                 
                 // Show analyzer
                 if (this.analyzerContainer) {
@@ -532,6 +622,8 @@ class VoiceChatManager {
                 // Mic OFF: Close producer and sendTransport
                 this.stopMicAnalyzer();
                 this.stopProducerMonitoring();
+                // 字幕: PCM キャプチャを停止（micProcessingContext を閉じる前に）
+                this._stopCaptionCapture();
                 this.micGainNode = null;
                 this.micSourceNode = null;
                 this.micDestinationNode = null;

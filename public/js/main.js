@@ -13,6 +13,7 @@ import PlayerBlockList from './player-block-list.js';
 import PlayerActionMenu from './player-action-menu.js';
 import MenuManager from './menu-manager.js';
 import VoiceChatManager from './voice-chat-manager.js';
+import CaptionManager from './caption-manager.js';
 import VideoChatManager from './video-chat-manager.js';
 import PdfViewerVoiceChatManager from './pdf-viewer-voice-chat-manager.js';
 import PdfViewerManager from './pdf-viewer-manager.js';
@@ -78,6 +79,7 @@ class MetaverseApp {
         this.teleportManager = null;
         this.uiManager = null;
         this.chatManager = null;
+        this.captionManager = null;
         this.menuManager = null;
         this.voiceChatManager = null;
         this.videoChatManager = null;
@@ -445,6 +447,15 @@ class MetaverseApp {
             );
             this.chatManager.setCharacterController(this.characterController);
             this.chatManager.setPlayerBlockedCheck((id) => this.playerBlockList.has(id));
+
+            // Initialize caption manager (リアルタイム音声字幕の表示)
+            this.captionManager = new CaptionManager(
+                this.networkManager,
+                this.playerManager,
+                this.sceneManager
+            );
+            this.captionManager.setCharacterController(this.characterController);
+            this.captionManager.setPlayerBlockedCheck((id) => this.playerBlockList.has(id));
         } else {
             document.documentElement.dataset.adminCameraMode = 'true';
             document.body.dataset.adminCameraMode = 'true';
@@ -514,6 +525,8 @@ class MetaverseApp {
         // Connect menu manager to voice chat and video chat
         this.menuManager.setVoiceChatManager(this.voiceChatManager);
         this.menuManager.setVideoChatManager(this.videoChatManager);
+        // Connect menu manager to captions (字幕トグル)
+        if (this.captionManager) this.menuManager.setCaptionManager(this.captionManager);
         this.menuManager.setReturnToLobbyCallback(() => {
             const world = this.worldManager.getWorld('lobby');
             if (world) this.worldManager.loadWorld('lobby', () => {});
@@ -1010,6 +1023,7 @@ class MetaverseApp {
         if (this.taikoGameManager?.setSocket) this.taikoGameManager.setSocket(sock);
         if (this.pdfViewerVoiceChatManager?.setSocket) this.pdfViewerVoiceChatManager.setSocket(sock);
         if (this.voiceChatManager) this.voiceChatManager.socket = sock;
+        if (this.captionManager) this.captionManager.setSocket(sock);
         if (this.videoChatManager) this.videoChatManager.socket = sock;
         if (this.chatManager?.rebindNetworkEvents) this.chatManager.rebindNetworkEvents();
     }
@@ -1282,6 +1296,11 @@ class MetaverseApp {
         // Update chat (emoji positions)
         if (this.chatManager) {
             this.chatManager.update();
+        }
+
+        // Update captions (per-player subtitle positions)
+        if (this.captionManager) {
+            this.captionManager.update();
         }
 
         // Update info panel (ワールド名、座標、プレイヤー一覧、ping)
