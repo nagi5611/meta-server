@@ -1,0 +1,10 @@
+{
+    "name": "meta-server",
+    "install": "npm install",
+    "terminals": [
+        {
+            "name": "dev",
+            "command": "META_SRC_DIRECTORY=\"${META_SRC_DIRECTORY:-$HOME/.meta-runtime}\" npm run dev"
+        }
+    ]
+}
