@@ -30,7 +30,7 @@ export async function probeFontAssets() {
     return fontProbeStatus;
 }
 
-/** @typedef {'admin'|'mic'|'speaker'|'chat'|'stamp'|'help'|'restart'|'settings'|'logout'|'close'|'confirm-yes'|'confirm-no'|'chat-send'|'chat-input'|'settings-prev'|'settings-next'|'lang-ja'|'lang-en'|'lang-zh'|'admin-invisible'|'admin-fly'|'admin-speed'|'stamp-emoji'} VrMenuActionId */
+/** @typedef {'admin'|'mic'|'speaker'|'chat'|'stamp'|'help'|'restart'|'settings'|'logout'|'close'|'confirm-yes'|'confirm-no'|'chat-send'|'chat-input'|'settings-prev'|'settings-next'|'lang-ja'|'lang-en'|'lang-zh'|'lang-ko'|'lang-zh-tw'|'admin-invisible'|'admin-fly'|'admin-speed'|'stamp-emoji'} VrMenuActionId */
 
 export const VR_UI_COLORS = {
     bg: 0x1a1f28,

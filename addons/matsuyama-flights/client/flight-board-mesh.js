@@ -23,6 +23,8 @@ function boardLocaleTag() {
     const loc = getMetaverseLocale();
     if (loc === 'en') return 'en-US';
     if (loc === 'zh') return 'zh-CN';
+    if (loc === 'zh-tw') return 'zh-TW';
+    if (loc === 'ko') return 'ko-KR';
     return 'ja-JP';
 }
 const ROW_H = 26;

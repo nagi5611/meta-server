@@ -1,7 +1,9 @@
 // public/js/metaverse-i18n.js
-/** @typedef {'ja'|'en'|'zh'} MetaverseLocale */
+import { METAVERSE_LOCALE_EXTENSIONS } from './metaverse-i18n-locales-ko-zh-tw.js';
 
-export const SUPPORTED_METAVERSE_LOCALES = /** @type {const} */ (['ja', 'en', 'zh']);
+/** @typedef {'ja'|'en'|'zh'|'ko'|'zh-tw'} MetaverseLocale */
+
+export const SUPPORTED_METAVERSE_LOCALES = /** @type {const} */ (['ja', 'en', 'zh', 'ko', 'zh-tw']);
 
 /**
  * 各キーは ja を基準に en / zh を冗長に保持する（欠落時は ja にフォールバック）
@@ -341,6 +343,8 @@ export const METAVERSE_STRINGS = {
     'settings.langJa': { ja: '日本語', en: '日本語', zh: '日语' },
     'settings.langEn': { ja: 'English', en: 'English', zh: '英语' },
     'settings.langZh': { ja: '中文（简体）', en: 'Chinese (Simplified)', zh: '中文（简体）' },
+    'settings.langKo': { ja: '한국어', en: 'Korean', zh: '韩语' },
+    'settings.langZhTw': { ja: '中文（繁體）', en: 'Chinese (Traditional)', zh: '中文（繁体）' },
     'settings.languageHint': {
         ja: '表示言語を選択してください',
         en: 'Choose the display language',
@@ -720,11 +724,46 @@ export const METAVERSE_STRINGS = {
     },
 };
 
+for (const [key, ext] of Object.entries(METAVERSE_LOCALE_EXTENSIONS)) {
+    if (METAVERSE_STRINGS[key]) {
+        Object.assign(METAVERSE_STRINGS[key], ext);
+    }
+}
+
+Object.assign(METAVERSE_STRINGS['settings.langKo'], {
+    ko: '한국어',
+    'zh-tw': '韓語',
+});
+Object.assign(METAVERSE_STRINGS['settings.langZhTw'], {
+    ko: '중국어(번체)',
+    'zh-tw': '中文（繁體）',
+});
+Object.assign(METAVERSE_STRINGS['settings.langJa'], {
+    ko: '日本語',
+    'zh-tw': '日本語',
+});
+Object.assign(METAVERSE_STRINGS['settings.langEn'], {
+    ko: 'English',
+    'zh-tw': 'English',
+});
+Object.assign(METAVERSE_STRINGS['settings.langZh'], {
+    ko: '중국어(간체)',
+    'zh-tw': '中文（簡體）',
+});
+Object.assign(METAVERSE_STRINGS['settings.languageLabel'], {
+    ko: '언어:',
+    'zh-tw': '語言：',
+});
+Object.assign(METAVERSE_STRINGS['settings.languageHint'], {
+    ko: '표시 언어를 선택하세요',
+    'zh-tw': '請選擇介面語言',
+});
+
 /** @type {MetaverseLocale} */
 let currentLocale = 'ja';
 
 /**
- * ブラウザの言語・地域タグから ja / en / zh を推定する
+ * ブラウザの言語・地域タグから対応ロケールを推定する
  * @returns {MetaverseLocale}
  */
 export function detectBrowserMetaverseLocale() {
@@ -744,8 +783,14 @@ export function detectBrowserMetaverseLocale() {
         if (tag.startsWith('ja')) {
             return 'ja';
         }
+        if (tag === 'zh-tw' || tag === 'zh-hk' || tag === 'zh-mo' || tag === 'zh-hant') {
+            return 'zh-tw';
+        }
         if (tag.startsWith('zh')) {
             return 'zh';
+        }
+        if (tag.startsWith('ko')) {
+            return 'ko';
         }
         if (tag.startsWith('en')) {
             return 'en';
@@ -759,9 +804,15 @@ export function detectBrowserMetaverseLocale() {
  * @returns {MetaverseLocale|null}
  */
 export function normalizeMetaverseLocale(raw) {
-    const s = String(raw || '').toLowerCase();
-    if (s === 'ja' || s === 'en' || s === 'zh') {
+    const s = String(raw || '').toLowerCase().replace(/_/g, '-');
+    if (s === 'ja' || s === 'en' || s === 'zh' || s === 'ko' || s === 'zh-tw') {
         return s;
+    }
+    if (s === 'zh-hk' || s === 'zh-mo' || s === 'zh-hant' || s.startsWith('zh-tw')) {
+        return 'zh-tw';
+    }
+    if (s.startsWith('ko')) {
+        return 'ko';
     }
     return null;
 }
@@ -854,13 +905,17 @@ function applyMetaverseSelectOptions() {
     }
     const langSel = document.getElementById('language');
     if (langSel) {
+        const langKeyByValue = {
+            ja: 'settings.langJa',
+            en: 'settings.langEn',
+            zh: 'settings.langZh',
+            ko: 'settings.langKo',
+            'zh-tw': 'settings.langZhTw',
+        };
         for (const opt of langSel.querySelectorAll('option')) {
-            if (opt.value === 'ja') {
-                opt.textContent = t('settings.langJa');
-            } else if (opt.value === 'en') {
-                opt.textContent = t('settings.langEn');
-            } else if (opt.value === 'zh') {
-                opt.textContent = t('settings.langZh');
+            const k = langKeyByValue[opt.value];
+            if (k) {
+                opt.textContent = t(k);
             }
         }
     }
@@ -883,7 +938,14 @@ export function applyMetaverseI18nToDocument() {
     if (typeof document === 'undefined') {
         return;
     }
-    const langAttr = currentLocale === 'zh' ? 'zh-Hans' : currentLocale;
+    const langAttr =
+        currentLocale === 'zh'
+            ? 'zh-Hans'
+            : currentLocale === 'zh-tw'
+              ? 'zh-Hant'
+              : currentLocale === 'ko'
+                ? 'ko'
+                : currentLocale;
     document.documentElement.lang = langAttr;
 
     document.querySelectorAll('[data-i18n]').forEach((el) => {

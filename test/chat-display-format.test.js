@@ -21,10 +21,10 @@ function formatDisplayMessage(data, isOwnMessage = false) {
 
 /**
  * emitChatToRoomWithLocale のペイロード組み立てロジック
- * @param {'ja' | 'en' | 'zh'} senderLocale
- * @param {'ja' | 'en' | 'zh'} listenerLocale
+ * @param {'ja' | 'en' | 'zh' | 'ko' | 'zh-tw'} senderLocale
+ * @param {'ja' | 'en' | 'zh' | 'ko' | 'zh-tw'} listenerLocale
  * @param {string} originalMessage
- * @param {Partial<Record<'ja' | 'en' | 'zh', string>>} translationsByLocale
+ * @param {Partial<Record<'ja' | 'en' | 'zh' | 'ko' | 'zh-tw', string>>} translationsByLocale
  */
 function buildRecipientPayload(senderLocale, listenerLocale, originalMessage, translationsByLocale) {
     const translated = translationsByLocale[listenerLocale];

@@ -11,10 +11,21 @@ function makeRoomState(players) {
 }
 
 describe('normalizeUiLocale', () => {
-    it('returns ja, en, zh as-is', () => {
+    it('returns ja, en, zh, ko, zh-tw as-is', () => {
         assert.equal(normalizeUiLocale('ja'), 'ja');
         assert.equal(normalizeUiLocale('en'), 'en');
         assert.equal(normalizeUiLocale('zh'), 'zh');
+        assert.equal(normalizeUiLocale('ko'), 'ko');
+        assert.equal(normalizeUiLocale('zh-tw'), 'zh-tw');
+    });
+
+    it('maps zh-hant variants to zh-tw', () => {
+        assert.equal(normalizeUiLocale('zh-TW'), 'zh-tw');
+        assert.equal(normalizeUiLocale('zh-hant'), 'zh-tw');
+    });
+
+    it('maps ko variants to ko', () => {
+        assert.equal(normalizeUiLocale('ko-KR'), 'ko');
     });
 
     it('defaults unknown values to ja', () => {
