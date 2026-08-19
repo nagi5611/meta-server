@@ -1095,6 +1095,16 @@ function rejectNonTlsHttpLayer(req, res, next) {
 app.use(cookieParser());
 app.use(rejectNonTlsHttpLayer);
 // 段階的 CSP: 全体は互換維持。Three.js Draco（WASM Worker）には wasm-unsafe-eval が必要
+/** Open WebAR SDK が Worker 内で importScripts する CDN（/qr-ar のみ追加許可） */
+const WEBAR_CSP_SCRIPT_SRC = [
+    'https://cdn-aws.web-ar.studio',
+    'https://cdn.web-ar.studio',
+];
+const WEBAR_CSP_WORKER_SRC = [
+    'https://cdn-aws.web-ar.studio',
+    'https://cdn.web-ar.studio',
+];
+
 const defaultCspDirectives = {
     defaultSrc: ["'self'"],
     scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", 'https://cdn.jsdelivr.net'],
@@ -1108,11 +1118,40 @@ const defaultCspDirectives = {
     baseUri: ["'self'"],
     frameAncestors: ["'self'"],
 };
+
+/**
+ * QR-AR ページ向け CSP（WebAR SDK の CDN Worker を許可）
+ * @param {typeof defaultCspDirectives} base
+ */
+function buildQrArCspDirectives(base) {
+    return {
+        ...base,
+        scriptSrc: [...base.scriptSrc, ...WEBAR_CSP_SCRIPT_SRC],
+        workerSrc: [...base.workerSrc, ...WEBAR_CSP_WORKER_SRC],
+    };
+}
+
+/**
+ * @param {import('express').Request} req
+ * @returns {boolean}
+ */
+function isQrArPageRequest(req) {
+    if (req.method !== 'GET') return false;
+    return (
+        req.path === '/qr-ar' ||
+        req.path === '/qr-ar/' ||
+        req.path === '/qr-ar/index.html'
+    );
+}
+
 app.use((req, res, next) => {
     const isInstanceViewerPage =
         req.method === 'GET' && (req.path === '/instance' || req.path === '/instance/');
+    const cspDirectives = isQrArPageRequest(req)
+        ? buildQrArCspDirectives(defaultCspDirectives)
+        : defaultCspDirectives;
     helmet({
-        contentSecurityPolicy: isInstanceViewerPage ? false : { directives: defaultCspDirectives },
+        contentSecurityPolicy: isInstanceViewerPage ? false : { directives: cspDirectives },
         crossOriginResourcePolicy: { policy: 'cross-origin' },
     })(req, res, next);
 });
