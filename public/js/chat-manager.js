@@ -11,6 +11,10 @@ function timeLocaleForMetaverse() {
             return 'en-US';
         case 'zh':
             return 'zh-CN';
+        case 'zh-tw':
+            return 'zh-TW';
+        case 'ko':
+            return 'ko-KR';
         default:
             return 'ja-JP';
     }

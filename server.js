@@ -697,7 +697,7 @@ function parseSetUsernamePayload(payload) {
  * @param {{ players: Map<string, { uiLocale?: string }> }} roomState
  * @param {string} currentRoom
  * @param {Record<string, unknown>} chatData 他プレイヤー向けベース
- * @param {Partial<Record<'ja' | 'en' | 'zh', string>>} translationsByLocale ロケール別翻訳文
+ * @param {Partial<Record<'ja' | 'en' | 'zh' | 'ko' | 'zh-tw', string>>} translationsByLocale ロケール別翻訳文
  * @param {Record<string, unknown>} [selfChatData] 送信者向け（省略時は chatData）
  */
 function emitChatToRoomWithLocale(ioServer, senderSocket, roomState, currentRoom, chatData, translationsByLocale, selfChatData) {
@@ -4082,7 +4082,7 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            /** @type {Partial<Record<'ja' | 'en' | 'zh', string>>} */
+            /** @type {Partial<Record<'ja' | 'en' | 'zh' | 'ko' | 'zh-tw', string>>} */
             const translationsByLocale = {};
             for (const { locale, translated, skipped } of translationResults) {
                 if (

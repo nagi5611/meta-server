@@ -127,17 +127,33 @@ export class VrSettingsPanel {
 
         if (this._section === 'general') {
             this._contentBlock.add(createBodyText(t('settings.languageLabel')));
-            const langRow = createRow(0.09);
+            const langKeys = {
+                ja: 'settings.langJa',
+                en: 'settings.langEn',
+                zh: 'settings.langZh',
+                ko: 'settings.langKo',
+                'zh-tw': 'settings.langZhTw',
+            };
+            const langRow1 = createRow(0.09);
             for (const loc of ['ja', 'en', 'zh']) {
-                const names = { ja: '日本語', en: 'English', zh: '中文' };
-                langRow.add(createMenuButton({
+                langRow1.add(createMenuButton({
                     width: 0.22,
                     height: 0.07,
-                    label: names[loc],
+                    label: t(langKeys[loc]),
                     actionId: `lang-${loc}`,
                 }));
             }
-            this._contentBlock.add(langRow);
+            this._contentBlock.add(langRow1);
+            const langRow2 = createRow(0.09);
+            for (const loc of ['ko', 'zh-tw']) {
+                langRow2.add(createMenuButton({
+                    width: 0.22,
+                    height: 0.07,
+                    label: t(langKeys[loc]),
+                    actionId: `lang-${loc}`,
+                }));
+            }
+            this._contentBlock.add(langRow2);
             this._contentBlock.add(createBodyText(`${t('settings.languageHint')} (${s.language || 'ja'})`));
             return;
         }
@@ -273,6 +289,8 @@ export class VrSettingsPanel {
         if (action === 'lang-ja') { this.actions.applySetting('language', 'ja'); await this._renderSection(); return true; }
         if (action === 'lang-en') { this.actions.applySetting('language', 'en'); await this._renderSection(); return true; }
         if (action === 'lang-zh') { this.actions.applySetting('language', 'zh'); await this._renderSection(); return true; }
+        if (action === 'lang-ko') { this.actions.applySetting('language', 'ko'); await this._renderSection(); return true; }
+        if (action === 'lang-zh-tw') { this.actions.applySetting('language', 'zh-tw'); await this._renderSection(); return true; }
 
         if (action === 'cycle-mic-device') {
             const list = [{ deviceId: '', label: t('settings.defaultDevice') }, ...this._audioDevices.mics];
