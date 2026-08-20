@@ -1,7 +1,7 @@
 // test/speech-captions.test.js — mock STT プロバイダの単体テスト（資格情報不要）
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCaptionSession } from '../lib/speech-captions.js';
+import { createCaptionSession, isCaptionStreamWritable } from '../lib/speech-captions.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -16,6 +16,17 @@ function makeSpeechChunk() {
 function makeSilenceChunk() {
     return Buffer.alloc(1600 * 2); // all zeros
 }
+
+describe('isCaptionStreamWritable', () => {
+    it('null / destroyed / non-writable を拒否する', () => {
+        assert.equal(isCaptionStreamWritable(null), false);
+        assert.equal(isCaptionStreamWritable(undefined), false);
+        assert.equal(isCaptionStreamWritable({ destroyed: true, writable: true }), false);
+        assert.equal(isCaptionStreamWritable({ destroyed: false, writable: false }), false);
+        assert.equal(isCaptionStreamWritable({ destroyed: false, writable: true }), true);
+        assert.equal(isCaptionStreamWritable({ destroyed: false }), true);
+    });
+});
 
 describe('speech-captions (mock provider)', () => {
     it('発話 PCM で interim と final を返す', async () => {
