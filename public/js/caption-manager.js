@@ -23,7 +23,7 @@ class CaptionManager {
 
         /** 聞き手の字幕表示 ON/OFF */
         this.enabled = false;
-        /** playerId -> { text, isFinal, utteranceId, dismissTimer, idleTimer } */
+        /** playerId -> { text, displayText, translatedMessage, isFinal, utteranceId, dismissTimer, idleTimer } */
         this.captions = new Map();
         /** playerId -> HTMLElement */
         this.captionDivs = new Map();
@@ -74,7 +74,22 @@ class CaptionManager {
     }
 
     /**
-     * @param {{peerId:string, username:string, text:string, isFinal:boolean, utteranceId?:number, utteranceEnd?:boolean}} data
+     * @param {string} original
+     * @param {string|undefined} translatedMessage
+     * @param {boolean} isOwnSpeaker
+     * @returns {string}
+     */
+    _formatDisplayText(original, translatedMessage, isOwnSpeaker) {
+        if (isOwnSpeaker) return original;
+        const translated = translatedMessage;
+        if (typeof translated === 'string' && translated.trim() && translated !== original) {
+            return `${original} (${translated.trim()})`;
+        }
+        return original;
+    }
+
+    /**
+     * @param {{peerId:string, username:string, text:string, isFinal:boolean, utteranceId?:number, utteranceEnd?:boolean, translatedMessage?:string}} data
      */
     _onCaption(data) {
         if (!this.enabled || !data) return;
@@ -94,11 +109,21 @@ class CaptionManager {
         }
 
         const utteranceId = Number.isFinite(data.utteranceId) ? data.utteranceId : 0;
+        const isOwnSpeaker = this.networkManager?.myPlayerId === playerId;
         let entry = this.captions.get(playerId);
+        const isTranslationUpdate = !!(
+            entry
+            && entry.utteranceId === utteranceId
+            && entry.isFinal
+            && data.translatedMessage
+        );
+
         if (!entry || entry.utteranceId !== utteranceId) {
             if (entry) this._remove(playerId);
             entry = {
                 text: '',
+                displayText: '',
+                translatedMessage: undefined,
                 isFinal: false,
                 utteranceId,
                 username: data.username,
@@ -108,18 +133,23 @@ class CaptionManager {
             this.captions.set(playerId, entry);
         }
 
-        // 同一発話内は全文置き換え（追記しない）。発話が変われば entry ごと作り直す。
         entry.text = text;
         entry.isFinal = !!data.isFinal;
         entry.username = data.username || entry.username;
+        if (typeof data.translatedMessage === 'string' && data.translatedMessage.trim()) {
+            entry.translatedMessage = data.translatedMessage.trim();
+        }
+        entry.displayText = this._formatDisplayText(entry.text, entry.translatedMessage, isOwnSpeaker);
 
-        if (entry.dismissTimer) { clearTimeout(entry.dismissTimer); entry.dismissTimer = null; }
-        if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = null; }
+        if (!isTranslationUpdate) {
+            if (entry.dismissTimer) { clearTimeout(entry.dismissTimer); entry.dismissTimer = null; }
+            if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = null; }
 
-        if (entry.isFinal) {
-            entry.dismissTimer = setTimeout(() => this._remove(playerId), FINAL_DISMISS_MS);
-        } else {
-            entry.idleTimer = setTimeout(() => this._remove(playerId), IDLE_CLEAR_MS);
+            if (entry.isFinal) {
+                entry.dismissTimer = setTimeout(() => this._remove(playerId), FINAL_DISMISS_MS);
+            } else {
+                entry.idleTimer = setTimeout(() => this._remove(playerId), IDLE_CLEAR_MS);
+            }
         }
         this._render(playerId);
     }
@@ -156,7 +186,7 @@ class CaptionManager {
         const entry = this.captions.get(playerId);
         if (!entry) return;
         const div = this._ensureDiv(playerId);
-        div.textContent = entry.text;
+        div.textContent = entry.displayText || entry.text;
         div.classList.toggle('interim', !entry.isFinal);
         div.style.display = 'block';
         this._updatePosition(playerId, div);

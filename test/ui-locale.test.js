@@ -1,7 +1,7 @@
 // test/ui-locale.test.js — UI ロケールヘルパーの回帰テスト
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getListenerTargetLocales, normalizeUiLocale } from '../lib/ui-locale.js';
+import { getCaptionListenerTargetLocales, getListenerTargetLocales, normalizeUiLocale } from '../lib/ui-locale.js';
 
 /**
  * @param {Record<string, { uiLocale?: string }>} players
@@ -61,5 +61,35 @@ describe('getListenerTargetLocales', () => {
             a: { uiLocale: 'ja' },
         });
         assert.deepEqual(getListenerTargetLocales(room, 'sender', 'ja'), []);
+    });
+});
+
+describe('getCaptionListenerTargetLocales', () => {
+    it('only considers caption listener socket ids', () => {
+        const room = makeRoomState({
+            speaker: { uiLocale: 'ja' },
+            listenerA: { uiLocale: 'en' },
+            listenerB: { uiLocale: 'zh' },
+            notListening: { uiLocale: 'ko' },
+        });
+        const targets = getCaptionListenerTargetLocales(
+            room,
+            new Set(['listenerA', 'listenerB']),
+            'speaker',
+            'ja',
+        );
+        assert.deepEqual(targets.sort(), ['en', 'zh']);
+    });
+
+    it('excludes speaker and same-locale listeners', () => {
+        const room = makeRoomState({
+            speaker: { uiLocale: 'ja' },
+            listenerA: { uiLocale: 'ja' },
+            listenerB: { uiLocale: 'en' },
+        });
+        assert.deepEqual(
+            getCaptionListenerTargetLocales(room, new Set(['speaker', 'listenerA', 'listenerB']), 'speaker', 'ja'),
+            ['en'],
+        );
     });
 });
