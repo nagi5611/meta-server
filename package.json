@@ -18,7 +18,8 @@
         "bench:install-runner-deps": "npm install --no-fund --no-audit --ignore-scripts",
         "test:webxr-vr": "node --test addons/webxr-vr/test/*.test.js",
         "test:spawn-pending": "node --test test/spawn-pending-storage.test.js",
-        "test:admin-security": "node --test test/admin-security.test.js"
+        "test:admin-security": "node --test test/admin-security.test.js",
+        "test:captions": "node --test test/speech-captions.test.js test/captions-log.test.js"
     },
     "keywords": [
         "metaverse",
@@ -36,6 +37,7 @@
         "@gltf-transform/core": "^4.3.0",
         "@gltf-transform/extensions": "^4.3.0",
         "@gltf-transform/functions": "^4.3.0",
+        "@google-cloud/speech": "^8.0.1",
         "@google/generative-ai": "^0.24.1",
         "@web-ar-studio/webar-engine-sdk": "^1.0.24",
         "bcryptjs": "^3.0.3",
