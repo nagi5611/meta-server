@@ -16,6 +16,7 @@ import { initUserSessionsDb, insertSession, getLatestSessionByUsername, getSessi
 import { initCaptionsLogDb } from './db/captions-log.js';
 import {
     captionsReady as captionsRuntimeReady,
+    configureCaptionsServer,
     setListener as captionsSetListener,
     handleAudioChunk as captionsHandleAudioChunk,
     notifySpeakerIfListeners as captionsNotifySpeaker,
@@ -3047,6 +3048,8 @@ function captionDisplayName(socket) {
     } catch (_) { /* ignore */ }
     return 'Guest';
 }
+
+configureCaptionsServer({ getRoomState });
 
 setAircraftServerDeps({ getRoomState, readWorlds });
 
