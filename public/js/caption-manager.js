@@ -4,9 +4,9 @@
 import * as THREE from 'three';
 
 /** final 表示を保持してから消すまでの時間(ms) */
-const FINAL_DISMISS_MS = 4000;
-/** interim が途切れても残り続けないための保険クリア(ms) */
-const IDLE_CLEAR_MS = 6000;
+const FINAL_DISMISS_MS = 2000;
+/** interim 更新が止まったら発話終了とみなして消す(ms) */
+const IDLE_CLEAR_MS = 1200;
 
 class CaptionManager {
     /**
@@ -23,7 +23,7 @@ class CaptionManager {
 
         /** 聞き手の字幕表示 ON/OFF */
         this.enabled = false;
-        /** playerId -> { text, isFinal, dismissTimer, idleTimer } */
+        /** playerId -> { text, isFinal, utteranceId, dismissTimer, idleTimer } */
         this.captions = new Map();
         /** playerId -> HTMLElement */
         this.captionDivs = new Map();
@@ -74,33 +74,51 @@ class CaptionManager {
     }
 
     /**
-     * @param {{peerId:string, username:string, text:string, isFinal:boolean}} data
+     * @param {{peerId:string, username:string, text:string, isFinal:boolean, utteranceId?:number, utteranceEnd?:boolean}} data
      */
     _onCaption(data) {
         if (!this.enabled || !data) return;
         const playerId = data.peerId;
         if (!playerId) return;
         if (this.isPlayerBlocked && this.isPlayerBlocked(playerId)) return;
-        const text = String(data.text || '').trim();
-        if (!text) return;
 
+        if (data.utteranceEnd) {
+            this._remove(playerId);
+            return;
+        }
+
+        const text = String(data.text || '').trim();
+        if (!text) {
+            this._remove(playerId);
+            return;
+        }
+
+        const utteranceId = Number.isFinite(data.utteranceId) ? data.utteranceId : 0;
         let entry = this.captions.get(playerId);
-        if (!entry) {
-            entry = { text: '', isFinal: false, username: data.username, dismissTimer: null, idleTimer: null };
+        if (!entry || entry.utteranceId !== utteranceId) {
+            if (entry) this._remove(playerId);
+            entry = {
+                text: '',
+                isFinal: false,
+                utteranceId,
+                username: data.username,
+                dismissTimer: null,
+                idleTimer: null,
+            };
             this.captions.set(playerId, entry);
         }
+
+        // 同一発話内は全文置き換え（追記しない）。発話が変われば entry ごと作り直す。
         entry.text = text;
         entry.isFinal = !!data.isFinal;
         entry.username = data.username || entry.username;
 
-        // 既存タイマーをリセット
         if (entry.dismissTimer) { clearTimeout(entry.dismissTimer); entry.dismissTimer = null; }
         if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = null; }
 
         if (entry.isFinal) {
             entry.dismissTimer = setTimeout(() => this._remove(playerId), FINAL_DISMISS_MS);
         } else {
-            // interim が途切れても残らないよう保険クリア
             entry.idleTimer = setTimeout(() => this._remove(playerId), IDLE_CLEAR_MS);
         }
         this._render(playerId);
