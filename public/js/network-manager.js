@@ -977,7 +977,12 @@ class NetworkManager {
 
         const elapsed = Date.now() - this.lastPongTime;
         const noResponse = elapsed >= this.NO_RESPONSE_THRESHOLD_MS;
-        return { pingMs: this.pingMs, noResponse, connecting: false, reconnecting: false };
+        return {
+            pingMs: noResponse ? null : this.pingMs,
+            noResponse,
+            connecting: false,
+            reconnecting: false,
+        };
     }
 }
 

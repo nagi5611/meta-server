@@ -127,6 +127,7 @@ import {
     applyAircraftPoseFromPlayerUpdate,
     worldContainsAircraftSlot,
 } from './lib/aircraft-server/room-aircraft.js';
+import { getPortalLinksForRequest } from './lib/metaverse-portal-links.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -6793,6 +6794,7 @@ app.get('/api/client-config', (req, res) => {
         moduleScriptOrigin: MODULE_SCRIPT_ORIGIN,
         planLoadConcurrency: PLAN_LOAD_CONCURRENCY,
         googleMapsApiKey: String(process.env.GOOGLE_MAPS_API_KEY || '').trim() || null,
+        portalLinks: getPortalLinksForRequest(req),
         assetModels: {
             mode: USE_S3_MODELS ? 'cdn' : 'local',
             cdnBaseUrl: USE_S3_MODELS ? normalizedCdnBaseUrl() : null,

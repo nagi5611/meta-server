@@ -22,6 +22,7 @@ import MobileJoystickManager from './mobile-joystick-manager.js';
 import MobileUIManager from './mobile-ui-manager.js';
 import IdleControlHint from './idle-control-hint.js';
 import { registerMetaverseServiceWorker } from './service-worker-register.js';
+import { renderMetaversePortalNav } from './metaverse-portal-nav.js';
 import {
     runClientInits,
     runFrameUpdates,
@@ -1310,7 +1311,18 @@ class MetaverseApp {
             const playerCount = this.isAdminCameraMode
                 ? (this.playerManager?.remotePlayers?.size ?? 0)
                 : (this.playerManager?.getPlayerCount?.() ?? 0);
-            const players = this.networkManager.lastPlayersSnapshot || [];
+            const pingStatus = this.networkManager.getPingStatus();
+            const myId = this.networkManager.myPlayerId;
+            const players = (this.networkManager.lastPlayersSnapshot || []).map((p) => {
+                if (p.id !== myId) return p;
+                if (pingStatus.noResponse || pingStatus.connecting || pingStatus.reconnecting) {
+                    return { ...p, pingMs: null };
+                }
+                if (pingStatus.pingMs != null) {
+                    return { ...p, pingMs: pingStatus.pingMs };
+                }
+                return p;
+            });
             if (this.isMobileMode) {
                 MobileUIManager.updateMobileInfo(world?.name || '-', position, playerCount);
             } else {
@@ -1321,7 +1333,7 @@ class MetaverseApp {
                     players
                 );
             }
-            this.uiManager.updatePingDisplay(this.networkManager.getPingStatus());
+            this.uiManager.updatePingDisplay(pingStatus);
         }
 
         this.updateLandscapeOverlay();
@@ -1332,6 +1344,13 @@ class MetaverseApp {
 }
 
 // Initialize and run the app
+renderMetaversePortalNav(document.getElementById('metaverse-portal-links')).then(() => {
+    const nav = document.getElementById('metaverse-portal-nav');
+    if (nav && nav.querySelector('.portal-nav-links a')) {
+        nav.removeAttribute('hidden');
+    }
+});
+
 const app = new MetaverseApp();
 app.init().catch(error => {
     console.error('Failed to initialize application:', error);
