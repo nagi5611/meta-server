@@ -227,12 +227,7 @@ class PlayerManager {
                         : gltf.scene.clone();
                     resolve({ scene: clonedScene, animations, animationMap, displayScale: scaleMul });
                 },
-                (progress) => {
-                    if (progress.total) {
-                        const percent = (progress.loaded / progress.total) * 100;
-                        console.log(`Loading avatar: ${percent.toFixed(2)}%`);
-                    }
-                },
+                undefined,
                 (error) => {
                     reject(error);
                 }

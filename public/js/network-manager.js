@@ -9,6 +9,9 @@ import {
     redirectAdminMetaverseAuthFailed,
 } from './admin-metaverse-auth.js';
 
+/** リモート GLB 作成・同期の同時実行上限（メインスレッド飽和と Socket ping 遅延を抑える） */
+const REMOTE_PLAYER_LOAD_CONCURRENCY = 4;
+
 class NetworkManager {
     constructor(playerManager) {
         this.socket = null;
@@ -145,16 +148,55 @@ class NetworkManager {
     async flushPendingRemotePlayers() {
         if (!this._worldViewDisplayReady) return;
         const pending = this._pendingRemotePlayerCreates.splice(0);
-        for (const player of pending) {
-            try {
-                await this._createRemotePlayerIfReady(player);
-            } catch (error) {
-                console.error(`Failed to create deferred remote player ${player.id}:`, error);
+        if (!pending.length) return;
+
+        await this._yieldBeforeHeavyRemotePlayerWork();
+        await this._forEachWithConcurrency(
+            pending,
+            REMOTE_PLAYER_LOAD_CONCURRENCY,
+            async (player) => {
+                try {
+                    await this._createRemotePlayerIfReady(player);
+                } catch (error) {
+                    console.error(`Failed to create deferred remote player ${player.id}:`, error);
+                }
             }
-        }
-        if (pending.length) {
-            this.updatePlayerCount();
-        }
+        );
+        this.updatePlayerCount();
+    }
+
+    /**
+     * GLB 読み込み等の重い処理の前にメインスレッドへ譲る（ping/pong 等の Socket 処理余地）
+     * @returns {Promise<void>}
+     */
+    _yieldBeforeHeavyRemotePlayerWork() {
+        return new Promise((resolve) => {
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(() => resolve(), { timeout: 32 });
+            } else {
+                setTimeout(resolve, 0);
+            }
+        });
+    }
+
+    /**
+     * プール方式で非同期処理を並列実行（同時実行数上限付き）
+     * @template T
+     * @param {T[]} items
+     * @param {number} limit
+     * @param {(item: T) => Promise<void>} fn
+     */
+    async _forEachWithConcurrency(items, limit, fn) {
+        if (!items.length) return;
+        const cap = Math.max(1, Math.min(limit, items.length));
+        let nextIndex = 0;
+        const worker = async () => {
+            while (nextIndex < items.length) {
+                const i = nextIndex++;
+                await fn(items[i]);
+            }
+        };
+        await Promise.all(Array.from({ length: cap }, () => worker()));
     }
 
     /**
@@ -442,6 +484,7 @@ class NetworkManager {
         });
 
         // Handle player updates (30fps snapshot from server)
+        // GLB 同期はメインスレッドを占有しうるため、yield + 並列上限で Socket（ping 等）への影響を抑える
         this.socket.on('players-update', async (snapshot) => {
             // Support both old format (array) and new format (object with timestamp)
             const players = snapshot.players || snapshot;
@@ -455,27 +498,49 @@ class NetworkManager {
             // Store snapshot for info panel (current room players with vcMicOn)
             this.lastPlayersSnapshot = players.filter(p => p.world === this.currentWorld);
 
-            // Process player updates
+            // 同一ワールドのリモート同期（GLB は並列上限付き）。別ワールドは即時除去。
+            const sameWorldRemote = [];
             for (const player of players) {
-                if (player.id !== this.myPlayerId) {
-                    // Only show players in same world
-                    if (player.world === this.currentWorld) {
+                if (player.id === this.myPlayerId) continue;
+                if (player.world === this.currentWorld) {
+                    sameWorldRemote.push(player);
+                } else {
+                    this._remoteAircraftOccupied.delete(player.id);
+                    this.playerManager.removeRemotePlayer(player.id);
+                }
+            }
+
+            if (sameWorldRemote.length) {
+                await this._yieldBeforeHeavyRemotePlayerWork();
+                await this._forEachWithConcurrency(
+                    sameWorldRemote,
+                    REMOTE_PLAYER_LOAD_CONCURRENCY,
+                    async (player) => {
                         if (!this.playerManager.hasRemotePlayer(player.id)) {
                             try {
                                 await this._createRemotePlayerIfReady(player);
                             } catch (error) {
-                                console.error(`Failed to create remote player ${player.id} during update:`, error);
+                                console.error(
+                                    `Failed to create remote player ${player.id} during update:`,
+                                    error
+                                );
                             }
                         } else {
-                            // Use quaternion if available, otherwise use rotation
                             const rotation = player.quaternion || player.rotation;
                             const name = player.displayName || player.username;
                             const animState = player.animState || 'idle';
-                            await this.playerManager.syncRemotePlayerAvatarFromNetwork(
-                                player.id,
-                                player.avatarId || null,
-                                animState
-                            );
+                            try {
+                                await this.playerManager.syncRemotePlayerAvatarFromNetwork(
+                                    player.id,
+                                    player.avatarId || null,
+                                    animState
+                                );
+                            } catch (error) {
+                                console.error(
+                                    `Failed to sync remote player ${player.id} during update:`,
+                                    error
+                                );
+                            }
                             this.playerManager.updateRemotePlayer(
                                 player.id,
                                 player.position,
@@ -485,12 +550,8 @@ class NetworkManager {
                             );
                         }
                         this._syncRemotePlayerVisible(player);
-                    } else {
-                        // Hide players in different worlds
-                        this._remoteAircraftOccupied.delete(player.id);
-                        this.playerManager.removeRemotePlayer(player.id);
                     }
-                }
+                );
             }
 
             if (snapshot.aircraft && this._onAircraftSnapshot) {

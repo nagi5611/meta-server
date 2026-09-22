@@ -90,6 +90,13 @@ class PhysicsManager {
          */
         this.groundMaxFallSpeedForGrounded = 1.25;
 
+        /** 段差登り（auto-step）: この高さまでの段を自動で上がる（m） */
+        this.maxStepHeight = 0.45;
+        /** 段差登り: これ未満の段差は無視（m） */
+        this.minStepHeight = 0.03;
+        /** 段差登り: 前方プローブ距離の上限（m） */
+        this.maxStepProbeForward = 0.6;
+
         /** 速度リセット／減衰のデバッグログを出す */
         this.debugVelocityChanges = true;
         this._velLogBefore = new THREE.Vector3();
@@ -247,23 +254,27 @@ class PhysicsManager {
         const allowWallTunnelCheck =
             this.playerIsOnGround && this.playerVelocity.y <= 0.12;
         if (allowWallTunnelCheck && horiz > 0.004) {
+            this._tryAutoStepUp(moveDirection);
             const midY = (this._tunnelStart.y + this.playerPosition.y) * 0.5 + 0.4;
             this._segFrom.set(this._tunnelStart.x, midY, this._tunnelStart.z);
             this._segTo.set(this.playerPosition.x, midY, this.playerPosition.z);
             if (this.segmentBlockedByWallMesh(this._segFrom, this._segTo)) {
-                const keepY = this.playerPosition.y;
-                this.playerPosition.x = this._tunnelStart.x;
-                this.playerPosition.z = this._tunnelStart.z;
-                this.playerPosition.y = keepY;
-                this._velLogBefore.copy(this.playerVelocity);
-                this.playerVelocity.x = 0;
-                this.playerVelocity.z = 0;
-                this._logVelocityChange(
-                    'reset',
-                    'wall-tunnel-rollback-xz',
-                    this._velLogBefore,
-                    this.playerVelocity
-                );
+                const steppedOver = this._tryAutoStepUp(moveDirection);
+                if (!steppedOver) {
+                    const keepY = this.playerPosition.y;
+                    this.playerPosition.x = this._tunnelStart.x;
+                    this.playerPosition.z = this._tunnelStart.z;
+                    this.playerPosition.y = keepY;
+                    this._velLogBefore.copy(this.playerVelocity);
+                    this.playerVelocity.x = 0;
+                    this.playerVelocity.z = 0;
+                    this._logVelocityChange(
+                        'reset',
+                        'wall-tunnel-rollback-xz',
+                        this._velLogBefore,
+                        this.playerVelocity
+                    );
+                }
             }
         }
 
@@ -631,6 +642,43 @@ class PhysicsManager {
         this._triangleNormalWorld(hit.faceIndex, this._hitNormalWorld);
         if (Math.abs(this._hitNormalWorld.y) >= 0.52) return false;
 
+        return true;
+    }
+
+    /**
+     * 接地歩行時、移動方向前方の段差を maxStepHeight 以内なら Y を上げる
+     * @param {THREE.Vector3} moveDirection このフレームの移動量（主に水平）
+     * @returns {boolean}
+     */
+    _tryAutoStepUp(moveDirection) {
+        if (!this.collider?.geometry?.boundsTree) return false;
+        if (!this.playerIsOnGround && this.playerVelocity.y > 0.12) return false;
+
+        const mx = moveDirection.x;
+        const mz = moveDirection.z;
+        const horizLen = Math.hypot(mx, mz);
+        if (horizLen < 1e-5) return false;
+
+        const dirX = mx / horizLen;
+        const dirZ = mz / horizLen;
+        const probeForward = Math.min(
+            horizLen + this.capsuleInfo.radius * 0.55,
+            this.maxStepProbeForward
+        );
+
+        const probeCenter = this._triNa.set(
+            this.playerPosition.x + dirX * probeForward,
+            this.playerPosition.y + this.maxStepHeight,
+            this.playerPosition.z + dirZ * probeForward
+        );
+        const aheadGround = this._sampleGroundBelow(probeCenter);
+        if (!aheadGround) return false;
+
+        const stepUp = aheadGround.minCapsuleY - this.playerPosition.y;
+        if (stepUp < this.minStepHeight || stepUp > this.maxStepHeight) return false;
+        if (aheadGround.headroom > 0.22) return false;
+
+        this.playerPosition.y = aheadGround.minCapsuleY;
         return true;
     }
 

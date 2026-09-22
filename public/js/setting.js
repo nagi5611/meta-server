@@ -143,7 +143,7 @@ let selectedPdfPath = null; // 左パネル「PDF一覧」で選択中のPDF（p
 let lightHelpers = []; // { light, mesh? } for point/spot position drag
 let worldObjectList = []; // 右パネル「オブジェクト一覧」の並び（クリックで選択用）
 /** オブジェクト一覧の階層展開状態＋ prefab 子行用の動的キー（例 pf_m123） */
-let objectListExpanded = { lights: false, models: false, pdfs: false, flightBoards: false };
+let objectListExpanded = { lights: false, models: false, pdfs: false, flightBoards: false, fdsSmokes: false, fdsSmokeButtons: false };
 /** @type {{ kind: 'model'|'pdf'|'light', data: object }|null} Ctrl+C で取り込んだオブジェクトスナップショット */
 let worldEditorObjectClipboard = null;
 /** 貼り付け時に X 方向へずらす距離（m） */
@@ -1282,6 +1282,8 @@ function onWorldEditorClipboardKeyDown(e) {
             selectedObject.userData.config
             || selectedObject.userData.pdfConfig
             || selectedObject.userData.flightBoardConfig
+            || selectedObject.userData.fdsSmokeConfig
+            || selectedObject.userData.fdsSmokeButtonConfig
         ) {
             syncObjectFromPanel({ recordUndo: false });
         }
@@ -1317,6 +1319,24 @@ function onTransformChange() {
         obj.userData.flightBoardConfig.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
         obj.userData.flightBoardConfig.rotation = { x: obj.rotation.x * 180 / Math.PI, y: obj.rotation.y * 180 / Math.PI, z: obj.rotation.z * 180 / Math.PI };
         obj.userData.flightBoardConfig.scale = { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z };
+        if (selectedObject === obj) updateObjectPanel(obj);
+    }
+    if (obj.userData.fdsSmokeConfig) {
+        const cfg = obj.userData.fdsSmokeConfig;
+        cfg.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+        cfg.rotation = {
+            x: obj.rotation.x * 180 / Math.PI,
+            y: obj.rotation.y * 180 / Math.PI,
+            z: obj.rotation.z * 180 / Math.PI
+        };
+        const uniformScale = obj.scale.x;
+        cfg.scale = uniformScale;
+        obj.scale.set(uniformScale, uniformScale, uniformScale);
+        if (selectedObject === obj) updateObjectPanel(obj);
+    }
+    if (obj.userData.fdsSmokeButtonConfig) {
+        const cfg = obj.userData.fdsSmokeButtonConfig;
+        cfg.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
         if (selectedObject === obj) updateObjectPanel(obj);
     }
     if (obj.userData.lightConfig) {
@@ -1387,6 +1407,24 @@ function selectObject(obj) {
             document.getElementById('object-props-taiko').style.display = 'none';
             document.getElementById('object-props-teleporter').style.display = '';
         } else if (obj.userData.flightBoardConfig) {
+            updateObjectPanel(obj);
+            document.getElementById('object-hint').style.display = 'none';
+            document.getElementById('object-props').style.display = 'block';
+            document.getElementById('light-hint').style.display = 'block';
+            document.getElementById('light-props').style.display = 'none';
+            document.getElementById('object-props-animation').style.display = 'none';
+            document.getElementById('object-props-taiko').style.display = 'none';
+            document.getElementById('object-props-teleporter').style.display = 'none';
+        } else if (obj.userData.fdsSmokeConfig) {
+            updateObjectPanel(obj);
+            document.getElementById('object-hint').style.display = 'none';
+            document.getElementById('object-props').style.display = 'block';
+            document.getElementById('light-hint').style.display = 'block';
+            document.getElementById('light-props').style.display = 'none';
+            document.getElementById('object-props-animation').style.display = 'none';
+            document.getElementById('object-props-taiko').style.display = 'none';
+            document.getElementById('object-props-teleporter').style.display = 'none';
+        } else if (obj.userData.fdsSmokeButtonConfig) {
             updateObjectPanel(obj);
             document.getElementById('object-hint').style.display = 'none';
             document.getElementById('object-props').style.display = 'block';
@@ -1553,7 +1591,43 @@ function updateGlbAnimInteractPanel(obj) {
 
 function updateObjectPanel(obj) {
     if (!obj) return;
-    const c = obj.userData.config || obj.userData.pdfConfig || obj.userData.flightBoardConfig;
+    if (obj.userData.fdsSmokeButtonConfig) {
+        const c = obj.userData.fdsSmokeButtonConfig;
+        const mtlRow = document.getElementById('obj-mtl-row');
+        if (mtlRow) mtlRow.style.display = 'none';
+        document.getElementById('obj-path').value = c.label || c.id || 'FDS再生ボタン';
+        document.getElementById('obj-pos-x').value = obj.position.x;
+        document.getElementById('obj-pos-y').value = obj.position.y;
+        document.getElementById('obj-pos-z').value = obj.position.z;
+        document.getElementById('obj-rot-x').value = '0';
+        document.getElementById('obj-rot-y').value = '0';
+        document.getElementById('obj-rot-z').value = '0';
+        document.getElementById('obj-scale-x').value = '1';
+        document.getElementById('obj-scale-y').value = '1';
+        document.getElementById('obj-scale-z').value = '1';
+        const idEl = document.getElementById('obj-fds-btn-id');
+        if (idEl) idEl.value = c.id || '';
+        const labelEl = document.getElementById('obj-fds-btn-label');
+        if (labelEl) labelEl.value = c.label || '';
+        const msgEl = document.getElementById('obj-fds-btn-message');
+        if (msgEl) msgEl.value = c.message || '';
+        const smokeSel = document.getElementById('obj-fds-btn-smoke-id');
+        if (smokeSel) populateFdsSmokeIdSelectForEditor(smokeSel, c.fdsSmokeId || '');
+        const radiusEl = document.getElementById('obj-fds-btn-radius');
+        if (radiusEl) radiusEl.value = c.radius != null ? c.radius : 3;
+        const pb = c.playback || {};
+        const fromEl = document.getElementById('obj-fds-btn-from-frame');
+        if (fromEl) fromEl.value = pb.fromFrame != null ? pb.fromFrame : 0;
+        const secEl = document.getElementById('obj-fds-btn-seconds-per-frame');
+        if (secEl) secEl.value = pb.secondsPerFrame != null ? pb.secondsPerFrame : 1;
+        const loopEl = document.getElementById('obj-fds-btn-loop');
+        if (loopEl) loopEl.checked = pb.loop !== false;
+        const gb = document.getElementById('object-props-glb-anim');
+        if (gb) gb.style.display = 'none';
+        updateFdsSmokeEditorPropBlocks(obj);
+        return;
+    }
+    const c = obj.userData.config || obj.userData.pdfConfig || obj.userData.flightBoardConfig || obj.userData.fdsSmokeConfig;
     if (!c) return;
     const mtlRow = document.getElementById('obj-mtl-row');
     const mtlSel = document.getElementById('obj-mtl-path');
@@ -1569,6 +1643,10 @@ function updateObjectPanel(obj) {
     if (obj.userData.flightBoardConfig) {
         document.getElementById('obj-path').value =
             boardFilterEditorLabel(obj.userData.flightBoardConfig.filter);
+    } else if (obj.userData.fdsSmokeConfig) {
+        const manifest = String(c.manifest || '').trim();
+        const label = c.id || manifest.split('/').slice(-2, -1)[0] || 'FDS煙';
+        document.getElementById('obj-path').value = manifest ? `${label} (${manifest})` : label;
     } else {
         document.getElementById('obj-path').value =
             (c.path || (c.framePaths && c.framePaths[0])) || '';
@@ -1579,9 +1657,34 @@ function updateObjectPanel(obj) {
     document.getElementById('obj-rot-x').value = (obj.rotation.x * 180 / Math.PI).toFixed(2);
     document.getElementById('obj-rot-y').value = (obj.rotation.y * 180 / Math.PI).toFixed(2);
     document.getElementById('obj-rot-z').value = (obj.rotation.z * 180 / Math.PI).toFixed(2);
-    document.getElementById('obj-scale-x').value = obj.scale.x;
-    document.getElementById('obj-scale-y').value = obj.scale.y;
-    document.getElementById('obj-scale-z').value = obj.scale.z;
+    if (obj.userData.fdsSmokeConfig) {
+        const s = typeof c.scale === 'number' ? c.scale : (obj.scale.x || 1);
+        document.getElementById('obj-scale-x').value = s;
+        document.getElementById('obj-scale-y').value = s;
+        document.getElementById('obj-scale-z').value = s;
+        const pb = c.playback || {};
+        const idEl = document.getElementById('obj-fds-smoke-id');
+        if (idEl) idEl.value = c.id || '';
+        const autoplayEl = document.getElementById('obj-fds-smoke-autoplay');
+        if (autoplayEl) autoplayEl.checked = pb.autoplay === true;
+        const startEndEl = document.getElementById('obj-fds-smoke-start-at-end');
+        if (startEndEl) startEndEl.checked = pb.startAtEnd !== false;
+        const loopEl = document.getElementById('obj-fds-smoke-loop');
+        if (loopEl) loopEl.checked = pb.loop !== false;
+        const secEl = document.getElementById('obj-fds-smoke-seconds-per-frame');
+        if (secEl) secEl.value = pb.secondsPerFrame != null ? pb.secondsPerFrame : 1;
+        const mirror = c.mirror || {};
+        const mirrorXEl = document.getElementById('obj-fds-smoke-mirror-x');
+        if (mirrorXEl) mirrorXEl.checked = mirror.x === true;
+        const mirrorYEl = document.getElementById('obj-fds-smoke-mirror-y');
+        if (mirrorYEl) mirrorYEl.checked = mirror.y === true;
+        const mirrorZEl = document.getElementById('obj-fds-smoke-mirror-z');
+        if (mirrorZEl) mirrorZEl.checked = mirror.z === true;
+    } else {
+        document.getElementById('obj-scale-x').value = obj.scale.x;
+        document.getElementById('obj-scale-y').value = obj.scale.y;
+        document.getElementById('obj-scale-z').value = obj.scale.z;
+    }
     if (obj.userData.config) {
         const anim = c.animate && c.animate.rotation;
         document.getElementById('obj-animate').checked = !!anim;
@@ -1679,6 +1782,25 @@ function updateObjectPanel(obj) {
         if (lodDet) lodDet.style.display = 'none';
         const rodDet1 = document.getElementById('object-props-prefab-rod');
         if (rodDet1) rodDet1.style.display = 'none';
+    } else if (obj.userData.fdsSmokeConfig) {
+        const gb = document.getElementById('object-props-glb-anim');
+        if (gb) gb.style.display = 'none';
+        const lodDet = document.getElementById('object-props-prefab-lod');
+        if (lodDet) lodDet.style.display = 'none';
+        const rodDet2 = document.getElementById('object-props-prefab-rod');
+        if (rodDet2) rodDet2.style.display = 'none';
+        updateFdsSmokeEditorPropBlocks(obj);
+    } else if (obj.userData.fdsSmokeButtonConfig) {
+        const gb = document.getElementById('object-props-glb-anim');
+        if (gb) gb.style.display = 'none';
+        const lodDet = document.getElementById('object-props-prefab-lod');
+        if (lodDet) lodDet.style.display = 'none';
+        const rodDet3 = document.getElementById('object-props-prefab-rod');
+        if (rodDet3) rodDet3.style.display = 'none';
+        updateFdsSmokeEditorPropBlocks(obj);
+    }
+    if (obj.userData.config || obj.userData.pdfConfig || obj.userData.flightBoardConfig) {
+        updateFdsSmokeEditorPropBlocks(obj);
     }
 }
 
@@ -1689,6 +1811,86 @@ function updateObjectPanel(obj) {
 function syncObjectFromPanel(opts) {
     const recordUndo = !opts || opts.recordUndo !== false;
     if (!selectedObject) return;
+    if (selectedObject.userData.fdsSmokeButtonConfig) {
+        const c = selectedObject.userData.fdsSmokeButtonConfig;
+        if (recordUndo) pushUndo();
+        selectedObject.position.set(
+            parseFloat(document.getElementById('obj-pos-x').value) || 0,
+            parseFloat(document.getElementById('obj-pos-y').value) || 0,
+            parseFloat(document.getElementById('obj-pos-z').value) || 0
+        );
+        c.position = {
+            x: selectedObject.position.x,
+            y: selectedObject.position.y,
+            z: selectedObject.position.z,
+        };
+        const labelEl = document.getElementById('obj-fds-btn-label');
+        c.label = labelEl ? String(labelEl.value || '').trim() || '再生' : c.label;
+        const msgEl = document.getElementById('obj-fds-btn-message');
+        c.message = msgEl ? String(msgEl.value || '').trim() : '';
+        const smokeSel = document.getElementById('obj-fds-btn-smoke-id');
+        c.fdsSmokeId = smokeSel ? String(smokeSel.value || '').trim() : '';
+        const radiusEl = document.getElementById('obj-fds-btn-radius');
+        const radius = radiusEl ? parseFloat(radiusEl.value) : 3;
+        c.radius = Number.isFinite(radius) && radius > 0 ? radius : 3;
+        const fromEl = document.getElementById('obj-fds-btn-from-frame');
+        const fromFrame = fromEl ? parseInt(fromEl.value, 10) : 0;
+        const secEl = document.getElementById('obj-fds-btn-seconds-per-frame');
+        const secondsPerFrame = secEl ? parseFloat(secEl.value) : 1;
+        const loopEl = document.getElementById('obj-fds-btn-loop');
+        c.playback = {
+            fromFrame: Number.isFinite(fromFrame) && fromFrame >= 0 ? fromFrame : 0,
+            loop: loopEl ? loopEl.checked : true,
+            secondsPerFrame: Number.isFinite(secondsPerFrame) && secondsPerFrame > 0 ? secondsPerFrame : 1,
+        };
+        renderWorldObjectList();
+        return;
+    }
+    if (selectedObject.userData.fdsSmokeConfig) {
+        const c = selectedObject.userData.fdsSmokeConfig;
+        if (recordUndo) pushUndo();
+        selectedObject.position.set(
+            parseFloat(document.getElementById('obj-pos-x').value) || 0,
+            parseFloat(document.getElementById('obj-pos-y').value) || 0,
+            parseFloat(document.getElementById('obj-pos-z').value) || 0
+        );
+        selectedObject.rotation.set(
+            (parseFloat(document.getElementById('obj-rot-x').value) || 0) * Math.PI / 180,
+            (parseFloat(document.getElementById('obj-rot-y').value) || 0) * Math.PI / 180,
+            (parseFloat(document.getElementById('obj-rot-z').value) || 0) * Math.PI / 180
+        );
+        const s = parseFloat(document.getElementById('obj-scale-x').value) || 1;
+        selectedObject.scale.set(s, s, s);
+        c.position = { x: selectedObject.position.x, y: selectedObject.position.y, z: selectedObject.position.z };
+        c.rotation = {
+            x: selectedObject.rotation.x * 180 / Math.PI,
+            y: selectedObject.rotation.y * 180 / Math.PI,
+            z: selectedObject.rotation.z * 180 / Math.PI
+        };
+        c.scale = s;
+        const pb = c.playback || {};
+        const autoplayEl = document.getElementById('obj-fds-smoke-autoplay');
+        const startEndEl = document.getElementById('obj-fds-smoke-start-at-end');
+        const loopEl = document.getElementById('obj-fds-smoke-loop');
+        const secEl = document.getElementById('obj-fds-smoke-seconds-per-frame');
+        c.playback = {
+            autoplay: autoplayEl ? autoplayEl.checked : false,
+            startAtEnd: startEndEl ? startEndEl.checked : true,
+            loop: loopEl ? loopEl.checked : false,
+            secondsPerFrame: secEl && Number.isFinite(parseFloat(secEl.value)) && parseFloat(secEl.value) > 0
+                ? parseFloat(secEl.value)
+                : 1,
+        };
+        const mirrorXEl = document.getElementById('obj-fds-smoke-mirror-x');
+        const mirrorYEl = document.getElementById('obj-fds-smoke-mirror-y');
+        const mirrorZEl = document.getElementById('obj-fds-smoke-mirror-z');
+        c.mirror = {
+            x: mirrorXEl ? mirrorXEl.checked : false,
+            y: mirrorYEl ? mirrorYEl.checked : false,
+            z: mirrorZEl ? mirrorZEl.checked : false,
+        };
+        return;
+    }
     const c = selectedObject.userData.config
         || selectedObject.userData.pdfConfig
         || selectedObject.userData.flightBoardConfig;
@@ -2787,6 +2989,10 @@ function buildWorldsFromScene() {
             lights: w.lights ? w.lights.map((l) => ({ ...l })) : [],
             pdfs: w.pdfs ? w.pdfs.map((p) => ({ ...p })) : [],
             flightBoards: w.flightBoards ? w.flightBoards.map((b) => ({ ...b })) : [],
+            fdsSmokes: w.fdsSmokes ? w.fdsSmokes.map((s) => JSON.parse(JSON.stringify(s))) : [],
+            fdsSmokeButtons: w.fdsSmokeButtons
+                ? w.fdsSmokeButtons.map((b) => JSON.parse(JSON.stringify(b)))
+                : [],
             vdbs: [],
             floorEnabled: wid === selectedWorldId ? document.getElementById('floor-enabled').checked : (w.floorEnabled !== false),
             floorWidth: wid === selectedWorldId
@@ -2834,6 +3040,8 @@ function buildWorldsFromScene() {
             w.lights = [];
             w.pdfs = [];
             w.flightBoards = [];
+            w.fdsSmokes = [];
+            w.fdsSmokeButtons = [];
             editGroup.children.forEach((child) => {
                 if (child.userData.config && !child.isLight) {
                     const c = { ...child.userData.config };
@@ -2915,6 +3123,22 @@ function buildWorldsFromScene() {
                     b.rotation = { x: child.rotation.x * 180 / Math.PI, y: child.rotation.y * 180 / Math.PI, z: child.rotation.z * 180 / Math.PI };
                     b.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
                     w.flightBoards.push(b);
+                }
+                if (child.userData.fdsSmokeConfig) {
+                    const s = JSON.parse(JSON.stringify(child.userData.fdsSmokeConfig));
+                    s.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+                    s.rotation = {
+                        x: child.rotation.x * 180 / Math.PI,
+                        y: child.rotation.y * 180 / Math.PI,
+                        z: child.rotation.z * 180 / Math.PI
+                    };
+                    s.scale = child.scale.x;
+                    w.fdsSmokes.push(s);
+                }
+                if (child.userData.fdsSmokeButtonConfig) {
+                    const b = JSON.parse(JSON.stringify(child.userData.fdsSmokeButtonConfig));
+                    b.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+                    w.fdsSmokeButtons.push(b);
                 }
             });
             w.spawnPoint = {
@@ -3204,6 +3428,237 @@ async function loadWorldModelEntryForEditor(config, idx) {
 }
 
 /**
+ * FDS 煙エディタ用プロキシのボックス寸法を更新する
+ * @param {THREE.Group} group
+ * @param {number} sizeX
+ * @param {number} sizeY three.js Y（FDS Z 方向）
+ * @param {number} sizeZ three.js Z（FDS Y 方向）
+ */
+function resizeFdsSmokeEditorProxy(group, sizeX, sizeY, sizeZ) {
+    const proxy = group.userData.fdsSmokeProxy;
+    if (!proxy) return;
+    const { mesh, edges } = proxy;
+    if (mesh.geometry) mesh.geometry.dispose();
+    if (edges.geometry) edges.geometry.dispose();
+    const geom = new THREE.BoxGeometry(sizeX, sizeY, sizeZ);
+    mesh.geometry = geom;
+    edges.geometry = new THREE.EdgesGeometry(geom);
+    mesh.position.set(sizeX / 2, sizeY / 2, sizeZ / 2);
+    edges.position.set(sizeX / 2, sizeY / 2, sizeZ / 2);
+}
+
+/**
+ * FDS 煙をワールド編集シーンにプロキシ表示する（ギズモ移動用）
+ * @param {object} config
+ * @returns {THREE.Group}
+ */
+function loadFdsSmokeIntoEditor(config) {
+    const pos = config.position || { x: 0, y: 0, z: 0 };
+    const rot = config.rotation || { x: 0, y: 0, z: 0 };
+    const scale = typeof config.scale === 'number' && config.scale > 0 ? config.scale : 1;
+
+    const group = new THREE.Group();
+    group.userData.fdsSmokeConfig = JSON.parse(JSON.stringify(config));
+
+    const defaultSize = 10;
+    const geom = new THREE.BoxGeometry(defaultSize, defaultSize, defaultSize);
+    const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geom),
+        new THREE.LineBasicMaterial({ color: 0xff6600 })
+    );
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0xff6600,
+        transparent: true,
+        opacity: 0.12,
+        depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.position.set(defaultSize / 2, defaultSize / 2, defaultSize / 2);
+    edges.position.set(defaultSize / 2, defaultSize / 2, defaultSize / 2);
+    group.userData.fdsSmokeProxy = { mesh, edges };
+    group.add(edges);
+    group.add(mesh);
+
+    group.position.set(pos.x, pos.y, pos.z);
+    group.rotation.set(
+        rot.x * Math.PI / 180,
+        rot.y * Math.PI / 180,
+        rot.z * Math.PI / 180
+    );
+    group.scale.set(scale, scale, scale);
+    editGroup.add(group);
+
+    const manifestPath = String(config.manifest || '').trim();
+    if (manifestPath) {
+        fetch('/' + manifestPath.replace(/^\/+/, ''))
+            .then((res) => (res.ok ? res.json() : null))
+            .then((manifest) => {
+                const bounds = manifest && manifest.bounds;
+                if (!bounds) return;
+                const dx = Math.abs(bounds.x[1] - bounds.x[0]);
+                const dyFds = Math.abs(bounds.y[1] - bounds.y[0]);
+                const dzFds = Math.abs(bounds.z[1] - bounds.z[0]);
+                if (dx > 0 && dyFds > 0 && dzFds > 0) {
+                    resizeFdsSmokeEditorProxy(group, dx, dzFds, dyFds);
+                }
+            })
+            .catch(() => { /* manifest 未取得時は既定ボックス */ });
+    }
+
+    return group;
+}
+
+/**
+ * FDS 再生ボタンをワールド編集シーンにマーカー表示する（ギズモ移動用）
+ * @param {object} config
+ * @returns {THREE.Group}
+ */
+function loadFdsSmokeButtonIntoEditor(config) {
+    const pos = config.position || { x: 0, y: 1, z: 0 };
+    const group = new THREE.Group();
+    group.userData.fdsSmokeButtonConfig = JSON.parse(JSON.stringify(config));
+
+    const geom = new THREE.SphereGeometry(0.45, 16, 12);
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0x44aaff,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geom),
+        new THREE.LineBasicMaterial({ color: 0x2288dd })
+    );
+    group.add(edges);
+    group.add(mesh);
+    group.position.set(pos.x, pos.y, pos.z);
+    editGroup.add(group);
+    return group;
+}
+
+/**
+ * 右パネル「再生する FDS 煙」セレクトを当ワールドの fdsSmokes で埋める
+ * @param {HTMLSelectElement | null} select
+ * @param {string} [currentId]
+ */
+function populateFdsSmokeIdSelectForEditor(select, currentId = '') {
+    if (!select || !selectedWorldId) return;
+    const world = worlds[selectedWorldId];
+    const fdsSmokes = Array.isArray(world?.fdsSmokes) ? world.fdsSmokes : [];
+    select.innerHTML = '<option value="">（未選択）</option>';
+    for (const smoke of fdsSmokes) {
+        const id = smoke.id || smoke.manifest || '';
+        if (!id) continue;
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = id;
+        select.appendChild(opt);
+    }
+    if (currentId && fdsSmokes.some((s) => (s.id || s.manifest) === currentId)) {
+        select.value = currentId;
+    }
+}
+
+/**
+ * FDS煙・再生ボタン用プロパティブロックの表示切替
+ * @param {THREE.Object3D | null} obj
+ */
+function updateFdsSmokeEditorPropBlocks(obj) {
+    const smokeDet = document.getElementById('object-props-fds-smoke');
+    const btnDet = document.getElementById('object-props-fds-smoke-btn');
+    if (smokeDet) smokeDet.style.display = obj?.userData?.fdsSmokeConfig ? '' : 'none';
+    if (btnDet) btnDet.style.display = obj?.userData?.fdsSmokeButtonConfig ? '' : 'none';
+}
+
+/**
+ * ライブラリのシミュレーションを選択中ワールドに追加する（ローカル worlds、未保存）
+ * @param {string} simId
+ * @returns {{ ok: boolean, duplicate?: boolean, error?: string }}
+ */
+export function addFdsSmokeFromSimulation(simId) {
+    const trimmed = String(simId || '').trim();
+    if (!trimmed || !selectedWorldId) {
+        return { ok: false, error: 'ワールドまたはシミュレーション ID が未選択です。' };
+    }
+    const world = worlds[selectedWorldId];
+    if (!world) return { ok: false, error: 'ワールドが見つかりません。' };
+    if (!Array.isArray(world.fdsSmokes)) world.fdsSmokes = [];
+
+    const manifestPath = `simulations/${trimmed}/manifest.json`;
+    const entryId = `${trimmed}-smoke`;
+    const existingInWorld = world.fdsSmokes.find(
+        (e) => e.manifest === manifestPath || e.id === entryId,
+    );
+    const existingInScene = editGroup?.children.find((child) => {
+        const cfg = child.userData?.fdsSmokeConfig;
+        return cfg && (cfg.manifest === manifestPath || cfg.id === entryId);
+    });
+
+    if (existingInWorld || existingInScene) {
+        if (existingInScene) selectObject(existingInScene);
+        return { ok: true, duplicate: true };
+    }
+
+    const sp = world.spawnPoint || { x: 0, y: 10, z: 0 };
+    const entry = {
+        id: entryId,
+        manifest: manifestPath,
+        position: { x: sp.x, y: sp.y, z: sp.z },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: 1,
+        mirror: { x: false, y: false, z: false },
+        playback: {
+            autoplay: false,
+            startAtEnd: true,
+            loop: false,
+            secondsPerFrame: 1,
+        },
+    };
+    world.fdsSmokes.push(entry);
+    const group = loadFdsSmokeIntoEditor(entry);
+    selectObject(group);
+    renderWorldObjectList();
+    writeWorldEditCache();
+    return { ok: true };
+}
+
+/**
+ * 選択中ワールドに FDS 再生ボタンを追加する
+ * @returns {{ ok: boolean, error?: string }}
+ */
+export function addFdsSmokeButtonToWorld() {
+    if (!selectedWorldId) {
+        return { ok: false, error: 'ワールドを選択してください。' };
+    }
+    const world = worlds[selectedWorldId];
+    if (!world) return { ok: false, error: 'ワールドが見つかりません。' };
+    if (!Array.isArray(world.fdsSmokeButtons)) world.fdsSmokeButtons = [];
+
+    const sp = world.spawnPoint || { x: 0, y: 10, z: 0 };
+    const fdsSmokes = Array.isArray(world.fdsSmokes) ? world.fdsSmokes : [];
+    const config = {
+        id: `btn-${Date.now()}`,
+        label: '煙を再生',
+        message: '',
+        fdsSmokeId: fdsSmokes[0]?.id || '',
+        position: { x: sp.x, y: sp.y, z: sp.z },
+        radius: 3,
+        playback: {
+            fromFrame: 0,
+            loop: true,
+            secondsPerFrame: 1,
+        },
+    };
+    world.fdsSmokeButtons.push(config);
+    const group = loadFdsSmokeButtonIntoEditor(config);
+    selectObject(group);
+    renderWorldObjectList();
+    writeWorldEditCache();
+    return { ok: true };
+}
+
+/**
  * ワールド設定をシーンに適用する（3D モデルは最大 16 件ずつバッチ並列で読み込み。GET /models/* は既存の Service Worker により Stale-While-Revalidate される）
  * @param {object} world
  * @returns {Promise<void>}
@@ -3213,6 +3668,13 @@ async function loadWorldIntoScene(world) {
     ensureWorldRodsShape(world);
     editorPreviewRodId = DEFAULT_ROD_ID;
     stopFlightBoardEditorPolling();
+    worldEditSceneClearHooks.forEach((fn) => {
+        try {
+            fn();
+        } catch (err) {
+            console.error('[setting] worldEditSceneClearHook:', err);
+        }
+    });
     while (editGroup.children.length) {
         const c = editGroup.children[0];
         editGroup.remove(c);
@@ -3275,6 +3737,16 @@ async function loadWorldIntoScene(world) {
     if (flightBoards.length) {
         startFlightBoardEditorPolling(editGroup);
     }
+
+    const fdsSmokes = world.fdsSmokes || [];
+    fdsSmokes.forEach((config) => {
+        loadFdsSmokeIntoEditor(config);
+    });
+
+    const fdsSmokeButtons = world.fdsSmokeButtons || [];
+    fdsSmokeButtons.forEach((config) => {
+        loadFdsSmokeButtonIntoEditor(config);
+    });
 
     document.getElementById('spawn-x').value = (world.spawnPoint && world.spawnPoint.x) ?? 0;
     document.getElementById('spawn-y').value = (world.spawnPoint && world.spawnPoint.y) ?? 10;
@@ -3393,12 +3865,52 @@ function animate() {
             selectedObject.userData.flightBoardConfig.rotation = { x: selectedObject.rotation.x * 180 / Math.PI, y: selectedObject.rotation.y * 180 / Math.PI, z: selectedObject.rotation.z * 180 / Math.PI };
             selectedObject.userData.flightBoardConfig.scale = { x: selectedObject.scale.x, y: selectedObject.scale.y, z: selectedObject.scale.z };
         }
+        if (selectedObject && selectedObject.userData.fdsSmokeConfig) {
+            selectedObject.userData.fdsSmokeConfig.position = { x: selectedObject.position.x, y: selectedObject.position.y, z: selectedObject.position.z };
+            selectedObject.userData.fdsSmokeConfig.rotation = { x: selectedObject.rotation.x * 180 / Math.PI, y: selectedObject.rotation.y * 180 / Math.PI, z: selectedObject.rotation.z * 180 / Math.PI };
+            selectedObject.userData.fdsSmokeConfig.scale = selectedObject.scale.x;
+        }
     }
     controls.update();
+    if (worldEditFrameHooks.size > 0) {
+        const ctx = { scene, camera, renderer, editGroup };
+        worldEditFrameHooks.forEach((fn) => {
+            try {
+                fn(ctx);
+            } catch (err) {
+                console.error('[setting] worldEditFrameHook:', err);
+            }
+        });
+    }
     renderer.render(scene, camera);
 }
 
 // --- API ---
+
+/** @type {Set<(ctx: { scene: THREE.Scene, camera: THREE.Camera, renderer: THREE.WebGLRenderer, editGroup: THREE.Group }) => void>} */
+const worldEditFrameHooks = new Set();
+/** @type {Set<() => void>} */
+const worldEditSceneClearHooks = new Set();
+
+/**
+ * ワールド編集の毎フレーム描画前に呼ばれるフックを登録する
+ * @param {(ctx: { scene: THREE.Scene, camera: THREE.Camera, renderer: THREE.WebGLRenderer, editGroup: THREE.Group }) => void} fn
+ * @returns {() => void} 登録解除関数
+ */
+export function registerWorldEditFrameHook(fn) {
+    worldEditFrameHooks.add(fn);
+    return () => worldEditFrameHooks.delete(fn);
+}
+
+/**
+ * ワールド編集シーンをクリアする直前に呼ばれるフックを登録する
+ * @param {() => void} fn
+ * @returns {() => void} 登録解除関数
+ */
+export function registerWorldEditSceneClearHook(fn) {
+    worldEditSceneClearHooks.add(fn);
+    return () => worldEditSceneClearHooks.delete(fn);
+}
 
 /** ワールド編集パネル用 localStorage キャッシュ（一覧の速い再表示・オフライン時のフォールバック用） */
 const WORLD_EDIT_CACHE_STORAGE_KEY = 'metaverse-admin-world-edit-cache-v1';
@@ -3668,7 +4180,7 @@ function createModelObjectListCategory(key, modelChildren, startIndex) {
             div.innerHTML = `<span title="${label}">${label}</span>`;
             div.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (worldObjectList[idx]) selectObject(worldObjectList[idx]);
+                selectObject(child);
             });
             childrenWrap.appendChild(div);
             return;
@@ -3733,8 +4245,14 @@ function renderWorldObjectList() {
     const modelsArr = [];
     const pdfsArr = [];
     const flightBoardsArr = [];
+    const fdsSmokesArr = [];
+    const fdsSmokeButtonsArr = [];
     editGroup.children.forEach((child) => {
-        if (child.userData.flightBoardConfig) {
+        if (child.userData.fdsSmokeButtonConfig) {
+            fdsSmokeButtonsArr.push(child);
+        } else if (child.userData.fdsSmokeConfig) {
+            fdsSmokesArr.push(child);
+        } else if (child.userData.flightBoardConfig) {
             flightBoardsArr.push(child);
         } else if (child.userData.pdfConfig) {
             pdfsArr.push(child);
@@ -3746,12 +4264,20 @@ function renderWorldObjectList() {
             lightsArr.push(child);
         }
     });
-    worldObjectList = [...lightsArr, ...modelsArr, ...pdfsArr, ...flightBoardsArr];
+    worldObjectList = [...lightsArr, ...modelsArr, ...pdfsArr, ...flightBoardsArr, ...fdsSmokesArr, ...fdsSmokeButtonsArr];
+    if (fdsSmokesArr.length > 0) {
+        objectListExpanded.fdsSmokes = true;
+    }
+    if (fdsSmokeButtonsArr.length > 0) {
+        objectListExpanded.fdsSmokeButtons = true;
+    }
     if (selectedObject) {
         if (lightsArr.includes(selectedObject)) objectListExpanded.lights = true;
         if (modelsArr.includes(selectedObject)) objectListExpanded.models = true;
         if (pdfsArr.includes(selectedObject)) objectListExpanded.pdfs = true;
         if (flightBoardsArr.includes(selectedObject)) objectListExpanded.flightBoards = true;
+        if (fdsSmokesArr.includes(selectedObject)) objectListExpanded.fdsSmokes = true;
+        if (fdsSmokeButtonsArr.includes(selectedObject)) objectListExpanded.fdsSmokeButtons = true;
         if (
             selectedObject.userData.config
             && String(selectedObject.userData.config.prefabManifest || '').trim()
@@ -3772,6 +4298,16 @@ function renderWorldObjectList() {
         if (child.userData.config) {
             const path = child.userData.config.path || '';
             return path.split('/').pop() || 'モデル';
+        }
+        if (child.userData.fdsSmokeConfig) {
+            const cfg = child.userData.fdsSmokeConfig;
+            const manifest = String(cfg.manifest || '').trim();
+            const simName = manifest.split('/').slice(-2, -1)[0];
+            return cfg.id || simName || 'FDS煙';
+        }
+        if (child.userData.fdsSmokeButtonConfig) {
+            const cfg = child.userData.fdsSmokeButtonConfig;
+            return cfg.label || cfg.id || 'FDS再生ボタン';
         }
         return (child.userData.lightConfig && child.userData.lightConfig.type) || 'light';
     }
@@ -3804,7 +4340,7 @@ function renderWorldObjectList() {
             div.innerHTML = `<span title="${label}">${label}</span>`;
             div.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (worldObjectList[idx]) selectObject(worldObjectList[idx]);
+                selectObject(child);
             });
             childrenWrap.appendChild(div);
         });
@@ -3820,6 +4356,18 @@ function renderWorldObjectList() {
         'flightBoards',
         flightBoardsArr,
         lightsArr.length + modelsArr.length + pdfsArr.length
+    ));
+    el.appendChild(createCategory(
+        'FDS煙',
+        'fdsSmokes',
+        fdsSmokesArr,
+        lightsArr.length + modelsArr.length + pdfsArr.length + flightBoardsArr.length
+    ));
+    el.appendChild(createCategory(
+        'FDS再生ボタン',
+        'fdsSmokeButtons',
+        fdsSmokeButtonsArr,
+        lightsArr.length + modelsArr.length + pdfsArr.length + flightBoardsArr.length + fdsSmokesArr.length
     ));
 }
 
@@ -5190,6 +5738,35 @@ function bindEvents() {
     bindAddFlightBoardButton('btn-add-flight-board-domestic', 'domestic');
     bindAddFlightBoardButton('btn-add-flight-board-international', 'international');
 
+    const btnAddFdsSmokeBtn = document.getElementById('btn-add-fds-smoke-btn');
+    if (btnAddFdsSmokeBtn) {
+        btnAddFdsSmokeBtn.addEventListener('click', () => {
+            const result = addFdsSmokeButtonToWorld();
+            if (!result.ok && result.error) alert(result.error);
+        });
+    }
+
+    const fdsSmokeFieldIds = [
+        'obj-fds-smoke-autoplay',
+        'obj-fds-smoke-start-at-end',
+        'obj-fds-smoke-loop',
+        'obj-fds-smoke-seconds-per-frame',
+        'obj-fds-smoke-mirror-x',
+        'obj-fds-smoke-mirror-y',
+        'obj-fds-smoke-mirror-z',
+        'obj-fds-btn-label',
+        'obj-fds-btn-message',
+        'obj-fds-btn-smoke-id',
+        'obj-fds-btn-radius',
+        'obj-fds-btn-from-frame',
+        'obj-fds-btn-seconds-per-frame',
+        'obj-fds-btn-loop',
+    ];
+    for (const id of fdsSmokeFieldIds) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', syncObjectFromPanel);
+    }
+
     let modelUploadModalBusy = false;
     let modelUploadQueuePollId = null;
     /** GLB: ボディ送信後、キューポーリングでステータス文言を合わせる行 UI */
@@ -6344,4 +6921,18 @@ async function init() {
 /** ワールド編集エディタを初期化する。admin パネル初表示時に 1 回だけ呼ぶ。 */
 export async function initSettingEditor() {
     return init();
+}
+
+/** サーバーから worlds を再取得し、選択中ワールドをシーンに反映する */
+export async function refreshWorldsFromServer() {
+    await fetchWorlds();
+    renderWorldList();
+    renderModelList();
+    renderPdfList();
+    populateDestWorldSelect();
+    if (selectedWorldId && worlds[selectedWorldId]) {
+        await loadWorldIntoScene(worlds[selectedWorldId]);
+    }
+    renderWorldObjectList();
+    writeWorldEditCache();
 }

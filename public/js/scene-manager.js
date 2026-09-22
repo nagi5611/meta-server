@@ -138,6 +138,28 @@ async function getClientPlanLoadConcurrency() {
     return fallback;
 }
 
+/** BVH 再生成後の PDF ポスター同時ロード数 */
+const PDF_LOAD_CONCURRENCY = 2;
+
+/**
+ * @param {number} concurrency
+ * @param {Array<() => Promise<void>>} factories
+ * @returns {Promise<void>}
+ */
+async function runWithConcurrency(concurrency, factories) {
+    const n = factories.length;
+    let cursor = 0;
+    async function worker() {
+        while (true) {
+            const i = cursor++;
+            if (i >= n) break;
+            await factories[i]();
+        }
+    }
+    const workers = Math.min(Math.max(1, concurrency), Math.max(1, n));
+    await Promise.all(Array.from({ length: workers }, () => worker()));
+}
+
 class SceneManager {
     constructor() {
         this.scene = null;
@@ -1435,8 +1457,7 @@ class SceneManager {
                 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.8.69'}/pdf.worker.min.mjs`;
             }
         }
-        for (let pi = 0; pi < pdfConfigs.length; pi++) {
-            const config = pdfConfigs[pi];
+        const pdfFactories = pdfConfigs.map((config) => async () => {
             const path = config.path || 'pdfs/placeholder.pdf';
             const pdfLabel = path.split(/[/\\]/).pop() || path;
             const url = path.startsWith('/') ? path : '/' + path;
@@ -1493,7 +1514,8 @@ class SceneManager {
                 this._addPdfPlaceholderMesh(position, rotation, scale, path, config.teleporter);
                 completePdfUnit(pdfLabel);
             }
-        }
+        });
+        await runWithConcurrency(PDF_LOAD_CONCURRENCY, pdfFactories);
         console.log(`Loaded ${pdfConfigs.length} PDF poster(s)`);
     }
 

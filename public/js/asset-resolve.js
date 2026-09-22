@@ -11,6 +11,28 @@ const signedHrefCache = new Map();
 /** サーバー sign-asset-urls の1リクエスト上限 */
 const SIGN_BATCH_SIZE = 64;
 
+/** 署名 API バッチの同時実行数 */
+const SIGN_BATCH_CONCURRENCY = 2;
+
+/**
+ * @param {number} concurrency
+ * @param {Array<() => Promise<void>>} factories
+ * @returns {Promise<void>}
+ */
+async function runWithConcurrency(concurrency, factories) {
+    const n = factories.length;
+    let cursor = 0;
+    async function worker() {
+        while (true) {
+            const i = cursor++;
+            if (i >= n) break;
+            await factories[i]();
+        }
+    }
+    const workers = Math.min(Math.max(1, concurrency), Math.max(1, n));
+    await Promise.all(Array.from({ length: workers }, () => worker()));
+}
+
 /**
  * ブラウザ上では fetch / GLTFLoader が CORS を要求するため CDN 署名 URL ではなく同一オリジンを使う
  * @returns {boolean}
@@ -49,11 +71,26 @@ function logicalPosixFromCdnUrl(cdnUrl, cfg) {
     return `models/${suffix}`;
 }
 
+/** @type {(() => Promise<unknown>) | null} */
+let loadClientConfigOnceFn = null;
+
+/**
+ * client-config 取得を外部実装に差し替える（テナント共有 Promise 等）
+ * @param {(() => Promise<unknown>) | null} fn
+ */
+export function setLoadClientConfigOnceFn(fn) {
+    loadClientConfigOnceFn = fn;
+    configPromise = null;
+}
+
 /**
  * /api/client-config を一度だけ取得
  * @returns {Promise<unknown>}
  */
 export function loadClientConfigOnce() {
+    if (loadClientConfigOnceFn) {
+        return loadClientConfigOnceFn();
+    }
     if (!configPromise) {
         configPromise = fetch('/api/client-config', { credentials: 'include' }).then((r) => r.json());
     }
@@ -111,33 +148,46 @@ function canonicalModelCdnSignKey(pathOrUrl, cfg) {
  * @param {string[]} urlKeys
  * @returns {Promise<void>}
  */
+/**
+ * sign-asset-urls を1バッチ分呼び出しキャッシュへ格納する
+ * @param {string[]} batch
+ * @returns {Promise<void>}
+ */
+async function signAndCacheUrlBatch(batch) {
+    try {
+        const res = await fetch('/api/metaverse/sign-asset-urls', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls: batch }),
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        const signed = j.signed && typeof j.signed === 'object' ? j.signed : null;
+        if (!signed) return;
+        for (const key of batch) {
+            const href = signed[key];
+            if (typeof href === 'string' && href.length > 0) {
+                signedHrefCache.set(key, href);
+            }
+        }
+    } catch {
+        /* 個別 resolve 時にフォールバック */
+    }
+}
+
 async function signAndCacheUrlKeys(urlKeys) {
     const unique = [...new Set(urlKeys.filter(Boolean))].filter((k) => !signedHrefCache.has(k));
     if (!unique.length) return;
 
+    const batches = [];
     for (let i = 0; i < unique.length; i += SIGN_BATCH_SIZE) {
-        const batch = unique.slice(i, i + SIGN_BATCH_SIZE);
-        try {
-            const res = await fetch('/api/metaverse/sign-asset-urls', {
-                method: 'POST',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ urls: batch }),
-            });
-            if (!res.ok) continue;
-            const j = await res.json();
-            const signed = j.signed && typeof j.signed === 'object' ? j.signed : null;
-            if (!signed) continue;
-            for (const key of batch) {
-                const href = signed[key];
-                if (typeof href === 'string' && href.length > 0) {
-                    signedHrefCache.set(key, href);
-                }
-            }
-        } catch {
-            /* 個別 resolve 時にフォールバック */
-        }
+        batches.push(unique.slice(i, i + SIGN_BATCH_SIZE));
     }
+    await runWithConcurrency(
+        SIGN_BATCH_CONCURRENCY,
+        batches.map((batch) => () => signAndCacheUrlBatch(batch)),
+    );
 }
 
 /**
