@@ -1337,6 +1337,13 @@ function onTransformChange() {
     if (obj.userData.fdsSmokeButtonConfig) {
         const cfg = obj.userData.fdsSmokeButtonConfig;
         cfg.position = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+        if (cfg.panel !== false && (cfg.panel == null || typeof cfg.panel !== 'object')) {
+            cfg.panel = {
+                rotation: { x: 0, y: 180, z: 0 },
+                scale: { x: 1.4, y: 1.4, z: 1 },
+                maxDistance: 18,
+            };
+        }
         if (selectedObject === obj) updateObjectPanel(obj);
     }
     if (obj.userData.lightConfig) {
@@ -1843,6 +1850,13 @@ function syncObjectFromPanel(opts) {
             loop: loopEl ? loopEl.checked : true,
             secondsPerFrame: Number.isFinite(secondsPerFrame) && secondsPerFrame > 0 ? secondsPerFrame : 1,
         };
+        if (c.panel !== false && (c.panel == null || typeof c.panel !== 'object')) {
+            c.panel = {
+                rotation: { x: 0, y: 180, z: 0 },
+                scale: { x: 1.4, y: 1.4, z: 1 },
+                maxDistance: 18,
+            };
+        }
         renderWorldObjectList();
         return;
     }
@@ -3138,6 +3152,13 @@ function buildWorldsFromScene() {
                 if (child.userData.fdsSmokeButtonConfig) {
                     const b = JSON.parse(JSON.stringify(child.userData.fdsSmokeButtonConfig));
                     b.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+                    if (b.panel !== false && (b.panel == null || typeof b.panel !== 'object')) {
+                        b.panel = {
+                            rotation: { x: 0, y: 180, z: 0 },
+                            scale: { x: 1.4, y: 1.4, z: 1 },
+                            maxDistance: 18,
+                        };
+                    }
                     w.fdsSmokeButtons.push(b);
                 }
             });
@@ -3516,7 +3537,15 @@ function loadFdsSmokeIntoEditor(config) {
 function loadFdsSmokeButtonIntoEditor(config) {
     const pos = config.position || { x: 0, y: 1, z: 0 };
     const group = new THREE.Group();
-    group.userData.fdsSmokeButtonConfig = JSON.parse(JSON.stringify(config));
+    const normalized = JSON.parse(JSON.stringify(config));
+    if (normalized.panel !== false && (normalized.panel == null || typeof normalized.panel !== 'object')) {
+        normalized.panel = {
+            rotation: { x: 0, y: 180, z: 0 },
+            scale: { x: 1.4, y: 1.4, z: 1 },
+            maxDistance: 18,
+        };
+    }
+    group.userData.fdsSmokeButtonConfig = normalized;
 
     const geom = new THREE.SphereGeometry(0.45, 16, 12);
     const mat = new THREE.MeshBasicMaterial({
@@ -3644,6 +3673,11 @@ export function addFdsSmokeButtonToWorld() {
         fdsSmokeId: fdsSmokes[0]?.id || '',
         position: { x: sp.x, y: sp.y, z: sp.z },
         radius: 3,
+        panel: {
+            rotation: { x: 0, y: 180, z: 0 },
+            scale: { x: 1.4, y: 1.4, z: 1 },
+            maxDistance: 18,
+        },
         playback: {
             fromFrame: 0,
             loop: true,
