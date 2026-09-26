@@ -7,7 +7,16 @@
     <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
     <link rel="stylesheet" href="/css/admin.css">
     <link rel="stylesheet" href="/css/setting.css">
-    <script type="importmap" src="/js/admin-importmap.json"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+            "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+            "three/examples/jsm/utils/BufferGeometryUtils": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/utils/BufferGeometryUtils.js"
+        }
+    }
+    </script>
 </head>
 <body>
     <div id="admin-chart-save-toast" class="admin-chart-save-toast" role="status" aria-live="polite" hidden></div>

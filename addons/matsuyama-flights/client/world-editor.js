@@ -1,5 +1,5 @@
 // addons/matsuyama-flights/client/world-editor.js — ワールド編集用発着パネル
-import * as THREE from 'three';
+import * as THREE from '/js/three-cdn-entry.js';
 import { t } from '/js/metaverse-i18n.js';
 import { normalizeBoardFilter } from './flight-board-filter.js';
 import {

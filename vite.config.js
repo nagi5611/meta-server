@@ -76,9 +76,11 @@ export default defineConfig({
     root: 'public',
     envDir: projectRoot,
     resolve: {
-        alias: fs.existsSync(threeMeshUiEntry)
-            ? { 'three-mesh-ui': threeMeshUiEntry }
-            : {},
+        alias: {
+            ...(fs.existsSync(threeMeshUiEntry) ? { 'three-mesh-ui': threeMeshUiEntry } : {}),
+            // 管理画面は非バンドルで CDN three を使う。本番ワールドは同一 THREE インスタンスに揃える。
+            '/js/three-cdn-entry.js': path.join(projectRoot, 'node_modules/three/build/three.module.js'),
+        },
     },
     plugins: [copyPublicAssets()],
     server: {
