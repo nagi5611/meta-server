@@ -85,6 +85,12 @@ async function applyAdminCsrfToXhr(xhr) {
 const WORLD_SAVE_SERIALIZE_YIELD_EVERY = 64;
 /** localStorage キャッシュを書き込まないモデル数上限（約 5MB 制限回避） */
 const WORLD_EDIT_CACHE_MAX_MODEL_COUNT = 1200;
+/** Prefab パーツ LOD テーブルがこれを超えると既定ランクのみ保存（巨大 JSON 回避） */
+const PREFAB_LOD_PART_RANK_MAX_KEYS = 256;
+/** オブジェクト一覧・LOD パネルに列挙する Prefab パーツ数の上限 */
+const PREFAB_PART_UI_LIST_CAP = 64;
+/** オブジェクトパネル LOD 表の最大行数 */
+const PREFAB_LOD_PART_PANEL_CAP = 96;
 
 /**
  * メインスレッドに描画・ステータス更新の隙を渡す
@@ -108,6 +114,42 @@ function countWorldEditModels(worldsObj) {
         if (w && typeof w === 'object' && Array.isArray(w.models)) n += w.models.length;
     }
     return n;
+}
+
+/**
+ * Prefab の lodPartRanks / lodRanks が巨大化しないよう整理（in-place）
+ * @param {Record<string, unknown>} c
+ */
+function slimPrefabLodFieldsInPlace(c) {
+    if (!c || typeof c !== 'object') return;
+    delete c._editorDisplayedRodManifest;
+    const def = Number.isFinite(c.lodRank) ? Math.max(1, Math.floor(Number(c.lodRank))) : 1;
+    const partRanks = c.lodPartRanks;
+    if (partRanks && typeof partRanks === 'object' && !Array.isArray(partRanks)) {
+        const entries = Object.entries(partRanks);
+        const allDefault = entries.every(([, v]) => Math.max(1, Math.floor(Number(v))) === def);
+        if (!entries.length || allDefault || entries.length > PREFAB_LOD_PART_RANK_MAX_KEYS) {
+            delete c.lodPartRanks;
+        }
+    }
+    if (Array.isArray(c.lodRanks)) {
+        const arr = c.lodRanks;
+        const allDefault = arr.every((v) => Math.max(1, Math.floor(Number(v))) === def);
+        if (!arr.length || allDefault || arr.length > PREFAB_LOD_PART_RANK_MAX_KEYS) {
+            delete c.lodRanks;
+        }
+    }
+}
+
+/**
+ * editGroup 内の config から巨大 LOD 表を除去（保存前）
+ */
+function slimAllEditGroupPrefabConfigs() {
+    if (!editGroup) return;
+    for (const child of editGroup.children) {
+        const cfg = child.userData?.config;
+        if (cfg && typeof cfg === 'object') slimPrefabLodFieldsInPlace(cfg);
+    }
 }
 
 /**
@@ -1857,6 +1899,7 @@ function updateObjectPanel(obj) {
  */
 function syncObjectFromPanel(opts) {
     const recordUndo = !opts || opts.recordUndo !== false;
+    const skipLodPanelRefresh = !!(opts && opts.skipLodPanelRefresh);
     if (!selectedObject) return;
     if (selectedObject.userData.fdsSmokeButtonConfig) {
         const c = selectedObject.userData.fdsSmokeButtonConfig;
@@ -2157,7 +2200,7 @@ function syncObjectFromPanel(opts) {
                 delete c.lodPartRanks;
                 delete c.lodRanks;
             }
-            renderWorldLodPanel();
+            if (!skipLodPanelRefresh) renderWorldLodPanel();
         }
         const pfmRod = String(c.prefabManifest || '').trim();
         if (pfmRod) {
@@ -2839,19 +2882,8 @@ function renderWorldLodPanel() {
                 if (!Number.isFinite(r) || r < 1) r = 1;
                 r = Math.min(numBands, r);
                 cfg.lodRank = r;
-                /** @type {number[]} */
-                const ranksByChild = [];
-                ch.children.forEach((part) => {
-                    if (part.userData && part.userData.isPrefabPart) ranksByChild.push(r);
-                });
-                if (ranksByChild.length) cfg.lodRanks = ranksByChild;
-                else delete cfg.lodRanks;
-                ch.traverse((part) => {
-                    if (part.userData && part.userData.isPrefabPart && part.userData.prefabPartPath) {
-                        if (!cfg.lodPartRanks) cfg.lodPartRanks = {};
-                        cfg.lodPartRanks[part.userData.prefabPartPath] = r;
-                    }
-                });
+                delete cfg.lodPartRanks;
+                delete cfg.lodRanks;
                 if (selectedObject === ch) updateObjectPanel(ch);
             });
             row.appendChild(span);
@@ -3000,8 +3032,14 @@ function fillObjectLodPanel(obj, c) {
     const defR = Number.isFinite(c.lodRank) ? c.lodRank : 1;
     const lodArr = Array.isArray(c.lodRanks) && c.lodRanks.length ? c.lodRanks : null;
     let partIdx = 0;
+    let hiddenPartRows = 0;
     for (const ch of obj.children) {
         if (!ch.userData || !ch.userData.isPrefabPart || !ch.userData.prefabPartPath) continue;
+        if (partIdx >= PREFAB_LOD_PART_PANEL_CAP) {
+            hiddenPartRows++;
+            partIdx++;
+            continue;
+        }
         const path = ch.userData.prefabPartPath;
         const tr = document.createElement('tr');
         tr.dataset.partPath = path;
@@ -3029,6 +3067,14 @@ function fillObjectLodPanel(obj, c) {
         tbody.appendChild(tr);
         partIdx++;
     }
+    if (hiddenPartRows > 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 2;
+        td.textContent = `…他 ${hiddenPartRows} パーツ（一覧省略・既定 LOD ランク）`;
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+    }
 }
 
 /**
@@ -3038,7 +3084,9 @@ function fillObjectLodPanel(obj, c) {
  */
 function serializeEditGroupChildIntoWorld(w, child) {
     if (child.userData.config && !child.isLight) {
-        const c = { ...child.userData.config };
+        const srcCfg = child.userData.config;
+        slimPrefabLodFieldsInPlace(srcCfg);
+        const c = { ...srcCfg };
         c.position = { x: child.position.x, y: child.position.y, z: child.position.z };
         c.rotation = {
             x: child.rotation.x * 180 / Math.PI,
@@ -3512,6 +3560,7 @@ async function loadWorldModelEntryForEditor(config, idx) {
         if (Array.isArray(config.lodRanks) && config.lodRanks.length) {
             cfgBase.lodRanks = config.lodRanks.map((x) => Math.max(1, Math.floor(Number(x))));
         }
+        slimPrefabLodFieldsInPlace(cfgBase);
         if (config.rodOverrides && typeof config.rodOverrides === 'object' && !Array.isArray(config.rodOverrides)) {
             cfgBase.rodOverrides = JSON.parse(JSON.stringify(config.rodOverrides));
         }
@@ -4371,8 +4420,15 @@ function createModelObjectListCategory(key, modelChildren, startIndex) {
         sub.className = 'object-list-prefab-parts';
         sub.style.display = subEx ? '' : 'none';
         sub.style.paddingLeft = '1.25em';
+        let shownPrefabParts = 0;
+        let hiddenPrefabParts = 0;
         child.children.forEach((partRoot) => {
             if (!partRoot.userData || !partRoot.userData.isPrefabPart) return;
+            if (shownPrefabParts >= PREFAB_PART_UI_LIST_CAP) {
+                hiddenPrefabParts++;
+                return;
+            }
+            shownPrefabParts++;
             const pl = (partRoot.userData.prefabPartPath || '').split('/').pop() || 'part';
             const pr = document.createElement('div');
             pr.className = 'item object-list-item object-list-prefab-part' + (selectedObject === child ? ' selected' : '');
@@ -4383,6 +4439,12 @@ function createModelObjectListCategory(key, modelChildren, startIndex) {
             });
             sub.appendChild(pr);
         });
+        if (hiddenPrefabParts > 0) {
+            const pr = document.createElement('div');
+            pr.className = 'item object-list-item object-list-prefab-part';
+            pr.textContent = `…他 ${hiddenPrefabParts} パーツ`;
+            sub.appendChild(pr);
+        }
         block.appendChild(sub);
         childrenWrap.appendChild(block);
     });
@@ -5368,7 +5430,8 @@ function bindEvents() {
         status.className = '';
         if (btn) btn.disabled = true;
         try {
-            syncObjectFromPanel();
+            syncObjectFromPanel({ recordUndo: false, skipLodPanelRefresh: true });
+            slimAllEditGroupPrefabConfigs();
             status.textContent = '保存データを作成中…';
             await yieldToMainThread();
             const totalChildren = editGroup?.children?.length ?? 0;
