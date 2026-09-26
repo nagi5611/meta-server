@@ -1166,9 +1166,10 @@ app.use((req, res, next) => {
     })(req, res, next);
 });
 app.use((req, res, next) => {
+    const worldsSavePath = String(req.originalUrl || req.path || '').split('?')[0];
     const isWorldsSave =
         req.method === 'POST' &&
-        (req.path === '/admin/worlds' || String(req.originalUrl || '').split('?')[0] === '/admin/worlds');
+        (worldsSavePath === '/admin/worlds' || worldsSavePath === '/admin/worlds/patch');
     const limit = isWorldsSave ? '64mb' : '1mb';
     return express.json({ limit })(req, res, next);
 });
@@ -5362,36 +5363,32 @@ app.get('/admin/worlds', (req, res) => {
     }
 });
 
+/**
+ * POST /admin/worlds 用の worlds 全体検証
+ * @param {Record<string, unknown>} worlds
+ * @returns {string[]}
+ */
+function collectWorldsAdminSaveValidationErrors(worlds) {
+    const errors = [];
+    if (CHART_FEATURES_ENABLED) {
+        errors.push(...validateWorldsTaikoMultiplayer(worlds));
+    }
+    errors.push(...validateWorldsAircraft(worlds));
+    errors.push(...validateWorldsPhysicsAssist(worlds));
+    errors.push(...validateWorldsAircraftPhysics(worlds));
+    errors.push(...validateWorldsPlayBoundsAndColliders(worlds));
+    errors.push(...validateWorldsFloorDimensions(worlds));
+    return errors;
+}
+
 app.post('/admin/worlds', (req, res) => {
     const worlds = req.body;
     if (!worlds || typeof worlds !== 'object') {
         return res.status(400).json({ error: 'Invalid body: expected worlds object' });
     }
-        if (CHART_FEATURES_ENABLED) {
-            const taikoErrs = validateWorldsTaikoMultiplayer(worlds);
-            if (taikoErrs.length > 0) {
-                return res.status(400).json({ error: taikoErrs.join(' ') });
-            }
-        }
-        const aircraftErrs = validateWorldsAircraft(worlds);
-        if (aircraftErrs.length > 0) {
-            return res.status(400).json({ error: aircraftErrs.join(' ') });
-        }
-        const physicsErrs = validateWorldsPhysicsAssist(worlds);
-        if (physicsErrs.length > 0) {
-            return res.status(400).json({ error: physicsErrs.join(' ') });
-        }
-        const aircraftPhysErrs = validateWorldsAircraftPhysics(worlds);
-        if (aircraftPhysErrs.length > 0) {
-            return res.status(400).json({ error: aircraftPhysErrs.join(' ') });
-        }
-    const boundsErrs = validateWorldsPlayBoundsAndColliders(worlds);
-    if (boundsErrs.length > 0) {
-        return res.status(400).json({ error: boundsErrs.join(' ') });
-    }
-    const floorDimErrs = validateWorldsFloorDimensions(worlds);
-    if (floorDimErrs.length > 0) {
-        return res.status(400).json({ error: floorDimErrs.join(' ') });
+    const validationErrs = collectWorldsAdminSaveValidationErrors(worlds);
+    if (validationErrs.length > 0) {
+        return res.status(400).json({ error: validationErrs.join(' ') });
     }
     normalizeWorldsLod(worlds);
     normalizeWorldsRod(worlds);
@@ -5401,6 +5398,40 @@ app.post('/admin/worlds', (req, res) => {
     } catch (err) {
         console.error('POST /admin/worlds error:', err);
         res.status(500).json({ error: 'Failed to save worlds' });
+    }
+});
+
+/** 選択ワールドの差分のみ worlds.json にマージ（他ワールドキーはそのまま） */
+app.post('/admin/worlds/patch', (req, res) => {
+    const body = req.body;
+    if (!body || typeof body !== 'object') {
+        return res.status(400).json({ error: 'Invalid body' });
+    }
+    const worldId = String(body.worldId || '').trim();
+    const patch = body.patch;
+    if (!worldId) {
+        return res.status(400).json({ error: 'worldId is required' });
+    }
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+        return res.status(400).json({ error: 'patch object is required' });
+    }
+    const all = readWorlds();
+    const prev = all[worldId] && typeof all[worldId] === 'object' && !Array.isArray(all[worldId])
+        ? all[worldId]
+        : {};
+    all[worldId] = { ...prev, ...patch, id: worldId };
+    const validationErrs = collectWorldsAdminSaveValidationErrors(all);
+    if (validationErrs.length > 0) {
+        return res.status(400).json({ error: validationErrs.join(' ') });
+    }
+    normalizeWorldsLod(all);
+    normalizeWorldsRod(all);
+    try {
+        writeWorlds(all);
+        res.json({ success: true, worldId, patchedKeys: Object.keys(patch) });
+    } catch (err) {
+        console.error('POST /admin/worlds/patch error:', err);
+        res.status(500).json({ error: 'Failed to patch worlds' });
     }
 });
 

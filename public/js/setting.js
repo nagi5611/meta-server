@@ -60,7 +60,8 @@ import {
     MODEL_MAX_TRIANGLES_TOTAL,
     MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD,
     fetchModelContentLength,
-    countTrianglesInObject
+    countTrianglesInObject,
+    countMeshesInObject
 } from './model-load-limits.js';
 import { ADMIN_CSRF_HEADER } from './admin-api-fetch.js';
 import { encodeAssetPathToUrlPath, notifyServiceWorkerInvalidate } from './service-worker-register.js';
@@ -93,6 +94,34 @@ const PREFAB_PART_UI_LIST_CAP = 64;
 const PREFAB_LOD_PART_PANEL_CAP = 96;
 /** localStorage キャッシュを書かない worlds JSON 概算サイズ（UTF-16 安全側） */
 const WORLD_EDIT_CACHE_MAX_JSON_CHARS = 4_000_000;
+
+/** 差分保存: 最後にサーバと一致した worlds スナップショット */
+/** @type {Record<string, unknown>|null} */
+let worldsSaveBaseline = null;
+
+/** ワールド JSON 差分比較対象キー */
+const WORLD_PATCH_KEYS = [
+    'name',
+    'models',
+    'spawnPoint',
+    'lights',
+    'pdfs',
+    'flightBoards',
+    'fdsSmokes',
+    'fdsSmokeButtons',
+    'vdbs',
+    'floorEnabled',
+    'floorWidth',
+    'floorDepth',
+    'showGoogleMapsCopyright',
+    'physicsAssist',
+    'aircraftPhysics',
+    'lodSystem',
+    'rods',
+    'playBounds',
+    'serverColliders',
+    'taikoMultiplayer'
+];
 
 /**
  * メインスレッドに描画・ステータス更新の隙を渡す
@@ -159,6 +188,67 @@ function slimAllEditGroupPrefabConfigs() {
  * @param {import('three').Object3D|null|undefined} root
  * @returns {number}
  */
+/**
+ * editGroup 直下オブジェクト群の Mesh 数合計
+ * @param {import('three').Object3D[]} children
+ * @returns {number}
+ */
+function countMeshesInEditGroupChildren(children) {
+    let n = 0;
+    for (const ch of children) n += countMeshesInObject(ch);
+    return n;
+}
+
+/** サーバ一致スナップショットを更新 */
+function snapshotWorldsSaveBaseline() {
+    try {
+        worldsSaveBaseline = JSON.parse(JSON.stringify(worlds));
+    } catch {
+        worldsSaveBaseline = null;
+    }
+}
+
+/**
+ * ベースラインとの差分のみ patch オブジェクト化
+ * @param {Record<string, unknown>|undefined|null} baselineWorld
+ * @param {Record<string, unknown>} nextWorld
+ * @returns {Record<string, unknown>}
+ */
+function computeWorldJsonPatch(baselineWorld, nextWorld) {
+    const base = baselineWorld && typeof baselineWorld === 'object' ? baselineWorld : {};
+    /** @type {Record<string, unknown>} */
+    const patch = {};
+    for (const key of WORLD_PATCH_KEYS) {
+        if (nextWorld[key] === undefined && base[key] === undefined) continue;
+        const bStr = JSON.stringify(base[key] ?? null);
+        const nStr = JSON.stringify(nextWorld[key] ?? null);
+        if (bStr !== nStr) patch[key] = nextWorld[key];
+    }
+    return patch;
+}
+
+/**
+ * 選択中ワールド 1 件分のエクスポート用オブジェクトを組み立てる
+ * @returns {Record<string, unknown>}
+ */
+function createEmptySelectedWorldExportShell() {
+    const src = selectedWorldId && worlds[selectedWorldId] ? worlds[selectedWorldId] : {};
+    return {
+        id: selectedWorldId,
+        name: src.name || selectedWorldId,
+        models: [],
+        lights: [],
+        pdfs: [],
+        flightBoards: [],
+        fdsSmokes: [],
+        fdsSmokeButtons: [],
+        vdbs: [],
+        floorEnabled: true,
+        floorWidth: DEFAULT_FLOOR_WIDTH_M,
+        floorDepth: DEFAULT_FLOOR_DEPTH_M
+    };
+}
+
 function countPrefabPartRootsOnObject(root) {
     if (!root || !root.children) return 0;
     let n = 0;
@@ -501,7 +591,7 @@ function playEditorGltfClipPreview(model, clipName) {
  * @param {{ path?: string, mtlPath?: string, prefabManifest?: string }} config
  * @returns {Promise<{ model: THREE.Object3D, triangleCount: number, gltfAnimations?: THREE.AnimationClip[] }>}
  */
-async function loadModelFromConfig(config) {
+async function loadModelFromConfig(config, loadOpts) {
     const pfm = String(config.prefabManifest || '').trim();
     if (pfm) {
         const planeProxy = pfm.startsWith('plane/') ? '/admin/plane-asset' : undefined;
@@ -510,6 +600,9 @@ async function loadModelFromConfig(config) {
             manifestPath: pfm,
             createGLTFLoader: createEditorGLTFLoader,
             adminPlaneProxyBase: planeProxy,
+            onMeshLoadProgress: loadOpts && loadOpts.onPrefabMeshProgress
+                ? (meshesLoaded) => loadOpts.onPrefabMeshProgress(meshesLoaded)
+                : undefined,
         });
         if (totalTris > MODEL_MAX_TRIANGLES_TOTAL) {
             disposeObjectTree(group);
@@ -3216,11 +3309,12 @@ function serializeEditGroupChildIntoWorld(w, child) {
  */
 async function serializeEditGroupChildrenIntoWorldAsync(w, children, onProgress) {
     const list = children;
+    const meshesTotal = countMeshesInEditGroupChildren(list);
+    let meshesDone = 0;
     for (let i = 0; i < list.length; i++) {
         serializeEditGroupChildIntoWorld(w, list[i]);
-        if (onProgress && (i === 0 || (i + 1) % 100 === 0 || i === list.length - 1)) {
-            onProgress(i + 1, list.length);
-        }
+        meshesDone += countMeshesInObject(list[i]);
+        if (onProgress) onProgress(meshesDone, meshesTotal);
         if (i % WORLD_SAVE_SERIALIZE_YIELD_EVERY === WORLD_SAVE_SERIALIZE_YIELD_EVERY - 1) {
             await yieldToMainThread();
         }
@@ -3387,6 +3481,17 @@ async function buildWorldsFromSceneForSave(onProgress) {
 }
 
 /**
+ * 選択ワールドのみシーンから JSON 用オブジェクトを組み立てる
+ * @param {(meshesDone: number, meshesTotal: number) => void} [onProgress]
+ */
+async function buildSelectedWorldExportForSave(onProgress) {
+    const w = createEmptySelectedWorldExportShell();
+    await serializeEditGroupChildrenIntoWorldAsync(w, editGroup.children, onProgress);
+    applySelectedWorldExportMeta(w);
+    return w;
+}
+
+/**
  * 保存した worlds JSON をメモリと3Dシーンに反映する
  * @param {Record<string, unknown>} parsed
  */
@@ -3403,6 +3508,7 @@ async function applyWorldsStateFromJson(parsed) {
         } finally {
             setWorldEditLoader(false);
         }
+        snapshotWorldsSaveBaseline();
         writeWorldEditCache();
         return;
     }
@@ -3417,6 +3523,7 @@ async function applyWorldsStateFromJson(parsed) {
             setWorldEditLoader(false);
         }
     }
+    snapshotWorldsSaveBaseline();
     writeWorldEditCache();
 }
 
@@ -3551,7 +3658,7 @@ async function runWithConcurrency(concurrency, factories) {
  * @param {number} idx
  * @returns {Promise<{ idx: number, skip?: true, model?: import('three').Object3D, triangleCount?: number, cfgBase?: object, err?: string }>}
  */
-async function loadWorldModelEntryForEditor(config, idx) {
+async function loadWorldModelEntryForEditor(config, idx, loadOpts) {
     const path = config.path || '';
     const pfm = String(config.prefabManifest || '').trim();
     const loadManifest = pfm ? resolvePrefabManifestForRod(config, editorPreviewRodId) : pfm;
@@ -3600,7 +3707,7 @@ async function loadWorldModelEntryForEditor(config, idx) {
             const res = await loadModelFromConfig({
                 prefabManifest: loadManifest,
                 path: String(path || '').trim() || loadManifest
-            });
+            }, loadOpts);
             model = res.model;
             triangleCount = res.triangleCount;
             cfgBase._editorDisplayedRodManifest = loadManifest;
@@ -3608,7 +3715,7 @@ async function loadWorldModelEntryForEditor(config, idx) {
             const res = await loadModelFromConfig({
                 path,
                 mtlPath: isObjPath(path) ? (config.mtlPath || '') : ''
-            });
+            }, loadOpts);
             model = res.model;
             triangleCount = res.triangleCount;
         }
@@ -3986,7 +4093,13 @@ async function loadWorldIntoScene(world) {
     updatePhysicsAssistSpawnHint();
 
     const models = world.models || [];
-    const factories = models.map((config, idx) => () => loadWorldModelEntryForEditor(config, idx));
+    let sceneMeshesLoaded = 0;
+    const loadOpts = {
+        onPrefabMeshProgress: (/** @type {number} */ prefabMeshes) => {
+            setWorldEditLoader(true, `メッシュ読込 ${sceneMeshesLoaded + prefabMeshes}…`);
+        }
+    };
+    const factories = models.map((config, idx) => () => loadWorldModelEntryForEditor(config, idx, loadOpts));
     const slots = await runWithConcurrency(ADMIN_WORLD_MODEL_LOAD_CONCURRENCY, factories);
     const errs = [];
     for (const slot of slots) {
@@ -4006,6 +4119,8 @@ async function loadWorldIntoScene(world) {
         model.userData.editId = 'm' + slotIdx;
         model.userData.config = cfgBase;
         editGroup.add(model);
+        sceneMeshesLoaded += countMeshesInObject(model);
+        setWorldEditLoader(true, `メッシュ読込 ${sceneMeshesLoaded}…`);
     }
     if (errs.length) {
         const el = document.getElementById('save-status');
@@ -4238,6 +4353,7 @@ async function fetchWorlds() {
     if (!res.ok) throw new Error('Failed to load worlds');
     worlds = await res.json();
     normalizeWorldsRod(worlds);
+    snapshotWorldsSaveBaseline();
 }
 
 async function fetchModels() {
@@ -5466,24 +5582,38 @@ function bindEvents() {
             slimAllEditGroupPrefabConfigs();
             status.textContent = '保存データを作成中…';
             await yieldToMainThread();
-            const totalChildren = editGroup?.children?.length ?? 0;
-            const payload = await buildWorldsFromSceneForSave((done, total) => {
-                if (status) status.textContent = `保存データを作成中… ${done}/${total}`;
+            if (!selectedWorldId) {
+                throw new Error('保存するワールドが選択されていません');
+            }
+            const meshesTotal = countMeshesInEditGroupChildren(editGroup?.children ?? []);
+            const nextWorld = await buildSelectedWorldExportForSave((meshesDone, meshesTotalSave) => {
+                if (status) {
+                    status.textContent = `保存データを作成中… メッシュ ${meshesDone}/${meshesTotalSave || meshesTotal}`;
+                }
             });
-            worlds = payload;
+            const baselineWorld =
+                worldsSaveBaseline && worldsSaveBaseline[selectedWorldId]
+                    ? worldsSaveBaseline[selectedWorldId]
+                    : worlds[selectedWorldId];
+            const patch = computeWorldJsonPatch(
+                baselineWorld && typeof baselineWorld === 'object' ? baselineWorld : {},
+                nextWorld
+            );
+            if (!Object.keys(patch).length) {
+                status.textContent = '変更がありません';
+                return;
+            }
             status.textContent = 'JSON をエンコード中…';
             await yieldToMainThread();
             let bodyJson;
             try {
-                bodyJson = JSON.stringify(payload);
+                bodyJson = JSON.stringify({ worldId: selectedWorldId, patch });
             } catch (e) {
                 throw new Error('JSON が大きすぎます: ' + (e && e.message ? e.message : String(e)));
             }
-            status.textContent = totalChildren > 0
-                ? `サーバに送信中…（約 ${Math.max(1, Math.round(bodyJson.length / 1024))} KB・オブジェクト ${totalChildren} 件）`
-                : `サーバに送信中…（約 ${Math.max(1, Math.round(bodyJson.length / 1024))} KB）`;
+            status.textContent = `サーバに送信中…（差分 ${Object.keys(patch).join(', ')}・約 ${Math.max(1, Math.round(bodyJson.length / 1024))} KB・メッシュ ${meshesTotal}）`;
             await yieldToMainThread();
-            const res = await fetch('/admin/worlds', {
+            const res = await fetch('/admin/worlds/patch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
@@ -5499,6 +5629,13 @@ function bindEvents() {
                 }
                 throw new Error(msg || res.statusText);
             }
+            if (!worlds[selectedWorldId] || typeof worlds[selectedWorldId] !== 'object') {
+                worlds[selectedWorldId] = { id: selectedWorldId };
+            }
+            Object.assign(worlds[selectedWorldId], patch);
+            normalizeWorldsLod(worlds);
+            normalizeWorldsRod(worlds);
+            snapshotWorldsSaveBaseline();
             status.textContent = '保存しました。反映にはサーバー再起動が必要です。';
             if (bodyJson.length <= WORLD_EDIT_CACHE_MAX_JSON_CHARS) {
                 scheduleDeferredWorldEditCacheWrite();

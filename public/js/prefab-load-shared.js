@@ -1,6 +1,6 @@
 // public/js/prefab-load-shared.js — prefab マニフェスト fetch + THREE.Group + 子 GLB 読込（scene-manager / setting 共有）
 
-import { countTrianglesInObject } from './model-load-limits.js';
+import { countMeshesInObject, countTrianglesInObject } from './model-load-limits.js';
 import { resolveModelAssetHref } from './asset-resolve.js';
 
 /**
@@ -15,8 +15,117 @@ export function resolvePrefabPartAssetPath(file) {
     return `models/${f}`;
 }
 
-/** マニフェスト内 .glb パーツの同時取得数（1 本の GLTFLoader は setPath 競合のためパーツごとに作る） */
-const PREFAB_PART_LOAD_CONCURRENCY = 24;
+/** マニフェスト内 .glb パーツの同時処理数（fetch Worker + メイン parse） */
+const PREFAB_PART_LOAD_CONCURRENCY_FALLBACK = 24;
+
+/**
+ * Prefab パーツ GLB の同時 load 本数（CPU コア数ベース）
+ * @returns {number}
+ */
+export function getPrefabPartLoadConcurrency() {
+    if (typeof navigator !== 'undefined' && Number.isFinite(navigator.hardwareConcurrency)) {
+        const hc = navigator.hardwareConcurrency;
+        return Math.min(32, Math.max(4, hc * 2));
+    }
+    return PREFAB_PART_LOAD_CONCURRENCY_FALLBACK;
+}
+
+/** @type {GlbFetchWorkerPool|null} */
+let glbFetchWorkerPool = null;
+
+/**
+ * GLB バイナリ fetch 用 Worker プール（メインスレッドの parse と並行）
+ */
+class GlbFetchWorkerPool {
+    constructor(size) {
+        /** @type {Worker[]} */
+        this.workers = [];
+        /** @type {Array<{ jobId: number, url: string, credentials: string, resolve: (b: ArrayBuffer) => void, reject: (e: Error) => void }>} */
+        this.queue = [];
+        /** @type {Map<number, { resolve: (b: ArrayBuffer) => void, reject: (e: Error) => void }>} */
+        this.pending = new Map();
+        this.jobSeq = 0;
+        const n = Math.max(1, Math.min(size, 16));
+        if (typeof Worker === 'undefined') {
+            this.disabled = true;
+            return;
+        }
+        this.disabled = false;
+        for (let i = 0; i < n; i++) {
+            const w = new Worker('/js/prefab-glb-fetch-worker.js');
+            /** @type {Worker & { _busy?: boolean }} */ (w)._busy = false;
+            w.onmessage = (ev) => this._onWorkerMessage(w, ev);
+            w.onerror = () => {
+                w._busy = false;
+                this._pump();
+            };
+            this.workers.push(w);
+        }
+    }
+
+    /**
+     * @param {Worker} worker
+     * @param {MessageEvent} ev
+     */
+    _onWorkerMessage(worker, ev) {
+        const data = ev.data;
+        worker._busy = false;
+        if (data && typeof data.jobId === 'number') {
+            const job = this.pending.get(data.jobId);
+            if (job) {
+                this.pending.delete(data.jobId);
+                if (data.ok && data.buffer) job.resolve(data.buffer);
+                else job.reject(new Error(data.error || 'fetch failed'));
+            }
+        }
+        this._pump();
+    }
+
+    _pump() {
+        if (this.disabled) return;
+        for (const worker of this.workers) {
+            if (worker._busy || !this.queue.length) continue;
+            const job = this.queue.shift();
+            if (!job) break;
+            worker._busy = true;
+            worker.postMessage({
+                jobId: job.jobId,
+                url: job.url,
+                credentials: job.credentials,
+            });
+        }
+    }
+
+    /**
+     * @param {string} url
+     * @param {'include' | 'omit'} credentials
+     * @returns {Promise<ArrayBuffer>}
+     */
+    fetchArrayBuffer(url, credentials) {
+        if (this.disabled) {
+            return fetch(url, { credentials }).then((res) => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.arrayBuffer();
+            });
+        }
+        const jobId = ++this.jobSeq;
+        return new Promise((resolve, reject) => {
+            this.pending.set(jobId, { resolve, reject });
+            this.queue.push({ jobId, url, credentials, resolve, reject });
+            this._pump();
+        });
+    }
+}
+
+/**
+ * @param {number} concurrency
+ * @returns {GlbFetchWorkerPool}
+ */
+function getGlbFetchWorkerPool(concurrency) {
+    const size = Math.min(16, Math.max(2, Math.floor(concurrency / 2)));
+    if (!glbFetchWorkerPool) glbFetchWorkerPool = new GlbFetchWorkerPool(size);
+    return glbFetchWorkerPool;
+}
 
 /**
  * 工場を最大 concurrency 本で同時実行し、結果を入力順の配列で返す
@@ -223,18 +332,23 @@ function fetchCredentialsForResolvedUrl(resolved) {
  * @param {AbortSignal} [signal]
  * @returns {Promise<import('three/examples/jsm/loaders/GLTFLoader.js').GLTF>}
  */
-async function loadGltfViaFetch(resolved, createGLTFLoader, signal) {
+async function loadGltfViaFetch(resolved, createGLTFLoader, signal, prefetchedBuffer, fetchPool) {
     if (signal?.aborted) {
         throw new DOMException('Aborted', 'AbortError');
     }
-    const res = await fetch(resolved, {
-        credentials: fetchCredentialsForResolvedUrl(resolved),
-        signal,
-    });
-    if (!res.ok) {
-        throw new Error(`GLB の取得に失敗: ${resolved}（HTTP ${res.status}）`);
+    let buffer = prefetchedBuffer;
+    if (!buffer) {
+        const credentials = fetchCredentialsForResolvedUrl(resolved);
+        if (fetchPool) {
+            buffer = await fetchPool.fetchArrayBuffer(resolved, credentials);
+        } else {
+            const res = await fetch(resolved, { credentials, signal });
+            if (!res.ok) {
+                throw new Error(`GLB の取得に失敗: ${resolved}（HTTP ${res.status}）`);
+            }
+            buffer = await res.arrayBuffer();
+        }
     }
-    const buffer = await res.arrayBuffer();
     if (signal?.aborted) {
         throw new DOMException('Aborted', 'AbortError');
     }
@@ -262,6 +376,7 @@ export async function loadSinglePrefabPartGlb({
     onXhrProgress,
     adminPlaneProxyBase,
     signal,
+    fetchPool,
 }) {
     const part = manifest.parts[partIndex];
     if (!part) {
@@ -278,8 +393,8 @@ export async function loadSinglePrefabPartGlb({
         resolved = await resolveModelAssetHref(filePath);
     }
 
-    if (signal) {
-        const gltf = await loadGltfViaFetch(resolved, createGLTFLoader, signal);
+    if (signal || fetchPool) {
+        const gltf = await loadGltfViaFetch(resolved, createGLTFLoader, signal, undefined, fetchPool);
         const root = gltf.scene;
         const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
         if (anims.length) root.userData.gltfClips = anims;
@@ -327,6 +442,7 @@ export async function loadSinglePrefabPartGlb({
  * @param {number[]} [options.partIndices] 指定時はそのインデックスのパーツのみ読込
  * @param {ReturnType<typeof normalizePrefabManifest>} [options.cachedManifest] manifestPath の fetch を省略
  * @param {AbortSignal} [options.signal] 指定時 fetch を中断可能
+ * @param {(meshesLoaded: number, partsDone: number, partCount: number) => void} [options.onMeshLoadProgress]
  * @returns {Promise<{ group: import('three').Group, manifest: ReturnType<typeof normalizePrefabManifest>, totalTris: number }>}
  */
 export async function loadPrefabGroupFromManifest({
@@ -339,6 +455,7 @@ export async function loadPrefabGroupFromManifest({
     partIndices,
     cachedManifest,
     signal,
+    onMeshLoadProgress,
 }) {
     const man = cachedManifest
         ? cachedManifest
@@ -364,23 +481,32 @@ export async function loadPrefabGroupFromManifest({
             ? partIndices.filter((i) => i >= 0 && i < man.parts.length)
             : man.parts.map((_, i) => i);
     const partCount = indices.length;
+    const concurrency = getPrefabPartLoadConcurrency();
+    const fetchPool = typeof window !== 'undefined' ? getGlbFetchWorkerPool(concurrency) : null;
+    let meshesLoaded = 0;
+    let partsDone = 0;
 
     const factories = indices.map((partIdx, loadOrder) => async () => {
         if (signal?.aborted) {
             throw new DOMException('Aborted', 'AbortError');
         }
-        return loadSinglePrefabPartGlb({
+        const root = await loadSinglePrefabPartGlb({
             manifest: man,
             partIndex: partIdx,
             createGLTFLoader,
             adminPlaneProxyBase,
             signal,
+            fetchPool,
             onXhrProgress: (name, xhr) => {
                 onXhrProgress?.(name, xhr, loadOrder, partCount);
             },
         });
+        meshesLoaded += countMeshesInObject(root);
+        partsDone += 1;
+        onMeshLoadProgress?.(meshesLoaded, partsDone, partCount);
+        return root;
     });
-    const partRoots = await runWithConcurrency(PREFAB_PART_LOAD_CONCURRENCY, factories);
+    const partRoots = await runWithConcurrency(concurrency, factories);
     let totalTris = 0;
     for (const scene of partRoots) {
         group.add(scene);

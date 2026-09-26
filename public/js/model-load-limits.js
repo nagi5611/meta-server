@@ -52,6 +52,19 @@ export async function fetchModelContentLength(url) {
  * @param {{ traverse: (fn: (c: object) => void) => void }} root
  * @returns {number}
  */
+/**
+ * Object3D 配下の Mesh ノード数
+ * @param {{ traverse: (fn: (c: object) => void) => void }} root
+ * @returns {number}
+ */
+export function countMeshesInObject(root) {
+    let n = 0;
+    root.traverse((c) => {
+        if (c.isMesh) n++;
+    });
+    return n;
+}
+
 export function countTrianglesInObject(root) {
     let n = 0;
     root.traverse((c) => {
