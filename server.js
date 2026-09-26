@@ -1527,7 +1527,7 @@ function basicAuth(req, res, next) {
 function adminPanelCspMiddleware(_req, res, next) {
     res.setHeader(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-29LJb0dccUuNlVTwpMWHgSmUkBewwCtE8yX1Bac/hE8=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: wss: ws: https:; media-src 'self' blob: data: https:; font-src 'self' data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: wss: ws: https:; media-src 'self' blob: data: https:; font-src 'self' data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
     );
     next();
 }
