@@ -91,6 +91,8 @@ const PREFAB_LOD_PART_RANK_MAX_KEYS = 256;
 const PREFAB_PART_UI_LIST_CAP = 64;
 /** オブジェクトパネル LOD 表の最大行数 */
 const PREFAB_LOD_PART_PANEL_CAP = 96;
+/** localStorage キャッシュを書かない worlds JSON 概算サイズ（UTF-16 安全側） */
+const WORLD_EDIT_CACHE_MAX_JSON_CHARS = 4_000_000;
 
 /**
  * メインスレッドに描画・ステータス更新の隙を渡す
@@ -150,6 +152,20 @@ function slimAllEditGroupPrefabConfigs() {
         const cfg = child.userData?.config;
         if (cfg && typeof cfg === 'object') slimPrefabLodFieldsInPlace(cfg);
     }
+}
+
+/**
+ * Prefab ルート直下の isPrefabPart 子数（メッシュ数ではなくパーツ GLB 数）
+ * @param {import('three').Object3D|null|undefined} root
+ * @returns {number}
+ */
+function countPrefabPartRootsOnObject(root) {
+    if (!root || !root.children) return 0;
+    let n = 0;
+    for (const ch of root.children) {
+        if (ch.userData && ch.userData.isPrefabPart) n++;
+    }
+    return n;
 }
 
 /**
@@ -2176,24 +2192,31 @@ function syncObjectFromPanel(opts) {
                 const drEl = document.getElementById('obj-lod-rank-default');
                 const dr = drEl ? parseInt(drEl.value, 10) : 1;
                 c.lodRank = Number.isFinite(dr) && dr > 0 ? dr : 1;
-                const tbody = document.getElementById('obj-lod-part-tbody');
-                const partRanks = {};
-                /** @type {number[]} */
-                const lodRanks = [];
-                if (tbody) {
-                    tbody.querySelectorAll('tr[data-part-path]').forEach((row) => {
-                        const path = row.getAttribute('data-part-path');
-                        const inp = row.querySelector('input[data-part-rank]');
-                        if (!path || !inp) return;
-                        const r = parseInt(inp.value, 10);
-                        if (Number.isFinite(r) && r > 0) partRanks[path] = r;
-                        lodRanks.push(Number.isFinite(r) && r > 0 ? r : c.lodRank);
-                    });
+                const partCount = countPrefabPartRootsOnObject(obj);
+                if (partCount > PREFAB_LOD_PART_PANEL_CAP) {
+                    delete c.lodPartRanks;
+                    delete c.lodRanks;
+                } else {
+                    const tbody = document.getElementById('obj-lod-part-tbody');
+                    const partRanks = {};
+                    /** @type {number[]} */
+                    const lodRanks = [];
+                    if (tbody) {
+                        tbody.querySelectorAll('tr[data-part-path]').forEach((row) => {
+                            const path = row.getAttribute('data-part-path');
+                            const inp = row.querySelector('input[data-part-rank]');
+                            if (!path || !inp) return;
+                            const r = parseInt(inp.value, 10);
+                            if (Number.isFinite(r) && r > 0) partRanks[path] = r;
+                            lodRanks.push(Number.isFinite(r) && r > 0 ? r : c.lodRank);
+                        });
+                    }
+                    if (Object.keys(partRanks).length) c.lodPartRanks = partRanks;
+                    else delete c.lodPartRanks;
+                    if (lodRanks.length) c.lodRanks = lodRanks;
+                    else delete c.lodRanks;
+                    slimPrefabLodFieldsInPlace(c);
                 }
-                if (Object.keys(partRanks).length) c.lodPartRanks = partRanks;
-                else delete c.lodPartRanks;
-                if (lodRanks.length) c.lodRanks = lodRanks;
-                else delete c.lodRanks;
             } else {
                 delete c.lodId;
                 delete c.lodRank;
@@ -3119,12 +3142,6 @@ function serializeEditGroupChildIntoWorld(w, child) {
             if (lid) {
                 c.lodId = lid;
                 if (Number.isFinite(c.lodRank)) c.lodRank = Math.max(1, Math.floor(c.lodRank));
-                if (c.lodPartRanks && typeof c.lodPartRanks === 'object') {
-                    c.lodPartRanks = { ...c.lodPartRanks };
-                }
-                if (Array.isArray(c.lodRanks) && c.lodRanks.length) {
-                    c.lodRanks = c.lodRanks.map((x) => Math.max(1, Math.floor(Number(x))));
-                }
             } else {
                 delete c.lodId;
                 delete c.lodRank;
@@ -3140,6 +3157,7 @@ function serializeEditGroupChildIntoWorld(w, child) {
         } else {
             delete c.rodOverrides;
         }
+        slimPrefabLodFieldsInPlace(c);
         w.models.push(c);
     }
     if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
@@ -4160,10 +4178,24 @@ function writeWorldEditCache() {
             }
             return;
         }
+        let worldsJson;
+        try {
+            worldsJson = JSON.stringify(worlds);
+        } catch {
+            return;
+        }
+        if (worldsJson.length > WORLD_EDIT_CACHE_MAX_JSON_CHARS) {
+            try {
+                localStorage.removeItem(WORLD_EDIT_CACHE_STORAGE_KEY);
+            } catch {
+                /* ignore */
+            }
+            return;
+        }
         const payload = {
             v: 1,
             savedAt: Date.now(),
-            worlds: JSON.parse(JSON.stringify(worlds)),
+            worlds,
             modelList: modelList.slice(),
             prefabManifestList: prefabManifestList.slice(),
             mtlList: mtlList.slice(),
@@ -5439,15 +5471,23 @@ function bindEvents() {
                 if (status) status.textContent = `保存データを作成中… ${done}/${total}`;
             });
             worlds = payload;
+            status.textContent = 'JSON をエンコード中…';
+            await yieldToMainThread();
+            let bodyJson;
+            try {
+                bodyJson = JSON.stringify(payload);
+            } catch (e) {
+                throw new Error('JSON が大きすぎます: ' + (e && e.message ? e.message : String(e)));
+            }
             status.textContent = totalChildren > 0
-                ? `サーバに送信中…（オブジェクト約 ${totalChildren} 件）`
-                : 'サーバに送信中…';
+                ? `サーバに送信中…（約 ${Math.max(1, Math.round(bodyJson.length / 1024))} KB・オブジェクト ${totalChildren} 件）`
+                : `サーバに送信中…（約 ${Math.max(1, Math.round(bodyJson.length / 1024))} KB）`;
             await yieldToMainThread();
             const res = await fetch('/admin/worlds', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: JSON.stringify(payload)
+                body: bodyJson
             });
             if (!res.ok) {
                 let msg = await res.text();
@@ -5460,7 +5500,9 @@ function bindEvents() {
                 throw new Error(msg || res.statusText);
             }
             status.textContent = '保存しました。反映にはサーバー再起動が必要です。';
-            scheduleDeferredWorldEditCacheWrite();
+            if (bodyJson.length <= WORLD_EDIT_CACHE_MAX_JSON_CHARS) {
+                scheduleDeferredWorldEditCacheWrite();
+            }
         } catch (e) {
             status.textContent = '保存に失敗: ' + e.message;
             status.className = 'error';

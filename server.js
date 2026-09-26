@@ -287,7 +287,7 @@ function writeWorlds(worlds) {
     const tmpPath = WORLDS_PATH + '.tmp.' + Date.now();
     fs.writeFileSync(tmpPath, JSON.stringify(worlds), 'utf8');
     fs.renameSync(tmpPath, WORLDS_PATH);
-    worldsRuntimeCache = JSON.parse(JSON.stringify(worlds));
+    worldsRuntimeCache = worlds;
 }
 
 /**
