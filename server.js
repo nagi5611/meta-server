@@ -285,7 +285,7 @@ function isValidWorldRoomId(roomId) {
 
 function writeWorlds(worlds) {
     const tmpPath = WORLDS_PATH + '.tmp.' + Date.now();
-    fs.writeFileSync(tmpPath, JSON.stringify(worlds, null, 2), 'utf8');
+    fs.writeFileSync(tmpPath, JSON.stringify(worlds), 'utf8');
     fs.renameSync(tmpPath, WORLDS_PATH);
     worldsRuntimeCache = JSON.parse(JSON.stringify(worlds));
 }
@@ -1165,7 +1165,13 @@ app.use((req, res, next) => {
         crossOriginResourcePolicy: { policy: 'cross-origin' },
     })(req, res, next);
 });
-app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => {
+    const isWorldsSave =
+        req.method === 'POST' &&
+        (req.path === '/admin/worlds' || String(req.originalUrl || '').split('?')[0] === '/admin/worlds');
+    const limit = isWorldsSave ? '64mb' : '1mb';
+    return express.json({ limit })(req, res, next);
+});
 
 /** HTTPS: SSL_CERT_PATH と SSL_KEY_PATH が両方設定されていれば HTTPS で待ち受ける（リバースプロキシ時は無効） */
 const SSL_CERT_PATH = process.env.SSL_CERT_PATH;

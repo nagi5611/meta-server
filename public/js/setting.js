@@ -81,6 +81,35 @@ async function applyAdminCsrfToXhr(xhr) {
     if (token) xhr.setRequestHeader(ADMIN_CSRF_HEADER, token);
 }
 
+/** 大量オブジェクト保存時に UI を固めないための譲歩 */
+const WORLD_SAVE_SERIALIZE_YIELD_EVERY = 64;
+/** localStorage キャッシュを書き込まないモデル数上限（約 5MB 制限回避） */
+const WORLD_EDIT_CACHE_MAX_MODEL_COUNT = 1200;
+
+/**
+ * メインスレッドに描画・ステータス更新の隙を渡す
+ * @returns {Promise<void>}
+ */
+function yieldToMainThread() {
+    return new Promise((resolve) => {
+        requestAnimationFrame(() => {
+            setTimeout(resolve, 0);
+        });
+    });
+}
+
+/**
+ * @param {Record<string, unknown>} worldsObj
+ * @returns {number}
+ */
+function countWorldEditModels(worldsObj) {
+    let n = 0;
+    for (const w of Object.values(worldsObj || {})) {
+        if (w && typeof w === 'object' && Array.isArray(w.models)) n += w.models.length;
+    }
+    return n;
+}
+
 /**
  * ワールド JSON 用 aircraft。ライブラリ連携時は id / radius / label / aircraftLibraryId のみ。
  * 未リンクのレガシー機体はカメラ・physics を JSON から引き継ぎ保存する。
@@ -3002,7 +3031,140 @@ function fillObjectLodPanel(obj, c) {
     }
 }
 
-function buildWorldsFromScene() {
+/**
+ * editGroup の1子を worlds JSON の models / lights 等へ追記する
+ * @param {Record<string, unknown>} w
+ * @param {import('three').Object3D} child
+ */
+function serializeEditGroupChildIntoWorld(w, child) {
+    if (child.userData.config && !child.isLight) {
+        const c = { ...child.userData.config };
+        c.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+        c.rotation = {
+            x: child.rotation.x * 180 / Math.PI,
+            y: child.rotation.y * 180 / Math.PI,
+            z: child.rotation.z * 180 / Math.PI
+        };
+        c.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
+        if (c.animate) c.animate = { ...c.animate, rotation: c.animate.rotation ? { ...c.animate.rotation } : {} };
+        if (c.teleporter) c.teleporter = { ...c.teleporter };
+        if (c.taiko) c.taiko = { ...c.taiko };
+        if (c.aircraft) {
+            const ser = serializeAircraftForWorldJson(c.aircraft);
+            if (ser) c.aircraft = ser;
+            else delete c.aircraft;
+        }
+        if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
+        delete c.chunkManifest;
+        if (!isObjPath(c.path || '')) delete c.mtlPath;
+        const hasPfm = !!String(c.prefabManifest || '').trim();
+        if (!hasPfm) {
+            delete c.prefabManifest;
+            delete c.prefabGroupId;
+        }
+        if (!String(c.path || '').trim() && hasPfm) {
+            c.path = c.prefabManifest;
+        }
+        if (!String(c.path || '').trim() && !hasPfm) delete c.path;
+        if (hasPfm) {
+            const lid = String(c.lodId || '').trim();
+            if (lid) {
+                c.lodId = lid;
+                if (Number.isFinite(c.lodRank)) c.lodRank = Math.max(1, Math.floor(c.lodRank));
+                if (c.lodPartRanks && typeof c.lodPartRanks === 'object') {
+                    c.lodPartRanks = { ...c.lodPartRanks };
+                }
+                if (Array.isArray(c.lodRanks) && c.lodRanks.length) {
+                    c.lodRanks = c.lodRanks.map((x) => Math.max(1, Math.floor(Number(x))));
+                }
+            } else {
+                delete c.lodId;
+                delete c.lodRank;
+                delete c.lodPartRanks;
+                delete c.lodRanks;
+            }
+            if (c.rodOverrides && typeof c.rodOverrides === 'object' && !Array.isArray(c.rodOverrides)) {
+                c.rodOverrides = JSON.parse(JSON.stringify(c.rodOverrides));
+            } else {
+                delete c.rodOverrides;
+            }
+            delete c._editorDisplayedRodManifest;
+        } else {
+            delete c.rodOverrides;
+        }
+        w.models.push(c);
+    }
+    if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
+        const cfg = { ...child.userData.lightConfig };
+        cfg.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+        w.lights.push(cfg);
+    }
+    if (child.isMesh && child.userData.lightRef && child.userData.lightConfig) {
+        const cfg = { ...child.userData.lightConfig };
+        cfg.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+        w.lights.push(cfg);
+    }
+    if (child.isMesh && child.userData.pdfConfig) {
+        const p = { ...child.userData.pdfConfig };
+        p.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+        p.rotation = { x: child.rotation.x * 180 / Math.PI, y: child.rotation.y * 180 / Math.PI, z: child.rotation.z * 180 / Math.PI };
+        p.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
+        w.pdfs.push(p);
+    }
+    if (child.isMesh && child.userData.flightBoardConfig) {
+        const b = { ...child.userData.flightBoardConfig };
+        b.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+        b.rotation = { x: child.rotation.x * 180 / Math.PI, y: child.rotation.y * 180 / Math.PI, z: child.rotation.z * 180 / Math.PI };
+        b.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
+        w.flightBoards.push(b);
+    }
+    if (child.userData.fdsSmokeConfig) {
+        const s = JSON.parse(JSON.stringify(child.userData.fdsSmokeConfig));
+        s.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+        s.rotation = {
+            x: child.rotation.x * 180 / Math.PI,
+            y: child.rotation.y * 180 / Math.PI,
+            z: child.rotation.z * 180 / Math.PI
+        };
+        s.scale = child.scale.x;
+        w.fdsSmokes.push(s);
+    }
+    if (child.userData.fdsSmokeButtonConfig) {
+        const b = JSON.parse(JSON.stringify(child.userData.fdsSmokeButtonConfig));
+        b.position = { x: child.position.x, y: child.position.y, z: child.position.z };
+        if (b.panel !== false && (b.panel == null || typeof b.panel !== 'object')) {
+            b.panel = {
+                rotation: { x: 0, y: 180, z: 0 },
+                scale: { x: 1.4, y: 1.4, z: 1 },
+                maxDistance: 18,
+            };
+        }
+        w.fdsSmokeButtons.push(b);
+    }
+}
+
+/**
+ * @param {Record<string, unknown>} w
+ * @param {import('three').Object3D[]} children
+ * @param {(done: number, total: number) => void} [onProgress]
+ */
+async function serializeEditGroupChildrenIntoWorldAsync(w, children, onProgress) {
+    const list = children;
+    for (let i = 0; i < list.length; i++) {
+        serializeEditGroupChildIntoWorld(w, list[i]);
+        if (onProgress && (i === 0 || (i + 1) % 100 === 0 || i === list.length - 1)) {
+            onProgress(i + 1, list.length);
+        }
+        if (i % WORLD_SAVE_SERIALIZE_YIELD_EVERY === WORLD_SAVE_SERIALIZE_YIELD_EVERY - 1) {
+            await yieldToMainThread();
+        }
+    }
+}
+
+/**
+ * @returns {{ out: Record<string, unknown>, selectedWorld: Record<string, unknown>|null }}
+ */
+function buildWorldsExportOutWithoutSceneChildren() {
     const out = {};
     for (const wid of Object.keys(worlds)) {
         const w = worlds[wid];
@@ -3067,160 +3229,91 @@ function buildWorldsFromScene() {
             w.flightBoards = [];
             w.fdsSmokes = [];
             w.fdsSmokeButtons = [];
-            editGroup.children.forEach((child) => {
-                if (child.userData.config && !child.isLight) {
-                    const c = { ...child.userData.config };
-                    c.position = { x: child.position.x, y: child.position.y, z: child.position.z };
-                    c.rotation = {
-                        x: child.rotation.x * 180 / Math.PI,
-                        y: child.rotation.y * 180 / Math.PI,
-                        z: child.rotation.z * 180 / Math.PI
-                    };
-                    c.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
-                    if (c.animate) c.animate = { ...c.animate, rotation: c.animate.rotation ? { ...c.animate.rotation } : {} };
-                    if (c.teleporter) c.teleporter = { ...c.teleporter };
-                    if (c.taiko) c.taiko = { ...c.taiko };
-                    if (c.aircraft) {
-                        const ser = serializeAircraftForWorldJson(c.aircraft);
-                        if (ser) c.aircraft = ser;
-                        else delete c.aircraft;
-                    }
-                    if (c.glbInteract) c.glbInteract = { ...c.glbInteract };
-                    delete c.chunkManifest;
-                    if (!isObjPath(c.path || '')) delete c.mtlPath;
-                    const hasPfm = !!String(c.prefabManifest || '').trim();
-                    if (!hasPfm) {
-                        delete c.prefabManifest;
-                        delete c.prefabGroupId;
-                    }
-                    if (!String(c.path || '').trim() && hasPfm) {
-                        c.path = c.prefabManifest;
-                    }
-                    if (!String(c.path || '').trim() && !hasPfm) delete c.path;
-                    if (hasPfm) {
-                        const lid = String(c.lodId || '').trim();
-                        if (lid) {
-                            c.lodId = lid;
-                            if (Number.isFinite(c.lodRank)) c.lodRank = Math.max(1, Math.floor(c.lodRank));
-                            if (c.lodPartRanks && typeof c.lodPartRanks === 'object') {
-                                c.lodPartRanks = { ...c.lodPartRanks };
-                            }
-                            if (Array.isArray(c.lodRanks) && c.lodRanks.length) {
-                                c.lodRanks = c.lodRanks.map((x) => Math.max(1, Math.floor(Number(x))));
-                            }
-                        } else {
-                            delete c.lodId;
-                            delete c.lodRank;
-                            delete c.lodPartRanks;
-                            delete c.lodRanks;
-                        }
-                        if (c.rodOverrides && typeof c.rodOverrides === 'object' && !Array.isArray(c.rodOverrides)) {
-                            c.rodOverrides = JSON.parse(JSON.stringify(c.rodOverrides));
-                        } else {
-                            delete c.rodOverrides;
-                        }
-                        delete c._editorDisplayedRodManifest;
-                    } else {
-                        delete c.rodOverrides;
-                    }
-                    w.models.push(c);
-                }
-                if (child.isLight && child.userData.lightConfig && (child.type === 'AmbientLight' || child.type === 'DirectionalLight')) {
-                    const cfg = { ...child.userData.lightConfig };
-                    cfg.position = { x: child.position.x, y: child.position.y, z: child.position.z };
-                    w.lights.push(cfg);
-                }
-                if (child.isMesh && child.userData.lightRef && child.userData.lightConfig) {
-                    const cfg = { ...child.userData.lightConfig };
-                    cfg.position = { x: child.position.x, y: child.position.y, z: child.position.z };
-                    w.lights.push(cfg);
-                }
-                if (child.isMesh && child.userData.pdfConfig) {
-                    const p = { ...child.userData.pdfConfig };
-                    p.position = { x: child.position.x, y: child.position.y, z: child.position.z };
-                    p.rotation = { x: child.rotation.x * 180 / Math.PI, y: child.rotation.y * 180 / Math.PI, z: child.rotation.z * 180 / Math.PI };
-                    p.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
-                    w.pdfs.push(p);
-                }
-                if (child.isMesh && child.userData.flightBoardConfig) {
-                    const b = { ...child.userData.flightBoardConfig };
-                    b.position = { x: child.position.x, y: child.position.y, z: child.position.z };
-                    b.rotation = { x: child.rotation.x * 180 / Math.PI, y: child.rotation.y * 180 / Math.PI, z: child.rotation.z * 180 / Math.PI };
-                    b.scale = { x: child.scale.x, y: child.scale.y, z: child.scale.z };
-                    w.flightBoards.push(b);
-                }
-                if (child.userData.fdsSmokeConfig) {
-                    const s = JSON.parse(JSON.stringify(child.userData.fdsSmokeConfig));
-                    s.position = { x: child.position.x, y: child.position.y, z: child.position.z };
-                    s.rotation = {
-                        x: child.rotation.x * 180 / Math.PI,
-                        y: child.rotation.y * 180 / Math.PI,
-                        z: child.rotation.z * 180 / Math.PI
-                    };
-                    s.scale = child.scale.x;
-                    w.fdsSmokes.push(s);
-                }
-                if (child.userData.fdsSmokeButtonConfig) {
-                    const b = JSON.parse(JSON.stringify(child.userData.fdsSmokeButtonConfig));
-                    b.position = { x: child.position.x, y: child.position.y, z: child.position.z };
-                    if (b.panel !== false && (b.panel == null || typeof b.panel !== 'object')) {
-                        b.panel = {
-                            rotation: { x: 0, y: 180, z: 0 },
-                            scale: { x: 1.4, y: 1.4, z: 1 },
-                            maxDistance: 18,
-                        };
-                    }
-                    w.fdsSmokeButtons.push(b);
-                }
-            });
-            w.spawnPoint = {
-                x: parseFloat(document.getElementById('spawn-x').value) || 0,
-                y: parseFloat(document.getElementById('spawn-y').value) || 10,
-                z: parseFloat(document.getElementById('spawn-z').value) || 0
-            };
-            w.floorEnabled = document.getElementById('floor-enabled').checked;
-            w.floorWidth = parseFloat(document.getElementById('floor-width')?.value) || DEFAULT_FLOOR_WIDTH_M;
-            w.floorDepth = parseFloat(document.getElementById('floor-depth')?.value) || DEFAULT_FLOOR_DEPTH_M;
-            if (document.getElementById('google-maps-copyright-enabled')?.checked) {
-                w.showGoogleMapsCopyright = true;
-            } else {
-                delete w.showGoogleMapsCopyright;
-            }
-            const paEn = document.getElementById('physics-assist-enabled')?.checked;
-            const minRaw = document.getElementById('physics-assist-min-y')?.value?.trim() ?? '';
-            const maxRaw = document.getElementById('physics-assist-max-y')?.value?.trim() ?? '';
-            if (paEn) {
-                w.physicsAssist = { enabled: true };
-                if (minRaw !== '') {
-                    const n = parseFloat(minRaw);
-                    if (Number.isFinite(n)) w.physicsAssist.minFeetY = n;
-                }
-                if (maxRaw !== '') {
-                    const n = parseFloat(maxRaw);
-                    if (Number.isFinite(n)) w.physicsAssist.maxFeetY = n;
-                }
-            } else {
-                delete w.physicsAssist;
-            }
-            const srcLod = worlds[selectedWorldId] && worlds[selectedWorldId].lodSystem;
-            if (srcLod && typeof srcLod === 'object') {
-                w.lodSystem = {
-                    ids: Array.isArray(srcLod.ids) ? srcLod.ids.slice() : [],
-                    thresholdsById:
-                        srcLod.thresholdsById && typeof srcLod.thresholdsById === 'object'
-                            ? JSON.parse(JSON.stringify(srcLod.thresholdsById))
-                            : {}
-                };
-            }
-            const srcRods = worlds[selectedWorldId] && worlds[selectedWorldId].rods;
-            if (Array.isArray(srcRods)) {
-                w.rods = srcRods.map((r) => ({
-                    id: r.id,
-                    label: r.label,
-                    description: r.description != null ? String(r.description) : '',
-                }));
-            }
         }
+    }
+    const selectedWorld =
+        selectedWorldId && out[selectedWorldId] && typeof out[selectedWorldId] === 'object'
+            ? out[selectedWorldId]
+            : null;
+    return { out, selectedWorld };
+}
+
+/**
+ * 選択ワールドのスポーン・床・LOD 等（editGroup シリアライズ後）
+ * @param {Record<string, unknown>} w
+ */
+function applySelectedWorldExportMeta(w) {
+    w.spawnPoint = {
+        x: parseFloat(document.getElementById('spawn-x').value) || 0,
+        y: parseFloat(document.getElementById('spawn-y').value) || 10,
+        z: parseFloat(document.getElementById('spawn-z').value) || 0
+    };
+    w.floorEnabled = document.getElementById('floor-enabled').checked;
+    w.floorWidth = parseFloat(document.getElementById('floor-width')?.value) || DEFAULT_FLOOR_WIDTH_M;
+    w.floorDepth = parseFloat(document.getElementById('floor-depth')?.value) || DEFAULT_FLOOR_DEPTH_M;
+    if (document.getElementById('google-maps-copyright-enabled')?.checked) {
+        w.showGoogleMapsCopyright = true;
+    } else {
+        delete w.showGoogleMapsCopyright;
+    }
+    const paEn = document.getElementById('physics-assist-enabled')?.checked;
+    const minRaw = document.getElementById('physics-assist-min-y')?.value?.trim() ?? '';
+    const maxRaw = document.getElementById('physics-assist-max-y')?.value?.trim() ?? '';
+    if (paEn) {
+        w.physicsAssist = { enabled: true };
+        if (minRaw !== '') {
+            const n = parseFloat(minRaw);
+            if (Number.isFinite(n)) w.physicsAssist.minFeetY = n;
+        }
+        if (maxRaw !== '') {
+            const n = parseFloat(maxRaw);
+            if (Number.isFinite(n)) w.physicsAssist.maxFeetY = n;
+        }
+    } else {
+        delete w.physicsAssist;
+    }
+    const srcLod = worlds[selectedWorldId] && worlds[selectedWorldId].lodSystem;
+    if (srcLod && typeof srcLod === 'object') {
+        w.lodSystem = {
+            ids: Array.isArray(srcLod.ids) ? srcLod.ids.slice() : [],
+            thresholdsById:
+                srcLod.thresholdsById && typeof srcLod.thresholdsById === 'object'
+                    ? JSON.parse(JSON.stringify(srcLod.thresholdsById))
+                    : {}
+        };
+    }
+    const srcRods = worlds[selectedWorldId] && worlds[selectedWorldId].rods;
+    if (Array.isArray(srcRods)) {
+        w.rods = srcRods.map((r) => ({
+            id: r.id,
+            label: r.label,
+            description: r.description != null ? String(r.description) : '',
+        }));
+    }
+}
+
+function buildWorldsFromScene() {
+    const { out, selectedWorld: w } = buildWorldsExportOutWithoutSceneChildren();
+    if (w) {
+        for (const child of editGroup.children) {
+            serializeEditGroupChildIntoWorld(w, child);
+        }
+        applySelectedWorldExportMeta(w);
+    }
+    normalizeWorldsLod(out);
+    normalizeWorldsRod(out);
+    return out;
+}
+
+/**
+ * 大量オブジェクト時はシリアライズを分割して UI を固めない
+ * @param {(done: number, total: number) => void} [onProgress]
+ */
+async function buildWorldsFromSceneForSave(onProgress) {
+    const { out, selectedWorld: w } = buildWorldsExportOutWithoutSceneChildren();
+    if (w) {
+        await serializeEditGroupChildrenIntoWorldAsync(w, editGroup.children, onProgress);
+        applySelectedWorldExportMeta(w);
     }
     normalizeWorldsLod(out);
     normalizeWorldsRod(out);
@@ -4010,6 +4103,14 @@ function readWorldEditCache() {
 /** 現在の worlds / 一覧をストレージに保存する */
 function writeWorldEditCache() {
     try {
+        if (countWorldEditModels(worlds) > WORLD_EDIT_CACHE_MAX_MODEL_COUNT) {
+            try {
+                localStorage.removeItem(WORLD_EDIT_CACHE_STORAGE_KEY);
+            } catch {
+                /* ignore */
+            }
+            return;
+        }
         const payload = {
             v: 1,
             savedAt: Date.now(),
@@ -4022,6 +4123,16 @@ function writeWorldEditCache() {
         localStorage.setItem(WORLD_EDIT_CACHE_STORAGE_KEY, JSON.stringify(payload));
     } catch (e) {
         console.warn('[world-edit] cache write failed:', e);
+    }
+}
+
+/** 保存成功後の localStorage キャッシュをアイドル時に書く（メインスレッド占有を避ける） */
+function scheduleDeferredWorldEditCacheWrite() {
+    const run = () => writeWorldEditCache();
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(run, { timeout: 8000 });
+    } else {
+        setTimeout(run, 100);
     }
 }
 
@@ -5251,23 +5362,47 @@ function bindEvents() {
 
     document.getElementById('btn-save').addEventListener('click', async () => {
         const status = document.getElementById('save-status');
+        const btn = document.getElementById('btn-save');
+        if (btn?.disabled) return;
         status.textContent = '';
         status.className = '';
+        if (btn) btn.disabled = true;
         try {
             syncObjectFromPanel();
-            const payload = buildWorldsFromScene();
+            status.textContent = '保存データを作成中…';
+            await yieldToMainThread();
+            const totalChildren = editGroup?.children?.length ?? 0;
+            const payload = await buildWorldsFromSceneForSave((done, total) => {
+                if (status) status.textContent = `保存データを作成中… ${done}/${total}`;
+            });
+            worlds = payload;
+            status.textContent = totalChildren > 0
+                ? `サーバに送信中…（オブジェクト約 ${totalChildren} 件）`
+                : 'サーバに送信中…';
+            await yieldToMainThread();
             const res = await fetch('/admin/worlds', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify(payload)
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                let msg = await res.text();
+                try {
+                    const j = JSON.parse(msg);
+                    if (j && j.error) msg = typeof j.error === 'string' ? j.error : JSON.stringify(j.error);
+                } catch {
+                    /* use msg */
+                }
+                throw new Error(msg || res.statusText);
+            }
             status.textContent = '保存しました。反映にはサーバー再起動が必要です。';
-            writeWorldEditCache();
+            scheduleDeferredWorldEditCacheWrite();
         } catch (e) {
             status.textContent = '保存に失敗: ' + e.message;
             status.className = 'error';
+        } finally {
+            if (btn) btn.disabled = false;
         }
     });
 
