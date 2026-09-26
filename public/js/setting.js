@@ -62,6 +62,7 @@ import {
     fetchModelContentLength,
     countTrianglesInObject
 } from './model-load-limits.js';
+import { ADMIN_CSRF_HEADER } from './admin-api-fetch.js';
 import { encodeAssetPathToUrlPath, notifyServiceWorkerInvalidate } from './service-worker-register.js';
 import { resolveEnvAssetHref } from './asset-resolve.js';
 import { resolveModelAssetHref } from './asset-resolve.js';
@@ -69,6 +70,16 @@ import {
     mergeAircraftPhysicsFromWorld,
     clipAircraftPhysicsPartialFromUser
 } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
+
+/**
+ * 管理 API の XHR（fetch パッチ非経由）に CSRF ヘッダを付与する
+ * @param {XMLHttpRequest} xhr
+ */
+async function applyAdminCsrfToXhr(xhr) {
+    if (typeof window.getAdminCsrfToken !== 'function') return;
+    const token = await window.getAdminCsrfToken();
+    if (token) xhr.setRequestHeader(ADMIN_CSRF_HEADER, token);
+}
 
 /**
  * ワールド JSON 用 aircraft。ライブラリ連携時は id / radius / label / aircraftLibraryId のみ。
@@ -5978,7 +5989,9 @@ function bindEvents() {
             form.append('filename_b64', btoa(unescape(encodeURIComponent(file.name))));
             if (skipTextureResize) form.append('skipTextureResize', '1');
             else if (textureMaxEdgeStr) form.append('textureMaxEdge', textureMaxEdgeStr);
-            xhr.send(form);
+            applyAdminCsrfToXhr(xhr)
+                .then(() => xhr.send(form))
+                .catch(reject);
         });
     }
 
@@ -6658,7 +6671,9 @@ function bindEvents() {
                 form.append('zip', file, file.name);
                 if (skipTextureResize) form.append('skipTextureResize', '1');
                 else if (textureMaxEdgeStr) form.append('textureMaxEdge', textureMaxEdgeStr);
-                xhr.send(form);
+                applyAdminCsrfToXhr(xhr)
+                    .then(() => xhr.send(form))
+                    .catch(reject);
             });
 
         try {
