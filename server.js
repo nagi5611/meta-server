@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import './lib/discord-console-webhook-install.js';
-import { notifyDiscordActivity } from './lib/discord-activity-webhook.js';
+import { notifyDiscordActivity, registerActivityShutdownSignals } from './lib/discord-activity-webhook.js';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import express from 'express';
@@ -7858,5 +7858,7 @@ function formatBytes(bytes) {
             });
         });
     }
+    registerActivityShutdownSignals();
+    notifyDiscordActivity('server_start', {});
     });
 })();
