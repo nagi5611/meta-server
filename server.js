@@ -4216,7 +4216,7 @@ io.on('connection', (socket) => {
                 updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
 
                 notifyDiscordActivity('chat', {
-                    userId: socket.id,
+                    userName: player.username,
                     chatMessage: text,
                     chatWarning: true,
                     chatWarningCount: activePoints,
@@ -4252,7 +4252,7 @@ io.on('connection', (socket) => {
             updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
 
             notifyDiscordActivity('chat', {
-                userId: socket.id,
+                userName: player.username,
                 chatMessage: text,
                 chatWarning: false,
             });
