@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import './lib/discord-console-webhook-install.js';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import express from 'express';
