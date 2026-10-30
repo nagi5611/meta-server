@@ -3357,11 +3357,6 @@ io.on('connection', (socket) => {
     
     console.log(`Player ${socket.id} joined room: ${currentRoom} (${roomState.players.size} players)`);
 
-    notifyDiscordActivity('player_join', {
-        userName: getPlayerDisplayName(initialPlayerState),
-        room: currentRoom,
-    });
-
     // Ping/Pong for latency measurement
     socket.on('ping', (data, callback) => {
         if (typeof callback === 'function') {
@@ -3805,6 +3800,14 @@ io.on('connection', (socket) => {
             displayName,
             avatarId: player.avatarId || null,
         });
+
+        if (!socket.data.activityJoinNotified) {
+            socket.data.activityJoinNotified = true;
+            notifyDiscordActivity('player_join', {
+                userName: displayName,
+                room: currentRoom,
+            });
+        }
     });
 
     socket.on('set-ui-locale', (locale) => {
