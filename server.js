@@ -4217,10 +4217,9 @@ io.on('connection', (socket) => {
 
                 notifyDiscordActivity('chat', {
                     userId: socket.id,
-                    userName: player.username,
                     chatMessage: text,
                     chatWarning: true,
-                    room: currentRoom,
+                    chatWarningCount: activePoints,
                 });
 
                 ack({ ok: true });
@@ -4254,10 +4253,8 @@ io.on('connection', (socket) => {
 
             notifyDiscordActivity('chat', {
                 userId: socket.id,
-                userName: player.username,
                 chatMessage: text,
                 chatWarning: false,
-                room: currentRoom,
             });
 
             ack({ ok: true });
