@@ -3357,8 +3357,7 @@ io.on('connection', (socket) => {
     
     console.log(`Player ${socket.id} joined room: ${currentRoom} (${roomState.players.size} players)`);
 
-    notifyDiscordActivity('login', {
-        userId: socket.id,
+    notifyDiscordActivity('player_join', {
         userName: getPlayerDisplayName(initialPlayerState),
         room: currentRoom,
     });
