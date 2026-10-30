@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import './lib/discord-console-webhook-install.js';
+import { notifyDiscordActivity } from './lib/discord-activity-webhook.js';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import express from 'express';
@@ -1797,6 +1798,10 @@ app.post('/api/auth/student/login', authLoginIpLimiter, (req, res) => {
     if (SOCKET_AUTH_TOKEN_IN_JSON) {
         body.socketAuthToken = token;
     }
+    notifyDiscordActivity('login', {
+        userId: user.username,
+        userName: user.displayName,
+    });
     res.json(body);
 });
 
@@ -1820,6 +1825,10 @@ app.post('/api/auth/teacher/login', authLoginIpLimiter, (req, res) => {
     if (SOCKET_AUTH_TOKEN_IN_JSON) {
         body.socketAuthToken = token;
     }
+    notifyDiscordActivity('login', {
+        userId: user.username,
+        userName: user.displayName,
+    });
     res.json(body);
 });
 
@@ -3348,6 +3357,12 @@ io.on('connection', (socket) => {
     
     console.log(`Player ${socket.id} joined room: ${currentRoom} (${roomState.players.size} players)`);
 
+    notifyDiscordActivity('login', {
+        userId: socket.id,
+        userName: getPlayerDisplayName(initialPlayerState),
+        room: currentRoom,
+    });
+
     // Ping/Pong for latency measurement
     socket.on('ping', (data, callback) => {
         if (typeof callback === 'function') {
@@ -4198,6 +4213,14 @@ io.on('connection', (socket) => {
                 );
                 updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
 
+                notifyDiscordActivity('chat', {
+                    userId: socket.id,
+                    userName: player.username,
+                    chatMessage: text,
+                    chatWarning: true,
+                    room: currentRoom,
+                });
+
                 ack({ ok: true });
                 return;
             }
@@ -4226,6 +4249,14 @@ io.on('connection', (socket) => {
 
             emitChatToRoomWithLocale(io, socket, roomState, currentRoom, chatData, translationsByLocale);
             updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
+
+            notifyDiscordActivity('chat', {
+                userId: socket.id,
+                userName: player.username,
+                chatMessage: text,
+                chatWarning: false,
+                room: currentRoom,
+            });
 
             ack({ ok: true });
         } finally {
@@ -5162,6 +5193,14 @@ io.on('connection', (socket) => {
         if (currentRoom) {
             releaseAllAircraftForPlayerInRoom(io, currentRoom, socket.id);
             const roomState = getRoomState(currentRoom);
+            const leavingPlayer = roomState.players.get(socket.id);
+            if (leavingPlayer) {
+                notifyDiscordActivity('logout', {
+                    userId: socket.id,
+                    userName: getPlayerDisplayName(leavingPlayer),
+                    room: currentRoom,
+                });
+            }
             roomState.players.delete(socket.id);
             
             // Notify room members
