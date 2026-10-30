@@ -5198,9 +5198,7 @@ io.on('connection', (socket) => {
             const leavingPlayer = roomState.players.get(socket.id);
             if (leavingPlayer) {
                 notifyDiscordActivity('logout', {
-                    userId: socket.id,
                     userName: getPlayerDisplayName(leavingPlayer),
-                    room: currentRoom,
                 });
             }
             roomState.players.delete(socket.id);
