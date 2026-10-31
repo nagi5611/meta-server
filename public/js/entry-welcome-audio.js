@@ -1,7 +1,8 @@
 // public/js/entry-welcome-audio.js — Welcome 演出用 BGM（/music/login.mp3）
 
 const LOGIN_MUSIC_SRC = '/music/login.mp3';
-const WELCOME_MUSIC_VOLUME = 0.85;
+/** 入場 Welcome BGM の再生音量（HTMLAudioElement.volume、0〜1） */
+const WELCOME_MUSIC_VOLUME = 0.425;
 
 /** Welcome 表示から BGM 再生までの遅延（ms） */
 export const WELCOME_MUSIC_START_DELAY_MS = 500;
@@ -17,6 +18,7 @@ function getWelcomeAudio() {
     if (welcomeAudio) return welcomeAudio;
     if (window.__metWelcomeMusic instanceof HTMLAudioElement) {
         welcomeAudio = window.__metWelcomeMusic;
+        welcomeAudio.volume = WELCOME_MUSIC_VOLUME;
         return welcomeAudio;
     }
     welcomeAudio = new Audio(LOGIN_MUSIC_SRC);
@@ -52,6 +54,7 @@ export function primeEntryWelcomeMusic() {
  */
 export function startEntryWelcomeMusic() {
     const audio = getWelcomeAudio();
+    audio.volume = WELCOME_MUSIC_VOLUME;
     if (!audio.paused) return;
 
     audio.currentTime = 0;
@@ -112,6 +115,7 @@ export function installEntryWelcomeAudioGlobals() {
     window.metScheduleWelcomeMusicAfterShown = scheduleEntryWelcomeMusicAfterWelcomeShown;
     window.metStopWelcomeMusic = stopEntryWelcomeMusic;
     window.metWelcomeMusicStartDelayMs = WELCOME_MUSIC_START_DELAY_MS;
+    window.metWelcomeMusicVolume = WELCOME_MUSIC_VOLUME;
 }
 
 installEntryWelcomeAudioGlobals();

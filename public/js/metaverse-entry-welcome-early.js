@@ -103,6 +103,8 @@
         };
 
         const musicDelayMs = 500;
+        /** entry-welcome-audio.js の WELCOME_MUSIC_VOLUME と同一（モジュール読込前のためここで定義） */
+        const welcomeMusicVolume = 0.425;
         const scheduleEarlyWelcomeMusic = () => {
             const visibleAt =
                 typeof window.__metWelcomeVisibleAt === 'number' ? window.__metWelcomeVisibleAt : Date.now();
@@ -114,7 +116,7 @@
                         ? window.__metWelcomeMusic
                         : new Audio('/music/login.mp3');
                 audio.preload = 'auto';
-                audio.volume = 0.85;
+                audio.volume = welcomeMusicVolume;
                 window.__metWelcomeMusic = audio;
                 if (audio.paused) {
                     audio.currentTime = 0;
