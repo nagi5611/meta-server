@@ -17,7 +17,9 @@ import {
     disposeSceneIBL,
     applyToneMapping,
     createGradientSkyDomeMesh,
-    DEFAULT_HDR_PATH
+    DEFAULT_HDR_PATH,
+    VIEW_DISTANCE_M_DEFAULT,
+    VIEW_DISTANCE_M_MOBILE_DEFAULT,
 } from './ibl-setup.js';
 import {
     applyVisualModeToObject3D,
@@ -37,6 +39,7 @@ import {
 import { getCachedContentLength } from './model-asset-session-cache.js';
 import { batchFetchModelContentLengths } from './model-load-batch.js';
 import { collectLegacyLoadSizeCheckUrls } from './world-asset-preload.js';
+import { splitLegacyIndicesByViewDistance } from './world-model-load-order.js';
 import { mergeAircraftPhysicsForObject, mergeAircraftPhysicsFromWorld } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
 import {
     mergeEasyAircraftPhysicsFromWorld,
@@ -237,6 +240,16 @@ class SceneManager {
      */
     setBlockRendererRecreate(blocked) {
         this._blockRendererRecreate = !!blocked;
+    }
+
+    /**
+     * モバイル表示優先: 描画距離を抑え updateDrawDistanceCulling で遠景を間引く
+     */
+    applyMobileDisplayPriorityDefaults() {
+        const cur = clampViewDistanceM(this.graphicsOptions.viewDistanceM);
+        if (cur >= VIEW_DISTANCE_M_DEFAULT) {
+            this.graphicsOptions.viewDistanceM = VIEW_DISTANCE_M_MOBILE_DEFAULT;
+        }
     }
 
     /**
@@ -1027,7 +1040,7 @@ class SceneManager {
      * Load multiple world models
      * @param {Array<Object|string>} modelConfigs - Array of model configs or paths
      * @param {function} onComplete - Callback when all models are loaded
-     * @param {{ loadState?: { completedCount: number, totalCount: number }, onLoadProgress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string, prefabTitle?: string }) => void, getLegacyManifest?: (idx: number) => ReturnType<typeof normalizePrefabManifest>|null, worldAircraftPhysics?: Record<string, unknown>|null, modelIndexFilter?: (idx: number) => boolean }} [loadOptions]
+     * @param {{ loadState?: { completedCount: number, totalCount: number }, onLoadProgress?: (o: { fileName: string, completedCount: number, totalCount: number, loadKind?: string, prefabTitle?: string }) => void, getLegacyManifest?: (idx: number) => ReturnType<typeof normalizePrefabManifest>|null, worldAircraftPhysics?: Record<string, unknown>|null, modelIndexFilter?: (idx: number) => boolean, spawnPoint?: { x: number, y: number, z: number }, viewDistanceM?: number, onNearDisplayReady?: () => void | Promise<void> }} [loadOptions]
      */
     async loadWorldModels(modelConfigs, onComplete, loadOptions = {}) {
         const {
@@ -1037,6 +1050,9 @@ class SceneManager {
             worldAircraftPhysics,
             worldLodSystem,
             modelIndexFilter,
+            spawnPoint,
+            viewDistanceM,
+            onNearDisplayReady,
         } = loadOptions;
 
         this._worldLodSystem =
@@ -1391,24 +1407,52 @@ class SceneManager {
                 await batchFetchModelContentLengths(sizeCheckUrls, planConc);
             }
 
-            let nextWorkerSlot = 0;
+            const spawn =
+                spawnPoint && typeof spawnPoint === 'object'
+                    ? {
+                        x: Number(spawnPoint.x) || 0,
+                        y: Number(spawnPoint.y) || 0,
+                        z: Number(spawnPoint.z) || 0,
+                    }
+                    : { x: 0, y: 10, z: 0 };
+            const viewR = clampViewDistanceM(
+                viewDistanceM ?? this.graphicsOptions.viewDistanceM ?? VIEW_DISTANCE_M_DEFAULT
+            );
+            const { near: nearIndices, far: farIndices } = splitLegacyIndicesByViewDistance(
+                modelConfigs,
+                indicesToLoad,
+                spawn,
+                viewR
+            );
+
             /**
-             * 共有インデックスから次のモデルを読み込む（最大 concurrency 本まで同時実行）
+             * @param {number[]} orderedIndices spawn 近傍順
              */
-            const modelWorker = async () => {
-                while (true) {
-                    const slot = nextWorkerSlot++;
-                    if (slot >= indicesToLoad.length) break;
-                    const mi = indicesToLoad[slot];
-                    await loadOne(modelConfigs[mi], mi);
-                }
-            };
-            const workerCount = Math.min(concurrency, Math.max(1, indicesToLoad.length));
-            if (indicesToLoad.length > 0) {
+            const runLegacyLoadBatch = async (orderedIndices) => {
+                if (!orderedIndices.length) return;
+                let nextWorkerSlot = 0;
+                const modelWorker = async () => {
+                    while (true) {
+                        const slot = nextWorkerSlot++;
+                        if (slot >= orderedIndices.length) break;
+                        const mi = orderedIndices[slot];
+                        await loadOne(modelConfigs[mi], mi);
+                    }
+                };
+                const workerCount = Math.min(concurrency, orderedIndices.length);
                 await Promise.all(Array.from({ length: workerCount }, () => modelWorker()));
+            };
+
+            await runLegacyLoadBatch(nearIndices);
+            if (typeof onNearDisplayReady === 'function') {
+                await onNearDisplayReady();
             }
+            await runLegacyLoadBatch(farIndices);
+
             this.environmentGroup.updateMatrixWorld(true);
-            console.log(`Batch model load done (${indicesToLoad.length}/${modelConfigs.length} entries)`);
+            console.log(
+                `Batch model load done (near ${nearIndices.length}, far ${farIndices.length}, total legacy ${indicesToLoad.length}/${modelConfigs.length})`
+            );
 
             try {
                 await this._requestBVHRegeneration();

@@ -14,6 +14,8 @@ export const DEFAULT_WORLD_DIRECTIONAL_INTENSITY = 0.8;
 
 /** メタバース描画距離（球半径・メートル相当）の既定・クランプ範囲 */
 export const VIEW_DISTANCE_M_DEFAULT = 50;
+/** モバイル表示優先: 描画距離の推奨既定（既存設定が広い場合のみクランプ） */
+export const VIEW_DISTANCE_M_MOBILE_DEFAULT = 35;
 export const VIEW_DISTANCE_M_MIN = 10;
 export const VIEW_DISTANCE_M_MAX = 10000;
 /** 描画距離スライダーの内部位置（0〜この値）。実距離は非線形に変換する */

@@ -11,6 +11,7 @@ import {
 import { promptRodSelection } from './rod-selection.js';
 import { resolveWorldModelsForRod, DEFAULT_ROD_ID } from './world-rod-resolve.js';
 import { awaitWorldPreloadIfAny } from './world-preload.js';
+import { isMobile } from './mobile-utils.js';
 
 class WorldManager {
     constructor(sceneManager) {
@@ -122,6 +123,10 @@ class WorldManager {
 
         await awaitWorldPreloadIfAny();
 
+        if (isMobile()) {
+            this.sceneManager.applyMobileDisplayPriorityDefaults();
+        }
+
         this._worldLoadUi?.onLoadStart?.();
 
         const rodId = await promptRodSelection(world);
@@ -185,12 +190,40 @@ class WorldManager {
             loadState.totalCount = 1;
         }
 
+        let nearDisplayUnlocked = false;
+        let spawnStreamingDone = false;
+
+        /**
+         * 近傍 legacy 完了後: VAS 初回 + ロード UI 解除（遠方 legacy は loadWorldModels 内で継続）
+         */
+        const unlockNearDisplay = async () => {
+            if (nearDisplayUnlocked) return;
+            nearDisplayUnlocked = true;
+            if (!spawnStreamingDone) {
+                await vas.runInitialNearSpawn(spawn, viewDistanceM);
+                spawnStreamingDone = true;
+            }
+            await this.sceneManager.flushBVHRegeneration();
+            if (totalAssets > 0) {
+                await this._worldLoadUi?.finalize?.(() => {
+                    this.sceneManager.render();
+                });
+            }
+            console.log(`World near display ready: ${worldId}`);
+            if (onComplete) {
+                onComplete(world);
+            }
+            await this._worldLoadUi?.onLoadComplete?.();
+        };
+
         try {
             await this.sceneManager.loadWorldModels(
                 modelsForRod,
                 async () => {
-                    // 描画距離内 streaming の idle/loading がゼロになるまで待つ（VAS.runInitialNearSpawn）
-                    await vas.runInitialNearSpawn(spawn, viewDistanceM);
+                    if (!spawnStreamingDone) {
+                        await vas.runInitialNearSpawn(spawn, viewDistanceM);
+                        spawnStreamingDone = true;
+                    }
                     await this.sceneManager.flushBVHRegeneration();
 
                     await this.sceneManager.loadWorldPdfs(world.pdfs || [], {
@@ -217,22 +250,27 @@ class WorldManager {
                     worldAircraftPhysics: world.aircraftPhysics,
                     worldLodSystem: world.lodSystem && typeof world.lodSystem === 'object' ? world.lodSystem : null,
                     modelIndexFilter: (idx) => vas.isLegacyIndex(idx),
+                    spawnPoint: spawn,
+                    viewDistanceM,
+                    onNearDisplayReady: unlockNearDisplay,
                 }
             );
         } finally {
-            if (totalAssets > 0) {
+            if (totalAssets > 0 && !nearDisplayUnlocked) {
                 await this._worldLoadUi?.finalize?.(() => {
                     this.sceneManager.render();
                 });
             }
             console.log(`World loaded: ${worldId}`);
-            if (onComplete) {
-                onComplete(world);
+            if (!nearDisplayUnlocked) {
+                if (onComplete) {
+                    onComplete(world);
+                }
+                await this._worldLoadUi?.onLoadComplete?.();
             }
             if (this.onWorldChangeCallback) {
                 this.onWorldChangeCallback(world);
             }
-            await this._worldLoadUi?.onLoadComplete?.();
         }
     }
 
