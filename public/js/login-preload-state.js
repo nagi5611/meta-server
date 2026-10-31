@@ -12,7 +12,7 @@ const PENDING_WELCOME_STORAGE_KEY = 'metaverse_pending_welcome_v1';
 export const ENTRY_WELCOME_MS = 5000;
 
 /**
- * @returns {{ worldId?: string, completedAt?: number, entryClickAt?: number } | null}
+ * @returns {{ worldId?: string, completedAt?: number, entryClickAt?: number, warmRodId?: string, warmCompletedAt?: number, preloadPhase?: string } | null}
  */
 function readLoginPreloadState() {
     try {
@@ -51,10 +51,44 @@ export function recordLoginEntryClick() {
  * ログイン画面でのプリロード完了を記録
  * @param {string} worldId
  */
-export function markLoginPreloadComplete(worldId) {
+export function markLoginPreloadComplete(worldId, extra = {}) {
     const id = String(worldId || '').trim();
     if (!id) return;
-    writeLoginPreloadState({ worldId: id, completedAt: Date.now() });
+    writeLoginPreloadState({
+        worldId: id,
+        completedAt: Date.now(),
+        preloadPhase: extra.phase || 'manifest-only',
+    });
+}
+
+/**
+ * ロッド確定後の GLB 温め完了を記録
+ * @param {string} worldId
+ * @param {string} rodId
+ */
+export function markLoginWorldAssetWarmComplete(worldId, rodId) {
+    const id = String(worldId || '').trim();
+    const rod = String(rodId || '').trim();
+    if (!id || !rod) return;
+    writeLoginPreloadState({
+        worldId: id,
+        warmRodId: rod,
+        warmCompletedAt: Date.now(),
+    });
+}
+
+/**
+ * 同一ワールド・同一ロッドで GLB 温め済みか（入場直後 60 秒）
+ * @param {string} worldId
+ * @param {string} rodId
+ * @returns {boolean}
+ */
+export function isLoginWorldAssetWarmFresh(worldId, rodId) {
+    const s = readLoginPreloadState();
+    if (!s?.warmCompletedAt || !s.warmRodId || !s.worldId) return false;
+    const now = Date.now();
+    if (now - s.warmCompletedAt > LOGIN_PRELOAD_FRESH_MS) return false;
+    return s.worldId === String(worldId || '').trim() && s.warmRodId === String(rodId || '').trim();
 }
 
 /**

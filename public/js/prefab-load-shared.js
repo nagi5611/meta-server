@@ -2,6 +2,11 @@
 
 import { countMeshesInObject, countTrianglesInObject } from './model-load-limits.js';
 import { resolveModelAssetHref } from './asset-resolve.js';
+import {
+    getCachedPrefabManifestJson,
+    putCachedPrefabManifestJson,
+} from './prefab-manifest-cache.js';
+import { getCachedAssetBuffer, putCachedAssetBuffer } from './model-asset-session-cache.js';
 
 /**
  * マニフェスト parts[].file を models/ または plane/ 付きの参照パスへ正規化
@@ -125,6 +130,15 @@ function getGlbFetchWorkerPool(concurrency) {
     const size = Math.min(16, Math.max(2, Math.floor(concurrency / 2)));
     if (!glbFetchWorkerPool) glbFetchWorkerPool = new GlbFetchWorkerPool(size);
     return glbFetchWorkerPool;
+}
+
+/**
+ * ストリーミング prefab 等で共有する GLB fetch Worker プール
+ * @returns {GlbFetchWorkerPool | null}
+ */
+export function getSharedGlbFetchWorkerPool() {
+    if (typeof window === 'undefined') return null;
+    return getGlbFetchWorkerPool(getPrefabPartLoadConcurrency());
 }
 
 /**
@@ -256,6 +270,10 @@ export function adminPlaneProxyUrl(planeRelativePath, adminBase) {
  */
 export async function fetchPrefabManifestJson(manifestPath, opts = {}) {
     const rawPath = String(manifestPath || '').trim();
+    if (!opts.adminPlaneProxyBase) {
+        const cached = getCachedPrefabManifestJson(rawPath);
+        if (cached) return cached;
+    }
     const proxyBase = String(opts.adminPlaneProxyBase || '').trim();
     let u;
     if (proxyBase && rawPath.startsWith('plane/')) {
@@ -286,7 +304,11 @@ export async function fetchPrefabManifestJson(manifestPath, opts = {}) {
     if (!mRes.ok) {
         throw new Error(`マニフェストの取得に失敗: ${manifestPath}（HTTP ${mRes.status}）`);
     }
-    return mRes.json();
+    const json = await mRes.json();
+    if (!opts.adminPlaneProxyBase) {
+        putCachedPrefabManifestJson(rawPath, json);
+    }
+    return json;
 }
 
 /**
@@ -336,7 +358,7 @@ async function loadGltfViaFetch(resolved, createGLTFLoader, signal, prefetchedBu
     if (signal?.aborted) {
         throw new DOMException('Aborted', 'AbortError');
     }
-    let buffer = prefetchedBuffer;
+    let buffer = prefetchedBuffer ?? getCachedAssetBuffer(resolved);
     if (!buffer) {
         const credentials = fetchCredentialsForResolvedUrl(resolved);
         if (fetchPool) {
@@ -348,6 +370,7 @@ async function loadGltfViaFetch(resolved, createGLTFLoader, signal, prefetchedBu
             }
             buffer = await res.arrayBuffer();
         }
+        if (buffer) putCachedAssetBuffer(resolved, buffer);
     }
     if (signal?.aborted) {
         throw new DOMException('Aborted', 'AbortError');
@@ -356,6 +379,23 @@ async function loadGltfViaFetch(resolved, createGLTFLoader, signal, prefetchedBu
     const isHttpsAbs = /^https:\/\//i.test(resolved);
     const resourcePath = isHttpsAbs ? resolved : gltfLoaderPathAndFile(resolved).dirUrl;
     return loader.parseAsync(buffer, resourcePath);
+}
+
+/**
+ * 解決済み URL から GLB を fetch（セッションキャッシュ）+ parse
+ * @param {string} resolved
+ * @param {() => import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoader} createGLTFLoader
+ * @param {{ signal?: AbortSignal, fetchPool?: GlbFetchWorkerPool, prefetchedBuffer?: ArrayBuffer }} [opts]
+ * @returns {Promise<import('three/examples/jsm/loaders/GLTFLoader.js').GLTF>}
+ */
+export async function loadGltfFromResolvedUrl(resolved, createGLTFLoader, opts = {}) {
+    return loadGltfViaFetch(
+        resolved,
+        createGLTFLoader,
+        opts.signal,
+        opts.prefetchedBuffer,
+        opts.fetchPool
+    );
 }
 
 /**
@@ -393,8 +433,9 @@ export async function loadSinglePrefabPartGlb({
         resolved = await resolveModelAssetHref(filePath);
     }
 
-    if (signal || fetchPool) {
-        const gltf = await loadGltfViaFetch(resolved, createGLTFLoader, signal, undefined, fetchPool);
+    const pool = fetchPool ?? (typeof window !== 'undefined' ? getGlbFetchWorkerPool(getPrefabPartLoadConcurrency()) : null);
+    if (signal || pool) {
+        const gltf = await loadGltfViaFetch(resolved, createGLTFLoader, signal, undefined, pool);
         const root = gltf.scene;
         const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
         if (anims.length) root.userData.gltfClips = anims;

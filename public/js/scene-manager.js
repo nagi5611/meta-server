@@ -32,9 +32,11 @@ import {
     MODEL_MAX_BYTES_GLTF,
     MODEL_MAX_TRIANGLES_TOTAL,
     MODEL_SHADOW_DISABLE_TRIANGLE_THRESHOLD,
-    fetchModelContentLength,
     countTrianglesInObject
 } from './model-load-limits.js';
+import { getCachedContentLength } from './model-asset-session-cache.js';
+import { batchFetchModelContentLengths } from './model-load-batch.js';
+import { collectLegacyLoadSizeCheckUrls } from './world-asset-preload.js';
 import { mergeAircraftPhysicsForObject, mergeAircraftPhysicsFromWorld } from '../../addons/aircraft/client/aircraft-physics-defaults.js';
 import {
     mergeEasyAircraftPhysicsFromWorld,
@@ -53,6 +55,8 @@ import {
     buildEncodedModelUrlFromPath,
     loadPrefabGroupFromManifest,
     loadSinglePrefabPartGlb,
+    loadGltfFromResolvedUrl,
+    getSharedGlbFetchWorkerPool,
     normalizePrefabManifest,
 } from './prefab-load-shared.js';
 
@@ -851,6 +855,7 @@ class SceneManager {
                 manifest,
                 partIndex,
                 createGLTFLoader: createGLTFLoaderWithDraco,
+                fetchPool: getSharedGlbFetchWorkerPool(),
             });
 
             const tris = countTrianglesInObject(partRoot);
@@ -1287,7 +1292,7 @@ class SceneManager {
                 }
             }
             const maxBytes = this._isObjPath(modelPath) ? MODEL_MAX_BYTES_OBJ : MODEL_MAX_BYTES_GLTF;
-            const contentLen = await fetchModelContentLength(url);
+            const contentLen = getCachedContentLength(url);
             if (contentLen != null && contentLen > maxBytes) {
                 const mb = Math.round(contentLen / 1024 / 1024);
                 const maxMb = Math.round(maxBytes / 1024 / 1024);
@@ -1329,18 +1334,16 @@ class SceneManager {
                         return;
                     }
 
-                    const loader = createGLTFLoaderWithDraco();
-                    loader.load(
-                        url,
-                        (gltf) => {
+                    loadGltfFromResolvedUrl(url, createGLTFLoaderWithDraco, {
+                        fetchPool: getSharedGlbFetchWorkerPool(),
+                    })
+                        .then((gltf) => {
                             const root = gltf.scene;
                             const anims = Array.isArray(gltf.animations) ? gltf.animations : [];
                             if (anims.length) root.userData.gltfClips = anims;
                             resolve(root);
-                        },
-                        undefined,
-                        reject
-                    );
+                        })
+                        .catch(reject);
                 });
 
                 const tris = countTrianglesInObject(model);
@@ -1376,6 +1379,16 @@ class SceneManager {
                     continue;
                 }
                 indicesToLoad.push(i);
+            }
+
+            const sizeCheckUrls = await collectLegacyLoadSizeCheckUrls(
+                modelConfigs,
+                getLegacyManifest,
+                modelIndexFilter ?? (() => true),
+                (path) => this._resolveModelHref(path)
+            );
+            if (sizeCheckUrls.length) {
+                await batchFetchModelContentLengths(sizeCheckUrls, planConc);
             }
 
             let nextWorkerSlot = 0;

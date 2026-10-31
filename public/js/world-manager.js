@@ -4,7 +4,10 @@
  */
 
 import ViewDistanceStreaming from './view-distance-streaming.js';
-import { prefetchSignedAssetHrefs } from './asset-resolve.js';
+import {
+    ensureEntryWorldAssetsReady,
+    clearWorldBinaryAssetCache,
+} from './world-asset-preload.js';
 import { promptRodSelection } from './rod-selection.js';
 import { resolveWorldModelsForRod, DEFAULT_ROD_ID } from './world-rod-resolve.js';
 import { awaitWorldPreloadIfAny } from './world-preload.js';
@@ -132,6 +135,7 @@ class WorldManager {
         if (this.currentWorld) {
             this._viewDistanceStreaming?.reset();
             this._viewDistanceStreaming = null;
+            clearWorldBinaryAssetCache();
             this.sceneManager.clearWorld();
         }
 
@@ -162,10 +166,13 @@ class WorldManager {
         const viewDistanceM = this.sceneManager.graphicsOptions.viewDistanceM;
         loadState.totalCount = vas.countInitialLoadUnits(spawn, viewDistanceM, pdfList.length);
 
-        const prefetchPaths = vas.collectInitialPrefetchPaths(spawn, viewDistanceM);
-        if (prefetchPaths.length > 0) {
-            await prefetchSignedAssetHrefs(prefetchPaths);
-        }
+        await ensureEntryWorldAssetsReady({
+            worldId,
+            world,
+            rodId,
+            viewDistanceM,
+            vas,
+        });
 
         const onLoadProgress = (detail) => {
             this._worldLoadUi?.progress?.(detail);

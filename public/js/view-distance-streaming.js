@@ -131,6 +131,38 @@ export default class ViewDistanceStreaming {
         this.reset();
         if (!Array.isArray(modelConfigs)) return;
 
+        /** @type {Set<string>} */
+        const manifestPaths = new Set();
+        for (let i = 0; i < modelConfigs.length; i++) {
+            const config = typeof modelConfigs[i] === 'string' ? { path: modelConfigs[i] } : modelConfigs[i];
+            const pfm = String(config.prefabManifest || '').trim();
+            if (pfm) manifestPaths.add(pfm);
+        }
+
+        /** @type {Map<string, ReturnType<typeof normalizePrefabManifest> | null>} */
+        const manifestByPath = new Map();
+        const pathList = [...manifestPaths];
+        if (pathList.length) {
+            let cursor = 0;
+            const concurrency = Math.min(16, pathList.length);
+            const fetchOne = async (pfm) => {
+                try {
+                    const raw = await fetchPrefabManifestJson(pfm);
+                    manifestByPath.set(pfm, normalizePrefabManifest(raw));
+                } catch (err) {
+                    console.warn('[VAS] manifest fetch failed, legacy fallback:', pfm, err);
+                    manifestByPath.set(pfm, null);
+                }
+            };
+            async function worker() {
+                while (cursor < pathList.length) {
+                    const pi = cursor++;
+                    await fetchOne(pathList[pi]);
+                }
+            }
+            await Promise.all(Array.from({ length: concurrency }, () => worker()));
+        }
+
         for (let i = 0; i < modelConfigs.length; i++) {
             const config = typeof modelConfigs[i] === 'string' ? { path: modelConfigs[i] } : modelConfigs[i];
             const pfm = String(config.prefabManifest || '').trim();
@@ -148,10 +180,19 @@ export default class ViewDistanceStreaming {
                 continue;
             }
 
-            try {
-                const raw = await fetchPrefabManifestJson(pfm);
-                const man = normalizePrefabManifest(raw);
+            const man = manifestByPath.get(pfm);
+            if (!man) {
+                this.entries.push({
+                    idx: i,
+                    mode: 'legacy',
+                    state: 'idle',
+                    config,
+                    prefabManifest: pfm,
+                });
+                continue;
+            }
 
+            try {
                 if (prefabManifestHasPartStreamingBounds(man)) {
                     for (let pi = 0; pi < man.parts.length; pi++) {
                         const part = man.parts[pi];
@@ -204,7 +245,7 @@ export default class ViewDistanceStreaming {
                     });
                 }
             } catch (err) {
-                console.warn('[VAS] manifest fetch failed, legacy fallback:', pfm, err);
+                console.warn('[VAS] registry entry failed:', pfm, err);
                 this.entries.push({
                     idx: i,
                     mode: 'legacy',

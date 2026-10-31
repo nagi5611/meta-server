@@ -60,6 +60,17 @@ async function registerMetaverseServiceWorkerAsync() {
 }
 
 /**
+ * プリロード fetch が SW Cache Storage に載るよう ready を待つ（失敗時は即 resolve）
+ * @returns {Promise<void>}
+ */
+export async function awaitMetaverseServiceWorkerReady() {
+    if (!('serviceWorker' in navigator)) return;
+    try {
+        await navigator.serviceWorker.ready;
+    } catch (_) { /* ignore */ }
+}
+
+/**
  * Cache Storage をすべて削除し、このオリジンで登録された Service Worker を解除する（管理画面の強制再読み込み用）
  * @returns {Promise<void>}
  */
