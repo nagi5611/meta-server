@@ -1,0 +1,26 @@
+# RETIRED (2026-11): hub-server.service テンプレ。nginx/hub-admin-line/README.md 参照。
+# hub-server.service — 管理・非常用 Node（nagi-s1.f5.si → 127.0.0.1:3000）
+#
+# 配置:
+#   sudo cp systemd/hub-server.service.example /etc/systemd/system/hub-server.service
+#   sudo nano /etc/systemd/system/hub-server.service   # User / パスを環境に合わせる
+#   sudo systemctl daemon-reload && sudo systemctl enable --now hub-server.service
+#
+# 環境変数: /home/nagi/hub-server/hub.env（nginx/hub-admin-line/README.md 参照）
+
+[Unit]
+Description=meta-server hub (admin / emergency, nagi-s1.f5.si)
+After=network.target
+
+[Service]
+Type=simple
+User=nagi
+WorkingDirectory=/home/nagi/meta-server
+Environment=NODE_ENV=production
+EnvironmentFile=/home/nagi/hub-server/hub.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

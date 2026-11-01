@@ -239,8 +239,9 @@ nagi ALL=(ALL) NOPASSWD: /bin/systemctl start meta-server.service, /bin/systemct
 | ファイル | 説明 |
 |----------|------|
 | [sites-available/metaverse-proxy.conf.example](sites-available/metaverse-proxy.conf.example) | `server_name` 別に `proxy_pass` する完全例 |
-| [sites-available/metaverse-proxy.ex01.conf.example](sites-available/metaverse-proxy.ex01.conf.example) | hub=`http://nagi-s1.f5.si/`→3000、meta/metair は HTTPS→3001/3002（ex01） |
-| [sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) | ホスト監視用ホスト名（HTTP）の例 |
+| [sites-available/metaverse-proxy.ex01.conf.example](sites-available/metaverse-proxy.ex01.conf.example) | meta/metair を HTTPS→3001/3002 等（ex01。**hub/nagi-s1 は廃止**） |
+| [sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) | **RETIRED** — 旧ホスト監視用 HTTP vhost |
+| [hub-admin-line/README.md](hub-admin-line/README.md) | nagi-s1 hub 廃止の記録と DNS 手動削除 |
 | [snippets/metaverse-proxy-headers.conf.example](snippets/metaverse-proxy-headers.conf.example) | WebSocket 向けヘッダ等（`location` 内で include） |
 | [snippets/metaverse-proxy-error-pages.conf.example](snippets/metaverse-proxy-error-pages.conf.example) | 502/503/504 時に稼働状況 URL へ誘導する `error_page`（`server` 内で include） |
 | [html/metaverse-proxy-error.html](html/metaverse-proxy-error.html) | 上記用の静的 HTML（`/var/www/metaverse-nginx-errors/` に配置） |

@@ -1,7 +1,6 @@
-# metaverse-simple: TLS 終端 + hub/meta/metair を別ポートの Node へ振り分け（コピー用 ex01）
+# metaverse-simple: TLS 終端 + meta/metair を別ポートの Node へ振り分け（コピー用 ex01）
 #
-# ポート対応:
-#   http://nagi-s1.f5.si/  → 127.0.0.1:3000（hub・平文 HTTP のみ）
+# ポート対応（2026-11 本番。hub/nagi-s1.f5.si=3000 は廃止 — hub-admin-line/README.md）:
 #   https://meta.mmh-virtual.jp  → 127.0.0.1:3001
 #   https://metair.mmh-virtual.jp → 127.0.0.1:3002
 #
@@ -27,27 +26,15 @@ map $http_upgrade $connection_upgrade {
     ''      close;
 }
 
-# hub（nagi-s1.f5.si）: HTTP のみ → Node 3000
-server {
-    listen 80;
-    listen [::]:80;
-    server_name nagi-s1.f5.si;
-
-    client_max_body_size 500m;
-
-    include /etc/nginx/snippets/metaverse-proxy-error-pages.conf;
-
-    location /.well-known/acme-challenge/ {
-        root /var/www/html;
-    }
-
-    location / {
-        include /etc/nginx/snippets/metaverse-proxy-headers.conf;
-        proxy_pass http://127.0.0.1:3000;
-        proxy_read_timeout 86400s;
-        proxy_send_timeout 86400s;
-    }
-}
+# hub（nagi-s1.f5.si）: sites-available/nagi-s1-f5si.conf.example を有効化すること。
+# 以下は参考用。本番では server_name 重複を避けるため、このブロックは使わない。
+# server {
+#     listen 80;
+#     listen [::]:80;
+#     server_name nagi-s1.f5.si;
+#     ...
+#     proxy_pass http://127.0.0.1:3000;
+# }
 
 # meta / metair: HTTP → HTTPS（certbot が if ($host = ...) を挿入することがある）
 server {
