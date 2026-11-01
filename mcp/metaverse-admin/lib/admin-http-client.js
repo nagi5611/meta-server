@@ -9,16 +9,39 @@ let adminCsrfCache = null;
 let hostMonitorCsrfCache = null;
 
 /**
+ * @param {string} b64
+ * @returns {string}
+ */
+function decodePasswordB64(b64) {
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    return Buffer.from(padded, 'base64').toString('utf8');
+}
+
+/**
+ * meta / metair どちらの資格情報プレフィックスを使うか
+ * @returns {'META_ADMIN' | 'METAIR_ADMIN'}
+ */
+function getCredentialPrefix() {
+    const instance = String(process.env.META_ADMIN_INSTANCE ?? '').trim().toLowerCase();
+    if (instance === 'metair') return 'METAIR_ADMIN';
+    if (instance === 'meta') return 'META_ADMIN';
+
+    const base = String(process.env.META_ADMIN_BASE_URL ?? '').toLowerCase();
+    if (base.includes('metair.mmh-virtual.jp')) return 'METAIR_ADMIN';
+    return 'META_ADMIN';
+}
+
+/**
  * 環境変数から管理者パスワードを得る（平文はログに出さない）
  * @returns {string}
  */
 function readAdminPassword() {
-    const b64 = String(process.env.META_ADMIN_PASSWORD_B64 ?? '').trim();
+    const prefix = getCredentialPrefix();
+    const b64 = String(process.env[`${prefix}_PASSWORD_B64`] ?? '').trim();
     if (b64) {
-        const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-        return Buffer.from(padded, 'base64').toString('utf8');
+        return decodePasswordB64(b64);
     }
-    return String(process.env.META_ADMIN_PASSWORD ?? '');
+    return String(process.env[`${prefix}_PASSWORD`] ?? '');
 }
 
 /**
@@ -32,11 +55,14 @@ export function getAdminBaseUrl() {
  * @returns {{ username: string, password: string }}
  */
 export function getAdminCredentials() {
-    const username = String(process.env.META_ADMIN_USERNAME ?? 'admin').trim() || 'admin';
+    const prefix = getCredentialPrefix();
+    const usernameKey = prefix === 'METAIR_ADMIN' ? 'METAIR_ADMIN_USERNAME' : 'META_ADMIN_USERNAME';
+    const username =
+        String(process.env[usernameKey] ?? process.env.META_ADMIN_USERNAME ?? 'admin').trim() || 'admin';
     const password = readAdminPassword();
     if (password.length < 1) {
         throw new Error(
-            'META_ADMIN_PASSWORD または META_ADMIN_PASSWORD_B64 を MCP サーバーの env に設定してください'
+            `${prefix}_PASSWORD または ${prefix}_PASSWORD_B64 を MCP サーバーの env に設定してください`
         );
     }
     return { username, password };

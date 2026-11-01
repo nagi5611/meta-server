@@ -1,2 +1,4 @@
 node_modules/
 .env.mcp
+.env.mcp.meta
+.env.mcp.metair

@@ -52,9 +52,9 @@ SSH だけでは **管理 API の Basic パスワードは取れない**（`.env
 SSH MCP ではなく、リポジトリ内 **`mcp/metaverse-admin`**（stdio MCP）が **HTTPS の `/admin/*`・`/host-monitor/*`** を呼びます。
 
 1. `cd mcp/metaverse-admin && npm install`
-2. `cp .env.mcp.example .env.mcp` に `META_ADMIN_PASSWORD` または `META_ADMIN_PASSWORD_B64`（**git 禁止**）
-3. `.cursor/mcp.json.example` を `.cursor/mcp.json` にコピー（**meta / metair の 2 エントリ** — `META_ADMIN_BASE_URL` のみ差し替え）
-4. **Cloud Agent**: ダッシュボード Environment Secrets に `META_ADMIN_PASSWORD`（または `_B64`）を追加。MCP を有効化したうえで `.cursor/mcp.json` 相当を環境に登録
+2. `cp .env.mcp.meta.example .env.mcp.meta` / `cp .env.mcp.metair.example .env.mcp.metair` に各パスワード（**git 禁止**）
+3. `.cursor/mcp.json.example` → `.cursor/mcp.json`（meta / metair の 2 エントリ）
+4. **Cloud Agent**: Secrets に `META_ADMIN_PASSWORD`（meta）と **`METAIR_ADMIN_PASSWORD`**（metair）を別々に登録（チャットに書かない）
 
 ツール: `metaverse_admin_get` / `metaverse_admin_write`（変更系は `confirmWrite: true`）。
 
