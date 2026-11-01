@@ -4,17 +4,19 @@
       "command": "node",
       "args": ["${workspaceFolder}/mcp/metaverse-admin/index.js"],
       "env": {
+        "META_ADMIN_INSTANCE": "meta",
         "META_ADMIN_BASE_URL": "https://meta.mmh-virtual.jp"
       },
-      "envFile": "${workspaceFolder}/mcp/metaverse-admin/.env.mcp"
+      "envFile": "${workspaceFolder}/mcp/metaverse-admin/.env.mcp.meta"
     },
     "metaverse-admin-metair": {
       "command": "node",
       "args": ["${workspaceFolder}/mcp/metaverse-admin/index.js"],
       "env": {
+        "META_ADMIN_INSTANCE": "metair",
         "META_ADMIN_BASE_URL": "https://metair.mmh-virtual.jp"
       },
-      "envFile": "${workspaceFolder}/mcp/metaverse-admin/.env.mcp"
+      "envFile": "${workspaceFolder}/mcp/metaverse-admin/.env.mcp.metair"
     }
   }
 }

@@ -2,77 +2,70 @@
 
 Cursor から家メタバースの**管理パネルと同じ HTTP API**（`/admin/*`・`/host-monitor/*`）を呼び出す MCP サーバーです。**SSH ではありません。**
 
-## meta / metair の 2 本立て
+## meta / metair の 2 本立て（パスワード別）
 
-同一サーバー上の **別 Node プロセス**（別ドメイン・別 `.env`）向けに、Cursor では **MCP エントリを 2 つ**登録します（中身は同じ `index.js`、環境変数 `META_ADMIN_BASE_URL` だけ変える）。
+同一物理サーバー上の **別 Node プロセス**向けに MCP を 2 つ登録します。パスワードは **インスタンスごとに別 env / Secret** にします（チャットに書かない）。
 
-| MCP 名（例） | `META_ADMIN_BASE_URL` |
-|--------------|------------------------|
-| `metaverse-admin-meta` | `https://meta.mmh-virtual.jp` |
-| `metaverse-admin-metair` | `https://metair.mmh-virtual.jp` |
+| MCP 名（例） | `META_ADMIN_INSTANCE` | `META_ADMIN_BASE_URL` | パスワード env |
+|--------------|----------------------|------------------------|----------------|
+| `metaverse-admin-meta` | `meta` | `https://meta.mmh-virtual.jp` | `META_ADMIN_PASSWORD` または `_B64` |
+| `metaverse-admin-metair` | `metair` | `https://metair.mmh-virtual.jp` | `METAIR_ADMIN_PASSWORD` または `_B64` |
 
-リポジトリの [.cursor/mcp.json.example](../../.cursor/mcp.json.example) を参照。
+任意: metair だけユーザー名が違う場合は `METAIR_ADMIN_USERNAME`（未設定時は `META_ADMIN_USERNAME` → `admin`）。
+
+判定順: `META_ADMIN_INSTANCE` → `META_ADMIN_BASE_URL` のホスト名 → 既定は meta。
 
 ## 前提
 
-- 管理画面と同じ **Basic 認証**（`ADMIN_USERNAME` / `ADMIN_PASSWORD`）
-- POST 等は管理画面と同様 **CSRF**（MCP 側で自動取得）
+- 各インスタンスの `.env` にある **ADMIN_USERNAME / ADMIN_PASSWORD** と同じ値
+- POST 等は **CSRF**（MCP 側で自動取得）
 
-## セットアップ
+## セットアップ（Desktop）
 
-1. 依存関係（初回のみ）:
+1. `cd mcp/metaverse-admin && npm install`
 
-   ```bash
-   cd mcp/metaverse-admin
-   npm install
-   ```
-
-2. 認証用 env ファイル:
+2. env ファイル（**gitignore。コミットしない**）:
 
    ```bash
-   cp .env.mcp.example .env.mcp
+   cp .env.mcp.meta.example .env.mcp.meta
+   cp .env.mcp.metair.example .env.mcp.metair
    ```
 
-   `.env.mcp` に `META_ADMIN_PASSWORD` または `META_ADMIN_PASSWORD_B64` を設定（**git にコミットしない**）。
+   各ファイルにパスワード（平文または Base64）を入れる。
 
-3. Cursor MCP 設定（プロジェクト例）:
+3. `.cursor/mcp.json.example` → `.cursor/mcp.json`（`envFile` が `.env.mcp.meta` / `.env.mcp.metair` を指す）
 
-   - リポジトリの `.cursor/mcp.json.example` を `.cursor/mcp.json` にコピー
-   - または Cursor Settings → MCP に同等のエントリを追加
+4. Cursor 再読み込み → 両 MCP が接続済みになることを確認。
 
-   Windows パス例:
+## Cloud Agent
 
-   ```json
-   {
-     "mcpServers": {
-       "metaverse-admin": {
-         "command": "node",
-         "args": ["D:/myprojects/meta/server/metaverse-simple/mcp/metaverse-admin/index.js"],
-         "envFile": "D:/myprojects/meta/server/metaverse-simple/mcp/metaverse-admin/.env.mcp"
-       }
-     }
-   }
-   ```
+Environment Secrets（**ダッシュボード登録。チャット不要**）:
 
-4. Cursor を再読み込みし、MCP `metaverse-admin` が緑（接続済み）になることを確認。
+| Secret | 用途 |
+|--------|------|
+| `META_ADMIN_PASSWORD` または `META_ADMIN_PASSWORD_B64` | meta MCP |
+| `METAIR_ADMIN_PASSWORD` または `METAIR_ADMIN_PASSWORD_B64` | metair MCP |
+
+MCP 子プロセスに Secret が渡る構成なら、`envFile` は空でも `META_ADMIN_INSTANCE` + 上記 Secret で動作します。ローカルと同様に `.env.mcp.*` を使っても構いません。
 
 ## ツール
 
 | ツール | 用途 |
 |--------|------|
-| `metaverse_admin_get` | GET（`/admin/stats`, `/admin/worlds`, `/admin/players`, `/host-monitor/api/status` 等） |
-| `metaverse_admin_write` | POST/PUT/PATCH/DELETE（`confirmWrite: true` 必須） |
+| `metaverse_admin_get` | GET（`/admin/stats`, `/admin/worlds`, …） |
+| `metaverse_admin_write` | 変更系（`confirmWrite: true` 必須） |
 
-## 環境変数
+## 環境変数一覧
 
-| 変数 | 既定 | 説明 |
-|------|------|------|
-| `META_ADMIN_BASE_URL` | `https://meta.mmh-virtual.jp` | サーバー origin（末尾 `/` なし） |
-| `META_ADMIN_USERNAME` | `admin` | Basic ユーザー |
-| `META_ADMIN_PASSWORD` | — | Basic パスワード（平文） |
-| `META_ADMIN_PASSWORD_B64` | — | パスワードの Base64（平文と排他推奨） |
+| 変数 | 用途 |
+|------|------|
+| `META_ADMIN_INSTANCE` | `meta` / `metair`（推奨） |
+| `META_ADMIN_BASE_URL` | origin |
+| `META_ADMIN_USERNAME` / `META_ADMIN_PASSWORD` / `_B64` | meta 用 Basic |
+| `METAIR_ADMIN_USERNAME` | metair 用ユーザー（任意） |
+| `METAIR_ADMIN_PASSWORD` / `METAIR_ADMIN_PASSWORD_B64` | metair 用 Basic |
 
 ## セキュリティ
 
 - パスワードをチャット・リポジトリ・ログに載せない
-- `metaverse_admin_write` はキック・再起動・ワールド上書き等を含む — エージェントに任せる前に意図を確認すること
+- `metaverse_admin_write` は破壊的操作を含む — 実行前に意図を確認すること
