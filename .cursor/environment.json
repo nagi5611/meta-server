@@ -1,6 +1,6 @@
 {
     "name": "meta-server",
-    "install": "npm install",
+    "install": "npm install && npm install --prefix mcp/metaverse-admin",
     "terminals": [
         {
             "name": "dev",

@@ -1,6 +1,17 @@
 # metaverse-admin MCP
 
-Cursor から家メタバースサーバー（既定: `https://meta.mmh-virtual.jp`）の**管理パネルと同じ HTTP API**（`/admin/*`・`/host-monitor/*`）を呼び出す MCP サーバーです。
+Cursor から家メタバースの**管理パネルと同じ HTTP API**（`/admin/*`・`/host-monitor/*`）を呼び出す MCP サーバーです。**SSH ではありません。**
+
+## meta / metair の 2 本立て
+
+同一サーバー上の **別 Node プロセス**（別ドメイン・別 `.env`）向けに、Cursor では **MCP エントリを 2 つ**登録します（中身は同じ `index.js`、環境変数 `META_ADMIN_BASE_URL` だけ変える）。
+
+| MCP 名（例） | `META_ADMIN_BASE_URL` |
+|--------------|------------------------|
+| `metaverse-admin-meta` | `https://meta.mmh-virtual.jp` |
+| `metaverse-admin-metair` | `https://metair.mmh-virtual.jp` |
+
+リポジトリの [.cursor/mcp.json.example](../../.cursor/mcp.json.example) を参照。
 
 ## 前提
 
