@@ -127,13 +127,9 @@ WebRTC（mediasoup）用の **UDP/TCP の VC ポート範囲**は別途開ける
 
 ## ホスト監視ダッシュボード（任意）
 
-別ホスト名（例: `http://nagi-s1.f5.si/`）から **systemd のユニット状態を表示し、停止中なら Web から起動**できる機能があります。
+**2026-11 以降:** 平文 HTTP の `nagi-s1.f5.si` hub は廃止しました。詳細と DNS 手動削除は [hub-admin-line/README.md](hub-admin-line/README.md) を参照。以下の旧 nagi-s1 向け nginx 手順（ステップ 3 以降）は **使用しないでください**。
 
-### 全体のイメージ（先にこれだけ読む）
-
-- **ブラウザ** → **nginx**（例: `nagi-s1.f5.si`）→ **meta 用の Node**（例: ポート 3000）の **`/host-monitor/`** というページ。
-- そのページが **「どのサービスが動いてるか」** を表示し、止まっていれば **起動ボタン**で `systemctl start` を試す。
-- **metair 用の Node（3001）** にはこの画面は載っていない。**必ず meta 用 Node が動いているマシン・ポート**に nginx を向ける。
+別ホスト名（例: `http://nagi-s1.f5.si/`）から systemd 状態を表示する構成は廃止済みです。
 
 ---
 
@@ -239,8 +235,9 @@ nagi ALL=(ALL) NOPASSWD: /bin/systemctl start meta-server.service, /bin/systemct
 | ファイル | 説明 |
 |----------|------|
 | [sites-available/metaverse-proxy.conf.example](sites-available/metaverse-proxy.conf.example) | `server_name` 別に `proxy_pass` する完全例 |
-| [sites-available/metaverse-proxy.ex01.conf.example](sites-available/metaverse-proxy.ex01.conf.example) | hub=`http://nagi-s1.f5.si/`→3000、meta/metair は HTTPS→3001/3002（ex01） |
-| [sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) | ホスト監視用ホスト名（HTTP）の例 |
+| [sites-available/metaverse-proxy.ex01.conf.example](sites-available/metaverse-proxy.ex01.conf.example) | meta/metair を HTTPS→3001/3002 等（ex01。**hub/nagi-s1 は廃止**） |
+| [sites-available/nagi-s1-f5si.conf.example](sites-available/nagi-s1-f5si.conf.example) | **RETIRED** — 旧ホスト監視用 HTTP vhost |
+| [hub-admin-line/README.md](hub-admin-line/README.md) | nagi-s1 hub 廃止の記録と DNS 手動削除 |
 | [snippets/metaverse-proxy-headers.conf.example](snippets/metaverse-proxy-headers.conf.example) | WebSocket 向けヘッダ等（`location` 内で include） |
 | [snippets/metaverse-proxy-error-pages.conf.example](snippets/metaverse-proxy-error-pages.conf.example) | 502/503/504 時に稼働状況 URL へ誘導する `error_page`（`server` 内で include） |
 | [html/metaverse-proxy-error.html](html/metaverse-proxy-error.html) | 上記用の静的 HTML（`/var/www/metaverse-nginx-errors/` に配置） |
