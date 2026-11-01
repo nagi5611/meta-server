@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "metaverse-admin": {
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp/metaverse-admin/index.js"],
+      "envFile": "${workspaceFolder}/mcp/metaverse-admin/.env.mcp"
+    }
+  }
+}
