@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!mcp/metaverse-admin/.env.mcp.example
 
 # Certificates (秘密鍵・証明書はリポジトリに含めない)
 certs/*.pem

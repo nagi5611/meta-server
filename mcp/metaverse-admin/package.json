@@ -1,0 +1,20 @@
+{
+  "name": "metaverse-admin-mcp",
+  "version": "1.0.0",
+  "description": "Cursor MCP server for metaverse admin panel HTTP API",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "metaverse-admin-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["mcp", "metaverse", "admin"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  }
+}
