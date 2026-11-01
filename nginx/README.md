@@ -127,13 +127,9 @@ WebRTC（mediasoup）用の **UDP/TCP の VC ポート範囲**は別途開ける
 
 ## ホスト監視ダッシュボード（任意）
 
-別ホスト名（例: `http://nagi-s1.f5.si/`）から **systemd のユニット状態を表示し、停止中なら Web から起動**できる機能があります。
+**2026-11 以降:** 平文 HTTP の `nagi-s1.f5.si` hub は廃止しました。詳細と DNS 手動削除は [hub-admin-line/README.md](hub-admin-line/README.md) を参照。以下の旧 nagi-s1 向け nginx 手順（ステップ 3 以降）は **使用しないでください**。
 
-### 全体のイメージ（先にこれだけ読む）
-
-- **ブラウザ** → **nginx**（例: `nagi-s1.f5.si`）→ **meta 用の Node**（例: ポート 3000）の **`/host-monitor/`** というページ。
-- そのページが **「どのサービスが動いてるか」** を表示し、止まっていれば **起動ボタン**で `systemctl start` を試す。
-- **metair 用の Node（3001）** にはこの画面は載っていない。**必ず meta 用 Node が動いているマシン・ポート**に nginx を向ける。
+別ホスト名（例: `http://nagi-s1.f5.si/`）から systemd 状態を表示する構成は廃止済みです。
 
 ---
 
