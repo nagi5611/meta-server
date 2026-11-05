@@ -95,7 +95,10 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo apt install -y certbot python3-certbot-nginx
 ```
 
-### nginx プラグイン（推奨・初回）
+### nginx プラグイン（必須・本番）
+
+**nginx が 80/443 で常時稼働している構成では `certbot certonly --standalone` を使わない。**  
+standalone は 80 番を占有するため `certbot renew` が `Address already in use` で失敗し、証明書失効 → 526 / TLS エラーにつながる。
 
 設定の `server_name` と `listen 80` が合っている状態で:
 
@@ -106,13 +109,40 @@ sudo certbot --nginx -d meta.mmh-virtual.jp -d metair.mmh-virtual.jp
 ドメインごとに別証明書にする場合は、`-d` を分けて複数回実行し、各 `server { ssl_certificate ... }` を certbot が出力したパスに合わせます。  
 **1 枚の SAN 証明書**にまとめた場合は、両方の `server` ブロックで **同じ** `fullchain.pem` / `privkey.pem` を指します。
 
-### 更新後の reload
+`server_name` が複数ある場合（例: `metaprehub.mmh-virtual.jp`）は **そのホスト名用の証明書**を別途発行するか、`ssl_certificate` を **実在する lineage**（例: `meta.mmh-virtual.jp-0001`）に揃える。存在しない `/etc/letsencrypt/live/.../fullchain.pem` を参照すると **`nginx -t` 失敗 → nginx 全体停止 → 全ドメイン HTTPS 不通** になる。
+
+### 更新後の reload（deploy-hook）
 
 ```bash
 sudo systemctl reload nginx
 ```
 
-`certbot renew` のフックで `systemctl reload nginx` を呼ぶのが一般的です。
+リポジトリ同梱の運用スクリプト（本番サーバーで **1 回**実行）:
+
+```bash
+cd /path/to/meta-server
+sudo bash scripts/ops/install-certbot-nginx-hooks.sh
+```
+
+- `certbot renew` 成功後: `nginx -t` → `systemctl reload nginx`
+- 日次: `mmh-verify-nginx-ssl`（証明書ファイル欠落と `nginx -t`）
+
+手動確認:
+
+```bash
+sudo /usr/local/bin/mmh-verify-nginx-ssl
+sudo certbot renew --dry-run
+```
+
+### 証明書 lineage を削除するとき
+
+`certbot delete --cert-name ...` の前後で、必ず次を実行する。
+
+```bash
+sudo grep -R ssl_certificate /etc/nginx/sites-enabled/
+sudo /usr/local/bin/mmh-verify-nginx-ssl   # 未導入なら scripts/ops/verify-nginx-ssl-paths.sh
+sudo nginx -t && sudo systemctl reload nginx
+```
 
 ## ファイアウォール（ufw 例）
 

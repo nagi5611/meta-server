@@ -11,6 +11,8 @@
 
 5 分 cron。TLS エラーまたは HTTP 200 以外で失敗。失敗通知は **障害ごとに初回は即時**、継続失敗中は **最大 1 時間に 1 回**（KV `HEALTH_STATE`）。復旧後の次の失敗は再び初回扱い。
 
+**526 /「オリジン SSL 無効」:** Cloudflare プロキシ経由時の表示。直結 nginx 構成では **nginx 停止**（証明書パス欠落で `nginx -t` 失敗など）も TLS 不通として検知される。再発防止は [docs/ops-certbot-nginx.md](../../docs/ops-certbot-nginx.md) を参照。
+
 ## デプロイ
 
 ```bash
