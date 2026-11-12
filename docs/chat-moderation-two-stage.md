@@ -11,26 +11,19 @@
 
 二次で Gemini が `inappropriate: false` と返した場合は **JEV の誤検知として通過**。
 
-## JEV API 契約（想定）
+## 環境変数（最低限）
 
-`POST` JSON:
-
-```json
-{ "text": "送信1行", "context": "過去ログ（任意）" }
+```env
+JEV_API_KEY=sk_...
+JEV_THRESHOLD=0.5
 ```
 
-応答のいずれか:
+**エンドポイント URL の指定は不要**（既定で `https://jevai.website/api/v1/systemone`）。
 
-```json
-{ "allowed": true, "score": 0.12 }
-{ "allow": false, "score": 0.88, "reason": "..." }
-{ "score": 0.88 }
-```
+プレイグラウンドで作った質問セットを使う場合だけ `JEV_QUESTION_SET_ID` を指定する。
 
-`score` のみのときは **`score >= JEV_THRESHOLD` で拒否**（既定 0.5）。
+## Jev リクエスト（サーバーが自動生成）
 
-認証: 既定 `Authorization: Bearer <JEV_API_KEY>`（`JEV_API_KEY_HEADER` / `JEV_API_KEY_PREFIX` で変更可）。
+TypeSafe System One 形式。Noul の「はい」確率が `JEV_THRESHOLD` 未満なら一次通過。
 
-## 環境変数
-
-`.env.example` の JEV 節を参照。
+出典: [コンテンツモデレーション — Jev AI API](https://jevai.website/ja/use-cases/content-moderation)
