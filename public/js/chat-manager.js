@@ -229,6 +229,10 @@ class ChatManager {
             this.addChatMessage(data, true);
         });
 
+        socket.on('chat-receive-translation', (data) => {
+            this.applyLateChatTranslation(data);
+        });
+
         // Receive emoji broadcast
         socket.on('emoji-broadcast', (data) => {
             this.showPlayerEmoji(data.playerId, data.emoji);
@@ -274,6 +278,25 @@ class ChatManager {
      * @param {{ message?: string, timestamp?: number }} data
      * @returns {boolean} 処理済みなら true
      */
+    /**
+     * 一次判定後に非同期で届いた翻訳を既存バブルに反映する
+     * @param {{ senderId?: string, timestamp?: number, translatedMessage?: string }} data
+     */
+    applyLateChatTranslation(data) {
+        if (!this.chatMessages || data?.senderId == null || data.timestamp == null) return;
+        const translated = data.translatedMessage;
+        if (typeof translated !== 'string' || !translated.trim()) return;
+        const sel = `div.chat-message[data-sender-id="${CSS.escape(String(data.senderId))}"][data-timestamp="${String(data.timestamp)}"]`;
+        const el = this.chatMessages.querySelector(sel);
+        if (!el || el.classList.contains('my-message')) return;
+        const original = el.dataset.messageOriginal || '';
+        if (!original || translated === original) return;
+        const textEl = el.querySelector('.message-text');
+        if (!textEl) return;
+        const display = `${original} (${translated})`;
+        textEl.innerHTML = this.formatChatMessageHtml(display);
+    }
+
     tryFinalizeOptimisticOwnEcho(data) {
         const pending = this.optimisticPendingEntry;
         if (!pending || !pending.div || !pending.div.isConnected) return false;
@@ -455,6 +478,11 @@ class ChatManager {
             : (data.senderId || '');
         if (senderIdAttr) {
             messageDiv.setAttribute('data-sender-id', senderIdAttr);
+        }
+        const ts = data.timestamp != null ? Number(data.timestamp) : Date.now();
+        messageDiv.dataset.timestamp = String(ts);
+        if (typeof data.message === 'string') {
+            messageDiv.dataset.messageOriginal = data.message;
         }
 
         const showModerationUi = data.moderationWarning === true && !isOwnMessage;
