@@ -1,6 +1,8 @@
 // workers/mmh-health-check/src/index.js — MMH メタバース HTTPS ヘルスチェック
 
-/** @typedef {{ url: string; ok: boolean; status: number | null; error: string | null; checkedAt: string }} CheckResult */
+import { checkUrlWithRetries } from "./check-url.js";
+
+/** @typedef {{ url: string; ok: boolean; status: number | null; error: string | null; checkedAt: string; attempts?: number }} CheckResult */
 
 const MONITOR_URLS = [
   "https://meta.mmh-virtual.jp/",
@@ -18,38 +20,12 @@ const DISCORD_RESOLVED_THUMB =
 const FAILURE_NOTIFY_COOLDOWN_MS = 60 * 60 * 1000;
 
 /**
- * 単一 URL を GET（Workers fetch はデフォルトで TLS 検証あり）
+ * 単一 URL を GET（失敗時は最大 2 回リトライ）
  * @param {string} url
  * @returns {Promise<CheckResult>}
  */
 async function checkUrl(url) {
-  const checkedAt = new Date().toISOString();
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      headers: { "User-Agent": "mmh-health-check/1.0 (Cloudflare Worker)" },
-    });
-    if (res.status !== 200) {
-      return {
-        url,
-        ok: false,
-        status: res.status,
-        error: `HTTP status ${res.status}`,
-        checkedAt,
-      };
-    }
-    return { url, ok: true, status: 200, error: null, checkedAt };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      url,
-      ok: false,
-      status: null,
-      error: message,
-      checkedAt,
-    };
-  }
+  return checkUrlWithRetries(url);
 }
 
 /**
