@@ -20,12 +20,12 @@ JSON レポートの各 URL に `attempts`（成功・失敗までに使った�
 ```bash
 cd workers/mmh-health-check
 npm install
-npx wrangler login
-npx wrangler secret put WEBHOOK_URL
+# Cloud Agent / CI: CLOUDFLARE_API_TOKEN と CLOUDFLARE_ACCOUNT_ID を設定
+# 初回のみ: npx wrangler login または npx wrangler secret put WEBHOOK_URL
 npx wrangler deploy
 ```
 
-手動確認: デプロイ後の `https://<worker>.<subdomain>.workers.dev/run`
+本番 URL 例: `https://mmh-health-check.harumacci94.workers.dev/run`（`wrangler.toml` に本番 KV / cron を記載）
 
 ## 環境変数
 

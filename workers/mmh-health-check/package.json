@@ -1,0 +1,12 @@
+{
+  "name": "mmh-health-check",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "whoami": "wrangler whoami"
+  },
+  "devDependencies": {
+    "wrangler": "^4.165.0"
+  }
+}
