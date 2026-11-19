@@ -13,6 +13,8 @@
 
 JSON レポートの各 URL に `attempts`（成功・失敗までに使った試行回数）が付く。
 
+**526 /「オリジン SSL 無効」:** Cloudflare プロキシ経由時の表示。直結 nginx 構成では **nginx 停止**（証明書パス欠落で `nginx -t` 失敗など）も TLS 不通として検知される。再発防止は [docs/ops-certbot-nginx.md](../../docs/ops-certbot-nginx.md) を参照。
+
 ## デプロイ
 
 ```bash
