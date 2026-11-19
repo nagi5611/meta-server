@@ -48,7 +48,13 @@ import {
 import { peekBenchRunnerSecret } from './lib/bench-runner-auth.js';
 import { recordTickEmit, registerTickHookInstalled } from './lib/bench-tick-metrics.js';
 import { lookupIpLocation } from './lib/ip-geolocation.js';
-import { moderateChatMessage, moderateUsername, getModerationSystemPromptsForAdmin } from './lib/chat-moderation.js';
+import {
+    moderateChatMessage,
+    moderateUsername,
+    getModerationSystemPromptsForAdmin,
+    formatSecondaryModerationReason,
+} from './lib/chat-moderation.js';
+import { isJevChatModerationEnabled, jevPrimaryChatCheck } from './lib/chat-moderation-jev.js';
 import { translateChatMessage } from './lib/chat-translation.js';
 import { normalizeUiLocale, getListenerTargetLocales } from './lib/ui-locale.js';
 import { findNgPhraseMatch, getChatNgWords, saveChatNgWords } from './lib/chat-ng-words.js';
@@ -735,6 +741,130 @@ function emitChatToRoomWithLocale(ioServer, senderSocket, roomState, currentRoom
     }
 
     void currentRoom;
+}
+
+/**
+ * 翻訳が遅延到着したとき受信者の表示を更新する
+ * @param {import('socket.io').Server} ioServer
+ * @param {{ players: Map<string, { uiLocale?: string }> }} roomState
+ * @param {{ senderId: string, message: string, timestamp: number }} chatData
+ * @param {Partial<Record<'ja' | 'en' | 'zh' | 'ko' | 'zh-tw', string>>} translationsByLocale
+ * @param {'ja' | 'en' | 'zh' | 'ko' | 'zh-tw'} senderLocale
+ */
+function emitChatTranslationPatch(ioServer, roomState, chatData, translationsByLocale, senderLocale) {
+    const senderId = chatData.senderId;
+    const originalMessage = typeof chatData.message === 'string' ? chatData.message : '';
+    for (const [id, p] of roomState.players) {
+        if (id === senderId) continue;
+        const targetSocket = ioServer.sockets.sockets.get(id);
+        if (!targetSocket) continue;
+        const listenerLocale = normalizeUiLocale(p.uiLocale);
+        const translated = translationsByLocale[listenerLocale];
+        if (listenerLocale === senderLocale || !translated || translated === originalMessage) continue;
+        targetSocket.emit('chat-receive-translation', {
+            senderId,
+            timestamp: chatData.timestamp,
+            translatedMessage: translated,
+        });
+    }
+}
+
+/**
+ * @param {string} apiKey
+ * @param {string} text
+ * @param {Array<'ja' | 'en' | 'zh' | 'ko' | 'zh-tw'>} targetLocales
+ */
+async function buildChatTranslationsByLocale(apiKey, text, targetLocales) {
+    const translationPromises = targetLocales.map((locale) =>
+        translateChatMessage({
+            apiKey,
+            model: process.env.GEMINI_MODEL,
+            text,
+            targetLocale: locale,
+        }).then((result) => ({ locale, ...result })),
+    );
+    const translationResults =
+        translationPromises.length > 0 ? await Promise.all(translationPromises) : [];
+    /** @type {Partial<Record<'ja' | 'en' | 'zh' | 'ko' | 'zh-tw', string>>} */
+    const translationsByLocale = {};
+    for (const { locale, translated, skipped } of translationResults) {
+        if (
+            !skipped &&
+            typeof translated === 'string' &&
+            translated.trim() &&
+            translated !== text
+        ) {
+            translationsByLocale[locale] = translated.trim();
+        }
+    }
+    return translationsByLocale;
+}
+
+/**
+ * 承認後チャットを配信（ログ・履歴・ack 前の共通処理）
+ * @param {import('socket.io').Server} ioServer
+ * @param {import('socket.io').Socket} socket
+ * @param {{ players: Map<string, object> }} roomState
+ * @param {string} currentRoom
+ * @param {{ username: string }} player
+ * @param {string} text
+ * @param {number} now
+ * @param {Partial<Record<'ja' | 'en' | 'zh' | 'ko' | 'zh-tw', string>>} translationsByLocale
+ * @param {Record<string, unknown>} [chatDataExtras]
+ * @param {Record<string, unknown>} [selfChatData]
+ */
+function broadcastApprovedChat(
+    ioServer,
+    socket,
+    roomState,
+    currentRoom,
+    player,
+    text,
+    now,
+    translationsByLocale,
+    chatDataExtras = {},
+    selfChatData,
+) {
+    const chatData = {
+        senderId: socket.id,
+        senderName: player.username,
+        message: text,
+        timestamp: now,
+        ...chatDataExtras,
+    };
+
+    console.log(`[CHAT] ${player.username}: ${text}`);
+    addChatLog(currentRoom, player.username, text, socket.id);
+    appendApprovedChat(
+        currentRoom,
+        {
+            timestamp: now,
+            senderId: socket.id,
+            senderName: player.username,
+            message: text,
+        },
+        now,
+    );
+
+    chatUserLastSuccessAt.set(socket.id, now);
+
+    emitChatToRoomWithLocale(
+        ioServer,
+        socket,
+        roomState,
+        currentRoom,
+        chatData,
+        translationsByLocale,
+        selfChatData,
+    );
+    updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
+
+    notifyDiscordActivity('chat', {
+        userName: player.username,
+        chatMessage: text,
+        chatWarning: chatDataExtras.moderationWarning === true,
+        ...(chatDataExtras.moderationWarning ? { chatWarningCount: chatDataExtras.chatWarningCount } : {}),
+    });
 }
 
 /**
@@ -4081,8 +4211,10 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const jevEnabled = isJevChatModerationEnabled();
         const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
-        if (!apiKey) {
+
+        if (!jevEnabled && !apiKey) {
             console.error('[CHAT_MOD] GEMINI_API_KEY is not set; rejecting chat');
             ack({
                 ok: false,
@@ -4102,59 +4234,137 @@ io.on('connection', (socket) => {
             const senderLocale = normalizeUiLocale(player.uiLocale);
             const targetLocales = getListenerTargetLocales(roomState, socket.id, senderLocale);
 
-            const moderationPromise = moderateChatMessage({
-                apiKey,
-                model: process.env.GEMINI_MODEL,
-                historyTableText,
-                pendingLine,
-            });
-
-            const translationPromises = targetLocales.map((locale) =>
-                translateChatMessage({
-                    apiKey,
-                    model: process.env.GEMINI_MODEL,
-                    text,
-                    targetLocale: locale,
-                }).then((result) => ({ locale, ...result })),
-            );
-
-            let moderation;
-            let translationResults;
-            try {
-                [moderation, translationResults] = await Promise.all([
-                    moderationPromise,
-                    translationPromises.length > 0
-                        ? Promise.all(translationPromises)
-                        : Promise.resolve([]),
-                ]);
-            } catch (modErr) {
-                console.error('[CHAT_MOD] API error:', modErr);
-                releaseChatRoomSlot(currentRoom, roomSlotId);
-                ack({
-                    ok: false,
-                    code: 'moderation_error',
-                    message: 'チャットの検証に失敗しました。しばらくしてから再度お試しください。',
-                });
-                return;
-            }
-
+            /** @type {{ inappropriate: boolean, absolute_broadcast_block: boolean, reason_ja?: string, category_ja?: string } | null} */
+            let moderation = null;
             /** @type {Partial<Record<'ja' | 'en' | 'zh' | 'ko' | 'zh-tw', string>>} */
-            const translationsByLocale = {};
-            for (const { locale, translated, skipped } of translationResults) {
-                if (
-                    !skipped &&
-                    typeof translated === 'string' &&
-                    translated.trim() &&
-                    translated !== text
-                ) {
-                    translationsByLocale[locale] = translated.trim();
+            let translationsByLocale = {};
+            let usedJevSecondary = false;
+
+            if (jevEnabled) {
+                try {
+                    const primary = await jevPrimaryChatCheck({ text, historyTableText });
+                    console.log(
+                        `[CHAT_MOD][JEV] allow=${primary.allow} score=${primary.score ?? '—'} ms=${primary.latencyMs}`,
+                    );
+
+                    if (primary.allow) {
+                        broadcastApprovedChat(io, socket, roomState, currentRoom, player, text, now, {});
+                        ack({ ok: true });
+
+                        if (apiKey && targetLocales.length > 0) {
+                            void buildChatTranslationsByLocale(apiKey, text, targetLocales)
+                                .then((tr) => {
+                                    if (Object.keys(tr).length === 0) return;
+                                    emitChatTranslationPatch(
+                                        io,
+                                        roomState,
+                                        { senderId: socket.id, message: text, timestamp: now },
+                                        tr,
+                                        senderLocale,
+                                    );
+                                })
+                                .catch((trErr) =>
+                                    console.warn('[CHAT_TRANSLATE] async failed:', trErr?.message || trErr),
+                                );
+                        }
+                        return;
+                    }
+                } catch (jevErr) {
+                    console.error('[CHAT_MOD][JEV] error:', jevErr);
+                    releaseChatRoomSlot(currentRoom, roomSlotId);
+                    ack({
+                        ok: false,
+                        code: 'moderation_error',
+                        message: 'チャットの検証に失敗しました。しばらくしてから再度お試しください。',
+                    });
+                    return;
+                }
+
+                if (!apiKey) {
+                    releaseChatRoomSlot(currentRoom, roomSlotId);
+                    ack({
+                        ok: false,
+                        code: 'moderation_config',
+                        message: 'チャットの詳細検証が利用できません。管理者に連絡してください。',
+                    });
+                    return;
+                }
+
+                usedJevSecondary = true;
+                try {
+                    const moderationPromise = moderateChatMessage({
+                        apiKey,
+                        model: process.env.GEMINI_MODEL,
+                        historyTableText,
+                        pendingLine,
+                    });
+                    const translationsPromise =
+                        targetLocales.length > 0
+                            ? buildChatTranslationsByLocale(apiKey, text, targetLocales)
+                            : Promise.resolve({});
+                    [moderation, translationsByLocale] = await Promise.all([
+                        moderationPromise,
+                        translationsPromise,
+                    ]);
+                } catch (modErr) {
+                    console.error('[CHAT_MOD] secondary Gemini error:', modErr);
+                    releaseChatRoomSlot(currentRoom, roomSlotId);
+                    ack({
+                        ok: false,
+                        code: 'moderation_error',
+                        message: 'チャットの検証に失敗しました。しばらくしてから再度お試しください。',
+                    });
+                    return;
+                }
+
+                if (moderation.inappropriate !== true) {
+                    console.warn(`[CHAT_MOD][JEV] false positive overridden socket=${socket.id}`);
+                    broadcastApprovedChat(
+                        io,
+                        socket,
+                        roomState,
+                        currentRoom,
+                        player,
+                        text,
+                        now,
+                        translationsByLocale,
+                    );
+                    ack({ ok: true });
+                    return;
+                }
+            } else {
+                try {
+                    const moderationPromise = moderateChatMessage({
+                        apiKey,
+                        model: process.env.GEMINI_MODEL,
+                        historyTableText,
+                        pendingLine,
+                    });
+                    const translationsPromise =
+                        targetLocales.length > 0
+                            ? buildChatTranslationsByLocale(apiKey, text, targetLocales)
+                            : Promise.resolve({});
+                    [moderation, translationsByLocale] = await Promise.all([
+                        moderationPromise,
+                        translationsPromise,
+                    ]);
+                } catch (modErr) {
+                    console.error('[CHAT_MOD] API error:', modErr);
+                    releaseChatRoomSlot(currentRoom, roomSlotId);
+                    ack({
+                        ok: false,
+                        code: 'moderation_error',
+                        message: 'チャットの検証に失敗しました。しばらくしてから再度お試しください。',
+                    });
+                    return;
                 }
             }
 
             if (moderation.inappropriate) {
-                const reason =
-                    (moderation.reason_ja && String(moderation.reason_ja).trim()) ||
-                    '不適切な内容の可能性があります。';
+                const reason = usedJevSecondary
+                    ? formatSecondaryModerationReason(moderation)
+                    : (moderation.reason_ja && String(moderation.reason_ja).trim()) ||
+                      '不適切な内容の可能性があります。';
                 const absoluteBlock = moderation.absolute_broadcast_block === true;
                 const { activePoints, mutedNow } = registerChatInappropriate(socket.id, now);
                 const muteTail =
@@ -4180,82 +4390,41 @@ io.on('connection', (socket) => {
                     message: CHAT_ALERT_WARN_SHARE + reason,
                 });
 
-                const chatDataBase = {
+                const chatDataSelf = {
                     senderId: socket.id,
                     senderName: player.username,
                     message: text,
                     timestamp: now,
+                    moderationWarning: false,
                 };
-                const chatDataOthers = { ...chatDataBase, moderationWarning: true };
-                const chatDataSelf = { ...chatDataBase, moderationWarning: false };
-
                 console.log(`[CHAT] ${player.username}: ${text} (moderation warning to others)`);
-                addChatLog(currentRoom, player.username, text, socket.id);
-                appendApprovedChat(
-                    currentRoom,
-                    {
-                        timestamp: now,
-                        senderId: socket.id,
-                        senderName: player.username,
-                        message: text,
-                    },
-                    now,
-                );
-
-                chatUserLastSuccessAt.set(socket.id, now);
-
-                emitChatToRoomWithLocale(
+                broadcastApprovedChat(
                     io,
                     socket,
                     roomState,
                     currentRoom,
-                    chatDataOthers,
+                    player,
+                    text,
+                    now,
                     translationsByLocale,
+                    { moderationWarning: true, chatWarningCount: activePoints },
                     chatDataSelf,
                 );
-                updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
-
-                notifyDiscordActivity('chat', {
-                    userName: player.username,
-                    chatMessage: text,
-                    chatWarning: true,
-                    chatWarningCount: activePoints,
-                });
 
                 ack({ ok: true });
                 return;
             }
 
-            const chatData = {
-                senderId: socket.id,
-                senderName: player.username,
-                message: text,
-                timestamp: now,
-            };
-
-            console.log(`[CHAT] ${player.username}: ${text}`);
-            addChatLog(currentRoom, player.username, text, socket.id);
-            appendApprovedChat(
+            broadcastApprovedChat(
+                io,
+                socket,
+                roomState,
                 currentRoom,
-                {
-                    timestamp: now,
-                    senderId: socket.id,
-                    senderName: player.username,
-                    message: text,
-                },
+                player,
+                text,
                 now,
+                translationsByLocale,
             );
-
-            chatUserLastSuccessAt.set(socket.id, now);
-
-            emitChatToRoomWithLocale(io, socket, roomState, currentRoom, chatData, translationsByLocale);
-            updateTrafficStats(socket.id, { bytesSent: 50, packetsSent: 1 });
-
-            notifyDiscordActivity('chat', {
-                userName: player.username,
-                chatMessage: text,
-                chatWarning: false,
-            });
 
             ack({ ok: true });
         } finally {
