@@ -1,0 +1,11 @@
+# Synced with production (Cloudflare API settings) — mmh-health-check
+name = "mmh-health-check"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[[kv_namespaces]]
+binding = "HEALTH_STATE"
+id = "bce4d61026a043e8bd1cc51272a992ab"
+
+[triggers]
+crons = ["*/5 * * * *"]
